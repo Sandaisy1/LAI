@@ -48,20 +48,20 @@ go_ids <- c(
 
 ## 正确流程
 
-1. 用 `org.Hs.eg.db` / `GO.db` / `clusterProfiler::go2ont` 等，**分别**取出每个 `go_id` 的基因集（ENSEMBL 或 SYMBOL，与表达矩阵 ID 对齐）。某通路基因数 < 5 则跳过并记录，不要并入其他通路。
-2. **每个 GO 单独**用 GSVA/ssGSEA（推荐）或通路内基因均值，得到长度为样本数的通路得分向量。
+1. 用 QuickGO（每个 `go_id` 单独查询，含 descendant terms）取出基因集，经 `gencode.v36.annotation.gtf.gene` 映射到表达矩阵 ID。某通路基因数 < 5 则跳过并记录，不要并入其他通路。不使用 `AnnotationDbi` / `org.Hs.eg.db`。
+2. **每个 GO 单独**用通路内基因的均值 z-score 得到样本通路得分（替代 GSVA）。
 3. **每个 GO 单独**做临床相关：连续变量 Spearman；分类变量 Wilcoxon / Kruskal-Wallis；生存用通路得分连续 Cox，以及中位分组 log-rank。
 4. **每个 GO 单独**把该通路得分与表达矩阵中 **每一个基因** 做 Spearman；保留 `rho < 0` 且 FDR 达标的基因。负相关基因列表必须带所属 `go_id`。
 
 ```r
 # ❌ BAD：合并所有 GO 再分析一次
 all_genes <- unique(unlist(go_genesets))
-score <- gsva(expr, list(all = all_genes))
+score <- colMeans(expr[all_genes, , drop = FALSE])
 
 # ✅ GOOD：每个 GO 独立得分、独立相关、独立输出
 for (gid in go_ids) {
   genes_i <- go_genesets[[gid]]
-  score_i <- gsva(expr, setNames(list(genes_i), gid), method = "gsva")
+  score_i <- mean_z_score(expr, genes_i)   # 该通路基因跨样本 z-score 后取均值
   clin_i  <- correlate_clinical(score_i, clinical, survival)  # 仅本通路
   neg_i   <- gene_spearman_negative(score_i, expr)            # 仅本通路
   write_results(gid, clin_i, neg_i)

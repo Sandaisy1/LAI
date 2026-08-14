@@ -14,8 +14,10 @@ TCGA-BRCA 中 **每个** 神经元相关 GO 通路单独做临床关联，并寻
 
 ## 运行
 
+不需要 `AnnotationDbi` / `GSVA`。GO 基因集来自 QuickGO；通路得分为该通路基因的均值 z-score。可选 CRAN 包：`data.table`、`survival`。
+
 ```bash
-# 首次安装依赖
+# 可选：安装 CRAN 包
 Rscript scripts/analyze_go_pathways_tcga_brca.R --install-deps --data-dir data --out-dir results
 
 # 正式分析（17 个 GO 各自输出，不会合并）
@@ -25,5 +27,5 @@ Rscript scripts/analyze_go_pathways_tcga_brca.R --data-dir data --out-dir result
 Rscript scripts/analyze_go_pathways_tcga_brca.R --demo
 ```
 
-每个 GO 会单独写入 `results/clinical/`、`results/survival/`、`results/neg_genes/`。
+基因集缓存到 `data/cache/go_genes/`，断网时可复用。每个 GO 会单独写入 `results/clinical/`、`results/survival/`、`results/neg_genes/`。
 

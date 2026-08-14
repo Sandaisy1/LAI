@@ -9,10 +9,10 @@
 #   Rscript scripts/analyze_go_pathways_tcga_brca.R --data-dir data --out-dir results
 #   Rscript scripts/analyze_go_pathways_tcga_brca.R --demo
 #
-# 依赖（真实数据模式）：
+# 依赖（真实数据模式，只需 CRAN，不需要 AnnotationDbi / GSVA）：
 #   install.packages(c("data.table", "survival"))
-#   if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-#   BiocManager::install(c("org.Hs.eg.db", "GO.db", "AnnotationDbi", "GSVA"))
+# GO 基因集：QuickGO 接口（按每个 GO 单独下载，结果缓存到 data/cache/go_genes/）
+# 通路得分：通路内基因的均值 z-score（替代 GSVA）
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -127,12 +127,6 @@ install_deps_if_needed <- function() {
   for (p in cran) {
     if (!safe_pkg(p)) install.packages(p, repos = "https://cloud.r-project.org")
   }
-  if (!safe_pkg("BiocManager")) {
-    install.packages("BiocManager", repos = "https://cloud.r-project.org")
-  }
-  bioc <- c("org.Hs.eg.db", "GO.db", "AnnotationDbi", "GSVA")
-  missing <- bioc[!vapply(bioc, safe_pkg, logical(1))]
-  if (length(missing)) BiocManager::install(missing, update = FALSE, ask = FALSE)
 }
 
 find_data_file <- function(stem, data_dir) {
@@ -265,40 +259,130 @@ align_samples <- function(score, table_df) {
 }
 
 # -----------------------------------------------------------------------------
-# GO 基因集：每个 GO 单独取，绝不取并集后当作一条通路
+# GO 基因集：每个 GO 单独取（QuickGO，不依赖 AnnotationDbi）
 # -----------------------------------------------------------------------------
 
 go_term_name <- function(go_id) {
-  if (safe_pkg("GO.db")) {
-    nm <- tryCatch({
-      trm <- GO.db::GOTERM[[go_id]]
-      if (is.null(trm)) NA_character_ else AnnotationDbi::Term(trm)
-    }, error = function(e) NA_character_)
-    if (!is.na(nm) && nzchar(nm)) return(nm)
-  }
   unname(GO_NAMES[go_id])
 }
 
-get_genes_for_one_go <- function(go_id) {
-  if (!safe_pkg("org.Hs.eg.db") || !safe_pkg("AnnotationDbi")) {
-    stop("真实数据模式需要 org.Hs.eg.db 与 AnnotationDbi。请加 --install-deps 后重试。")
+go_cache_path <- function(go_id, cache_dir) {
+  file.path(cache_dir, paste0(gsub(":", "_", go_id), "_genes.tsv"))
+}
+
+read_cached_go_genes <- function(path) {
+  if (!file.exists(path) || !file.info(path)$size) {
+    return(NULL)
   }
-  dat <- tryCatch(
-    AnnotationDbi::select(
-      org.Hs.eg.db::org.Hs.eg.db,
-      keys = go_id,
-      columns = c("ENSEMBL", "SYMBOL"),
-      keytype = "GOALL"
-    ),
-    error = function(e) NULL
+  df <- utils::read.delim(path, stringsAsFactors = FALSE, check.names = FALSE)
+  list(
+    ensembl = unique(strip_ensembl_version(na.omit(as.character(df$ensembl)))),
+    symbol = unique(na.omit(as.character(df$symbol)))
   )
-  if (is.null(dat) || !nrow(dat)) {
+}
+
+write_cached_go_genes <- function(path, genes) {
+  ensure_dir(dirname(path))
+  sym <- unique(as.character(genes$symbol))
+  ens <- unique(as.character(genes$ensembl))
+  sym <- sym[!is.na(sym) & nzchar(sym)]
+  ens <- ens[!is.na(ens) & nzchar(ens)]
+  n <- max(length(sym), length(ens), 0L)
+  df <- data.frame(
+    symbol = if (n) c(sym, rep(NA_character_, n - length(sym))) else character(),
+    ensembl = if (n) c(ens, rep(NA_character_, n - length(ens))) else character(),
+    stringsAsFactors = FALSE
+  )
+  utils::write.table(df, path, sep = "\t", quote = FALSE, row.names = FALSE)
+}
+
+extract_human_ensembl <- function(...) {
+  txt <- paste(unlist(list(...)), collapse = " ")
+  hits <- unlist(regmatches(txt, gregexpr("ENSG[0-9]+", txt)))
+  unique(strip_ensembl_version(hits))
+}
+
+download_url <- function(url, dest, extra_headers = NULL) {
+  hdr <- c(`User-Agent` = "LAI-tcga-brca-go")
+  if (length(extra_headers)) hdr <- c(hdr, extra_headers)
+  ok <- tryCatch({
+    utils::download.file(
+      url, destfile = dest, quiet = TRUE, mode = "wb",
+      method = "libcurl", headers = hdr
+    )
+    file.exists(dest) && file.info(dest)$size > 0
+  }, error = function(e) FALSE)
+  if (ok) return(TRUE)
+  if (nzchar(Sys.which("curl"))) {
+    args <- c("-sS", "-L", "--fail", "-o", dest, "-A", "LAI-tcga-brca-go")
+    if ("Accept" %in% names(hdr)) args <- c(args, "-H", paste0("Accept: ", hdr[["Accept"]]))
+    args <- c(args, url)
+    st <- suppressWarnings(system2("curl", args, stdout = FALSE, stderr = FALSE))
+    return(isTRUE(st == 0L) && file.exists(dest) && file.info(dest)$size > 0)
+  }
+  FALSE
+}
+
+fetch_one_go_from_quickgo <- function(go_id) {
+  url <- paste0(
+    "https://www.ebi.ac.uk/QuickGO/services/annotation/downloadSearch?",
+    "goId=", utils::URLencode(go_id, reserved = TRUE),
+    "&taxonId=9606&goUsage=descendants"
+  )
+  tmp <- tempfile(fileext = ".tsv")
+  on.exit(unlink(tmp), add = TRUE)
+  if (!download_url(url, tmp, extra_headers = c(Accept = "text/tsv"))) {
+    return(NULL)
+  }
+  first <- tryCatch(readLines(tmp, n = 1L, warn = FALSE), error = function(e) "")
+  if (!length(first) || grepl("^\\s*\\{", first)) return(NULL)
+  df <- utils::read.delim(tmp, stringsAsFactors = FALSE, check.names = FALSE)
+  if (!nrow(df)) {
     return(list(ensembl = character(), symbol = character()))
   }
-  list(
-    ensembl = unique(strip_ensembl_version(na.omit(dat$ENSEMBL))),
-    symbol = unique(na.omit(dat$SYMBOL))
+  nms <- toupper(gsub("[^A-Za-z0-9]+", "_", names(df)))
+  names(df) <- nms
+  sym_col <- intersect(c("SYMBOL", "GENE_PRODUCT_SYMBOL"), names(df))
+  id_col <- intersect(c("GENE_PRODUCT_ID", "GENEPRODUCTID"), names(df))
+  with_col <- intersect(c("WITH_FROM", "WITHFROM"), names(df))
+  symbol <- if (length(sym_col)) as.character(df[[sym_col[[1]]]]) else character()
+  symbol <- unique(symbol[!is.na(symbol) & nzchar(symbol) & symbol != "-"])
+  ensembl <- extract_human_ensembl(
+    if (length(id_col)) df[[id_col[[1]]]] else NULL,
+    if (length(with_col)) df[[with_col[[1]]]] else NULL
   )
+  list(ensembl = ensembl, symbol = symbol)
+}
+
+get_genes_for_one_go <- function(go_id, cache_dir) {
+  cache_file <- go_cache_path(go_id, cache_dir)
+  if (file.exists(cache_file)) {
+    cached <- read_cached_go_genes(cache_file)
+    if (!is.null(cached)) {
+      log_msg(go_id, " 使用缓存基因集: ", cache_file)
+      return(cached)
+    }
+  }
+  log_msg(go_id, " 从 QuickGO 下载基因集（含 descendant terms）")
+  fetched <- tryCatch(fetch_one_go_from_quickgo(go_id), error = function(e) {
+    log_msg(go_id, " QuickGO 失败: ", conditionMessage(e))
+    NULL
+  })
+  if (is.null(fetched)) {
+    stop(
+      "无法获取 ", go_id, " 的基因集（不使用 AnnotationDbi，且 QuickGO 下载失败）。\n",
+      "请检查网络，或手动把 symbol/ensembl 两列写入: ", cache_file
+    )
+  }
+  write_cached_go_genes(cache_file, fetched)
+  fetched
+}
+
+map_symbols_via_gencode <- function(genes, gencode_df) {
+  if (is.null(gencode_df) || !nrow(gencode_df)) return(genes)
+  ens_from_sym <- gencode_df$gene_id[match(genes$symbol, gencode_df$gene_name)]
+  genes$ensembl <- unique(c(genes$ensembl, strip_ensembl_version(na.omit(ens_from_sym))))
+  genes
 }
 
 match_genes_to_expr <- function(gene_ids, expr_ids) {
@@ -324,23 +408,7 @@ mean_z_score <- function(expr, genes) {
 one_go_pathway_score <- function(expr, genes, go_id) {
   g <- intersect(genes, rownames(expr))
   if (length(g) < 2L) return(NULL)
-  if (safe_pkg("GSVA")) {
-    gene_set <- stats::setNames(list(g), go_id)
-    emat <- as.matrix(expr)
-    sc <- tryCatch({
-      if ("gsvaParam" %in% getNamespaceExports("GSVA")) {
-        param <- GSVA::gsvaParam(emat, gene_set, kcdf = "Gaussian")
-        GSVA::gsva(param, verbose = FALSE)
-      } else {
-        GSVA::gsva(emat, gene_set, method = "gsva", kcdf = "Gaussian", verbose = FALSE)
-      }
-    }, error = function(e) NULL)
-    if (!is.null(sc)) {
-      v <- as.numeric(sc[1, ])
-      names(v) <- colnames(expr)
-      return(v)
-    }
-  }
+  # 替代 GSVA：每个基因跨样本 z-score 后取均值，得到该 GO 的样本得分
   mean_z_score(expr, g)
 }
 
@@ -648,6 +716,7 @@ run_each_go <- function(go_ids, genesets_on_expr, expr, clinical, survival, prot
       sample = names(score_i),
       patient = patient_barcode(names(score_i)),
       score = as.numeric(score_i),
+      score_method = "mean_z",
       go_id = gid,
       go_name = gname,
       stringsAsFactors = FALSE
@@ -780,14 +849,16 @@ run_real <- function(opt) {
     log_msg("未找到蛋白文件，跳过蛋白负相关")
   }
 
-  log_msg("按每个 GO 分别取基因集（GOALL = 本 term + 子 term）")
+  log_msg("按每个 GO 分别从 QuickGO 取基因集（本 term + descendants；不使用 AnnotationDbi）")
+  cache_dir <- file.path(opt$data_dir, "cache", "go_genes")
+  ensure_dir(cache_dir)
   genesets_on_expr <- list()
   gene_inventory <- list()
   expr_ids <- rownames(expr)
   symbol_map <- prepare_symbol_map(gencode_df, expr_ids)
 
   for (gid in GO_IDS) {
-    raw <- get_genes_for_one_go(gid)
+    raw <- map_symbols_via_gencode(get_genes_for_one_go(gid, cache_dir), gencode_df)
     hit_ens <- match_genes_to_expr(raw$ensembl, expr_ids)
     hit_sym <- match_genes_to_expr(raw$symbol, expr_ids)
     hit <- unique(c(hit_ens, hit_sym))
@@ -832,6 +903,6 @@ main <- function(argv = commandArgs(trailingOnly = TRUE)) {
   invisible(NULL)
 }
 
-if (!interactive()) {
+if (sys.nframe() == 0L) {
   main()
 }
