@@ -1,0 +1,6 @@
+# 将以下文件放到本目录（扩展名 .tsv/.txt/.csv/.gz 均可）：
+#   TCGA-BRCA.clinical
+#   TCGA-BRCA.protein
+#   TCGA-BRCA.star_fpkm
+#   TCGA-BRCA.survival
+#   gencode.v36.annotation.gtf.gene
