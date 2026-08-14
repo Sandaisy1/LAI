@@ -1,7 +1,10 @@
 #!/usr/bin/env Rscript
-# Per-GO (NOT pooled) TCGA-BRCA analysis:
+# Per-GO (NOT pooled) TCGA-BRCA analysis, without GSVA / AnnotationDbi:
 #   1) each listed GO term vs clinical / survival
 #   2) genes negatively correlated with EACH GO term activity
+#
+# Pathway activity = combined z-score (mean of gene-wise z-scores in that GO).
+# GO genes: local TSV/GMT, else QuickGO, else NCBI gene2go + go-basic.obo.
 #
 # Expected inputs in data_dir (prefix match is OK):
 #   TCGA-BRCA.clinical, TCGA-BRCA.protein, TCGA-BRCA.star_fpkm,
@@ -9,9 +12,6 @@
 
 suppressPackageStartupMessages({
   library(data.table)
-  library(GSVA)
-  library(org.Hs.eg.db)
-  library(AnnotationDbi)
   library(survival)
 })
 
@@ -23,6 +23,8 @@ data_dir <- if (length(args) >= 1) args[[1]] else "data"
 out_dir  <- if (length(args) >= 2) args[[2]] else "results"
 dir.create(file.path(out_dir, "clinical"), recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(out_dir, "negcorr"), recursive = TRUE, showWarnings = FALSE)
+cache_dir <- file.path(data_dir, "cache")
+dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 
 go_ids <- c(
   "GO:0023041",  # neuronal signal transduction
@@ -53,9 +55,7 @@ rho_cutoff <- 0          # keep strictly negative correlations
 # ---------------------------------------------------------------------------
 find_input <- function(dir, pattern) {
   hits <- list.files(dir, pattern = pattern, full.names = TRUE, ignore.case = TRUE)
-  if (length(hits) == 0) {
-    stop("Cannot find input matching '", pattern, "' under ", dir)
-  }
+  if (!length(hits)) stop("Cannot find input matching '", pattern, "' under ", dir)
   hits[[1]]
 }
 
@@ -92,22 +92,215 @@ pick_col <- function(df, candidates) {
   NULL
 }
 
-gsva_each_go <- function(expr_mat, genesets) {
-  if (isTRUE(requireNamespace("GSVA", quietly = TRUE) &&
-             exists("gsvaParam", where = asNamespace("GSVA"), inherits = FALSE))) {
-    param <- GSVA::gsvaParam(exprData = expr_mat, geneSets = genesets, kcdf = "Gaussian")
-    return(GSVA::gsva(param, verbose = FALSE))
-  }
-  GSVA::gsva(expr_mat, genesets, method = "gsva", kcdf = "Gaussian", verbose = FALSE)
-}
-
 safe_spearman <- function(x, y) {
   ok <- is.finite(x) & is.finite(y)
-  if (sum(ok) < 10) {
-    return(list(rho = NA_real_, p = NA_real_, n = sum(ok)))
-  }
+  if (sum(ok) < 10) return(list(rho = NA_real_, p = NA_real_, n = sum(ok)))
   ct <- suppressWarnings(cor.test(x[ok], y[ok], method = "spearman", exact = FALSE))
   list(rho = unname(ct$estimate), p = ct$p.value, n = sum(ok))
+}
+
+download_if_missing <- function(url, dest) {
+  if (file.exists(dest) && isTRUE(file.info(dest)$size > 1000)) return(dest)
+  dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
+  message("Downloading ", url)
+  download.file(url, dest, mode = "wb", quiet = TRUE)
+  dest
+}
+
+# Combined z-score for EACH gene set separately (GSVA replacement).
+# expr_mat: genes x samples; genesets: named list, one GO per element.
+zscore_each_go <- function(expr_mat, genesets) {
+  z <- t(scale(t(expr_mat)))
+  z[!is.finite(z)] <- NA
+  scores <- matrix(NA_real_, nrow = length(genesets), ncol = ncol(expr_mat),
+                   dimnames = list(names(genesets), colnames(expr_mat)))
+  for (gs in names(genesets)) {
+    g <- intersect(genesets[[gs]], rownames(z))
+    if (!length(g)) next
+    scores[gs, ] <- colMeans(z[g, , drop = FALSE], na.rm = TRUE)
+  }
+  scores
+}
+
+read_local_genesets <- function(path, wanted) {
+  if (grepl("\\.gmt$", path, ignore.case = TRUE)) {
+    lines <- readLines(path, warn = FALSE)
+    out <- lapply(wanted, function(x) character(0))
+    names(out) <- wanted
+    for (ln in lines) {
+      p <- strsplit(ln, "\t", fixed = TRUE)[[1]]
+      if (length(p) < 3) next
+      gid <- p[[1]]
+      if (!grepl("^GO:", gid) && grepl("GO:[0-9]+", p[[2]])) {
+        gid <- regmatches(p[[2]], regexpr("GO:[0-9]+", p[[2]]))
+      }
+      if (gid %in% wanted) out[[gid]] <- unique(p[-(1:2)])
+    }
+    return(out)
+  }
+  dt <- fread(path)
+  go_col <- pick_col(dt, c("GO_ID", "go_id", "GO", "term"))
+  sym_col <- pick_col(dt, c("symbol", "gene_name", "Symbol", "gene"))
+  if (is.null(go_col) || is.null(sym_col)) {
+    stop("Local gene-set file must have GO_ID and symbol columns, or be GMT")
+  }
+  raw <- split(as.character(dt[[sym_col]]), as.character(dt[[go_col]]))
+  out <- lapply(wanted, function(g) unique(na.omit(as.character(raw[[g]]))))
+  names(out) <- wanted
+  out
+}
+
+# QuickGO: term + descendants (same idea as GOALL), no AnnotationDbi.
+fetch_quickgo_one <- function(go_id) {
+  q <- paste0(
+    "https://www.ebi.ac.uk/QuickGO/services/annotation/downloadSearch",
+    "?goId=", utils::URLencode(go_id, reserved = TRUE),
+    "&taxonId=9606&goUsage=descendants&geneProductType=protein"
+  )
+  tmp <- tempfile(fileext = ".tsv")
+  ok <- FALSE
+  if (nzchar(Sys.which("curl"))) {
+    st <- suppressWarnings(system2(
+      "curl",
+      c("-sL", "-H", "Accept: text/tsv", "--fail", "-o", tmp, q),
+      stdout = FALSE, stderr = FALSE
+    ))
+    ok <- identical(st, 0L) && file.exists(tmp) && isTRUE(file.info(tmp)$size > 20)
+  }
+  if (!ok) {
+    ok <- tryCatch({
+      download.file(q, tmp, mode = "wb", quiet = TRUE, headers = c(Accept = "text/tsv"))
+      file.exists(tmp) && isTRUE(file.info(tmp)$size > 20)
+    }, error = function(e) FALSE)
+  }
+  if (!ok) return(character(0))
+  dt <- tryCatch(fread(tmp, sep = "\t"), error = function(e) NULL)
+  if (is.null(dt) || !nrow(dt)) return(character(0))
+  sym_col <- pick_col(dt, c("SYMBOL", "symbol", "GENE PRODUCT ID"))
+  if (is.null(sym_col)) return(character(0))
+  unique(na.omit(as.character(dt[[sym_col]])))
+}
+
+# NCBI gene2go + OBO descendants (offline after first download).
+parse_go_children <- function(obo_path) {
+  lines <- readLines(obo_path, warn = FALSE)
+  children <- new.env(parent = emptyenv())
+  current_id <- NA_character_
+  in_term <- FALSE
+  for (ln in lines) {
+    if (identical(ln, "[Term]")) {
+      in_term <- TRUE
+      current_id <- NA_character_
+    } else if (!nzchar(ln)) {
+      in_term <- FALSE
+    } else if (in_term && startsWith(ln, "id: GO:")) {
+      current_id <- sub("^id: ", "", ln)
+    } else if (in_term && startsWith(ln, "is_a: GO:") && !is.na(current_id)) {
+      parent <- sub("^is_a: (GO:[0-9]+).*", "\\1", ln)
+      children[[parent]] <- c(children[[parent]], current_id)
+    }
+  }
+  children
+}
+
+go_descendants <- function(go_id, children_env) {
+  out <- go_id
+  queue <- go_id
+  seen <- new.env(parent = emptyenv())
+  seen[[go_id]] <- TRUE
+  while (length(queue)) {
+    x <- queue[[1]]
+    queue <- queue[-1]
+    kids <- children_env[[x]]
+    if (is.null(kids)) next
+    for (k in kids) {
+      if (is.null(seen[[k]])) {
+        seen[[k]] <- TRUE
+        out <- c(out, k)
+        queue <- c(queue, k)
+      }
+    }
+  }
+  unique(out)
+}
+
+fetch_ncbi_genesets <- function(wanted, cache_dir) {
+  obo <- download_if_missing(
+    "https://purl.obolibrary.org/obo/go/go-basic.obo",
+    file.path(cache_dir, "go-basic.obo")
+  )
+  g2g_path <- download_if_missing(
+    "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene2go.gz",
+    file.path(cache_dir, "gene2go.gz")
+  )
+  info_path <- download_if_missing(
+    "https://ftp.ncbi.nlm.nih.gov/gene/DATA/GENE_INFO/Mammalia/Homo_sapiens.gene_info.gz",
+    file.path(cache_dir, "Homo_sapiens.gene_info.gz")
+  )
+  message("Parsing GO parent/child relations")
+  children <- parse_go_children(obo)
+  term_map <- lapply(wanted, go_descendants, children_env = children)
+  names(term_map) <- wanted
+  all_terms <- unique(unlist(term_map, use.names = FALSE))
+
+  message("Reading NCBI gene2go (human)")
+  g2g <- fread(g2g_path)
+  nms <- names(g2g)
+  names(g2g) <- gsub("^#", "", nms)
+  tax_col <- pick_col(g2g, c("tax_id", "taxon"))
+  gene_col <- pick_col(g2g, c("GeneID", "Gene_ID"))
+  go_col <- pick_col(g2g, c("GO_ID", "GO"))
+  qual_col <- pick_col(g2g, c("Qualifier", "qualifier"))
+  g2g <- g2g[as.character(get(tax_col)) == "9606" & get(go_col) %in% all_terms]
+  if (!is.null(qual_col)) {
+    g2g <- g2g[!grepl("(^|[|])NOT([|]|$)", as.character(get(qual_col)))]
+  }
+
+  info <- fread(info_path)
+  names(info) <- gsub("^#", "", names(info))
+  id_col <- pick_col(info, c("GeneID"))
+  sym_col <- pick_col(info, c("Symbol", "symbol"))
+  id2sym <- setNames(as.character(info[[sym_col]]), as.character(info[[id_col]]))
+
+  out <- lapply(wanted, function(go_id) {
+    ids <- unique(as.character(g2g[[gene_col]][g2g[[go_col]] %in% term_map[[go_id]]]))
+    unique(na.omit(id2sym[ids]))
+  })
+  names(out) <- wanted
+  out
+}
+
+empty_genesets <- function(wanted) {
+  out <- lapply(wanted, function(x) character(0))
+  names(out) <- wanted
+  out
+}
+
+load_go_genesets <- function(wanted, data_dir, cache_dir) {
+  local_hits <- list.files(
+    data_dir,
+    pattern = "go_genesets\\.(tsv|txt|csv|gmt)$",
+    full.names = TRUE,
+    ignore.case = TRUE
+  )
+  if (length(local_hits)) {
+    message("Using local gene sets: ", local_hits[[1]])
+    return(read_local_genesets(local_hits[[1]], wanted))
+  }
+
+  message("Fetching each GO gene set from QuickGO (no AnnotationDbi)")
+  out <- empty_genesets(wanted)
+  n_ok <- 0L
+  for (go_id in wanted) {
+    syms <- tryCatch(fetch_quickgo_one(go_id), error = function(e) character(0))
+    out[[go_id]] <- setdiff(unique(syms), c("", "-", "NA"))
+    if (length(out[[go_id]])) n_ok <- n_ok + 1L
+    message("  ", go_id, ": ", length(out[[go_id]]), " genes")
+  }
+  if (n_ok > 0L) return(out)
+
+  message("QuickGO unavailable; falling back to NCBI gene2go + go-basic.obo")
+  fetch_ncbi_genesets(wanted, cache_dir)
 }
 
 # ---------------------------------------------------------------------------
@@ -133,24 +326,20 @@ expr <- read_matrix_like(expr_path)
 rownames(expr) <- sub("\\..*$", "", rownames(expr))
 expr <- expr[!duplicated(rownames(expr)), , drop = FALSE]
 
-# Keep primary tumor samples (01) when barcodes include sample type
 stype <- sample_type_code(colnames(expr))
 if (any(stype == "01", na.rm = TRUE)) {
   expr <- expr[, which(stype == "01"), drop = FALSE]
 }
 
-# One column per patient
 pid <- patient_id(colnames(expr))
 keep <- !duplicated(pid) & nchar(pid) >= 12
 expr <- expr[, keep, drop = FALSE]
 colnames(expr) <- pid[keep]
 
-# log2(FPKM + 1); skip if already log-like
 if (max(expr, na.rm = TRUE) > 100) {
   expr <- log2(expr + 1)
 }
 
-# Map ENSEMBL -> SYMBOL for GSVA gene sets; keep ENSEMBL matrix for genome-wide corr
 symbol_for <- gene_map$symbol[match(rownames(expr), gene_map$ensembl_id)]
 expr_symbol <- expr
 rownames(expr_symbol) <- ifelse(is.na(symbol_for) | symbol_for == "" | symbol_for == "-",
@@ -160,22 +349,7 @@ expr_symbol <- expr_symbol[!duplicated(rownames(expr_symbol)), , drop = FALSE]
 # ---------------------------------------------------------------------------
 # GO gene sets: ONE list entry per GO ID (never collapse)
 # ---------------------------------------------------------------------------
-message("Fetching genes for each GO term via org.Hs.eg.db GOALL")
-go_genesets <- lapply(go_ids, function(go_id) {
-  mapped <- tryCatch(
-    AnnotationDbi::select(
-      org.Hs.eg.db,
-      keys = go_id,
-      columns = c("SYMBOL", "ENSEMBL"),
-      keytype = "GOALL"
-    ),
-    error = function(e) NULL
-  )
-  if (is.null(mapped) || nrow(mapped) == 0) return(character(0))
-  unique(na.omit(mapped$SYMBOL))
-})
-names(go_genesets) <- go_ids
-
+go_genesets <- load_go_genesets(go_ids, data_dir, cache_dir)
 go_sizes <- data.table(
   GO_ID = go_ids,
   n_annotated = vapply(go_genesets, length, integer(1)),
@@ -189,21 +363,21 @@ if (length(skipped)) {
   message("Skipping GO terms with < ", min_genes, " genes in expression matrix: ",
           paste(skipped, collapse = ", "))
 }
-if (!length(usable)) stop("No GO term has enough genes in the expression matrix.")
+if (!length(usable)) {
+  stop("No GO term has enough genes. Put data/go_genesets.tsv (columns GO_ID, symbol) and retry.")
+}
 
 # ---------------------------------------------------------------------------
-# Pathway activity: GSVA matrix with one ROW PER GO (not a pooled signature)
+# Pathway activity: one ROW PER GO (z-score mean, not a pooled signature)
 # ---------------------------------------------------------------------------
-message("Computing GSVA scores separately for each GO term")
-gsva_scores <- gsva_each_go(expr_symbol, go_genesets[usable])
-# gsva_scores: GO x samples
+message("Computing combined z-scores separately for each GO term")
+pathway_scores <- zscore_each_go(expr_symbol, go_genesets[usable])
 fwrite(
-  data.table(GO_ID = rownames(gsva_scores), as.data.table(gsva_scores)),
-  file.path(out_dir, "gsva_scores_per_GO.tsv"),
+  data.table(GO_ID = rownames(pathway_scores), as.data.table(pathway_scores)),
+  file.path(out_dir, "pathway_zscores_per_GO.tsv"),
   sep = "\t"
 )
-
-samples <- intersect(colnames(gsva_scores), colnames(expr))
+samples <- intersect(colnames(pathway_scores), colnames(expr))
 
 # ---------------------------------------------------------------------------
 # Clinical + survival
@@ -230,9 +404,7 @@ if (!is.null(event_col)) {
   }
 }
 
-clin_num_cols <- names(clin)[vapply(clin, is.numeric, logical(1))]
-clin_num_cols <- setdiff(clin_num_cols, c("patient"))
-
+clin_num_cols <- setdiff(names(clin)[vapply(clin, is.numeric, logical(1))], "patient")
 is_cat <- vapply(clin, function(x) {
   if (is.numeric(x)) return(FALSE)
   u <- unique(as.character(x)[!is.na(x) & as.character(x) != ""])
@@ -240,7 +412,6 @@ is_cat <- vapply(clin, function(x) {
 }, logical(1))
 clin_cat_cols <- setdiff(names(clin)[is_cat], c("patient", clin_id_col))
 
-# Optional protein matrix, aligned to patients
 prot <- NULL
 if (!is.null(prot_path)) {
   prot <- tryCatch(read_matrix_like(prot_path), error = function(e) NULL)
@@ -261,12 +432,11 @@ message("Task 1: correlating EACH GO pathway with clinical variables")
 clin_rows <- list()
 
 for (go_id in usable) {
-  score <- as.numeric(gsva_scores[go_id, samples])
+  score <- as.numeric(pathway_scores[go_id, samples])
   names(score) <- samples
   go_clin_dir <- file.path(out_dir, "clinical", gsub(":", "_", go_id))
   dir.create(go_clin_dir, recursive = TRUE, showWarnings = FALSE)
 
-  # numeric clinical variables
   for (cc in clin_num_cols) {
     idx <- intersect(names(score), clin$patient)
     st <- safe_spearman(score[idx], clin[[cc]][match(idx, clin$patient)])
@@ -276,7 +446,6 @@ for (go_id in usable) {
     )
   }
 
-  # categorical clinical variables (stage, subtype, etc.)
   for (cc in clin_cat_cols) {
     idx <- intersect(names(score), clin$patient)
     grp <- factor(as.character(clin[[cc]][match(idx, clin$patient)]))
@@ -291,13 +460,12 @@ for (go_id in usable) {
     )
   }
 
-  # survival Cox (continuous GSVA score)
   if (!is.null(surv$os_time) && !is.null(surv$os_event)) {
     sdf <- surv[patient %in% names(score), .(patient, os_time, os_event)]
-    sdf[, gsva := score[patient]]
-    sdf <- sdf[is.finite(os_time) & is.finite(os_event) & is.finite(gsva) & os_time > 0]
+    sdf[, pathway_score := score[patient]]
+    sdf <- sdf[is.finite(os_time) & is.finite(os_event) & is.finite(pathway_score) & os_time > 0]
     if (nrow(sdf) >= 20 && length(unique(sdf$os_event)) == 2) {
-      fit <- tryCatch(coxph(Surv(os_time, os_event) ~ gsva, data = sdf), error = function(e) NULL)
+      fit <- tryCatch(coxph(Surv(os_time, os_event) ~ pathway_score, data = sdf), error = function(e) NULL)
       if (!is.null(fit)) {
         s <- summary(fit)
         clin_rows[[length(clin_rows) + 1]] <- data.table(
@@ -310,7 +478,6 @@ for (go_id in usable) {
     }
   }
 
-  # optional: each protein vs this GO score
   if (!is.null(prot)) {
     common <- intersect(names(score), colnames(prot))
     if (length(common) >= 10) {
@@ -340,17 +507,14 @@ if (nrow(clin_all)) {
 # ---------------------------------------------------------------------------
 message("Task 2: finding genes negatively correlated with EACH GO pathway")
 expr_use <- expr[, samples, drop = FALSE]
-# drop zero-variance genes
 keep_genes <- apply(expr_use, 1, function(v) sd(v, na.rm = TRUE) > 0)
 expr_use <- expr_use[keep_genes, , drop = FALSE]
 
 neg_summary <- list()
-
 for (go_id in usable) {
-  score <- as.numeric(gsva_scores[go_id, samples])
+  score <- as.numeric(pathway_scores[go_id, samples])
   rho <- as.numeric(cor(t(expr_use), score, method = "spearman", use = "pairwise.complete.obs"))
   n <- ncol(expr_use)
-  # Spearman p from rho (large-n approximation)
   tstat <- rho * sqrt((n - 2) / pmax(1e-12, 1 - rho^2))
   pval <- 2 * pt(-abs(tstat), df = n - 2)
   fdr <- p.adjust(pval, method = "BH")

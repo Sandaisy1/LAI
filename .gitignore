@@ -1,5 +1,6 @@
 data/*
 !data/.gitkeep
+data/cache/
 results/
 .Rhistory
 .RData
