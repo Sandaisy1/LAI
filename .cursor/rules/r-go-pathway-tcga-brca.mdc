@@ -1,0 +1,63 @@
+---
+description: TCGA-BRCA 中每个 GO 通路单独做临床相关与负相关基因分析（禁止合并通路）
+globs:
+  - "**/*.R"
+  - "**/*.r"
+  - "**/*.Rmd"
+alwaysApply: false
+---
+
+# 每个 GO 通路单独分析（禁止合并）
+
+分析 TCGA-BRCA 的 GO 通路时，**必须对用户列出的每一个 GO ID 单独循环**。禁止把多个 GO 基因集合并成一条“综合通路”再算相关。
+
+## 数据（只读这些输入）
+
+- `TCGA-BRCA.clinical`
+- `TCGA-BRCA.protein`
+- `TCGA-BRCA.star_fpkm`
+- `TCGA-BRCA.survival`
+- `gencode.v36.annotation.gtf.gene`
+
+通路活性用 `star_fpkm`（建议 `log2(FPKM+1)`）+ GSVA/ssGSEA；临床相关用 `clinical` + `survival`；蛋白相关用 `protein`；ENSEMBL→SYMBOL 用 gencode 注释。样本先对齐到肿瘤样本（优先 `01`），再用患者 ID（条形码前 12 位）匹配临床/生存。
+
+## 固定 GO 列表（逐个分析，不可合并）
+
+`GO:0023041`, `GO:1904457`, `GO:1904340`, `GO:2001224`, `GO:2001222`, `GO:0019227`, `GO:0019228`, `GO:1902847`, `GO:0031102`, `GO:0097492`, `GO:0097491`, `GO:0097374`, `GO:0007158`, `GO:1902667`, `GO:0031103`, `GO:0007411`, `GO:0007409`
+
+每个 GO 用 `org.Hs.eg.db` 的 `GOALL` 取注释基因；无基因或匹配表达矩阵后基因数 < 5 则跳过并记录，不要并入其他通路。
+
+## 任务 1：每个通路 vs 临床（不是所有通路一起）
+
+对 **每一个** GO：先算该通路的样本活性向量，再单独与分期、亚型、年龄、OS/PFS 等做相关或生存分析。结果表必须带 `GO_ID` 列，每个通路一个输出文件或长表中的独立分组。
+
+```r
+# ❌ BAD：合并所有 GO 再和临床相关
+combined <- unique(unlist(go_genesets))
+score <- gsva(expr, list(all_GO = combined), method = "gsva")[, 1]
+cor(score, clinical$age)
+
+# ✅ GOOD：每个 GO 单独打分、单独相关
+for (go_id in go_ids) {
+  score_i <- gsva(expr, go_genesets[go_id], method = "gsva")[1, ]
+  cor.test(score_i[samples], age[samples], method = "spearman")
+  coxph(Surv(time, event) ~ score_i, data = surv_df)
+}
+```
+
+## 任务 2：每个通路的负相关基因（不是所有通路一起）
+
+对 **每一个** GO：用该通路自己的活性向量，与表达矩阵中每个基因做 Spearman 相关；只保留 `rho < 0` 且 FDR < 0.05 的基因。禁止用合并通路分数，禁止把 17 个通路的负相关基因简单取交集/并集当成“每个通路”的结果。每个 GO 单独输出一张表。
+
+```r
+# ❌ BAD：一个合并分数对全基因组相关
+rho <- cor(expr, combined_score, method = "spearman")
+
+# ✅ GOOD：每个 GO 的分数分别对全基因组相关
+for (go_id in go_ids) {
+  score_i <- pathway_scores[go_id, samples]
+  rho <- cor(t(expr[, samples]), score_i, method = "spearman")
+  neg <- which(rho < 0 & p.adjust(pval, "BH") < 0.05)
+  write.csv(result, paste0("negcorr_", go_id, ".csv"))
+}
+```
