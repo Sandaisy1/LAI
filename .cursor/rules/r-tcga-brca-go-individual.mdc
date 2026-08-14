@@ -1,0 +1,24 @@
+---
+description: TCGA-BRCA 中每个 GO 通路必须单独分析，禁止合并基因集
+globs: "**/*.{R,r}"
+alwaysApply: true
+---
+
+# 每个 GO 通路单独分析
+
+- 每个 GO ID 必须独立取基因、独立计算通路活性、独立做临床/生存相关性和负相关基因筛选。
+- 禁止把多个 GO 的基因合并成一个基因集后再相关或富集。
+- 变量名沿用：`fpkm_data`、`probe_annot`、`clinical_data`、`survival_data`、`protein_data`。
+- 用 `org.Hs.eg.db` 的 `GOALL`（失败则回退 `GO`）映射基因；通路活性用该通路基因在肿瘤样本中的 z-score 均值。
+
+```r
+# ✅ 每个 GO 单独循环
+for (go_id in go_ids) {
+  genes <- get_go_genes(go_id)
+  score <- pathway_zmean(expr, genes)
+}
+
+# ❌ 禁止合并后再分析
+all_genes <- unique(unlist(lapply(go_ids, get_go_genes)))
+score <- pathway_zmean(expr, all_genes)
+```
