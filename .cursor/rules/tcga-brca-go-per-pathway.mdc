@@ -1,0 +1,76 @@
+---
+description: TCGA-BRCA 中每个 GO 通路必须独立做临床相关与负相关基因分析，禁止合并为“所有通路”
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# 每个 GO 通路独立分析（禁止合并）
+
+本项目只分析下列 **17 个 GO 通路**。任何临床相关、生存相关、负相关基因筛选，都必须 **按 GO ID 逐个循环**，对 **每一个通路单独出结果**。
+
+禁止：把全部 GO 基因取并集、把通路得分取均值/PCA、只报告“所有神经元通路”的一条汇总结果。并集/交集只能作为附录，不能替代逐通路结果。
+
+## 固定 GO 列表（不得增删，除非用户明确改口）
+
+```r
+go_ids <- c(
+  "GO:0023041",  # neuronal signal transduction
+  "GO:1904457",  # positive regulation of neuronal action potential
+  "GO:1904340",  # positive regulation of dopaminergic neuron differentiation
+  "GO:2001224",  # positive regulation of neuron migration
+  "GO:2001222",  # regulation of neuron migration
+  "GO:0019227",  # neuronal action potential propagation
+  "GO:0019228",  # neuronal action potential
+  "GO:1902847",  # regulation of neuronal signal transduction
+  "GO:0031102",  # neuron projection regeneration
+  "GO:0097492",  # sympathetic neuron axon guidance
+  "GO:0097491",  # sympathetic neuron projection guidance
+  "GO:0097374",  # sensory neuron axon guidance
+  "GO:0007158",  # neuron cell-cell adhesion
+  "GO:1902667",  # regulation of axon guidance
+  "GO:0031103",  # axon regeneration
+  "GO:0007411",  # axon guidance
+  "GO:0007409"   # axonogenesis
+)
+```
+
+## 数据文件（只用这些）
+
+| 文件 | 用途 |
+|------|------|
+| `TCGA-BRCA.clinical` | 临床表型（分期、分级、ER/PR/HER2 等） |
+| `TCGA-BRCA.survival` | 生存（OS/PFI 等时间与事件） |
+| `TCGA-BRCA.star_fpkm` | 表达矩阵；通路得分与基因相关都基于它 |
+| `TCGA-BRCA.protein` | 蛋白水平验证（可选，同样按每个 GO 独立） |
+| `gencode.v36.annotation.gtf.gene` | ENSG 与 gene symbol 映射 |
+
+样本对齐：表达/蛋白列名截到 TCGA 12 位 barcode，再与 clinical、survival 内连接。表达用 `log2(FPKM + 1)`。
+
+## 正确流程
+
+1. 用 QuickGO（每个 `go_id` 单独查询，含 descendant terms）取出基因集，经 `gencode.v36.annotation.gtf.gene` 映射到表达矩阵 ID。某通路基因数 < 5 则跳过并记录，不要并入其他通路。不使用 `AnnotationDbi` / `org.Hs.eg.db`。
+2. **每个 GO 单独**用通路内基因的均值 z-score 得到样本通路得分（替代 GSVA）。
+3. **每个 GO 单独**做临床相关：连续变量 Spearman；分类变量 Wilcoxon / Kruskal-Wallis；生存用通路得分连续 Cox，以及中位分组 log-rank。
+4. **每个 GO 单独**把该通路得分与表达矩阵中 **每一个基因** 做 Spearman；保留 `rho < 0` 且 FDR 达标的基因。负相关基因列表必须带所属 `go_id`。
+
+```r
+# ❌ BAD：合并所有 GO 再分析一次
+all_genes <- unique(unlist(go_genesets))
+score <- colMeans(expr[all_genes, , drop = FALSE])
+
+# ✅ GOOD：每个 GO 独立得分、独立相关、独立输出
+for (gid in go_ids) {
+  genes_i <- go_genesets[[gid]]
+  score_i <- mean_z_score(expr, genes_i)   # 该通路基因跨样本 z-score 后取均值
+  clin_i  <- correlate_clinical(score_i, clinical, survival)  # 仅本通路
+  neg_i   <- gene_spearman_negative(score_i, expr)            # 仅本通路
+  write_results(gid, clin_i, neg_i)
+}
+```
+
+## 输出（每个 GO 一份）
+
+- `results/clinical/<GOID>_clinical.tsv`
+- `results/survival/<GOID>_survival.tsv`
+- `results/neg_genes/<GOID>_negative_genes.tsv`（列含 gene、rho、p、FDR）
+- 可另存总表，但必须有 `go_id` 列，一行只描述一个通路或一个“通路–基因”对。

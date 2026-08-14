@@ -1,0 +1,7 @@
+data/*
+!data/.gitkeep
+results/
+.Rhistory
+.RData
+.Rproj.user
+*.tsv.gz
