@@ -1,0 +1,39 @@
+---
+description: TCGA-BRCA 中每个 GO 通路必须单独分析，禁止合并；临床相关与负相关基因均按单个 GO 输出
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# 每个 GO 通路单独分析（禁止合并）
+
+分析所列神经元相关 GO 时，**每一个 GO ID 都是独立假设**。禁止把多个 GO 合并成一个基因集、一个通路分数、一张“所有 GO”相关表，再当作最终结果。
+
+固定 GO 列表（仅可增删 ID，不可在分析中 union）：
+
+`GO:0023041`, `GO:1904457`, `GO:1904340`, `GO:2001224`, `GO:2001222`, `GO:0019227`, `GO:0019228`, `GO:1902847`, `GO:0031102`, `GO:0097492`, `GO:0097491`, `GO:0097374`, `GO:0007158`, `GO:1902667`, `GO:0031103`, `GO:0007411`, `GO:0007409`
+
+数据：`TCGA-BRCA.clinical`、`TCGA-BRCA.protein`、`TCGA-BRCA.star_fpkm`、`TCGA-BRCA.survival`、`gencode.v36.annotation.gtf.gene`。通路活性用 **ssGSEA/GSVA，每个 GO 一个 gene set**；肿瘤样本（barcode 样本类型 `01`）上计算。
+
+## 必须做到
+
+1. **临床相关性**：对每个 GO 的样本分数，分别做生存（Cox OS/PFI）和临床变量关联；结果表必须含 `go_id` 列。
+2. **负相关基因**：对每个 GO 分数，分别与全转录组（及可选蛋白组）做 Spearman；只保留 `rho < 0` 且 BH-FDR < 0.05。多重检验在 **该 GO 内部** 校正，不跨 GO 合并 p 值。
+3. 每个 GO 单独写结果文件（例如 `results/per_go/GO_0023041_*.csv`），另可附汇总表，但汇总不能替代分 GO 结果。
+
+## 禁止
+
+```r
+# ❌ BAD：合并所有 GO 再分析
+all_genes <- unique(unlist(go_sets))
+score <- gsva(expr, list(neuronal_all = all_genes), method = "ssgsea")
+cor(score, gene_i)  # 一次相关代表“所有通路”
+
+# ✅ GOOD：每个 GO 独立打分、独立相关
+for (go_id in go_ids) {
+  score_i <- gsva(expr, go_sets[go_id], method = "ssgsea")
+  clinical_i <- associate_clinical(score_i, clinical, survival)
+  neg_genes_i <- genes_negatively_correlated(score_i, expr)  # rho < 0
+}
+```
+
+基因集用 `org.Hs.eg.db` 的 `GOALL`（含子术语）映射 SYMBOL/ENSEMBL，用 gencode 去版本号后对齐 FPKM。基因数 < 5 的 GO 记录警告并跳过，不要并入其他 GO。
