@@ -1,0 +1,26 @@
+---
+description: TCGA-BRCA 中每个 GO 通路必须独立分析，禁止合并通路后再做临床或基因相关。
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# 逐个 GO，禁止合并
+
+- 临床相关、生存、负相关基因必须在单个 `go_id` 上计算。禁止 `union()` 所列 GO 基因集，禁止对多通路评分 `rowMeans()` 后再相关。
+- GO ID 与注释保持用户原文。改通路列表只编辑 `R/config.R`。
+- 每个 GO 的 BH-FDR 只在该通路内部进行。结果写入 `results/<GO_ID>/`。
+- 表达用 `log2(FPKM + 1)`；Ensembl ID 去版本号；默认只保留 TCGA 原发瘤 `01`。
+- 某个 GO 映射基因不足时跳过并警告，不得用其他通路填补。
+
+```r
+# ❌ BAD — 合并所有通路再相关
+all_genes <- unique(unlist(go_genesets))
+score <- colMeans(expr[all_genes, ])
+
+# ✅ GOOD — 每个通路独立
+for (go_id in go_ids) {
+  score <- pathway_scores[go_id, ]
+  cor_one_go_with_clinical(score, clinical)
+  cor_one_go_with_genes(score, expr)  # 保留 rho < 0
+}
+```
