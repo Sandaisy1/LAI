@@ -1,0 +1,39 @@
+---
+description: TCGA-BRCA 中每个 GO 通路必须单独分析（禁止合并）
+globs: "**/*.{R,r,Rmd,rmd}"
+alwaysApply: false
+---
+
+# 每个 GO 通路独立分析（禁止合并）
+
+对神经/轴突相关 GO 与 TCGA-BRCA 做关联时，**每一个 GO ID 单独计算**，禁止把所列通路合并成一个基因集合或一个综合得分。
+
+## 数据
+
+- `TCGA-BRCA.clinical` / `TCGA-BRCA.protein` / `TCGA-BRCA.star_fpkm` / `TCGA-BRCA.survival` / `gencode.v36.annotation.gtf.gene`
+- GO 列表只存在于 `R/00_config.R` 的 `GO_TERMS`；增删通路只改该对象
+
+## 每个 GO 必须各自完成
+
+1. 仅用该 GO 的基因（建议 `GOALL`）计算样本通路活性（ssGSEA 或基因 z-score 均值）
+2. 该通路得分 vs 临床/生存（相关、组间检验、Cox/KM）
+3. 全基因组（及蛋白）与**该通路得分**做 Spearman，筛选负相关（`rho < 0` 且 FDR 达标）
+4. 结果写入 `results/<GO_ID>/`，文件内带 `go_id` 列
+
+## 禁止
+
+```r
+# ❌ BAD：合并所有 GO 再分析一次
+all_genes <- unique(unlist(go_genes))
+score <- pathway_score(expr, all_genes)
+cor(score, clinical$age)
+
+# ✅ GOOD：按 GO 循环，互不借用基因集
+for (go_id in names(GO_TERMS)) {
+  score <- pathway_score(expr, go_genes[[go_id]])
+  clinical_assoc_one(score, clinical, go_id)
+  neg_genes_one(score, expr, go_id)
+}
+```
+
+汇总表只能是各 GO 结果的长表拼接，不能先合并基因再统计。亲代/子代 GO（如 `GO:0007411` 与 `GO:0097374`）也必须分开跑。

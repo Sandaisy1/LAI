@@ -1,0 +1,6 @@
+results/
+results_demo/
+.Rhistory
+.RData
+.Rproj.user/
+*.pdf
