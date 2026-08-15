@@ -9,7 +9,7 @@ alwaysApply: true
 
 # FUSC：Excel 数据 + 每个 GO 单独分析
 
-工作目录固定为 `E:/R/FUSC`。只用下面两份 Excel（扩展名 `.xlsx` 或 `.xls` 均可），用 `readxl` 读表：
+工作目录固定为 `E:/R/FUSC`。控制台分析前必须 `setwd("E:/R/FUSC")`，不要在别的目录对 `"."` 找文件。只用下面两份 Excel（扩展名 `.xlsx` 或 `.xls` 均可），用 `readxl` 读表：
 
 - 临床：`OEP00000155_样本_Human_1786804447300`（分型、预后）
 - 表达：`FUSCCTNBC_Expression_RNAseqFPKM`（RNA-seq FPKM）

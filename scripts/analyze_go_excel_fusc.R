@@ -10,10 +10,11 @@
 # 任务 2：寻找与各 GO 通路活性呈负相关的基因
 #
 # ============================ 请按这个跑 ============================
-# 1. 把本脚本放到 E:/R/FUSC
-# 2. 确认上述两份 Excel 在同一目录
-# 3. RStudio：Session -> Restart R，打开本文件，点 Source（整份运行）
-# 4. 不要把 17 个 GO 的基因合并后再打分
+# 1. 两份 Excel 必须在 E:/R/FUSC（资源管理器里应能同时看到它们）
+# 2. RStudio：Session -> Restart R
+# 3. 控制台先运行：setwd("E:/R/FUSC"); getwd()
+# 4. 打开本文件，点 Source（整份运行）。不要从中间逐行粘贴。
+# 5. 不要把 17 个 GO 的基因合并后再打分
 # ====================================================================
 ################################################################################
 
@@ -37,13 +38,14 @@ args <- commandArgs(trailingOnly = TRUE)
 work_dir <- if (length(args) >= 1) args[[1]] else "E:/R/FUSC"
 out_dir  <- if (length(args) >= 2) args[[2]] else "results_GO_excel"
 
-# 若 E:/R/FUSC 不存在（例如在别的机器上试跑），改用当前目录
+# 强制切到 E:/R/FUSC；控制台单独跑 locate_fusc_excels(".") 时也要先 setwd
 if (dir.exists(work_dir)) {
   setwd(work_dir)
 } else {
   message("未找到 ", work_dir, " ，改用当前工作目录：", getwd())
   work_dir <- getwd()
 }
+message("当前工作目录：", getwd())
 
 min_pathway_genes <- 2
 min_clin_n <- 6
@@ -168,29 +170,46 @@ list_excel <- function(dir) {
 }
 
 # 按文件名前缀定位（用户给的名字可以没有扩展名）
-find_named_excel <- function(dir, stem) {
-  hits <- list.files(dir, full.names = TRUE, ignore.case = TRUE)
-  hits <- hits[!startsWith(basename(hits), "~$")]
-  if (!length(hits)) return(NULL)
-  bn <- basename(hits)
-  stem_l <- tolower(stem)
-  sans <- tolower(sub("\\.(xlsx|xls)$", "", bn, ignore.case = TRUE))
-  exact <- which(sans == stem_l)
-  if (length(exact)) return(hits[[exact[[1]]]])
-  pref <- which(startsWith(sans, stem_l) & grepl("\\.(xlsx|xls)$", bn, ignore.case = TRUE))
-  if (length(pref)) return(hits[[pref[[1]]]])
+find_named_excel <- function(dirs, stem, fuzzy = NULL) {
+  dirs <- unique(dirs[dir.exists(dirs)])
+  for (dir in dirs) {
+    hits <- list.files(dir, full.names = TRUE, ignore.case = TRUE)
+    hits <- hits[!startsWith(basename(hits), "~$")]
+    if (!length(hits)) next
+    bn <- basename(hits)
+    stem_l <- tolower(stem)
+    sans <- tolower(sub("\\.(xlsx|xls)$", "", bn, ignore.case = TRUE))
+    exact <- which(sans == stem_l)
+    if (length(exact)) return(hits[[exact[[1]]]])
+    pref <- which(startsWith(sans, stem_l) & grepl("\\.(xlsx|xls)$", bn, ignore.case = TRUE))
+    if (length(pref)) return(hits[[pref[[1]]]])
+    if (!is.null(fuzzy)) {
+      fz <- which(grepl(fuzzy, bn, ignore.case = TRUE) & grepl("\\.(xlsx|xls)$", bn, ignore.case = TRUE))
+      if (length(fz)) return(hits[[fz[[1]]]])
+    }
+  }
   NULL
 }
 
-locate_fusc_excels <- function(dir) {
-  clin_path <- find_named_excel(dir, "OEP00000155_样本_Human_1786804447300")
-  fpkm_path <- find_named_excel(dir, "FUSCCTNBC_Expression_RNAseqFPKM")
+locate_fusc_excels <- function(dirs = c(getwd(), "E:/R/FUSC")) {
+  dirs <- unique(c(dirs, "E:/R/FUSC", "E:\\R\\FUSC"))
+  clin_path <- find_named_excel(dirs, "OEP00000155_样本_Human_1786804447300", fuzzy = "OEP00000155")
+  fpkm_path <- find_named_excel(
+    dirs,
+    "FUSCCTNBC_Expression_RNAseqFPKM",
+    fuzzy = "FUSCCTNBC.*FPKM|RNAseqFPKM"
+  )
   if (is.null(clin_path) || is.null(fpkm_path)) {
-    found <- paste(basename(list_excel(dir)), collapse = ", ")
+    found <- unique(unlist(lapply(dirs[dir.exists(dirs)], function(d) {
+      paste0(normalizePath(d, winslash = "/", mustWork = FALSE), ": ",
+             paste(basename(list_excel(d)), collapse = ", "))
+    })))
     stop(
-      "在 ", dir, " 未找到指定 Excel。\n",
-      "需要：OEP00000155_样本_Human_1786804447300  与  FUSCCTNBC_Expression_RNAseqFPKM\n",
-      "当前目录里的 Excel：", if (nzchar(found)) found else "（无）"
+      "未找到指定 Excel。R 当前工作目录是：", getwd(), "\n",
+      "请先运行：setwd(\"E:/R/FUSC\")\n",
+      "需要：OEP00000155_样本_Human_1786804447300.xlsx\n",
+      "      FUSCCTNBC_Expression_RNAseqFPKM.xlsx\n",
+      "各目录中的 Excel：\n  ", paste(found, collapse = "\n  ")
     )
   }
   list(clin = clin_path, fpkm = fpkm_path)
@@ -561,7 +580,7 @@ spearman_vs_score <- function(expr_mat, score) {
 # ---------------------------------------------------------------------------
 # 读入指定的两份 Excel
 # ---------------------------------------------------------------------------
-pair <- locate_fusc_excels(".")
+pair <- locate_fusc_excels(c(getwd(), work_dir, "E:/R/FUSC"))
 message("临床 Excel：", pair$clin)
 message("FPKM Excel：", pair$fpkm)
 
