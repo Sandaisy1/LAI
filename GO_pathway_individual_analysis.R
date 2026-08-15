@@ -772,9 +772,8 @@ if (length(all_scores) > 0) {
   }
   z_score[!is.finite(z_score)] <- 0
   # ★★★ 已修改结束 ★★★
-  # ★★★ 已修改开始：热图必须用 ComplexHeatmap::，不要直接 Heatmap()/draw() ★★★
-  # 旧代码（heatmaps 包会抢走 Heatmap，报“参数没有用”）：
-  #   draw(Heatmap(z_score, name = "z-score", ...))
+  # ★★★ 已修改开始：热图必须用 ComplexHeatmap:: 或下面的 ggplot 兜底 ★★★
+  # 请勿运行注释，也不要运行 draw(Heatmap(...))，那只是反例。
   tryCatch({
     pdf_hm <- file.path(out_dir, "01_pathway_score_heatmap.pdf")
     pdf(pdf_hm, width = 12, height = 6)
