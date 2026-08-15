@@ -574,16 +574,9 @@ for (go_id in go_to_run) {
   }
 
   # ---- 7.2 生存分析（仅本通路分数） ----
-  # ★★★ 已修改开始：7.2 生存分析，score 改成 go_score ★★★
-  # 旧代码（会报 closure 不可取子集，请勿运行）：
-  #   surv_use <- survival_data[sample_std %in% names(score)]
-  #   sc_surv <- score[surv_use$sample_std]
-  if (!exists("go_score") || !is.numeric(go_score)) {
-    stop("go_score 不是数值。请先运行通路打分段（搜：变量名必须用 go_score），不要运行 score[...]")
-  }
+  # ★★★ 已修改：不要单独把这段 stop() 贴到控制台；go_score 只在函数内部存在 ★★★
   surv_use <- survival_data[sample_std %in% names(go_score)]
   sc_surv <- go_score[surv_use$sample_std]
-  # ★★★ 已修改结束 ★★★
   surv_rows <- list()
 
   for (ep in names(surv_endpoints)) {
