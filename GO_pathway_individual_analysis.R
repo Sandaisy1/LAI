@@ -637,7 +637,7 @@ for (go_id in go_to_run) {
         pdf(file.path(go_dir, "KM_OS.pdf"), width = 7, height = 6)
         print(ggsurvplot(
           fit_m, data = d, pval = TRUE, risk.table = TRUE,
-          legend.title = "Pathway score",
+          # ★★★ 已修改：去掉 legend.title，避免 ggplot2 报 unknown labels colour ★★★
           legend.labs = c("Low", "High"),
           xlab = "Time (months)", ylab = "Overall survival",
           title = paste0(go_id, "\n", go_title),
@@ -791,7 +791,19 @@ if (length(all_scores) > 0) {
     message("  已保存通路分数热图：", pdf_hm)
   }, error = function(e) {
     if (dev.cur() > 1) invisible(dev.off())
-    message("热图绘制失败：", conditionMessage(e))
+    message("ComplexHeatmap 失败，改用 ggplot 热图：", conditionMessage(e))
+    # ★★★ 已修改：heatmaps 包抢走 Heatmap 时，用 ggplot 兜底 ★★★
+    plot_dt <- as.data.table(as.table(z_score))
+    setnames(plot_dt, c("GO", "sample", "z"))
+    p_hm <- ggplot(plot_dt, aes(x = sample, y = GO, fill = z)) +
+      geom_tile() +
+      scale_fill_gradient2(low = "#3C5488", mid = "white", high = "#E64B35") +
+      labs(title = "Each GO pathway score (not pooled)", x = NULL, y = NULL, fill = "z-score") +
+      theme_minimal() +
+      theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+            panel.grid = element_blank())
+    ggsave(file.path(out_dir, "01_pathway_score_heatmap.pdf"), p_hm, width = 12, height = 6)
+    message("  已保存通路分数热图（ggplot）：", file.path(out_dir, "01_pathway_score_heatmap.pdf"))
   })
   # ★★★ 已修改结束 ★★★
 }
