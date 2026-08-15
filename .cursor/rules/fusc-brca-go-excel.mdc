@@ -24,7 +24,7 @@ alwaysApply: true
 
 ## 任务
 
-1. **分型 + 预后气泡图**：每个 GO 的活性 vs PAM50/IHC（三阴性、HER2阳性、Luminal 等）以及 OS/DSS Cox。气泡图：x=指标，y=通路，点大小=`-log10(p)`，颜色=效应（分型=该亚型 vs 其余的 Δscore；预后=`log2(HR)`）。
+1. **分型 + 预后气泡图**：每个 GO 的活性 vs 分子分型（Fudan：LAR/IM/BLIS/MES，或三阴性、HER2阳性等）以及 OS/RFS Cox。气泡图：x=指标，y=通路，点大小=`-log10(p)`，颜色=效应（分型=该亚型 vs 其余的 Δscore；预后=`log2(HR)`）。
 2. **负相关基因**：每个 GO 单独对全基因组 Spearman，保留 `rho < 0` 且 FDR < 0.05。禁止把 17 个通路的负相关基因取并集当成“每个通路”的结果。
 
 ```r
