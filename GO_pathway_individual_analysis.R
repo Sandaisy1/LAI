@@ -501,9 +501,9 @@ run_go_individual_analysis <- function(go_ids = NULL) {
       NULL
     })
     if (!is.numeric(go_score) || length(go_score) == 0) {
-      message("  可用基因 < ", min_pathway_genes, " 或打分失败，跳过该通路")
-      next
-    }
+      # ★★★ 已修改：不要用 next。next 只能写在 for 里，贴到控制台会报「没有可中断的循环」
+      message("  可用基因 < ", min_pathway_genes, " 或打分失败，跳过该通路：", go_id)
+    } else {
     n_used <- attr(go_score, "n_genes")
     used_genes <- attr(go_score, "genes")
     message("  通路基因用于打分：", n_used)
@@ -723,7 +723,8 @@ run_go_individual_analysis <- function(go_ids = NULL) {
         }
       }
     }
-  }
+    }  # ★★★ 结束 else：打分失败时不执行 7.1-7.4，也不使用 next
+  }    # 结束 for (go_id in go_to_run)
 
   ## 8. 汇总输出（仍是“每个 GO 一行/一堆结果”，不是合并通路） ----
   if (length(all_scores) > 0) {
