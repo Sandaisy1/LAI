@@ -15,7 +15,8 @@
 #   5) 汇总热图：禁止 t(scale(score_mat))，改用手写 z-score
 #   6) 热图绘制：必须用 ComplexHeatmap::Heatmap，避免被 heatmaps::Heatmap 覆盖
 #   7) OS 森林图：ggplot2 4.0 用 geom_errorbar(orientation="y")，不要漏掉行末 +
-#   8) 多个 GO：已写在 go_list；用 go_to_run 控制本次跑哪些，必须整段 for 循环，不要只跑一个文件夹
+#   8) 多个 GO：已写在 go_list；用 go_to_run 控制本次跑哪些
+#   9) 设完 go_to_run 不会自动分析，必须再运行 run_go_individual_analysis()
 # ============================================================
 
 ## 0. 可调参数 ------------------------------------------------
@@ -424,6 +425,21 @@ message("与临床重叠：", length(intersect(common_samples, clinical_data$sam
 message("与生存重叠：", length(intersect(common_samples, survival_data$sample_std)))
 message("与蛋白重叠：", if (is.null(prot_mat)) 0 else length(intersect(common_samples, colnames(prot_mat))))
 
+## 6-8. 真正开始分析（设完 go_to_run 后必须调用本函数） ----------
+# ★★★ 已修改：go_to_run <- c(...) 只是点名，不会出结果；要再运行 run_go_individual_analysis() ★★★
+run_go_individual_analysis <- function(go_ids = NULL) {
+  if (is.null(go_ids)) {
+    if (!exists("go_to_run", inherits = TRUE)) {
+      stop("请先设置 go_to_run，例如：go_to_run <- go_list")
+    }
+    go_ids <- go_to_run
+  }
+  go_to_run <- unique(as.character(go_ids))
+  if (length(go_to_run) == 0) stop("go_to_run 是空的，没有要分析的 GO")
+  if (!exists("expr", inherits = TRUE) || is.null(expr)) {
+    stop("还没有表达矩阵 expr。请先从脚本开头 Source 到数据预处理结束，再调用本函数。")
+  }
+
 ## 6. 逐个 GO 取基因（绝不合并） ------------------------------
 # ★★★ 已修改：按 go_to_run 逐个取基因，不是合并成一个基因集 ★★★
 message("本次将单独分析 ", length(go_to_run), " 个 GO：", paste(go_to_run, collapse = ", "))
@@ -822,3 +838,8 @@ if (length(all_prot) > 0) {
 fwrite(go_set_summary, file.path(out_dir, "00_GO_gene_sets.csv"))
 message("\n分析完成。每个 GO 的独立结果在：", normalizePath(out_dir, mustWork = FALSE))
 message("请重点查看 per_GO/ 下各通路文件夹，以及 04_negative_genes_each_GO.csv")
+  invisible(TRUE)
+}
+
+# ★★★ 已修改：选完通路后必须运行下面这一行，分析才会开始 ★★★
+run_go_individual_analysis()
