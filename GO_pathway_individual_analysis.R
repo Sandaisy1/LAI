@@ -13,6 +13,9 @@
 # 5. 不要 library(heatmaps)；热图只用 ggplot，不要 Heatmap()/draw()
 # 6. 向量用小写 c()，不要写成 C()（C 是 contrasts）
 # 7. 函数定义之后才会分析；本脚本末尾会自动调用一次
+# 8. 汇总后会画两张气泡图：预后（OS/DSS）、转移（PFI/DFI + M/N/分期）
+# 9. 若 17 个 GO 已经跑完、只想补画气泡图：把下面 run_mode 改成 "bubbles_only" 再 Source
+#    或在控制台运行：draw_prognosis_metastasis_bubbles()
 # ====================================================================
 ################################################################################
 
@@ -63,6 +66,9 @@ min_clin_n <- 6            # 临床关联最少样本（原 10）
 min_group_n <- 2           # 每组最少人数（原 3）
 clin_plot_p_cutoff <- 0.10 # 箱线图：p<0.10 也画（原 0.05）
 out_dir <- "results_GO_individual"
+# "full" = 读数据并做完全部分析（含气泡图）
+# "bubbles_only" = 不重跑全基因组相关，只用已有 results_GO_individual 画两张气泡图
+run_mode <- "full"
 
 # 指定的 GO 通路（每个都单独分析；必须用小写 c()）
 go_list <- c(
@@ -121,18 +127,25 @@ need_files <- c(
   "TCGA-BRCA.clinical.tsv",
   "TCGA-BRCA.survival.tsv"
 )
-miss <- need_files[!file.exists(need_files)]
-if (length(miss) > 0) {
-  stop("以下文件不在工作目录中：\n  ", paste(miss, collapse = "\n  "))
-}
+if (!identical(run_mode, "bubbles_only")) {
+  miss <- need_files[!file.exists(need_files)]
+  if (length(miss) > 0) {
+    stop("以下文件不在工作目录中：\n  ", paste(miss, collapse = "\n  "))
+  }
 
-# 读取数据（不要在这之前调用 run_go_individual_analysis）
-fpkm_data     <- fread("TCGA-BRCA.star_fpkm.tsv")
-probe_annot   <- fread("gencode.v36.annotation.gtf.gene.probemap")
-clinical_data <- fread("TCGA-BRCA.clinical.tsv")
-survival_data <- fread("TCGA-BRCA.survival.tsv")
-protein_data  <- if (file.exists("TCGA-BRCA.protein.tsv")) fread("TCGA-BRCA.protein.tsv") else NULL
-if (is.null(protein_data)) message("未找到 TCGA-BRCA.protein.tsv，将跳过蛋白相关性")
+  # 读取数据（不要在这之前调用 run_go_individual_analysis）
+  fpkm_data     <- fread("TCGA-BRCA.star_fpkm.tsv")
+  probe_annot   <- fread("gencode.v36.annotation.gtf.gene.probemap")
+  clinical_data <- fread("TCGA-BRCA.clinical.tsv")
+  survival_data <- fread("TCGA-BRCA.survival.tsv")
+  protein_data  <- if (file.exists("TCGA-BRCA.protein.tsv")) fread("TCGA-BRCA.protein.tsv") else NULL
+  if (is.null(protein_data)) message("未找到 TCGA-BRCA.protein.tsv，将跳过蛋白相关性")
+} else {
+  message("run_mode = bubbles_only：跳过 FPKM 读取，只用已有结果画气泡图")
+  if (file.exists("TCGA-BRCA.clinical.tsv")) {
+    clinical_data <- fread("TCGA-BRCA.clinical.tsv")
+  }
+}
 
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(file.path(out_dir, "per_GO"), showWarnings = FALSE)
@@ -312,6 +325,297 @@ simplify_stage <- function(x) {
   out
 }
 
+# 远处转移 M0 / M1（MX、未知记为 NA）
+classify_m <- function(x) {
+  x <- toupper(as.character(x))
+  out <- rep(NA_character_, length(x))
+  out[grepl("\\bM1\\b|M1[ABC]?", x)] <- "M1"
+  out[is.na(out) & grepl("\\bM0\\b", x)] <- "M0"
+  out[grepl("MX|NOT AVAILABLE|UNKNOWN|NOT REPORTED", x)] <- NA_character_
+  out
+}
+
+# 淋巴结 N0 / Nplus
+classify_n <- function(x) {
+  x <- toupper(as.character(x))
+  out <- rep(NA_character_, length(x))
+  out[grepl("\\bN[1-3]", x)] <- "Nplus"
+  out[is.na(out) & grepl("\\bN0\\b", x)] <- "N0"
+  out[grepl("NX|NOT AVAILABLE|UNKNOWN|NOT REPORTED", x)] <- NA_character_
+  out
+}
+
+classify_early_late <- function(stage_simplified) {
+  x <- as.character(stage_simplified)
+  out <- rep(NA_character_, length(x))
+  out[x %in% c("Stage I", "Stage II")] <- "Early_I_II"
+  out[x %in% c("Stage III", "Stage IV")] <- "Late_III_IV"
+  out
+}
+
+# 在临床表上补转移相关二分类列（可重复调用）
+ensure_metastasis_clin_columns <- function(clin) {
+  if (is.null(clin) || nrow(clin) == 0) return(clin)
+  clin <- copy(clin)
+  if (!"sample_std" %in% names(clin)) {
+    cid <- detect_id_col(clin, c("sampleID", "sample", "bcr_patient_barcode", "submitter_id"))
+    clin[, sample_std := normalize_barcode(get(cid))]
+    clin <- clin[!duplicated(sample_std)]
+  }
+  if (!"stage_simplified" %in% names(clin)) {
+    stage_col <- first_present(names(clin), c(
+      "ajcc_pathologic_tumor_stage", "pathologic_stage", "clinical_stage", "ajcc_pathologic_stage"
+    ))
+    if (!is.na(stage_col)) clin[, stage_simplified := simplify_stage(get(stage_col))]
+  }
+  m_col <- first_present(names(clin), c(
+    "ajcc_metastasis_pathologic_pm", "pathologic_M", "pathologic_m",
+    "ajcc_pathologic_m", "M", "metastasis"
+  ))
+  n_col <- first_present(names(clin), c(
+    "ajcc_nodes_pathologic_pn", "pathologic_N", "pathologic_n",
+    "ajcc_pathologic_n", "N"
+  ))
+  if (!is.na(m_col)) clin[, meta_M := classify_m(get(m_col))] else if (!"meta_M" %in% names(clin)) clin[, meta_M := NA_character_]
+  if (!is.na(n_col)) clin[, meta_N := classify_n(get(n_col))] else if (!"meta_N" %in% names(clin)) clin[, meta_N := NA_character_]
+  if ("stage_simplified" %in% names(clin)) {
+    clin[, meta_stage := classify_early_late(stage_simplified)]
+  } else if (!"meta_stage" %in% names(clin)) {
+    clin[, meta_stage := NA_character_]
+  }
+  clin
+}
+
+# 两组 Wilcoxon：pos 为“更差/转移相关”组，effect = median(pos) - median(neg)
+two_group_score_assoc <- function(score_vec, group, pos_level, neg_level, feature_name) {
+  df <- data.frame(
+    score = as.numeric(score_vec),
+    group = as.character(group),
+    stringsAsFactors = FALSE
+  )
+  df <- df[is.finite(df$score) & df$group %in% c(pos_level, neg_level), , drop = FALSE]
+  n_pos <- sum(df$group == pos_level)
+  n_neg <- sum(df$group == neg_level)
+  if (n_pos < min_group_n || n_neg < min_group_n) return(NULL)
+  wt <- suppressWarnings(wilcox.test(score ~ group, data = df))
+  med_pos <- stats::median(df$score[df$group == pos_level], na.rm = TRUE)
+  med_neg <- stats::median(df$score[df$group == neg_level], na.rm = TRUE)
+  data.table(
+    feature = feature_name,
+    n = nrow(df),
+    n_pos = n_pos,
+    n_neg = n_neg,
+    effect = med_pos - med_neg,
+    pvalue = wt$p.value,
+    method = "Wilcoxon",
+    effect_type = "delta_median_score",
+    detail = sprintf(
+      "%s median=%.3f (n=%d); %s median=%.3f (n=%d)",
+      pos_level, med_pos, n_pos, neg_level, med_neg, n_neg
+    )
+  )
+}
+
+collect_metastasis_clinical <- function(go_id, go_title, score_vec, clin_use) {
+  rows <- list()
+  if ("meta_M" %in% names(clin_use)) {
+    rows[["M"]] <- two_group_score_assoc(score_vec, clin_use$meta_M, "M1", "M0", "Distant_M_M1_vs_M0")
+  }
+  if ("meta_N" %in% names(clin_use)) {
+    rows[["N"]] <- two_group_score_assoc(score_vec, clin_use$meta_N, "Nplus", "N0", "Node_Nplus_vs_N0")
+  }
+  if ("meta_stage" %in% names(clin_use)) {
+    rows[["S"]] <- two_group_score_assoc(
+      score_vec, clin_use$meta_stage, "Late_III_IV", "Early_I_II", "Stage_Late_vs_Early"
+    )
+  }
+  rows <- Filter(Negate(is.null), rows)
+  if (length(rows) == 0) return(data.table())
+  dt <- rbindlist(rows, fill = TRUE)
+  if (is.null(dt) || nrow(dt) == 0) return(data.table())
+  dt[, `:=`(GO = go_id, GO_name = go_title)]
+  dt
+}
+
+# 气泡图：x=指标，y=通路，点大小=-log10(p)，颜色=效应方向
+make_go_bubble_plot <- function(plot_dt, title, subtitle, caption, color_name) {
+  d <- copy(as.data.table(plot_dt))
+  d <- d[is.finite(pvalue) & is.finite(effect)]
+  if (nrow(d) == 0) return(NULL)
+  d[, neglogp := pmin(10, -log10(pmax(pvalue, 1e-12)))]
+  d[, go_lab := paste0(GO, "  ", GO_name)]
+  go_rank <- d[, .(m = max(neglogp, na.rm = TRUE)), by = go_lab]
+  setorder(go_rank, m)
+  d[, go_lab := factor(go_lab, levels = go_rank$go_lab)]
+  if (!is.factor(d$feature_lab)) {
+    d[, feature_lab := factor(feature_lab, levels = unique(as.character(feature_lab)))]
+  }
+  lim <- max(0.4, stats::quantile(abs(d$effect), 0.98, na.rm = TRUE), na.rm = TRUE)
+  ggplot(d, aes(x = feature_lab, y = go_lab, size = neglogp, color = effect)) +
+    geom_point(alpha = 0.9) +
+    scale_size_continuous(range = c(2.5, 12), name = expression(-log[10](p))) +
+    scale_color_gradient2(
+      low = "#3C5488", mid = "grey90", high = "#E64B35",
+      midpoint = 0, limits = c(-lim, lim), name = color_name
+    ) +
+    labs(title = title, subtitle = subtitle, caption = caption, x = NULL, y = NULL) +
+    theme_bw(base_size = 11) +
+    theme(
+      axis.text.x = element_text(angle = 30, hjust = 1),
+      panel.grid.major.x = element_blank(),
+      plot.caption = element_text(hjust = 0, size = 8, color = "grey30")
+    )
+}
+
+draw_prognosis_metastasis_bubbles <- function(result_dir = NULL, surv_all = NULL, all_scores = NULL) {
+  if (is.null(result_dir)) {
+    result_dir <- if (exists("out_dir", inherits = TRUE)) {
+      normalizePath(out_dir, mustWork = FALSE)
+    } else {
+      "results_GO_individual"
+    }
+  }
+  dir.create(result_dir, showWarnings = FALSE, recursive = TRUE)
+
+  if (is.null(surv_all)) {
+    surv_file <- file.path(result_dir, "03_survival_cox_each_GO.csv")
+    if (!file.exists(surv_file)) {
+      stop("找不到 ", surv_file, " 。请先跑完整分析，或等当前 17 个 GO 跑完再画气泡图。")
+    }
+    surv_all <- fread(surv_file)
+  }
+  surv_all <- as.data.table(surv_all)
+  if (!"model" %in% names(surv_all)) stop("生存结果表缺少 model 列")
+  hl <- surv_all[surv_all[["model"]] == "High_vs_Low"]
+  if (nrow(hl) == 0) hl <- surv_all[surv_all[["model"]] == "continuous_score"]
+  hl <- hl[is.finite(HR) & HR > 0]
+  hl[, effect := log2(HR)]
+  hl[, effect_type := "log2_HR"]
+  hl[, feature_lab := as.character(endpoint)]
+
+  prog_map <- c(
+    OS = "OS 总生存",
+    DSS = "DSS 疾病特异生存"
+  )
+  meta_surv_map <- c(
+    PFI = "PFI 无进展间隔",
+    DFI = "DFI 无病间隔"
+  )
+  prog <- hl[endpoint %in% names(prog_map)]
+  if (nrow(prog) > 0) prog[, feature_lab := unname(prog_map[as.character(endpoint)])]
+  meta_s <- hl[endpoint %in% names(meta_surv_map)]
+  if (nrow(meta_s) > 0) meta_s[, feature_lab := unname(meta_surv_map[as.character(endpoint)])]
+
+  # 转移临床：M1、N+、III-IV；优先用内存中的通路分数，否则读 CSV
+  meta_c <- data.table()
+  clin_use <- NULL
+  if (exists("clinical_data", inherits = TRUE)) {
+    clin_use <- ensure_metastasis_clin_columns(get("clinical_data", inherits = TRUE))
+  } else if (file.exists("TCGA-BRCA.clinical.tsv")) {
+    tmp_clin <- fread("TCGA-BRCA.clinical.tsv")
+    cid <- detect_id_col(tmp_clin, c("sampleID", "sample", "bcr_patient_barcode", "submitter_id"))
+    tmp_clin[, sample_std := normalize_barcode(get(cid))]
+    tmp_clin <- tmp_clin[!duplicated(sample_std)]
+    clin_use <- ensure_metastasis_clin_columns(tmp_clin)
+  }
+
+  score_list <- all_scores
+  if (is.null(score_list) || length(score_list) == 0) {
+    score_file <- file.path(result_dir, "01_pathway_scores_each_GO.csv")
+    if (file.exists(score_file)) {
+      sm <- fread(score_file)
+      go_cols <- setdiff(names(sm), "sample")
+      score_list <- lapply(go_cols, function(g) {
+        v <- as.numeric(sm[[g]])
+        names(v) <- as.character(sm$sample)
+        v
+      })
+      names(score_list) <- go_cols
+    }
+  }
+
+  if (!is.null(clin_use) && length(score_list) > 0) {
+    meta_c <- rbindlist(lapply(names(score_list), function(g) {
+      sc <- score_list[[g]]
+      title <- if (exists("go_name_map", inherits = TRUE) && g %in% names(go_name_map)) {
+        unname(go_name_map[g])
+      } else {
+        g
+      }
+      common <- intersect(clin_use$sample_std, names(sc))
+      if (length(common) < 10) return(NULL)
+      cu <- clin_use[sample_std %in% common]
+      collect_metastasis_clinical(g, title, sc[cu$sample_std], cu)
+    }), fill = TRUE)
+    if (is.null(meta_c)) meta_c <- data.table()
+  }
+
+  meta_lab_map <- c(
+    Distant_M_M1_vs_M0 = "远处转移 M1 vs M0",
+    Node_Nplus_vs_N0 = "淋巴结 N+ vs N0",
+    Stage_Late_vs_Early = "分期 III-IV vs I-II"
+  )
+  if (nrow(meta_c) > 0) {
+    meta_c[, feature_lab := unname(meta_lab_map[as.character(feature)])]
+    meta_c[is.na(feature_lab), feature_lab := feature]
+  }
+
+  meta_all <- rbindlist(list(
+    if (nrow(meta_s) > 0) meta_s[, .(GO, GO_name, feature, feature_lab, effect, pvalue, n, effect_type, HR, HR_low, HR_high)] else NULL,
+    if (nrow(meta_c) > 0) meta_c[, .(GO, GO_name, feature, feature_lab, effect, pvalue, n, effect_type, HR = NA_real_, HR_low = NA_real_, HR_high = NA_real_)] else NULL
+  ), fill = TRUE)
+
+  n_go <- uniqueN(c(prog$GO, meta_all$GO))
+  ht <- max(6.5, min(14, 0.38 * max(1, n_go) + 3.2))
+
+  if (nrow(prog) > 0) {
+    prog[, feature_lab := factor(feature_lab, levels = unname(prog_map))]
+    fwrite(prog, file.path(result_dir, "06_prognosis_bubble_data.csv"))
+    p_prog <- make_go_bubble_plot(
+      prog,
+      title = "各 GO 通路与乳腺癌预后",
+      subtitle = "每个 GO 单独打分；High vs Low Cox（未合并通路）",
+      caption = "颜色：log2(HR)。红=通路高分组预后更差（HR>1）；蓝=高分组预后更好（HR<1）。点越大 p 越小。",
+      color_name = "log2(HR)"
+    )
+    if (!is.null(p_prog)) {
+      pdf_p <- file.path(result_dir, "06_prognosis_bubble_each_GO.pdf")
+      ggsave(pdf_p, p_prog, width = 9.5, height = ht)
+      ggsave(file.path(result_dir, "06_prognosis_bubble_each_GO.png"), p_prog, width = 9.5, height = ht, dpi = 150)
+      message("  已保存预后气泡图：", pdf_p)
+    }
+  } else {
+    message("  无 OS/DSS High vs Low 结果，跳过预后气泡图")
+  }
+
+  if (nrow(meta_all) > 0) {
+    lv <- c(unname(meta_surv_map), unname(meta_lab_map))
+    lv <- lv[lv %in% as.character(meta_all$feature_lab)]
+    meta_all[, feature_lab := factor(as.character(feature_lab), levels = lv)]
+    fwrite(meta_all, file.path(result_dir, "07_metastasis_bubble_data.csv"))
+    p_meta <- make_go_bubble_plot(
+      meta_all,
+      title = "各 GO 通路与乳腺癌转移",
+      subtitle = "PFI/DFI：High vs Low Cox；M/N/分期：转移或晚分期组 vs 对照的通路分数差",
+      caption = paste0(
+        "颜色：生存为 log2(HR)，临床为 Δscore（转移/晚分期组中位数 − 对照）。",
+        "红=高通路分数偏向更差转移表型；蓝相反。点越大 p 越小。",
+        "TCGA-BRCA 的 M1 样本通常很少，M 列可能缺失或很弱。"
+      ),
+      color_name = "effect"
+    )
+    if (!is.null(p_meta)) {
+      pdf_m <- file.path(result_dir, "07_metastasis_bubble_each_GO.pdf")
+      ggsave(pdf_m, p_meta, width = 10.5, height = ht)
+      ggsave(file.path(result_dir, "07_metastasis_bubble_each_GO.png"), p_meta, width = 10.5, height = ht, dpi = 150)
+      message("  已保存转移气泡图：", pdf_m)
+    }
+  } else {
+    message("  无转移相关结果，跳过转移气泡图")
+  }
+  invisible(list(prognosis = prog, metastasis = meta_all))
+}
+
 detect_id_col <- function(dt, prefer) {
   nms <- names(dt)
   hit <- first_present(nms, prefer)
@@ -331,6 +635,7 @@ as_sample_matrix <- function(dt, id_prefer) {
 # ==============================================================================
 # 第四部分：表达矩阵预处理
 # ==============================================================================
+if (!identical(run_mode, "bubbles_only")) {
 gene_id_col <- names(fpkm_data)[1]
 expr_ids <- as.character(fpkm_data[[gene_id_col]])
 expr <- as.matrix(fpkm_data[, -1, with = FALSE])
@@ -430,6 +735,12 @@ if (!is.na(stage_col)) {
   clinical_data[, stage_simplified := simplify_stage(get(stage_col))]
   clin_features <- unique(c("stage_simplified", clin_features))
 }
+clinical_data <- ensure_metastasis_clin_columns(clinical_data)
+message(
+  "转移分组样本数：M1=", sum(clinical_data$meta_M == "M1", na.rm = TRUE),
+  "  N+=", sum(clinical_data$meta_N == "Nplus", na.rm = TRUE),
+  "  III-IV=", sum(clinical_data$meta_stage == "Late_III_IV", na.rm = TRUE)
+)
 
 prot_mat <- NULL
 if (!is.null(protein_data) && nrow(protein_data) > 0) {
@@ -458,6 +769,7 @@ message("表达矩阵：", nrow(expr), " 基因 x ", ncol(expr), " 样本")
 message("与临床重叠：", length(intersect(common_samples, clinical_data$sample_std)))
 message("与生存重叠：", length(intersect(common_samples, survival_data$sample_std)))
 message("与蛋白重叠：", if (is.null(prot_mat)) 0 else length(intersect(common_samples, colnames(prot_mat))))
+}  # 结束 if (!identical(run_mode, "bubbles_only")) 的数据预处理
 
 # ==============================================================================
 # 第六–八部分：每个 GO 单独分析（全部包在函数里，末尾调用一次）
@@ -504,6 +816,7 @@ run_go_individual_analysis <- function(go_ids = NULL) {
   all_surv   <- list()
   all_neg    <- list()
   all_prot   <- list()
+  all_meta   <- list()
 
   surv_endpoints <- list(
     OS  = c("OS",  "OS.time"),
@@ -557,6 +870,11 @@ run_go_individual_analysis <- function(go_ids = NULL) {
         assoc_clinical_feature(sc_clin, clin_use[[ft]], ft)
       })
       clin_tab <- rbindlist(clin_rows, fill = TRUE)
+      meta_clin_tab <- collect_metastasis_clinical(go_id, go_title, sc_clin, clin_use)
+      if (nrow(meta_clin_tab) > 0) {
+        fwrite(meta_clin_tab, file.path(go_dir, "metastasis_clinical.csv"))
+        all_meta[[go_id]] <- meta_clin_tab
+      }
       if (nrow(clin_tab) > 0) {
         clin_tab[, `:=`(GO = go_id, GO_name = go_title, fdr = p.adjust(pvalue, method = "BH"))]
         setcolorder(clin_tab, c("GO", "GO_name"))
@@ -837,6 +1155,20 @@ run_go_individual_analysis <- function(go_ids = NULL) {
     }
   }
 
+  if (length(all_meta) > 0) {
+    fwrite(rbindlist(all_meta, fill = TRUE), file.path(out_dir_abs, "07_metastasis_clinical_each_GO.csv"))
+  }
+
+  tryCatch({
+    draw_prognosis_metastasis_bubbles(
+      result_dir = out_dir_abs,
+      surv_all = if (length(all_surv) > 0) rbindlist(all_surv, fill = TRUE) else NULL,
+      all_scores = all_scores
+    )
+  }, error = function(e) {
+    message("  气泡图失败：", conditionMessage(e))
+  })
+
   if (length(all_neg) > 0) {
     neg_all <- rbindlist(all_neg, fill = TRUE)
     fwrite(neg_all, file.path(out_dir_abs, "04_negative_genes_each_GO.csv"))
@@ -865,5 +1197,12 @@ run_go_individual_analysis <- function(go_ids = NULL) {
 }
 
 # 数据已经读完、expr 已建好之后，才调用一次。不要把这一行挪到脚本开头。
-go_to_run <- go_list
-run_go_individual_analysis()
+# 17 个 GO 若已经跑完、只想补预后/转移气泡图：把 run_mode 改成 "bubbles_only"
+# 或在控制台直接运行（需已有 03_survival_cox_each_GO.csv）：
+#   draw_prognosis_metastasis_bubbles()
+if (identical(run_mode, "bubbles_only")) {
+  draw_prognosis_metastasis_bubbles()
+} else {
+  go_to_run <- go_list
+  run_go_individual_analysis()
+}
