@@ -13,6 +13,7 @@
 #   3) 临床箱线图：不再只打印 null device 1，改为报告保存了几张图
 #   4) 生存分析 7.2：同样禁止 score[...]；打分成功后会把 go_score 同步到 score 以兼容旧行
 #   5) 汇总热图：禁止 t(scale(score_mat))，改用手写 z-score
+#   6) 热图绘制：必须用 ComplexHeatmap::Heatmap，避免被 heatmaps::Heatmap 覆盖
 # ============================================================
 
 ## 0. 可调参数 ------------------------------------------------
@@ -94,6 +95,7 @@ library(ggpubr)
 library(enrichplot)
 library(ComplexHeatmap)
 library(EnhancedVolcano)
+# 若会话里加载过 heatmaps 包，Heatmap() 会被盖掉，后面一律写 ComplexHeatmap::Heatmap
 
 ## 2. 工作目录与数据读取 --------------------------------------
 if (dir.exists(work_dir)) {
@@ -719,7 +721,7 @@ if (length(all_scores) > 0) {
     }
   }
   ha <- NULL
-  if (ncol(anno_df) > 0) ha <- HeatmapAnnotation(df = anno_df)
+  if (ncol(anno_df) > 0) ha <- ComplexHeatmap::HeatmapAnnotation(df = anno_df)
   # ★★★ 已修改开始：热图缩放，禁止 t(scale(score_mat)) ★★★
   # 旧代码（会报 scale 找不到 matrix 方法，请勿运行）：
   #   z_score <- t(scale(score_mat))
@@ -739,21 +741,28 @@ if (length(all_scores) > 0) {
   }
   z_score[!is.finite(z_score)] <- 0
   # ★★★ 已修改结束 ★★★
+  # ★★★ 已修改开始：热图必须用 ComplexHeatmap::，不要直接 Heatmap()/draw() ★★★
+  # 旧代码（heatmaps 包会抢走 Heatmap，报“参数没有用”）：
+  #   draw(Heatmap(z_score, name = "z-score", ...))
   tryCatch({
-    pdf(file.path(out_dir, "01_pathway_score_heatmap.pdf"), width = 12, height = 6)
-    draw(Heatmap(
+    pdf_hm <- file.path(out_dir, "01_pathway_score_heatmap.pdf")
+    pdf(pdf_hm, width = 12, height = 6)
+    ht <- ComplexHeatmap::Heatmap(
       z_score,
       name = "z-score",
       top_annotation = ha,
       show_column_names = FALSE,
       row_names_gp = grid::gpar(fontsize = 8),
       column_title = "Each GO pathway score (not pooled)"
-    ))
-    dev.off()
+    )
+    ComplexHeatmap::draw(ht)
+    invisible(dev.off())
+    message("  已保存通路分数热图：", pdf_hm)
   }, error = function(e) {
-    if (dev.cur() > 1) dev.off()
+    if (dev.cur() > 1) invisible(dev.off())
     message("热图绘制失败：", conditionMessage(e))
   })
+  # ★★★ 已修改结束 ★★★
 }
 
 if (length(all_clin) > 0) {
