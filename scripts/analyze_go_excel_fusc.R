@@ -1,13 +1,17 @@
 #!/usr/bin/env Rscript
 ################################################################################
-# E:/R/FUSC：Excel 临床分型 + Excel FPKM，每个 GO 单独分析
+# E:/R/FUSC：FUSCCTNBC Excel 临床分型 + FPKM，每个 GO 单独分析
+#
+# 输入文件（必须放在 E:/R/FUSC，扩展名 .xlsx 或 .xls）：
+#   1) OEP00000155_样本_Human_1786804447300   病人信息（分型/预后）
+#   2) FUSCCTNBC_Expression_RNAseqFPKM         RNA-seq FPKM
 #
 # 任务 1：各 GO 通路 vs 乳腺癌分型、预后（气泡图）
 # 任务 2：寻找与各 GO 通路活性呈负相关的基因
 #
 # ============================ 请按这个跑 ============================
-# 1. 把本脚本放到 E:/R/FUSC（或保持脚本在仓库、数据在 E:/R/FUSC）
-# 2. 确认该目录里有两份 Excel：病人信息、RNA-seq FPKM（.xlsx 或 .xls）
+# 1. 把本脚本放到 E:/R/FUSC
+# 2. 确认上述两份 Excel 在同一目录
 # 3. RStudio：Session -> Restart R，打开本文件，点 Source（整份运行）
 # 4. 不要把 17 个 GO 的基因合并后再打分
 # ====================================================================
@@ -163,58 +167,91 @@ list_excel <- function(dir) {
   hits
 }
 
-score_as_fpkm <- function(path) {
-  nm <- tolower(basename(path))
-  s <- 0
-  if (grepl("fpkm|pfkm|rna|expr|seq|tpm|count", nm)) s <- s + 5
-  if (grepl("clin|patient|pheno|sampleinfo|clinical|分型|预后|生存", nm)) s <- s - 5
-  dt <- tryCatch(read_excel_dt(path), error = function(e) NULL)
-  if (is.null(dt) || ncol(dt) < 3 || nrow(dt) < 5) return(s - 10)
-  num_frac <- mean(vapply(dt[, -1, with = FALSE], numeric_frac, numeric(1)))
-  s + 8 * num_frac + 0.01 * min(nrow(dt), 20000) / 1000
+# 按文件名前缀定位（用户给的名字可以没有扩展名）
+find_named_excel <- function(dir, stem) {
+  hits <- list.files(dir, full.names = TRUE, ignore.case = TRUE)
+  hits <- hits[!startsWith(basename(hits), "~$")]
+  if (!length(hits)) return(NULL)
+  bn <- basename(hits)
+  stem_l <- tolower(stem)
+  sans <- tolower(sub("\\.(xlsx|xls)$", "", bn, ignore.case = TRUE))
+  exact <- which(sans == stem_l)
+  if (length(exact)) return(hits[[exact[[1]]]])
+  pref <- which(startsWith(sans, stem_l) & grepl("\\.(xlsx|xls)$", bn, ignore.case = TRUE))
+  if (length(pref)) return(hits[[pref[[1]]]])
+  NULL
 }
 
-score_as_clin <- function(path) {
-  nm <- tolower(basename(path))
-  s <- 0
-  if (grepl("clin|patient|pheno|sampleinfo|clinical|分型|预后|生存|subtype", nm)) s <- s + 6
-  if (grepl("fpkm|pfkm|rna|expr|seq|tpm|count", nm)) s <- s - 6
-  dt <- tryCatch(read_excel_dt(path), error = function(e) NULL)
-  if (is.null(dt) || !nrow(dt)) return(s - 10)
-  nms <- paste(names(dt), collapse = " ")
-  if (grepl("subtype|pam50|her2|tnbc|er_|pr_|分型|亚型|三阴|预后|生存|OS|DSS|status", nms, ignore.case = TRUE)) {
-    s <- s + 8
+locate_fusc_excels <- function(dir) {
+  clin_path <- find_named_excel(dir, "OEP00000155_样本_Human_1786804447300")
+  fpkm_path <- find_named_excel(dir, "FUSCCTNBC_Expression_RNAseqFPKM")
+  if (is.null(clin_path) || is.null(fpkm_path)) {
+    found <- paste(basename(list_excel(dir)), collapse = ", ")
+    stop(
+      "在 ", dir, " 未找到指定 Excel。\n",
+      "需要：OEP00000155_样本_Human_1786804447300  与  FUSCCTNBC_Expression_RNAseqFPKM\n",
+      "当前目录里的 Excel：", if (nzchar(found)) found else "（无）"
+    )
   }
-  num_frac <- mean(vapply(dt, numeric_frac, numeric(1)))
-  s + 3 * (1 - num_frac)
-}
-
-classify_excel_pair <- function(paths) {
-  if (!length(paths)) stop("在 ", getwd(), " 未找到 .xlsx/.xls。请把两份 Excel 放到工作目录。")
-  fpkm_path <- paths[which.max(vapply(paths, score_as_fpkm, numeric(1)))]
-  clin_cands <- setdiff(paths, fpkm_path)
-  if (!length(clin_cands)) stop("只找到 1 个 Excel，需要病人信息表 + FPKM 表各一份。")
-  clin_path <- clin_cands[which.max(vapply(clin_cands, score_as_clin, numeric(1)))]
   list(clin = clin_path, fpkm = fpkm_path)
 }
 
 excel_to_expr <- function(dt) {
-  first <- names(dt)[[1]]
-  first_vals <- as.character(dt[[first]])
-  other <- dt[, -1, with = FALSE]
-  num_other <- mean(vapply(other, numeric_frac, numeric(1)))
-  # 默认：第一列基因，其余列样本
-  if (num_other >= 0.6 && (looks_gene(first_vals) || nrow(dt) >= ncol(dt))) {
-    mat <- as.matrix(data.frame(lapply(other, function(x) suppressWarnings(as.numeric(as.character(x))))))
-    rownames(mat) <- make.unique(first_vals)
-    colnames(mat) <- normalize_id(names(other))
+  is_num_col <- vapply(dt, function(x) numeric_frac(x) >= 0.6, logical(1))
+  ann_idx <- which(!is_num_col)
+  num_idx <- which(is_num_col)
+  if (!length(num_idx)) stop("FPKM 表里没有数值列，请确认打开的是 FUSCCTNBC_Expression_RNAseqFPKM")
+
+  # 前几列注释 + 后面样本：取 gene/symbol 列作行名
+  if (length(ann_idx) && min(ann_idx) == 1 && min(num_idx) > 1 &&
+      (looks_gene(as.character(dt[[ann_idx[1]]])) || nrow(dt) >= length(num_idx))) {
+    gene_col <- pick_col(dt, c("gene", "Gene", "symbol", "Symbol", "gene_name", "GeneSymbol", "SYMBOL", names(dt)[ann_idx]))
+    if (is.null(gene_col)) gene_col <- names(dt)[ann_idx[length(ann_idx)]]
+    mat <- as.matrix(data.frame(lapply(dt[, num_idx, with = FALSE], function(x) {
+      suppressWarnings(as.numeric(as.character(x)))
+    })))
+    rownames(mat) <- make.unique(as.character(dt[[gene_col]]))
+    colnames(mat) <- normalize_id(names(dt)[num_idx])
     return(mat)
   }
   # 样本在行、基因在列
+  first <- names(dt)[[1]]
+  other <- dt[, -1, with = FALSE]
   mat <- as.matrix(data.frame(lapply(other, function(x) suppressWarnings(as.numeric(as.character(x))))))
-  rownames(mat) <- make.unique(normalize_id(first_vals))
+  rownames(mat) <- make.unique(normalize_id(as.character(dt[[first]])))
   colnames(mat) <- as.character(names(other))
   t(mat)
+}
+
+drop_normal_samples <- function(mat) {
+  cn <- colnames(mat)
+  is_n <- grepl("normal|adjacent|(^|[._-])N$|(^|[._-])N[0-9]*$", cn, ignore.case = TRUE) &
+    !grepl("TNBC|BLIS|LAR|IM|MES", cn, ignore.case = TRUE)
+  if (sum(!is_n) >= min_clin_n && sum(is_n) > 0) {
+    message("去掉疑似癌旁/正常样本：", sum(is_n), "；保留肿瘤：", sum(!is_n))
+    mat <- mat[, !is_n, drop = FALSE]
+  }
+  mat
+}
+
+compact_id <- function(x) toupper(gsub("[^A-Za-z0-9]", "", as.character(x)))
+
+match_expr_clin <- function(expr, clin) {
+  exact <- intersect(colnames(expr), clin$sample_id)
+  if (length(exact) >= min_clin_n) {
+    return(list(expr = expr[, exact, drop = FALSE], clin = clin[match(exact, sample_id)]))
+  }
+  emap <- data.table(expr_id = colnames(expr), key_id = compact_id(colnames(expr)))
+  cmap <- data.table(sample_id = clin$sample_id, key_id = compact_id(clin$sample_id))
+  emap <- emap[key_id != "" & !duplicated(key_id)]
+  cmap <- cmap[key_id != "" & !duplicated(key_id)]
+  common_key <- intersect(emap$key_id, cmap$key_id)
+  if (length(common_key) >= min_clin_n) {
+    expr2 <- expr[, emap$expr_id[match(common_key, emap$key_id)], drop = FALSE]
+    colnames(expr2) <- cmap$sample_id[match(common_key, cmap$key_id)]
+    return(list(expr = expr2, clin = clin[match(colnames(expr2), sample_id)]))
+  }
+  list(expr = expr, clin = clin)
 }
 
 collapse_duplicate_genes <- function(mat) {
@@ -263,31 +300,62 @@ derive_ihc_subtype <- function(clin) {
 }
 
 normalize_subtype_label <- function(x) {
-  x <- trimws(as.character(x))
-  x[is_missing_label(x)] <- NA_character_
-  out <- x
-  out[grepl("三阴|TNBC|basal", x, ignore.case = TRUE)] <- "TNBC"
-  out[grepl("HER2\\s*\\+|HER2阳性|Her2-?enr|HER2_pos", x, ignore.case = TRUE) &
-        !grepl("luminal|腔面|HR\\+", x, ignore.case = TRUE)] <- "HER2+"
-  out[grepl("LumA|Luminal\\s*A|腔面\\s*A", x, ignore.case = TRUE)] <- "Luminal A"
-  out[grepl("LumB|Luminal\\s*B|腔面\\s*B", x, ignore.case = TRUE)] <- "Luminal B"
-  out[grepl("Luminal|腔面|HR\\+", x, ignore.case = TRUE) & is.na(out)] <- "Luminal"
+  raw <- trimws(as.character(x))
+  raw[is_missing_label(raw)] <- NA_character_
+  out <- rep(NA_character_, length(raw))
+  out[grepl("\\bLAR\\b|luminal androgen|腔面雄激素", raw, ignore.case = TRUE)] <- "LAR"
+  out[is.na(out) & grepl("\\bBLIS\\b|basal-like immune|基底样免疫抑制", raw, ignore.case = TRUE)] <- "BLIS"
+  out[is.na(out) & grepl("\\bMES\\b|mesenchymal|间充质", raw, ignore.case = TRUE)] <- "MES"
+  out[is.na(out) & grepl("\\bIM\\b|immunomodulatory|免疫调节", raw, ignore.case = TRUE)] <- "IM"
+  out[is.na(out) & grepl("三阴|TNBC", raw, ignore.case = TRUE)] <- "TNBC"
+  out[is.na(out) & grepl("HER2\\s*\\+|HER2阳性|Her2-?enr|HER2_pos", raw, ignore.case = TRUE) &
+        !grepl("luminal|腔面|HR\\+|LAR", raw, ignore.case = TRUE)] <- "HER2+"
+  out[is.na(out) & grepl("LumA|Luminal\\s*A|腔面\\s*A", raw, ignore.case = TRUE)] <- "Luminal A"
+  out[is.na(out) & grepl("LumB|Luminal\\s*B|腔面\\s*B", raw, ignore.case = TRUE)] <- "Luminal B"
+  out[is.na(out) & grepl("Luminal|腔面|HR\\+", raw, ignore.case = TRUE)] <- "Luminal"
+  out[is.na(out) & !is.na(raw)] <- raw[is.na(out) & !is.na(raw)]
   out
+}
+
+guess_subtype_column <- function(clin) {
+  named <- pick_col(clin, c(
+    "subtype", "Subtype", "PAM50", "pam50", "BRCA_Subtype_PAM50",
+    "molecular_subtype", "IHC_subtype", "Fudan_subtype", "TNBC_subtype",
+    "mRNA_subtype", "分型", "亚型", "分子分型", "乳腺癌分型", "转录组分型"
+  ))
+  if (!is.null(named)) return(named)
+  rx <- "LAR|BLIS|\\bIM\\b|\\bMES\\b|三阴|TNBC|HER2|Luminal|腔面"
+  char_cols <- names(clin)[vapply(clin, function(x) is.character(x) || is.factor(x), logical(1))]
+  char_cols <- setdiff(char_cols, c("sample_id"))
+  best <- NULL
+  best_n <- 0
+  for (cc in char_cols) {
+    n <- sum(grepl(rx, as.character(clin[[cc]])), na.rm = TRUE)
+    if (n > best_n) {
+      best_n <- n
+      best <- cc
+    }
+  }
+  if (!is.null(best) && best_n >= min_clin_n) best else NULL
+}
+
+parse_event <- function(ev) {
+  if (is.numeric(ev)) return(as.integer(ev > 0))
+  as.integer(grepl("dead|deceased|death|event|relapse|recur|1|是|死亡|复发|进展", as.character(ev), ignore.case = TRUE))
 }
 
 prepare_clinical <- function(clin) {
   id_col <- pick_col(clin, c(
-    "sample", "sampleID", "Sample", "patient", "Patient", "ID", "id",
-    "bcr_patient_barcode", "submitter_id", "样本", "病人", "样本编号", names(clin)[1]
+    "sample", "sampleID", "Sample", "SampleName", "sample_name", "patient", "Patient",
+    "ID", "id", "bcr_patient_barcode", "submitter_id",
+    "样本", "样本名称", "样品名称", "样本编号", "病人", "病人编号", names(clin)[1]
   ))
   clin[, sample_id := normalize_id(get(id_col))]
   clin <- clin[!is.na(sample_id) & sample_id != "" & !duplicated(sample_id)]
 
-  sub_col <- pick_col(clin, c(
-    "subtype", "Subtype", "PAM50", "pam50", "BRCA_Subtype_PAM50",
-    "molecular_subtype", "IHC_subtype", "分型", "亚型", "分子分型", "乳腺癌分型"
-  ))
+  sub_col <- guess_subtype_column(clin)
   if (!is.null(sub_col)) {
+    message("分型列：", sub_col)
     clin[, subtype := normalize_subtype_label(get(sub_col))]
   } else {
     clin[, subtype := NA_character_]
@@ -296,22 +364,25 @@ prepare_clinical <- function(clin) {
   clin[, subtype := fifelse(is.na(subtype) | subtype == "", derived, subtype)]
 
   time_col <- pick_col(clin, c(
-    "OS.time", "OS_time", "os_time", "_OS", "overall_survival_time",
-    "生存时间", "总生存时间", "OS时间", "days_to_death", "days_to_last_followup"
+    "OS.time", "OS_time", "os_time", "_OS", "overall_survival_time", "OS_months",
+    "生存时间", "总生存时间", "OS时间", "随访时间", "days_to_death", "days_to_last_followup"
   ))
   event_col <- pick_col(clin, c(
     "OS", "OS.event", "os_event", "_EVENT", "event", "status", "vital_status",
-    "生存状态", "死亡", "预后", "结局"
+    "生存状态", "死亡", "预后", "结局", "死亡状态"
   ))
   if (!is.null(time_col)) clin[, os_time := as.numeric(get(time_col))]
-  if (!is.null(event_col)) {
-    ev <- clin[[event_col]]
-    if (is.numeric(ev)) {
-      clin[, os_event := as.integer(ev > 0)]
-    } else {
-      clin[, os_event := as.integer(grepl("dead|deceased|death|event|1|是|死亡|复发", as.character(ev), ignore.case = TRUE))]
-    }
-  }
+  if (!is.null(event_col)) clin[, os_event := parse_event(get(event_col))]
+
+  rfs_time_col <- pick_col(clin, c(
+    "RFS.time", "RFS_time", "DFS.time", "DFS_time", "PFS.time", "DFI.time",
+    "无病生存时间", "无复发生存时间", "复发时间"
+  ))
+  rfs_event_col <- pick_col(clin, c(
+    "RFS", "RFS.event", "DFS", "DFS.event", "PFS", "复发", "复发生存状态", "无病生存状态"
+  ))
+  if (!is.null(rfs_time_col)) clin[, rfs_time := as.numeric(get(rfs_time_col))]
+  if (!is.null(rfs_event_col)) clin[, rfs_event := parse_event(get(rfs_event_col))]
   clin
 }
 
@@ -488,10 +559,9 @@ spearman_vs_score <- function(expr_mat, score) {
 }
 
 # ---------------------------------------------------------------------------
-# 读入两份 Excel
+# 读入指定的两份 Excel
 # ---------------------------------------------------------------------------
-xlsx_files <- list_excel(".")
-pair <- classify_excel_pair(xlsx_files)
+pair <- locate_fusc_excels(".")
 message("临床 Excel：", pair$clin)
 message("FPKM Excel：", pair$fpkm)
 
@@ -502,6 +572,7 @@ expr <- excel_to_expr(fpkm_raw)
 expr <- collapse_duplicate_genes(expr)
 colnames(expr) <- normalize_id(colnames(expr))
 expr <- expr[, !duplicated(colnames(expr)), drop = FALSE]
+expr <- drop_normal_samples(expr)
 
 mx <- suppressWarnings(max(expr, na.rm = TRUE))
 if (is.finite(mx) && mx > 50) {
@@ -509,35 +580,21 @@ if (is.finite(mx) && mx > 50) {
   expr <- log2(expr + 1)
 }
 
+aligned <- match_expr_clin(expr, clin)
+expr <- aligned$expr
+clin <- aligned$clin
 common <- intersect(colnames(expr), clin$sample_id)
-if (length(common) < min_clin_n) {
-  # 有时临床用短 ID、表达用带后缀 ID：两边都截到最短公共前缀风格
-  clin_short <- substr(clin$sample_id, 1, 12)
-  expr_short <- substr(colnames(expr), 1, 12)
-  map <- data.table(expr_id = colnames(expr), short = expr_short)
-  map <- map[!duplicated(short)]
-  clin2 <- copy(clin)
-  clin2[, short := substr(sample_id, 1, 12)]
-  clin2 <- clin2[!duplicated(short)]
-  common_short <- intersect(map$short, clin2$short)
-  if (length(common_short) >= min_clin_n) {
-    expr <- expr[, map$expr_id[match(common_short, map$short)], drop = FALSE]
-    colnames(expr) <- common_short
-    clin <- clin2[match(common_short, short)]
-    clin[, sample_id := short]
-    common <- common_short
-  }
-}
 
 if (length(common) < min_clin_n) {
   stop("临床与 FPKM 匹配到的样本太少（n=", length(common),
-       "）。请确认两份 Excel 有同一套样本 ID。")
+       "）。请确认 OEP00000155 样本表与 FUSCCTNBC_Expression_RNAseqFPKM 使用同一套样本 ID。")
 }
 expr <- expr[, common, drop = FALSE]
 clin <- clin[match(common, sample_id)]
 message("匹配样本数：", length(common),
         "；分型非空：", sum(!is.na(clin$subtype)),
-        "；有 OS：", if ("os_time" %in% names(clin)) sum(is.finite(clin$os_time)) else 0)
+        "；有 OS：", if ("os_time" %in% names(clin)) sum(is.finite(clin$os_time)) else 0,
+        "；有 RFS：", if ("rfs_time" %in% names(clin)) sum(is.finite(clin$rfs_time)) else 0)
 
 # ---------------------------------------------------------------------------
 # GO 基因集 + 每个通路单独打分
@@ -607,13 +664,21 @@ for (go_id in usable) {
     }
   }
 
-  # ---- 预后：High vs Low Cox ----
+  # ---- 预后：OS / RFS High vs Low Cox ----
   if (all(c("os_time", "os_event") %in% names(clin))) {
     cox <- cox_high_low(go_score[clin$sample_id], clin$os_time, clin$os_event)
     if (!is.null(cox)) {
       cox[, `:=`(GO = go_id, GO_name = go_title, feature = "OS", feature_lab = "OS 总生存")]
       surv_rows[[length(surv_rows) + 1]] <- cox
       fwrite(cox, file.path(go_dir, "survival_OS.csv"))
+    }
+  }
+  if (all(c("rfs_time", "rfs_event") %in% names(clin))) {
+    cox <- cox_high_low(go_score[clin$sample_id], clin$rfs_time, clin$rfs_event)
+    if (!is.null(cox)) {
+      cox[, `:=`(GO = go_id, GO_name = go_title, feature = "RFS", feature_lab = "RFS 无复发生存")]
+      surv_rows[[length(surv_rows) + 1]] <- cox
+      fwrite(cox, file.path(go_dir, "survival_RFS.csv"))
     }
   }
 
@@ -647,7 +712,7 @@ if (length(subtype_rows)) {
   make_bubble(
     sub_all,
     title = "各 GO 通路与乳腺癌分型",
-    subtitle = "每个 GO 单独打分；该亚型 vs 其余样本的通路分数差（未合并通路）",
+    subtitle = "每个 GO 单独打分；该亚型 vs 其余样本的通路分数差（Fudan TNBC 或 IHC 分型，未合并通路）",
     caption = "颜色：Δscore = 该亚型中位数 − 其余中位数。红=该亚型通路活性更高；蓝相反。点越大 p 越小。",
     color_name = "Δscore",
     outfile_stub = file.path(out_dir, "02_subtype_bubble_each_GO")
@@ -659,6 +724,7 @@ if (length(subtype_rows)) {
 if (length(surv_rows)) {
   surv_all <- rbindlist(surv_rows, fill = TRUE)
   fwrite(surv_all, file.path(out_dir, "03_prognosis_each_GO.csv"))
+  surv_all[, feature_lab := factor(feature_lab, levels = intersect(c("OS 总生存", "RFS 无复发生存"), unique(feature_lab)))]
   make_bubble(
     surv_all,
     title = "各 GO 通路与乳腺癌预后",
@@ -668,7 +734,7 @@ if (length(surv_rows)) {
     outfile_stub = file.path(out_dir, "03_prognosis_bubble_each_GO")
   )
 } else {
-  message("临床表中没有可用的生存时间/结局列，跳过预后气泡图。可在 Excel 中增加 OS.time 与 OS 列后重跑。")
+  message("临床表中没有可用的生存时间/结局列，跳过预后气泡图。可在 Excel 中增加 OS.time/OS 或 RFS.time/RFS 后重跑。")
 }
 
 if (length(neg_summary)) {
