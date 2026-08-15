@@ -14,7 +14,7 @@
 #   4) 生存分析 7.2：同样禁止 score[...]；打分成功后会把 go_score 同步到 score 以兼容旧行
 #   5) 汇总热图：禁止 t(scale(score_mat))，改用手写 z-score
 #   6) 热图绘制：必须用 ComplexHeatmap::Heatmap，避免被 heatmaps::Heatmap 覆盖
-#   7) OS 森林图：ggplot2 4.0 用 geom_errorbar(orientation="y")，不再用 geom_errorbarh
+#   8) 多个 GO：已写在 go_list；用 go_to_run 控制本次跑哪些，必须整段 for 循环，不要只跑一个文件夹
 # ============================================================
 
 ## 0. 可调参数 ------------------------------------------------
@@ -66,6 +66,14 @@ go_name_map <- c(
   "GO:0007411" = "axon guidance",
   "GO:0007409" = "axonogenesis"
 )
+
+# ★★★ 已修改开始：一次跑多个 GO，不用在控制台逐个输入 ★★★
+# go_list 里已经有你列的 17 个通路。默认全部单独分析。
+# 若只想补跑某几个（例如还没有文件夹的），改成：
+#   go_to_run <- c("GO:0007411", "GO:0007409")
+# 若要加新通路：先写进 go_list 和 go_name_map，再保持 go_to_run <- go_list
+go_to_run <- go_list
+# ★★★ 已修改结束 ★★★
 
 ## 1. 加载包 --------------------------------------------------
 # 数据处理
@@ -416,10 +424,12 @@ message("与生存重叠：", length(intersect(common_samples, survival_data$sam
 message("与蛋白重叠：", if (is.null(prot_mat)) 0 else length(intersect(common_samples, colnames(prot_mat))))
 
 ## 6. 逐个 GO 取基因（绝不合并） ------------------------------
-go_gene_list <- lapply(go_list, get_go_genes)
-names(go_gene_list) <- go_list
+# ★★★ 已修改：按 go_to_run 逐个取基因，不是合并成一个基因集 ★★★
+message("本次将单独分析 ", length(go_to_run), " 个 GO：", paste(go_to_run, collapse = ", "))
+go_gene_list <- lapply(go_to_run, get_go_genes)
+names(go_gene_list) <- go_to_run
 
-go_set_summary <- rbindlist(lapply(go_list, function(g) {
+go_set_summary <- rbindlist(lapply(go_to_run, function(g) {
   dt <- go_gene_list[[g]]
   in_expr <- intersect(unique(dt$SYMBOL), rownames(expr))
   data.table(
@@ -446,7 +456,7 @@ surv_endpoints <- list(
   DFI = c("DFI", "DFI.time")
 )
 
-for (go_id in go_list) {
+for (go_id in go_to_run) {
   go_title <- unname(go_name_map[go_id])
   message("\n========== ", go_id, " | ", go_title, " ==========")
 
