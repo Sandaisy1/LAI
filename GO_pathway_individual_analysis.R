@@ -1193,6 +1193,7 @@ run_go_individual_analysis <- function(go_ids = NULL) {
   message("per_GO 现有 ", length(folders), " 个文件夹：")
   message(paste("  ", folders, collapse = "\n"))
   message("请重点查看 per_GO/ 下各通路文件夹，以及 04_negative_genes_each_GO.csv")
+  message("预后气泡图：06_prognosis_bubble_each_GO.pdf ；转移气泡图：07_metastasis_bubble_each_GO.pdf")
   invisible(TRUE)
 }
 
