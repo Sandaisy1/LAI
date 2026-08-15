@@ -10,6 +10,7 @@
 # 已修改处均用  “★★★ 已修改”  标记，全文搜索即可定位。
 #   1) pathway_zmean：不再使用 scale()/t()
 #   2) 通路分数变量由 score 改为 go_score（score 会撞上已有函数）
+#   3) 临床箱线图：不再只打印 null device 1，改为报告保存了几张图
 # ============================================================
 
 ## 0. 可调参数 ------------------------------------------------
@@ -490,10 +491,15 @@ for (go_id in go_list) {
     fwrite(clin_tab, file.path(go_dir, "clinical_association.csv"))
     all_clin[[go_id]] <- clin_tab
 
-    # 显著分类变量箱线图（最多 6 张）
+    # ★★★ 已修改开始：临床箱线图 ★★★
+    # 旧输出 `null device 1` 只是 dev.off() 关闭 PDF，不是分析结果，也看不出画了几张图。
     sig_cat <- clin_tab[type == "categorical" & pvalue < 0.05][order(pvalue)]
-    if (nrow(sig_cat) > 0) {
-      pdf(file.path(go_dir, "clinical_boxplots.pdf"), width = 7, height = 5)
+    if (nrow(sig_cat) == 0) {
+      message("  本通路无显著分类临床变量（p < 0.05），不画箱线图")
+    } else {
+      pdf_clin <- file.path(go_dir, "clinical_boxplots.pdf")
+      n_box <- 0L
+      pdf(pdf_clin, width = 7, height = 5)
       for (ft in head(sig_cat$feature, 6)) {
         plot_df <- data.frame(
           score = as.numeric(sc_clin),
@@ -504,15 +510,30 @@ for (go_id in go_list) {
         tab <- table(plot_df$group)
         plot_df <- plot_df[plot_df$group %in% names(tab)[tab >= 3], ]
         if (length(unique(plot_df$group)) < 2) next
-        p <- ggboxplot(plot_df, x = "group", y = "score", fill = "group", outlier.shape = NA) +
-          stat_compare_means() +
-          labs(title = paste0(go_id, "\n", go_title),
-               subtitle = ft, x = NULL, y = "Pathway score") +
-          theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
-        print(p)
+        ok <- tryCatch({
+          p <- ggboxplot(plot_df, x = "group", y = "score", fill = "group", outlier.shape = NA) +
+            stat_compare_means() +
+            labs(title = paste0(go_id, "\n", go_title),
+                 subtitle = paste0(ft, "  (p=", signif(sig_cat$pvalue[sig_cat$feature == ft][1], 3), ")"),
+                 x = NULL, y = "Pathway score") +
+            theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+          print(p)
+          TRUE
+        }, error = function(e) {
+          message("  箱线图失败（", ft, "）：", conditionMessage(e))
+          FALSE
+        })
+        if (isTRUE(ok)) n_box <- n_box + 1L
       }
-      dev.off()
+      invisible(dev.off())
+      if (n_box == 0L) {
+        if (file.exists(pdf_clin)) file.remove(pdf_clin)
+        message("  箱线图均被跳过（分组不足），未保存 PDF")
+      } else {
+        message("  已保存临床箱线图 ", n_box, " 张：", pdf_clin)
+      }
     }
+    # ★★★ 已修改结束 ★★★
   }
 
   # ---- 7.2 生存分析（仅本通路分数） ----
