@@ -162,10 +162,15 @@ get_go_genes <- function(go_id) {
 }
 
 pathway_zmean <- function(expr_mat, genes) {
-  genes <- unique(intersect(genes, rownames(expr_mat)))
+  genes <- unique(intersect(as.character(genes), rownames(expr_mat)))
   if (length(genes) < min_pathway_genes) return(NULL)
-  sub <- expr_mat[genes, , drop = FALSE]
-  z <- t(scale(t(sub)))
+  sub <- as.matrix(expr_mat[genes, , drop = FALSE])
+  storage.mode(sub) <- "double"
+  # 不用 scale()/t()：BiocGenerics 会把它们变成 S4 泛型，普通 matrix 会报错
+  gene_mean <- rowMeans(sub, na.rm = TRUE)
+  gene_sd <- sqrt(rowMeans((sub - gene_mean)^2, na.rm = TRUE))
+  gene_sd[!is.finite(gene_sd) | gene_sd < 1e-12] <- 1
+  z <- (sub - gene_mean) / gene_sd
   z[!is.finite(z)] <- 0
   sc <- colMeans(z, na.rm = TRUE)
   names(sc) <- colnames(sub)
@@ -182,7 +187,7 @@ spearman_vs_score <- function(mat, score) {
   keep <- apply(mat, 1, function(x) sd(x, na.rm = TRUE) > 0)
   mat <- mat[keep, , drop = FALSE]
   n <- ncol(mat)
-  r <- as.numeric(cor(t(mat), score, method = "spearman", use = "pairwise.complete.obs"))
+  r <- as.numeric(cor(base::t(as.matrix(mat)), score, method = "spearman", use = "pairwise.complete.obs"))
   names(r) <- rownames(mat)
   r <- pmin(pmax(r, -0.999999), 0.999999)
   tstat <- r * sqrt((n - 2) / pmax(1e-12, 1 - r^2))
@@ -443,22 +448,25 @@ for (go_id in go_list) {
     file.path(go_dir, "genes.csv")
   )
 
-  score <- pathway_zmean(expr, genes_here)
-  if (is.null(score)) {
-    message("  可用基因 < ", min_pathway_genes, "，跳过该通路")
+  go_score <- tryCatch(pathway_zmean(expr, genes_here), error = function(e) {
+    message("  通路打分失败：", conditionMessage(e))
+    NULL
+  })
+  if (!is.numeric(go_score) || length(go_score) == 0) {
+    message("  可用基因 < ", min_pathway_genes, " 或打分失败，跳过该通路")
     next
   }
-  n_used <- attr(score, "n_genes")
-  used_genes <- attr(score, "genes")
+  n_used <- attr(go_score, "n_genes")
+  used_genes <- attr(go_score, "genes")
   message("  通路基因用于打分：", n_used)
-  fwrite(data.table(sample = names(score), pathway_score = as.numeric(score)),
+  fwrite(data.table(sample = names(go_score), pathway_score = as.numeric(go_score)),
          file.path(go_dir, "pathway_score.csv"))
-  all_scores[[go_id]] <- score
+  all_scores[[go_id]] <- go_score
 
   # ---- 7.1 临床相关性（仅本通路分数） ----
-  clin_use <- clinical_data[sample_std %in% names(score)]
+  clin_use <- clinical_data[sample_std %in% names(go_score)]
   setkey(clin_use, sample_std)
-  sc_clin <- score[clin_use$sample_std]
+  sc_clin <- go_score[clin_use$sample_std]
   clin_rows <- lapply(clin_features, function(ft) {
     if (!ft %in% names(clin_use)) return(NULL)
     assoc_clinical_feature(sc_clin, clin_use[[ft]], ft)
@@ -496,8 +504,8 @@ for (go_id in go_list) {
   }
 
   # ---- 7.2 生存分析（仅本通路分数） ----
-  surv_use <- survival_data[sample_std %in% names(score)]
-  sc_surv <- score[surv_use$sample_std]
+  surv_use <- survival_data[sample_std %in% names(go_score)]
+  sc_surv <- go_score[surv_use$sample_std]
   surv_rows <- list()
 
   for (ep in names(surv_endpoints)) {
@@ -573,7 +581,7 @@ for (go_id in go_list) {
   }
 
   # ---- 7.3 全基因组负相关基因（仅对本通路分数） ----
-  cor_tab <- spearman_vs_score(expr, score)
+  cor_tab <- spearman_vs_score(expr, go_score)
   if (nrow(cor_tab) > 0) {
     setnames(cor_tab, "feature", "gene")
     cor_tab[, `:=`(
@@ -631,9 +639,9 @@ for (go_id in go_list) {
 
   # ---- 7.4 蛋白水平相关性（补充，仍按本通路分数） ----
   if (!is.null(prot_mat)) {
-    prot_common <- intersect(colnames(prot_mat), names(score))
+    prot_common <- intersect(colnames(prot_mat), names(go_score))
     if (length(prot_common) >= 20) {
-      prot_cor <- spearman_vs_score(prot_mat, score)
+      prot_cor <- spearman_vs_score(prot_mat, go_score)
       if (nrow(prot_cor) > 0) {
         setnames(prot_cor, "feature", "protein")
         prot_cor[, `:=`(GO = go_id, GO_name = go_title)]
@@ -668,7 +676,7 @@ if (length(all_scores) > 0) {
   }
   ha <- NULL
   if (ncol(anno_df) > 0) ha <- HeatmapAnnotation(df = anno_df)
-  z_score <- t(scale(score_mat))   # GO x samples
+  z_score <- base::t(base::scale(as.matrix(score_mat)))   # GO x samples
   z_score[!is.finite(z_score)] <- 0
   tryCatch({
     pdf(file.path(out_dir, "01_pathway_score_heatmap.pdf"), width = 12, height = 6)

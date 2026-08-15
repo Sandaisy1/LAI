@@ -10,15 +10,16 @@ alwaysApply: true
 - 禁止把多个 GO 的基因合并成一个基因集后再相关或富集。
 - 变量名沿用：`fpkm_data`、`probe_annot`、`clinical_data`、`survival_data`、`protein_data`。
 - 用 `org.Hs.eg.db` 的 `GOALL`（失败则回退 `GO`）映射基因；通路活性用该通路基因在肿瘤样本中的 z-score 均值。
+- 不要用裸调用 `scale()`/`t()` 给通路打分：加载 `SummarizedExperiment` 后它们会变成 S4 泛型，普通 matrix 会报错。不要把通路分数变量命名为 `score`（会和已有函数重名）。
 
 ```r
 # ✅ 每个 GO 单独循环
 for (go_id in go_ids) {
   genes <- get_go_genes(go_id)
-  score <- pathway_zmean(expr, genes)
+  go_score <- pathway_zmean(expr, genes)
 }
 
 # ❌ 禁止合并后再分析
 all_genes <- unique(unlist(lapply(go_ids, get_go_genes)))
-score <- pathway_zmean(expr, all_genes)
+go_score <- pathway_zmean(expr, all_genes)
 ```
