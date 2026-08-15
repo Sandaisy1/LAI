@@ -13,11 +13,12 @@
 #   3) 临床箱线图：不再只打印 null device 1，改为报告保存了几张图
 #   4) 生存分析 7.2：同样禁止 score[...]；打分成功后会把 go_score 同步到 score 以兼容旧行
 #   5) 汇总热图：禁止 t(scale(score_mat))，改用手写 z-score
-#   6) 热图绘制：必须用 ComplexHeatmap::Heatmap，避免被 heatmaps::Heatmap 覆盖
+#   6) 汇总热图只用 ggplot，不要运行 Heatmap()/draw()
 #   7) OS 森林图：ggplot2 4.0 用 geom_errorbar(orientation="y")，不要漏掉行末 +
 #   8) 多个 GO：已写在 go_list；用 go_to_run 控制本次跑哪些
-#   9) 不要 source 一个不存在的文件。在本脚本里搜索 run_go_individual_analysis <- function
-#      先把整个函数 Run 进会话，再执行 run_go_individual_analysis()
+#   9) 禁止 source("run_go_individual_analysis.R")，这个文件不存在。
+#      只需 source("GO_pathway_individual_analysis.R")，或在本脚本里搜索
+#      run_go_individual_analysis <- function 后运行该函数
 # ============================================================
 
 ## 0. 可调参数 ------------------------------------------------
