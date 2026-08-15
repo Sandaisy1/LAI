@@ -530,7 +530,9 @@ for (go_id in go_to_run) {
 
     # ★★★ 已修改开始：临床箱线图 ★★★
     # 旧输出 `null device 1` 只是 dev.off() 关闭 PDF，不是分析结果，也看不出画了几张图。
-    sig_cat <- clin_tab[type == "categorical" & pvalue < 0.05][order(pvalue)]
+    # ★★★ 已修改：不要写 type == "categorical"；type 会撞上 BiocGenerics::type 函数 ★★★
+    sig_cat <- clin_tab[clin_tab[["type"]] == "categorical" & clin_tab[["pvalue"]] < 0.05]
+    if (nrow(sig_cat) > 0) sig_cat <- sig_cat[order(sig_cat[["pvalue"]])]
     if (nrow(sig_cat) == 0) {
       message("  本通路无显著分类临床变量（p < 0.05），不画箱线图")
     } else {
