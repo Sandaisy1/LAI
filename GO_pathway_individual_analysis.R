@@ -792,8 +792,8 @@ run_go_individual_analysis <- function(go_ids = NULL) {
       ggsave(file.path(out_dir, "03_OS_forest_each_GO.pdf"), pfor, width = 10, height = 6)
       message("  已保存 OS 森林图：", file.path(out_dir, "03_OS_forest_each_GO.pdf"))
       # ★★★ 已修改结束 ★★★
-    }
-  }
+    }  # 结束 if (nrow(os_hl) > 0)
+  }    # ★★★ 必须有这一行：结束 if (length(all_surv) > 0)，少了 RStudio 会在 if 上打红叉
 
   if (length(all_neg) > 0) {
     neg_all <- rbindlist(all_neg, fill = TRUE)
@@ -812,7 +812,7 @@ run_go_individual_analysis <- function(go_ids = NULL) {
   fwrite(go_set_summary, file.path(out_dir, "00_GO_gene_sets.csv"))
   message("\n分析完成。每个 GO 的独立结果在：", normalizePath(out_dir, mustWork = FALSE))
   message("请重点查看 per_GO/ 下各通路文件夹，以及 04_negative_genes_each_GO.csv")
-    invisible(TRUE)
+  invisible(TRUE)
 }
 
 # ★★★ 已修改：定义函数之后必须调用才会开始分析 ★★★
