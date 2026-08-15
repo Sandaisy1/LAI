@@ -739,23 +739,7 @@ if (length(all_scores) > 0) {
   fwrite(data.table(sample = rownames(score_mat), as.data.table(score_mat)),
          file.path(out_dir, "01_pathway_scores_each_GO.csv"))
 
-  # 各通路分数热图（每列仍是单独 GO 分数，不是合并基因集）
-  anno_df <- data.frame(row.names = rownames(score_mat))
-  clin_hm <- clinical_data[sample_std %in% rownames(score_mat)]
-  if (nrow(clin_hm) > 0) {
-    if ("stage_simplified" %in% names(clin_hm)) {
-      anno_df$Stage <- clin_hm$stage_simplified[match(rownames(anno_df), clin_hm$sample_std)]
-    }
-    er_col <- first_present(names(clin_hm), c("er_status_by_ihc", "ER.Status"))
-    if (!is.na(er_col)) {
-      anno_df$ER <- as.character(clin_hm[[er_col]][match(rownames(anno_df), clin_hm$sample_std)])
-    }
-  }
-  ha <- NULL
-  if (ncol(anno_df) > 0) ha <- ComplexHeatmap::HeatmapAnnotation(df = anno_df)
-  # ★★★ 已修改开始：热图缩放，禁止 t(scale(score_mat)) ★★★
-  # 旧代码（会报 scale 找不到 matrix 方法，请勿运行）：
-  #   z_score <- t(scale(score_mat))
+  # ★★★ 已修改开始：汇总热图只用 ggplot，不要运行 Heatmap/draw ★★★
   sm <- as.matrix(score_mat)
   storage.mode(sm) <- "double"
   z_score <- matrix(
@@ -771,39 +755,18 @@ if (length(all_scores) > 0) {
     z_score[j, ] <- (x - mean(x, na.rm = TRUE)) / sdx
   }
   z_score[!is.finite(z_score)] <- 0
-  # ★★★ 已修改结束 ★★★
-  # ★★★ 已修改开始：热图必须用 ComplexHeatmap:: 或下面的 ggplot 兜底 ★★★
-  # 请勿运行注释，也不要运行 draw(Heatmap(...))，那只是反例。
-  tryCatch({
-    pdf_hm <- file.path(out_dir, "01_pathway_score_heatmap.pdf")
-    pdf(pdf_hm, width = 12, height = 6)
-    ht <- ComplexHeatmap::Heatmap(
-      z_score,
-      name = "z-score",
-      top_annotation = ha,
-      show_column_names = FALSE,
-      row_names_gp = grid::gpar(fontsize = 8),
-      column_title = "Each GO pathway score (not pooled)"
-    )
-    ComplexHeatmap::draw(ht)
-    invisible(dev.off())
-    message("  已保存通路分数热图：", pdf_hm)
-  }, error = function(e) {
-    if (dev.cur() > 1) invisible(dev.off())
-    message("ComplexHeatmap 失败，改用 ggplot 热图：", conditionMessage(e))
-    # ★★★ 已修改：heatmaps 包抢走 Heatmap 时，用 ggplot 兜底 ★★★
-    plot_dt <- as.data.table(as.table(z_score))
-    setnames(plot_dt, c("GO", "sample", "z"))
-    p_hm <- ggplot(plot_dt, aes(x = sample, y = GO, fill = z)) +
-      geom_tile() +
-      scale_fill_gradient2(low = "#3C5488", mid = "white", high = "#E64B35") +
-      labs(title = "Each GO pathway score (not pooled)", x = NULL, y = NULL, fill = "z-score") +
-      theme_minimal() +
-      theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
-            panel.grid = element_blank())
-    ggsave(file.path(out_dir, "01_pathway_score_heatmap.pdf"), p_hm, width = 12, height = 6)
-    message("  已保存通路分数热图（ggplot）：", file.path(out_dir, "01_pathway_score_heatmap.pdf"))
-  })
+  pdf_hm <- file.path(out_dir, "01_pathway_score_heatmap.pdf")
+  plot_dt <- as.data.table(as.table(z_score))
+  setnames(plot_dt, c("GO", "sample", "z"))
+  p_hm <- ggplot(plot_dt, aes(x = sample, y = GO, fill = z)) +
+    geom_tile() +
+    scale_fill_gradient2(low = "#3C5488", mid = "white", high = "#E64B35") +
+    labs(title = "Each GO pathway score (not pooled)", x = NULL, y = NULL, fill = "z-score") +
+    theme_minimal() +
+    theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+          panel.grid = element_blank())
+  ggsave(pdf_hm, p_hm, width = 12, height = 6)
+  message("  已保存通路分数热图：", pdf_hm)
   # ★★★ 已修改结束 ★★★
 }
 
