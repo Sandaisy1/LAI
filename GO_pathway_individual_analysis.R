@@ -779,9 +779,9 @@ if (length(all_surv) > 0) {
   if (nrow(os_hl) > 0) {
     os_hl[, lab := paste(GO, GO_name)]
     os_hl[, lab := factor(lab, levels = rev(lab))]
+    # ★★★ 已修改开始：整段森林图请整块粘贴，geom_errorbar 行末尾必须有 + ★★★
     pfor <- ggplot(os_hl, aes(x = HR, y = lab)) +
       geom_vline(xintercept = 1, linetype = 2, color = "grey50") +
-      # ★★★ 已修改：ggplot2 4.0 弃用 geom_errorbarh，改用 geom_errorbar(orientation = "y") ★★★
       geom_errorbar(aes(xmin = HR_low, xmax = HR_high), orientation = "y", width = 0.2) +
       geom_point(aes(color = pvalue < 0.05), size = 3) +
       scale_x_log10() +
@@ -789,6 +789,8 @@ if (length(all_surv) > 0) {
            x = "Hazard ratio", y = NULL, color = "p < 0.05") +
       theme_bw()
     ggsave(file.path(out_dir, "03_OS_forest_each_GO.pdf"), pfor, width = 10, height = 6)
+    message("  已保存 OS 森林图：", file.path(out_dir, "03_OS_forest_each_GO.pdf"))
+    # ★★★ 已修改结束 ★★★
   }
 }
 
