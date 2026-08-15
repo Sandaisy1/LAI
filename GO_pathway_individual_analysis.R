@@ -1,33 +1,61 @@
-# ============================================================
-# TCGA-BRCA：每个 GO 通路单独的临床相关性 & 负相关基因分析
+################################################################################
+# TCGA乳腺癌（BRCA）多组学数据分析完整流程
+# 包括：RNA-seq (FPKM)、临床数据、生存数据、蛋白表达数据
+# 目标：筛选与乳腺癌进展相关的 GO 通路基因
+#
 # 核心原则：每个 GO ID 单独取基因、单独打分、单独统计，绝不把通路合并
 #
-# 用法：将本脚本放在数据目录（默认 E:/R/BRCA）后，RStudio 中 Source 整份脚本
-# 或：setwd("E:/R/BRCA"); source("GO_pathway_individual_analysis.R")
-# 结果目录：results_GO_individual/  （每个 GO 一个子文件夹）
-#
-# ★★★ 请重新 Source 整份脚本，不要只接着跑旧的 score[...] 行 ★★★
-# 已修改处均用  “★★★ 已修改”  标记，全文搜索即可定位。
-#   1) pathway_zmean：不再使用 scale()/t()
-#   2) 通路分数变量由 score 改为 go_score（score 会撞上已有函数）
-#   3) 临床箱线图：不再只打印 null device 1，改为报告保存了几张图
-#   4) 生存分析 7.2：同样禁止 score[...]；打分成功后会把 go_score 同步到 score 以兼容旧行
-#   5) 汇总热图：禁止 t(scale(score_mat))，改用手写 z-score
-#   6) 汇总热图只用 ggplot，不要运行 Heatmap()/draw()
-#   7) OS 森林图：ggplot2 4.0 用 geom_errorbar(orientation="y")，不要漏掉行末 +
-#   8) 多个 GO：已写在 go_list；用 go_to_run 控制本次跑哪些
-#   10) 探索性阈值已放宽：负相关用名义 p<0.05；生存 10 人/3 事件；1 个基因也打分
-# ============================================================
+# ============================ 请按这个跑 ============================
+# 1. 用本文件完整覆盖：E:/R/BRCA/GO_pathway_individual_analysis.R
+# 2. RStudio：Session -> Restart R（清掉旧的空函数 / score 函数冲突）
+# 3. 打开本文件，点 Source（整份运行）。不要从中间逐段粘贴。
+# 4. 不要在读数据之前调用 run_go_individual_analysis()
+# 5. 不要 library(heatmaps)；热图只用 ggplot，不要 Heatmap()/draw()
+# 6. 向量用小写 c()，不要写成 C()（C 是 contrasts）
+# 7. 函数定义之后才会分析；本脚本末尾会自动调用一次
+# ====================================================================
+################################################################################
 
-## 0. 可调参数 ------------------------------------------------
-# ★★★ 已修改：放宽探索性阈值。乳腺肿瘤里神经/轴突 GO 基因少、死亡事件少，
-#     原来 FDR<0.05 且 |r|>=0.3、生存至少 20 人/5 个事件，很多通路会空。
-work_dir <- "E:/R/BRCA"
+# ==============================================================================
+# 第一部分：加载所需 R 包
+# ==============================================================================
+# 数据处理
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(readr)
+library(stringr)
+library(purrr)
+
+# 基因注释（每个 GO 单独取基因）
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+
+# 生存分析
+library(survival)
+library(survminer)
+
+# 可视化（不要加载 heatmaps：会盖掉 ComplexHeatmap::Heatmap）
+library(ggplot2)
+library(ggpubr)
+library(EnhancedVolcano)
+
+# 不再加载 SummarizedExperiment / TCGAbiolinks / edgeR / limma / clusterProfiler /
+# enrichplot / ComplexHeatmap / heatmaps：本流程读的是 Xena tsv，不需要它们，
+# 而且 SummarizedExperiment 会把 scale()/t() 变成 S4 泛型，普通 matrix 会报错。
+
+# ==============================================================================
+# 第二部分：可调参数、工作目录与数据读取
+# ==============================================================================
+# 探索性阈值已放宽：乳腺肿瘤里神经/轴突 GO 基因少、死亡事件少。
+# 原来 FDR<0.05 且 |r|>=0.3、生存至少 20 人/5 个事件，很多通路会空。
+work_dir <- "E:/R/BRCA"   # 与当前工程一致；若不存在则使用当前目录
 use_primary_tumor_only <- TRUE
-min_pathway_genes <- 1     # 有 1 个基因也计算通路分数
+min_pathway_genes <- 1     # 有 1 个基因也计算通路分数（原 2）
 neg_pvalue_cutoff <- 0.05  # 负相关主列表：名义 p（不再先卡 FDR）
 neg_fdr_cutoff <- 0.25     # 另存一份较宽的 FDR 列表
-neg_r_cutoff <- 0          # Spearman r < 0 即视为负相关
+neg_r_cutoff <- 0          # 负相关：Spearman r < 0
 strict_r_cutoff <- -0.15   # 高置信负相关（原 -0.3 对 BRCA 过严）
 min_surv_n <- 10           # 生存分析最少样本（原 20）
 min_surv_events <- 3       # 最少事件数（原 5）
@@ -36,7 +64,7 @@ min_group_n <- 2           # 每组最少人数（原 3）
 clin_plot_p_cutoff <- 0.10 # 箱线图：p<0.10 也画（原 0.05）
 out_dir <- "results_GO_individual"
 
-# 用户指定的 GO 通路（每个都单独分析）
+# 指定的 GO 通路（每个都单独分析；必须用小写 c()）
 go_list <- c(
   "GO:0023041",  # neuronal signal transduction
   "GO:1904457",  # positive regulation of neuronal action potential
@@ -77,50 +105,10 @@ go_name_map <- c(
   "GO:0007409" = "axonogenesis"
 )
 
-# ★★★ 已修改开始：一次跑多个 GO，不用在控制台逐个输入 ★★★
-# go_list 里已经有你列的 17 个通路。默认全部单独分析。
-# 若只想补跑某几个（例如还没有文件夹的），改成：
+# 默认分析 go_list 里全部 17 个通路。若只想补跑某几个，改成：
 #   go_to_run <- c("GO:0007411", "GO:0007409")
-# 若要加新通路：先写进 go_list 和 go_name_map，再保持 go_to_run <- go_list
 go_to_run <- go_list
-# ★★★ 已修改结束 ★★★
-#
-# 补跑全部通路：把下面两行一起贴到控制台（c 必须小写，不要写成 C()）。
-#   go_to_run <- go_list
-#   run_go_individual_analysis()
 
-## 1. 加载包 --------------------------------------------------
-# 数据处理
-library(data.table)
-library(dplyr)
-library(tidyr)
-library(tibble)
-library(readr)
-library(stringr)
-library(purrr)
-
-# 生信 / TCGA
-library(TCGAbiolinks)
-library(SummarizedExperiment)
-library(edgeR)
-library(limma)
-library(clusterProfiler)
-library(org.Hs.eg.db)
-library(AnnotationDbi)
-
-# 生存分析
-library(survival)
-library(survminer)
-
-# 可视化
-library(ggplot2)
-library(ggpubr)
-library(enrichplot)
-library(ComplexHeatmap)
-library(EnhancedVolcano)
-# 若会话里加载过 heatmaps 包，Heatmap() 会被盖掉，后面一律写 ComplexHeatmap::Heatmap
-
-## 2. 工作目录与数据读取 --------------------------------------
 if (dir.exists(work_dir)) {
   setwd(work_dir)
 } else {
@@ -138,6 +126,7 @@ if (length(miss) > 0) {
   stop("以下文件不在工作目录中：\n  ", paste(miss, collapse = "\n  "))
 }
 
+# 读取数据（不要在这之前调用 run_go_individual_analysis）
 fpkm_data     <- fread("TCGA-BRCA.star_fpkm.tsv")
 probe_annot   <- fread("gencode.v36.annotation.gtf.gene.probemap")
 clinical_data <- fread("TCGA-BRCA.clinical.tsv")
@@ -148,28 +137,35 @@ if (is.null(protein_data)) message("未找到 TCGA-BRCA.protein.tsv，将跳过�
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(file.path(out_dir, "per_GO"), showWarnings = FALSE)
 
-## 3. 工具函数 ------------------------------------------------
+# ==============================================================================
+# 第三部分：工具函数
+# ==============================================================================
+# 标准化条形码：转大写、点号变横杠、去掉末尾 A、截取前 15 位
 normalize_barcode <- function(x) {
   x <- toupper(gsub("\\.", "-", as.character(x)))
   x <- sub("A$", "", x)
   ifelse(nchar(x) >= 15, substr(x, 1, 15), x)
 }
 
+# 从标准化条形码提取第 14–15 位作为样本类型编码（01=原发肿瘤）
 sample_type_code <- function(ids) {
   substr(normalize_barcode(ids), 14, 15)
 }
 
+# 只保留字母数字，其余换成下划线（用于文件夹名）
 safe_name <- function(x) {
   x <- gsub("[^A-Za-z0-9]+", "_", x)
   x <- gsub("^_|_$", "", x)
   x
 }
 
+# 按优先级查找第一个存在的列名
 first_present <- function(nms, candidates) {
   hit <- candidates[candidates %in% nms]
   if (length(hit) == 0) NA_character_ else hit[1]
 }
 
+# 根据单个 GO 编号，从 org.Hs.eg.db 取基因（SYMBOL / ENSEMBL / ENTREZID）
 get_go_genes <- function(go_id) {
   pick <- function(keytype) {
     tryCatch(
@@ -187,9 +183,15 @@ get_go_genes <- function(go_id) {
   extra <- tryCatch({
     go2eg <- as.list(org.Hs.eg.db::org.Hs.egGO2ALLEGS)
     eg <- unique(as.character(go2eg[[go_id]]))
-    if (length(eg) == 0) NULL else {
-      AnnotationDbi::select(org.Hs.eg.db, keys = eg, keytype = "ENTREZID",
-                            columns = c("SYMBOL", "ENSEMBL"))
+    if (length(eg) == 0) {
+      NULL
+    } else {
+      AnnotationDbi::select(
+        org.Hs.eg.db,
+        keys = eg,
+        keytype = "ENTREZID",
+        columns = c("SYMBOL", "ENSEMBL")
+      )
     }
   }, error = function(e) NULL)
   if (!is.null(extra) && nrow(extra) > 0) {
@@ -207,7 +209,7 @@ get_go_genes <- function(go_id) {
   res
 }
 
-# ★★★ 已修改开始：pathway_zmean 不再调用 scale()/t() ★★★
+# 通路活性：基因 z-score 后对样本取均值。不要用 scale()/t()（S4 泛型会报错）
 pathway_zmean <- function(expr_mat, genes) {
   genes <- unique(intersect(as.character(genes), rownames(expr_mat)))
   if (length(genes) < min_pathway_genes) return(NULL)
@@ -224,17 +226,22 @@ pathway_zmean <- function(expr_mat, genes) {
   attr(sc, "genes") <- genes
   sc
 }
-# ★★★ 已修改结束 ★★★
 
-spearman_vs_score <- function(mat, score) {
-  common <- intersect(colnames(mat), names(score))
+# 每个基因/蛋白与通路分数的 Spearman 相关
+spearman_vs_score <- function(mat, score_vec) {
+  common <- intersect(colnames(mat), names(score_vec))
   if (length(common) < 5) return(data.table())
   mat <- mat[, common, drop = FALSE]
-  score <- score[common]
+  score_vec <- score_vec[common]
   keep <- apply(mat, 1, function(x) sd(x, na.rm = TRUE) > 0)
   mat <- mat[keep, , drop = FALSE]
   n <- ncol(mat)
-  r <- as.numeric(cor(base::t(as.matrix(mat)), score, method = "spearman", use = "pairwise.complete.obs"))  # ★★★ 已修改：base::t
+  r <- as.numeric(cor(
+    base::t(as.matrix(mat)),
+    score_vec,
+    method = "spearman",
+    use = "pairwise.complete.obs"
+  ))
   names(r) <- rownames(mat)
   r <- pmin(pmax(r, -0.999999), 0.999999)
   tstat <- r * sqrt((n - 2) / pmax(1e-12, 1 - r^2))
@@ -248,8 +255,9 @@ spearman_vs_score <- function(mat, score) {
   )
 }
 
-assoc_clinical_feature <- function(score, feature, feature_name) {
-  df <- data.frame(score = as.numeric(score), feature = feature, stringsAsFactors = FALSE)
+# 通路分数 vs 临床特征（连续=Spearman，两组=Wilcoxon，多组=Kruskal-Wallis）
+assoc_clinical_feature <- function(score_vec, feature, feature_name) {
+  df <- data.frame(score = as.numeric(score_vec), feature = feature, stringsAsFactors = FALSE)
   df <- df[is.finite(df$score) & !is.na(df$feature), , drop = FALSE]
   df$feature <- as.character(df$feature)
   df <- df[df$feature != "" & !tolower(df$feature) %in% c("na", "nan", "not reported", "unknown", "[not available]", "[unknown]"), ]
@@ -292,6 +300,7 @@ assoc_clinical_feature <- function(score, feature, feature_name) {
   )
 }
 
+# 分期文本标准化为 Stage I–IV
 simplify_stage <- function(x) {
   x <- toupper(as.character(x))
   out <- rep(NA_character_, length(x))
@@ -319,7 +328,9 @@ as_sample_matrix <- function(dt, id_prefer) {
   mat
 }
 
-## 4. 表达矩阵预处理 ------------------------------------------
+# ==============================================================================
+# 第四部分：表达矩阵预处理
+# ==============================================================================
 gene_id_col <- names(fpkm_data)[1]
 expr_ids <- as.character(fpkm_data[[gene_id_col]])
 expr <- as.matrix(fpkm_data[, -1, with = FALSE])
@@ -367,7 +378,6 @@ if (use_primary_tumor_only) {
   }
 }
 
-# 去重复样本列
 if (any(duplicated(colnames(expr)))) {
   expr <- expr[, !duplicated(colnames(expr)), drop = FALSE]
 }
@@ -380,7 +390,9 @@ if (is.finite(mx) && mx > 50) {
   message("表达值范围较小（max=", round(mx, 2), "），视为已 log 转换")
 }
 
-## 5. 临床 / 生存 / 蛋白对齐 ----------------------------------
+# ==============================================================================
+# 第五部分：临床 / 生存 / 蛋白对齐
+# ==============================================================================
 clin_id <- detect_id_col(clinical_data, c("sampleID", "sample", "bcr_patient_barcode", "submitter_id"))
 surv_id <- detect_id_col(survival_data, c("sample", "sampleID", "bcr_patient_barcode"))
 
@@ -391,7 +403,6 @@ survival_data[, sample_std := normalize_barcode(get(surv_id))]
 clinical_data <- clinical_data[!duplicated(sample_std)]
 survival_data <- survival_data[!duplicated(sample_std)]
 
-# 临床字段：优先常见 BRCA 变量，并纳入分期/受体/组织学等匹配列
 preferred_clin <- c(
   "age_at_initial_pathologic_diagnosis", "age_at_diagnosis", "age",
   "ajcc_pathologic_tumor_stage", "pathologic_stage", "clinical_stage",
@@ -412,7 +423,6 @@ auto_clin <- grep(
 clin_features <- unique(c(preferred_clin[preferred_clin %in% names(clinical_data)], auto_clin))
 clin_features <- setdiff(clin_features, skip_clin)
 
-# 分期简化列
 stage_col <- first_present(names(clinical_data), c(
   "ajcc_pathologic_tumor_stage", "pathologic_stage", "clinical_stage", "ajcc_pathologic_stage"
 ))
@@ -421,14 +431,13 @@ if (!is.na(stage_col)) {
   clin_features <- unique(c("stage_simplified", clin_features))
 }
 
-# 蛋白矩阵：自动判断样本在行还是在列
 prot_mat <- NULL
 if (!is.null(protein_data) && nrow(protein_data) > 0) {
   prot_mat <- tryCatch({
     prot_c1 <- as.character(protein_data[[1]])
     if (mean(grepl("^TCGA", prot_c1, ignore.case = TRUE), na.rm = TRUE) > 0.5) {
       tmp <- as_sample_matrix(protein_data, names(protein_data)[1])
-      tmp <- t(tmp)
+      tmp <- base::t(as.matrix(tmp))
     } else {
       tmp <- as_sample_matrix(protein_data, names(protein_data)[1])
     }
@@ -450,29 +459,28 @@ message("与临床重叠：", length(intersect(common_samples, clinical_data$sam
 message("与生存重叠：", length(intersect(common_samples, survival_data$sample_std)))
 message("与蛋白重叠：", if (is.null(prot_mat)) 0 else length(intersect(common_samples, colnames(prot_mat))))
 
-## 6-8. 真正开始分析 ------------------------------------------
-# ★★★ 已修改：函数就在本脚本里，不要 source 另一个不存在的文件 ★★★
-# 当前会话若还没有这个函数：从下面 run_go_individual_analysis <- function 选到对应 }，先 Run 一遍
-# 然后再运行：run_go_individual_analysis()
+# ==============================================================================
+# 第六–八部分：每个 GO 单独分析（全部包在函数里，末尾调用一次）
+# ==============================================================================
 run_go_individual_analysis <- function(go_ids = NULL) {
-    if (is.null(go_ids)) {
-      go_ids <- get("go_to_run", envir = .GlobalEnv, inherits = FALSE)
-    }
-    go_to_run <- unique(as.character(go_ids))
-    if (length(go_to_run) == 0) stop("go_to_run 是空的，没有要分析的 GO")
-    if (!exists("expr", envir = .GlobalEnv, inherits = FALSE) || is.null(get("expr", .GlobalEnv))) {
-      stop("还没有表达矩阵 expr。请先从脚本开头 Source 到数据预处理结束，再调用本函数。")
-    }
-    out_dir_abs <- normalizePath(out_dir, mustWork = FALSE)
-    dir.create(file.path(out_dir_abs, "per_GO"), recursive = TRUE, showWarnings = FALSE)
-    message("输出根目录：", out_dir_abs)
-    fwrite(data.table(
-      min_pathway_genes, neg_pvalue_cutoff, neg_fdr_cutoff, neg_r_cutoff, strict_r_cutoff,
-      min_surv_n, min_surv_events, min_clin_n, min_group_n, clin_plot_p_cutoff
-    ), file.path(out_dir_abs, "00_thresholds_used.csv"))
+  if (is.null(go_ids)) {
+    go_ids <- get("go_to_run", envir = .GlobalEnv, inherits = FALSE)
+  }
+  go_to_run <- unique(as.character(go_ids))
+  if (length(go_to_run) == 0) stop("go_to_run 是空的，没有要分析的 GO")
+  if (!exists("expr", envir = .GlobalEnv, inherits = FALSE) || is.null(get("expr", .GlobalEnv))) {
+    stop("还没有表达矩阵 expr。请从脚本开头 Source 整份，不要在读数据之前调用本函数。")
+  }
 
-  ## 6. 逐个 GO 取基因（绝不合并） ------------------------------
-  # ★★★ 已修改：按 go_to_run 逐个取基因，不是合并成一个基因集 ★★★
+  out_dir_abs <- normalizePath(out_dir, mustWork = FALSE)
+  dir.create(file.path(out_dir_abs, "per_GO"), recursive = TRUE, showWarnings = FALSE)
+  message("输出根目录：", out_dir_abs)
+  fwrite(data.table(
+    min_pathway_genes, neg_pvalue_cutoff, neg_fdr_cutoff, neg_r_cutoff, strict_r_cutoff,
+    min_surv_n, min_surv_events, min_clin_n, min_group_n, clin_plot_p_cutoff
+  ), file.path(out_dir_abs, "00_thresholds_used.csv"))
+
+  ## 6. 逐个 GO 取基因（绝不合并）
   message("本次将单独分析 ", length(go_to_run), " 个 GO：", paste(go_to_run, collapse = ", "))
   go_gene_list <- lapply(go_to_run, get_go_genes)
   names(go_gene_list) <- go_to_run
@@ -490,7 +498,7 @@ run_go_individual_analysis <- function(go_ids = NULL) {
   }), fill = TRUE)
   fwrite(go_set_summary, file.path(out_dir_abs, "00_GO_gene_sets.csv"))
 
-  ## 7. 每个 GO 单独分析 ----------------------------------------
+  ## 7. 每个 GO 单独分析（for 必须包住 7.1–7.4 全部内容）
   all_scores <- list()
   all_clin   <- list()
   all_surv   <- list()
@@ -506,270 +514,270 @@ run_go_individual_analysis <- function(go_ids = NULL) {
 
   for (go_id in go_to_run) {
     go_title <- unname(go_name_map[go_id])
+    if (is.na(go_title) || identical(go_title, "NA")) go_title <- go_id
     message("\n========== ", go_id, " | ", go_title, " ==========")
 
     go_dir <- file.path(out_dir_abs, "per_GO", safe_name(go_id))
-    if (!dir.create(go_dir, showWarnings = FALSE, recursive = TRUE) && !dir.exists(go_dir)) {
-      stop("无法创建目录：", go_dir)
-    }
+    dir.create(go_dir, showWarnings = FALSE, recursive = TRUE)
     message("  写入：", go_dir)
 
     genes_here <- unique(go_gene_list[[go_id]]$SYMBOL)
     fwrite(
-      data.table(GO = go_id, GO_name = go_title, gene = genes_here,
-                 in_expression = genes_here %in% rownames(expr)),
+      data.table(
+        GO = go_id, GO_name = go_title, gene = genes_here,
+        in_expression = genes_here %in% rownames(expr)
+      ),
       file.path(go_dir, "genes.csv")
     )
 
-    # ★★★ 已修改开始：变量名必须用 go_score，禁止再用 score ★★★
-    # 旧代码（会报 closure 不可取子集，请勿运行）：
-    #   score <- pathway_zmean(expr, genes_here)
-    #   clin_use <- clinical_data[sample_std %in% names(score)]
-    #   sc_clin <- score[clin_use$sample_std]
     go_score <- tryCatch(pathway_zmean(expr, genes_here), error = function(e) {
       message("  通路打分失败：", conditionMessage(e))
       NULL
     })
+
     if (!is.numeric(go_score) || length(go_score) == 0) {
-      # ★★★ 已修改：不要用 next。next 只能写在 for 里，贴到控制台会报「没有可中断的循环」
       message("  可用基因 < ", min_pathway_genes, " 或打分失败，跳过该通路：", go_id)
       writeLines(paste("SKIPPED", go_id, go_title), file.path(go_dir, "SKIPPED.txt"))
     } else {
-    n_used <- attr(go_score, "n_genes")
-    used_genes <- attr(go_score, "genes")
-    message("  通路基因用于打分：", n_used)
-    fwrite(data.table(sample = names(go_score), pathway_score = as.numeric(go_score)),
-           file.path(go_dir, "pathway_score.csv"))
-    all_scores[[go_id]] <- go_score
-    score <- go_score  # ★★★ 已修改：覆盖函数 score，避免后面旧代码 score[...] 报 closure
-
-    # ---- 7.1 临床相关性（仅本通路分数） ----
-    clin_use <- clinical_data[sample_std %in% names(go_score)]
-    setkey(clin_use, sample_std)
-    sc_clin <- go_score[clin_use$sample_std]
-    # ★★★ 已修改结束 ★★★
-    clin_rows <- lapply(clin_features, function(ft) {
-      if (!ft %in% names(clin_use)) return(NULL)
-      assoc_clinical_feature(sc_clin, clin_use[[ft]], ft)
-    })
-    clin_tab <- rbindlist(clin_rows, fill = TRUE)
-    if (nrow(clin_tab) > 0) {
-      clin_tab[, `:=`(GO = go_id, GO_name = go_title, fdr = p.adjust(pvalue, method = "BH"))]
-      setcolorder(clin_tab, c("GO", "GO_name"))
-      fwrite(clin_tab, file.path(go_dir, "clinical_association.csv"))
-      all_clin[[go_id]] <- clin_tab
-
-      # ★★★ 已修改开始：临床箱线图 ★★★
-      # 旧输出 `null device 1` 只是 dev.off() 关闭 PDF，不是分析结果，也看不出画了几张图。
-      # ★★★ 已修改：不要写 type == "categorical"；type 会撞上 BiocGenerics::type 函数 ★★★
-      sig_cat <- clin_tab[clin_tab[["type"]] == "categorical" & clin_tab[["pvalue"]] < clin_plot_p_cutoff]
-      if (nrow(sig_cat) > 0) sig_cat <- sig_cat[order(sig_cat[["pvalue"]])]
-      if (nrow(sig_cat) == 0) {
-        message("  本通路无分类临床变量达到 p < ", clin_plot_p_cutoff, "，不画箱线图")
-      } else {
-        pdf_clin <- file.path(go_dir, "clinical_boxplots.pdf")
-        n_box <- 0L
-        pdf(pdf_clin, width = 7, height = 5)
-        for (ft in head(sig_cat$feature, 6)) {
-          plot_df <- data.frame(
-            score = as.numeric(sc_clin),
-            group = as.character(clin_use[[ft]]),
-            stringsAsFactors = FALSE
-          )
-          plot_df <- plot_df[is.finite(plot_df$score) & !is.na(plot_df$group) & plot_df$group != "", ]
-          tab <- table(plot_df$group)
-          plot_df <- plot_df[plot_df$group %in% names(tab)[tab >= min_group_n], ]
-          if (length(unique(plot_df$group)) < 2) next
-          ok <- tryCatch({
-            p <- ggboxplot(plot_df, x = "group", y = "score", fill = "group", outlier.shape = NA) +
-              stat_compare_means() +
-              labs(title = paste0(go_id, "\n", go_title),
-                   subtitle = paste0(ft, "  (p=", signif(sig_cat$pvalue[sig_cat$feature == ft][1], 3), ")"),
-                   x = NULL, y = "Pathway score") +
-              theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
-            print(p)
-            TRUE
-          }, error = function(e) {
-            message("  箱线图失败（", ft, "）：", conditionMessage(e))
-            FALSE
-          })
-          if (isTRUE(ok)) n_box <- n_box + 1L
-        }
-        invisible(dev.off())
-        if (n_box == 0L) {
-          if (file.exists(pdf_clin)) file.remove(pdf_clin)
-          message("  箱线图均被跳过（分组不足），未保存 PDF")
-        } else {
-          message("  已保存临床箱线图 ", n_box, " 张：", pdf_clin)
-        }
-      }
-      # ★★★ 已修改结束 ★★★
-    }
-
-    # ---- 7.2 生存分析（仅本通路分数） ----
-    # ★★★ 已修改：不要单独把这段 stop() 贴到控制台；go_score 只在函数内部存在 ★★★
-    surv_use <- survival_data[sample_std %in% names(go_score)]
-    sc_surv <- go_score[surv_use$sample_std]
-    surv_rows <- list()
-
-    for (ep in names(surv_endpoints)) {
-      ev_col <- surv_endpoints[[ep]][1]
-      tm_col <- surv_endpoints[[ep]][2]
-      if (!all(c(ev_col, tm_col) %in% names(surv_use))) next
-
-      d <- data.frame(
-        sample = surv_use$sample_std,
-        time = as.numeric(surv_use[[tm_col]]),
-        event = as.numeric(surv_use[[ev_col]]),
-        score = as.numeric(sc_surv),
-        stringsAsFactors = FALSE
+      n_used <- attr(go_score, "n_genes")
+      used_genes <- attr(go_score, "genes")
+      message("  通路基因用于打分：", n_used)
+      fwrite(
+        data.table(sample = names(go_score), pathway_score = as.numeric(go_score)),
+        file.path(go_dir, "pathway_score.csv")
       )
-      d <- d[is.finite(d$time) & d$time > 0 & d$event %in% c(0, 1) & is.finite(d$score), ]
-      if (nrow(d) < min_surv_n || sum(d$event) < min_surv_events) next
+      all_scores[[go_id]] <- go_score
 
-      d$group <- ifelse(d$score >= median(d$score, na.rm = TRUE), "High", "Low")
-      d$group <- factor(d$group, levels = c("Low", "High"))
+      # ---- 7.1 临床相关性（仅本通路分数） ----
+      clin_use <- clinical_data[sample_std %in% names(go_score)]
+      setkey(clin_use, sample_std)
+      sc_clin <- go_score[clin_use$sample_std]
+      clin_rows <- lapply(clin_features, function(ft) {
+        if (!ft %in% names(clin_use)) return(NULL)
+        assoc_clinical_feature(sc_clin, clin_use[[ft]], ft)
+      })
+      clin_tab <- rbindlist(clin_rows, fill = TRUE)
+      if (nrow(clin_tab) > 0) {
+        clin_tab[, `:=`(GO = go_id, GO_name = go_title, fdr = p.adjust(pvalue, method = "BH"))]
+        setcolorder(clin_tab, c("GO", "GO_name"))
+        fwrite(clin_tab, file.path(go_dir, "clinical_association.csv"))
+        all_clin[[go_id]] <- clin_tab
 
-      cox_cont <- tryCatch(coxph(Surv(time, event) ~ score, data = d), error = function(e) NULL)
-      cox_grp  <- tryCatch(coxph(Surv(time, event) ~ group, data = d), error = function(e) NULL)
-      fit_km   <- tryCatch(survfit(Surv(time, event) ~ group, data = d), error = function(e) NULL)
-
-      if (!is.null(cox_cont)) {
-        s1 <- summary(cox_cont)
-        surv_rows[[paste0(ep, "_cont")]] <- data.table(
-          GO = go_id, GO_name = go_title, endpoint = ep, model = "continuous_score",
-          n = nrow(d), events = sum(d$event),
-          HR = s1$conf.int[1, 1],
-          HR_low = s1$conf.int[1, 3],
-          HR_high = s1$conf.int[1, 4],
-          pvalue = s1$coefficients[1, "Pr(>|z|)"]
-        )
+        # 不要写 type == "categorical"：type 会撞上 BiocGenerics::type
+        sig_cat <- clin_tab[clin_tab[["type"]] == "categorical" & clin_tab[["pvalue"]] < clin_plot_p_cutoff]
+        if (nrow(sig_cat) > 0) sig_cat <- sig_cat[order(sig_cat[["pvalue"]])]
+        if (nrow(sig_cat) == 0) {
+          message("  本通路无分类临床变量达到 p < ", clin_plot_p_cutoff, "，不画箱线图")
+        } else {
+          pdf_clin <- file.path(go_dir, "clinical_boxplots.pdf")
+          n_box <- 0L
+          pdf(pdf_clin, width = 7, height = 5)
+          for (ft in head(sig_cat$feature, 6)) {
+            plot_df <- data.frame(
+              score = as.numeric(sc_clin),
+              group = as.character(clin_use[[ft]]),
+              stringsAsFactors = FALSE
+            )
+            plot_df <- plot_df[is.finite(plot_df$score) & !is.na(plot_df$group) & plot_df$group != "", ]
+            tab <- table(plot_df$group)
+            plot_df <- plot_df[plot_df$group %in% names(tab)[tab >= min_group_n], ]
+            if (length(unique(plot_df$group)) < 2) next
+            ok <- tryCatch({
+              p <- ggboxplot(plot_df, x = "group", y = "score", fill = "group", outlier.shape = NA) +
+                stat_compare_means() +
+                labs(
+                  title = paste0(go_id, "\n", go_title),
+                  subtitle = paste0(ft, "  (p=", signif(sig_cat$pvalue[sig_cat$feature == ft][1], 3), ")"),
+                  x = NULL, y = "Pathway score"
+                ) +
+                theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+              print(p)
+              TRUE
+            }, error = function(e) {
+              message("  箱线图失败（", ft, "）：", conditionMessage(e))
+              FALSE
+            })
+            if (isTRUE(ok)) n_box <- n_box + 1L
+          }
+          invisible(dev.off())
+          if (n_box == 0L) {
+            if (file.exists(pdf_clin)) file.remove(pdf_clin)
+            message("  箱线图均被跳过（分组不足），未保存 PDF")
+          } else {
+            message("  已保存临床箱线图 ", n_box, " 张：", pdf_clin)
+          }
+        }
       }
-      if (!is.null(cox_grp)) {
-        s2 <- summary(cox_grp)
-        surv_rows[[paste0(ep, "_grp")]] <- data.table(
-          GO = go_id, GO_name = go_title, endpoint = ep, model = "High_vs_Low",
-          n = nrow(d), events = sum(d$event),
-          HR = s2$conf.int[1, 1],
-          HR_low = s2$conf.int[1, 3],
-          HR_high = s2$conf.int[1, 4],
-          pvalue = s2$coefficients[1, "Pr(>|z|)"]
+
+      # ---- 7.2 生存分析（仅本通路分数） ----
+      surv_use <- survival_data[sample_std %in% names(go_score)]
+      sc_surv <- go_score[surv_use$sample_std]
+      surv_rows <- list()
+
+      for (ep in names(surv_endpoints)) {
+        ev_col <- surv_endpoints[[ep]][1]
+        tm_col <- surv_endpoints[[ep]][2]
+        if (!all(c(ev_col, tm_col) %in% names(surv_use))) next
+
+        d <- data.frame(
+          sample = surv_use$sample_std,
+          time = as.numeric(surv_use[[tm_col]]),
+          event = as.numeric(surv_use[[ev_col]]),
+          score = as.numeric(sc_surv),
+          stringsAsFactors = FALSE
         )
+        d <- d[is.finite(d$time) & d$time > 0 & d$event %in% c(0, 1) & is.finite(d$score), ]
+        if (nrow(d) < min_surv_n || sum(d$event) < min_surv_events) next
+
+        d$group <- ifelse(d$score >= median(d$score, na.rm = TRUE), "High", "Low")
+        d$group <- factor(d$group, levels = c("Low", "High"))
+
+        cox_cont <- tryCatch(coxph(Surv(time, event) ~ score, data = d), error = function(e) NULL)
+        cox_grp  <- tryCatch(coxph(Surv(time, event) ~ group, data = d), error = function(e) NULL)
+        fit_km   <- tryCatch(survfit(Surv(time, event) ~ group, data = d), error = function(e) NULL)
+
+        if (!is.null(cox_cont)) {
+          s1 <- summary(cox_cont)
+          surv_rows[[paste0(ep, "_cont")]] <- data.table(
+            GO = go_id, GO_name = go_title, endpoint = ep, model = "continuous_score",
+            n = nrow(d), events = sum(d$event),
+            HR = s1$conf.int[1, 1],
+            HR_low = s1$conf.int[1, 3],
+            HR_high = s1$conf.int[1, 4],
+            pvalue = s1$coefficients[1, "Pr(>|z|)"]
+          )
+        }
+        if (!is.null(cox_grp)) {
+          s2 <- summary(cox_grp)
+          surv_rows[[paste0(ep, "_grp")]] <- data.table(
+            GO = go_id, GO_name = go_title, endpoint = ep, model = "High_vs_Low",
+            n = nrow(d), events = sum(d$event),
+            HR = s2$conf.int[1, 1],
+            HR_low = s2$conf.int[1, 3],
+            HR_high = s2$conf.int[1, 4],
+            pvalue = s2$coefficients[1, "Pr(>|z|)"]
+          )
+        }
+
+        if (!is.null(fit_km) && ep == "OS") {
+          tryCatch({
+            d$time_month <- d$time / 30.44
+            fit_m <- survfit(Surv(time_month, event) ~ group, data = d)
+            pdf(file.path(go_dir, "KM_OS.pdf"), width = 7, height = 6)
+            print(ggsurvplot(
+              fit_m, data = d, pval = TRUE, risk.table = TRUE,
+              legend.labs = c("Low", "High"),
+              xlab = "Time (months)", ylab = "Overall survival",
+              title = paste0(go_id, "\n", go_title),
+              ggtheme = theme_bw()
+            ))
+            dev.off()
+          }, error = function(e) {
+            if (dev.cur() > 1) dev.off()
+            message("  KM 作图失败：", conditionMessage(e))
+          })
+        }
       }
 
-      if (!is.null(fit_km) && ep == "OS") {
+      surv_tab <- rbindlist(surv_rows, fill = TRUE)
+      if (nrow(surv_tab) > 0) {
+        fwrite(surv_tab, file.path(go_dir, "survival_cox.csv"))
+        all_surv[[go_id]] <- surv_tab
+      }
+
+      # ---- 7.3 全基因组负相关基因（仅对本通路分数） ----
+      cor_tab <- spearman_vs_score(expr, go_score)
+      if (nrow(cor_tab) > 0) {
+        setnames(cor_tab, "feature", "gene")
+        cor_tab[, `:=`(
+          GO = go_id,
+          GO_name = go_title,
+          in_this_GO = gene %in% used_genes
+        )]
+        fwrite(cor_tab[order(-spearman_r)], file.path(go_dir, "all_gene_correlation.csv"))
+
+        neg_tab <- cor_tab[spearman_r < neg_r_cutoff & pvalue < neg_pvalue_cutoff]
+        setorder(neg_tab, spearman_r)
+        fwrite(neg_tab, file.path(go_dir, "negative_correlated_genes.csv"))
+        fwrite(
+          cor_tab[spearman_r < 0 & fdr < neg_fdr_cutoff][order(spearman_r)],
+          file.path(go_dir, "negative_correlated_genes_fdr.csv")
+        )
+        fwrite(
+          neg_tab[spearman_r <= strict_r_cutoff],
+          file.path(go_dir, "negative_correlated_genes_strict.csv")
+        )
+        all_neg[[go_id]] <- neg_tab
+        message(
+          "  负相关基因（r<0 且 p<", neg_pvalue_cutoff, "）：", nrow(neg_tab),
+          " ；r<=", strict_r_cutoff, "：", nrow(neg_tab[spearman_r <= strict_r_cutoff])
+        )
+
+        vol_df <- as.data.frame(cor_tab)
+        rownames(vol_df) <- vol_df$gene
+        key_neg <- head(neg_tab$gene, 15)
         tryCatch({
-          d$time_month <- d$time / 30.44
-          fit_m <- survfit(Surv(time_month, event) ~ group, data = d)
-          pdf(file.path(go_dir, "KM_OS.pdf"), width = 7, height = 6)
-          print(ggsurvplot(
-            fit_m, data = d, pval = TRUE, risk.table = TRUE,
-            # ★★★ 已修改：去掉 legend.title，避免 ggplot2 报 unknown labels colour ★★★
-            legend.labs = c("Low", "High"),
-            xlab = "Time (months)", ylab = "Overall survival",
-            title = paste0(go_id, "\n", go_title),
-            ggtheme = theme_bw()
+          pdf(file.path(go_dir, "volcano_gene_correlation.pdf"), width = 9, height = 7)
+          print(EnhancedVolcano(
+            vol_df,
+            lab = vol_df$gene,
+            x = "spearman_r",
+            y = "pvalue",
+            xlab = "Spearman r (gene vs this GO score)",
+            ylab = "-Log10 p",
+            title = paste(go_id, go_title),
+            pCutoff = neg_pvalue_cutoff,
+            FCcutoff = abs(strict_r_cutoff),
+            xlim = c(-1, 1),
+            selectLab = key_neg,
+            drawConnectors = TRUE
           ))
           dev.off()
         }, error = function(e) {
           if (dev.cur() > 1) dev.off()
-          message("  KM 作图失败：", conditionMessage(e))
+          message("  火山图失败：", conditionMessage(e))
         })
-      }
-    }
 
-    surv_tab <- rbindlist(surv_rows, fill = TRUE)
-    if (nrow(surv_tab) > 0) {
-      fwrite(surv_tab, file.path(go_dir, "survival_cox.csv"))
-      all_surv[[go_id]] <- surv_tab
-    }
-
-    # ---- 7.3 全基因组负相关基因（仅对本通路分数） ----
-    cor_tab <- spearman_vs_score(expr, go_score)  # ★★★ 已修改：传入 go_score
-    if (nrow(cor_tab) > 0) {
-      setnames(cor_tab, "feature", "gene")
-      cor_tab[, `:=`(
-        GO = go_id,
-        GO_name = go_title,
-        in_this_GO = gene %in% used_genes
-      )]
-      fwrite(cor_tab[order(-spearman_r)], file.path(go_dir, "all_gene_correlation.csv"))
-
-      neg_tab <- cor_tab[spearman_r < neg_r_cutoff & pvalue < neg_pvalue_cutoff]
-      setorder(neg_tab, spearman_r)
-      fwrite(neg_tab, file.path(go_dir, "negative_correlated_genes.csv"))
-      fwrite(cor_tab[spearman_r < 0 & fdr < neg_fdr_cutoff][order(spearman_r)],
-             file.path(go_dir, "negative_correlated_genes_fdr.csv"))
-      fwrite(neg_tab[spearman_r <= strict_r_cutoff],
-             file.path(go_dir, "negative_correlated_genes_strict.csv"))
-      all_neg[[go_id]] <- neg_tab
-      message("  负相关基因（r<0 且 p<", neg_pvalue_cutoff, "）：", nrow(neg_tab),
-              " ；r<=", strict_r_cutoff, "：", nrow(neg_tab[spearman_r <= strict_r_cutoff]))
-
-      vol_df <- as.data.frame(cor_tab)
-      rownames(vol_df) <- vol_df$gene
-      key_neg <- head(neg_tab$gene, 15)
-      tryCatch({
-        pdf(file.path(go_dir, "volcano_gene_correlation.pdf"), width = 9, height = 7)
-        print(EnhancedVolcano(
-          vol_df,
-          lab = vol_df$gene,
-          x = "spearman_r",
-          y = "pvalue",
-          xlab = "Spearman r (gene vs this GO score)",
-          ylab = "-Log10 p",
-          title = paste(go_id, go_title),
-          pCutoff = neg_pvalue_cutoff,
-          FCcutoff = abs(strict_r_cutoff),
-          xlim = c(-1, 1),
-          selectLab = key_neg,
-          drawConnectors = TRUE
-        ))
-        dev.off()
-      }, error = function(e) {
-        if (dev.cur() > 1) dev.off()
-        message("  火山图失败：", conditionMessage(e))
-      })
-
-      if (nrow(neg_tab) > 0) {
-        topn <- head(neg_tab, 30)
-        pbar <- ggplot(topn, aes(x = reorder(gene, spearman_r), y = spearman_r)) +
-          geom_col(fill = "#3C5488") +
-          coord_flip() +
-          labs(title = paste0("Top negative genes: ", go_id),
-               x = NULL, y = "Spearman r") +
-          theme_bw()
-        ggsave(file.path(go_dir, "top_negative_genes.pdf"), pbar, width = 7, height = 8)
-      }
-    }
-
-    # ---- 7.4 蛋白水平相关性（补充，仍按本通路分数） ----
-    if (!is.null(prot_mat)) {
-      prot_common <- intersect(colnames(prot_mat), names(go_score))  # ★★★ 已修改：go_score
-      if (length(prot_common) >= 20) {
-        prot_cor <- spearman_vs_score(prot_mat, go_score)
-        if (nrow(prot_cor) > 0) {
-          setnames(prot_cor, "feature", "protein")
-          prot_cor[, `:=`(GO = go_id, GO_name = go_title)]
-          fwrite(prot_cor[order(spearman_r)], file.path(go_dir, "protein_correlation.csv"))
-          all_prot[[go_id]] <- prot_cor[spearman_r < 0 & pvalue < neg_pvalue_cutoff][order(spearman_r)]
+        if (nrow(neg_tab) > 0) {
+          topn <- head(neg_tab, 30)
+          pbar <- ggplot(topn, aes(x = reorder(gene, spearman_r), y = spearman_r)) +
+            geom_col(fill = "#3C5488") +
+            coord_flip() +
+            labs(title = paste0("Top negative genes: ", go_id),
+                 x = NULL, y = "Spearman r") +
+            theme_bw()
+          ggsave(file.path(go_dir, "top_negative_genes.pdf"), pbar, width = 7, height = 8)
         }
       }
-    }
-    }  # ★★★ 结束 else：打分失败时不执行 7.1-7.4，也不使用 next
+
+      # ---- 7.4 蛋白水平相关性（仍按本通路分数） ----
+      if (!is.null(prot_mat)) {
+        prot_common <- intersect(colnames(prot_mat), names(go_score))
+        if (length(prot_common) >= 20) {
+          prot_cor <- spearman_vs_score(prot_mat, go_score)
+          if (nrow(prot_cor) > 0) {
+            setnames(prot_cor, "feature", "protein")
+            prot_cor[, `:=`(GO = go_id, GO_name = go_title)]
+            fwrite(prot_cor[order(spearman_r)], file.path(go_dir, "protein_correlation.csv"))
+            all_prot[[go_id]] <- prot_cor[spearman_r < 0 & pvalue < neg_pvalue_cutoff][order(spearman_r)]
+          }
+        }
+      }
+    }  # 结束 else（打分成功才做 7.1–7.4）
   }    # 结束 for (go_id in go_to_run)
 
-  ## 8. 汇总输出（仍是“每个 GO 一行/一堆结果”，不是合并通路） ----
+  ## 8. 汇总输出（每个 GO 一行/一堆结果，不是合并通路）
   if (length(all_scores) > 0) {
     score_mat <- do.call(cbind, lapply(all_scores, function(x) {
       x[colnames(expr)]
     }))
     colnames(score_mat) <- names(all_scores)
     rownames(score_mat) <- colnames(expr)
-    fwrite(data.table(sample = rownames(score_mat), as.data.table(score_mat)),
-           file.path(out_dir_abs, "01_pathway_scores_each_GO.csv"))
+    fwrite(
+      data.table(sample = rownames(score_mat), as.data.table(score_mat)),
+      file.path(out_dir_abs, "01_pathway_scores_each_GO.csv")
+    )
 
-    # ★★★ 已修改开始：汇总热图只用 ggplot，不要运行 Heatmap/draw ★★★
     sm <- as.matrix(score_mat)
     storage.mode(sm) <- "double"
     z_score <- matrix(
@@ -793,11 +801,12 @@ run_go_individual_analysis <- function(go_ids = NULL) {
       scale_fill_gradient2(low = "#3C5488", mid = "white", high = "#E64B35") +
       labs(title = "Each GO pathway score (not pooled)", x = NULL, y = NULL, fill = "z-score") +
       theme_minimal() +
-      theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
-            panel.grid = element_blank())
+      theme(
+        axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+        panel.grid = element_blank()
+      )
     ggsave(pdf_hm, p_hm, width = 12, height = 6)
     message("  已保存通路分数热图：", pdf_hm)
-    # ★★★ 已修改结束 ★★★
   }
 
   if (length(all_clin) > 0) {
@@ -805,7 +814,6 @@ run_go_individual_analysis <- function(go_ids = NULL) {
     fwrite(clin_all, file.path(out_dir_abs, "02_clinical_association_each_GO.csv"))
   }
 
-  # ★★★ 已修改：这段在函数内部，不要单独在控制台运行；all_surv 不是全局变量 ★★★
   if (length(all_surv) > 0) {
     surv_all <- rbindlist(all_surv, fill = TRUE)
     fwrite(surv_all, file.path(out_dir_abs, "03_survival_cox_each_GO.csv"))
@@ -814,44 +822,48 @@ run_go_individual_analysis <- function(go_ids = NULL) {
     if (nrow(os_hl) > 0) {
       os_hl[, lab := paste(GO, GO_name)]
       os_hl[, lab := factor(lab, levels = rev(lab))]
-      # ★★★ 已修改开始：整段森林图请整块粘贴，geom_errorbar 行末尾必须有 + ★★★
       pfor <- ggplot(os_hl, aes(x = HR, y = lab)) +
         geom_vline(xintercept = 1, linetype = 2, color = "grey50") +
         geom_errorbar(aes(xmin = HR_low, xmax = HR_high), orientation = "y", width = 0.2) +
         geom_point(aes(color = pvalue < 0.05), size = 3) +
         scale_x_log10() +
-        labs(title = "OS Cox: High vs Low (each GO separately)",
-             x = "Hazard ratio", y = NULL, color = "p < 0.05") +
+        labs(
+          title = "OS Cox: High vs Low (each GO separately)",
+          x = "Hazard ratio", y = NULL, color = "p < 0.05"
+        ) +
         theme_bw()
       ggsave(file.path(out_dir_abs, "03_OS_forest_each_GO.pdf"), pfor, width = 10, height = 6)
       message("  已保存 OS 森林图：", file.path(out_dir_abs, "03_OS_forest_each_GO.pdf"))
-      # ★★★ 已修改结束 ★★★
-    }  # 结束 if (nrow(os_hl) > 0)
-  }    # ★★★ 必须有这一行：结束 if (length(all_surv) > 0)，少了 RStudio 会在 if 上打红叉
+    }
+  }
 
   if (length(all_neg) > 0) {
     neg_all <- rbindlist(all_neg, fill = TRUE)
     fwrite(neg_all, file.path(out_dir_abs, "04_negative_genes_each_GO.csv"))
-    neg_count <- neg_all[, .(n_negative_genes = .N,
-                             n_strict = sum(spearman_r <= strict_r_cutoff)),
-                         by = .(GO, GO_name)]
+    neg_count <- neg_all[, .(
+      n_negative_genes = .N,
+      n_strict = sum(spearman_r <= strict_r_cutoff)
+    ), by = .(GO, GO_name)]
     fwrite(neg_count, file.path(out_dir_abs, "04_negative_genes_count_each_GO.csv"))
   }
 
   if (length(all_prot) > 0) {
-    fwrite(rbindlist(all_prot, fill = TRUE),
-           file.path(out_dir_abs, "05_negative_proteins_each_GO.csv"))
+    fwrite(
+      rbindlist(all_prot, fill = TRUE),
+      file.path(out_dir_abs, "05_negative_proteins_each_GO.csv")
+    )
   }
 
   fwrite(go_set_summary, file.path(out_dir_abs, "00_GO_gene_sets.csv"))
-  message("\n分析完成。每个 GO 的独立结果在：", normalizePath(out_dir_abs, mustWork = FALSE))
   folders <- list.files(file.path(out_dir_abs, "per_GO"))
   fwrite(data.table(folder = folders), file.path(out_dir_abs, "00_per_GO_folder_list.csv"))
+  message("\n分析完成。每个 GO 的独立结果在：", normalizePath(out_dir_abs, mustWork = FALSE))
   message("per_GO 现有 ", length(folders), " 个文件夹：")
   message(paste("  ", folders, collapse = "\n"))
   message("请重点查看 per_GO/ 下各通路文件夹，以及 04_negative_genes_each_GO.csv")
   invisible(TRUE)
 }
 
-# ★★★ 已修改：定义函数之后必须调用才会开始分析 ★★★
+# 数据已经读完、expr 已建好之后，才调用一次。不要把这一行挪到脚本开头。
+go_to_run <- go_list
 run_go_individual_analysis()

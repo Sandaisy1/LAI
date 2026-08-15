@@ -11,6 +11,9 @@ alwaysApply: true
 - 变量名沿用：`fpkm_data`、`probe_annot`、`clinical_data`、`survival_data`、`protein_data`。
 - 用 `org.Hs.eg.db` 的 `GOALL`（失败则回退 `GO`）映射基因；通路活性用该通路基因在肿瘤样本中的 z-score 均值。
 - 不要用裸调用 `scale()`/`t()` 给通路打分：加载 `SummarizedExperiment` 后它们会变成 S4 泛型，普通 matrix 会报错。不要把通路分数变量命名为 `score`（会和已有函数重名）。
+- `run_go_individual_analysis()` 必须在表达矩阵 `expr` 建好之后才调用；不要写在 `fread` 之前。第 6–8 节（取基因、for 循环、汇总）必须全部写在该函数内部。
+- `for (go_id in go_to_run)` 必须包住 7.1–7.4 全部内容；不要只包住 `message()` 就立刻 `}`。
+- 不要 `library(heatmaps)`；热图只用 ggplot。向量用小写 `c()`，不要写成 `C()`。
 
 ```r
 # ✅ 每个 GO 单独循环
