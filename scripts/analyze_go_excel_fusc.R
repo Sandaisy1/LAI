@@ -1,18 +1,18 @@
 #!/usr/bin/env Rscript
 ################################################################################
-# E:/R/FUSC：FUSCCTNBC Excel 临床分型 + FPKM，每个 GO 单独分析
+# E:/R/FUSC：FUSCCTNBC 临床 Excel + FPKM CSV，每个 GO 单独分析
 #
-# 输入文件（必须放在 E:/R/FUSC，扩展名 .xlsx 或 .xls）：
-#   1) OEP00000155_样本_Human_1786804447300   病人信息（分型/预后）
-#   2) FUSCCTNBC_Expression_RNAseqFPKM         RNA-seq FPKM
+# 输入文件（必须放在 E:/R/FUSC）：
+#   1) OEP00000155_样本_Human_1786804447300.xlsx   病人信息（Excel）
+#   2) FUSCCTNBC_Expression_RNAseqFPKM.csv         RNA-seq FPKM（CSV）
 #
 # 任务 1：各 GO 通路 vs 乳腺癌分型、预后（气泡图）
 # 任务 2：寻找与各 GO 通路活性呈负相关的基因
 #
 # ============================ 请按这个跑 ============================
-# 1. 两份 Excel 必须在 E:/R/FUSC（资源管理器里应能同时看到它们）
+# 1. 确认 E:/R/FUSC 里同时有上述 Excel 和 CSV
 # 2. RStudio：Session -> Restart R
-# 3. 控制台先运行：setwd("E:/R/FUSC"); getwd()
+# 3. 控制台先运行：setwd("E:/R/FUSC"); getwd(); list.files()
 # 4. 打开本文件，点 Source（整份运行）。不要从中间逐行粘贴。
 # 5. 不要把 17 个 GO 的基因合并后再打分
 # ====================================================================
@@ -38,7 +38,7 @@ args <- commandArgs(trailingOnly = TRUE)
 work_dir <- if (length(args) >= 1) args[[1]] else "E:/R/FUSC"
 out_dir  <- if (length(args) >= 2) args[[2]] else "results_GO_excel"
 
-# 强制切到 E:/R/FUSC；控制台单独跑 locate_fusc_excels(".") 时也要先 setwd
+# 强制切到 E:/R/FUSC；不要在别的目录对 "." 找文件
 if (dir.exists(work_dir)) {
   setwd(work_dir)
 } else {
@@ -155,61 +155,93 @@ numeric_frac <- function(x) {
   mean(is.finite(y))
 }
 
-read_excel_dt <- function(path) {
-  sheets <- tryCatch(excel_sheets(path), error = function(e) "Sheet1")
-  dt <- as.data.table(read_excel(path, sheet = sheets[[1]], .name_repair = "minimal"))
-  # 去掉全空列
+file_ext_lower <- function(path) {
+  tolower(sub("^.*\\.", "", basename(path)))
+}
+
+is_tabular <- function(bn) {
+  grepl("\\.(xlsx|xls|csv|tsv|txt)$", bn, ignore.case = TRUE)
+}
+
+drop_empty_cols <- function(dt) {
   keep <- vapply(dt, function(col) any(!is.na(col) & as.character(col) != ""), logical(1))
   dt[, keep, with = FALSE]
 }
 
-list_excel <- function(dir) {
-  hits <- list.files(dir, pattern = "\\.(xlsx|xls)$", full.names = TRUE, ignore.case = TRUE)
-  hits <- hits[!grepl("(~\\$)|(^\\.)", basename(hits))]
-  hits
+read_table_dt <- function(path) {
+  ext <- file_ext_lower(path)
+  if (ext %in% c("xlsx", "xls")) {
+    sheets <- tryCatch(excel_sheets(path), error = function(e) "Sheet1")
+    dt <- as.data.table(read_excel(path, sheet = sheets[[1]], .name_repair = "minimal"))
+    return(drop_empty_cols(dt))
+  }
+  dt <- tryCatch(fread(path, data.table = TRUE, showProgress = FALSE), error = function(e) NULL)
+  if (is.null(dt) || !ncol(dt)) {
+    dt <- tryCatch(fread(path, encoding = "UTF-8", data.table = TRUE, showProgress = FALSE),
+                   error = function(e) NULL)
+  }
+  if (is.null(dt) || !ncol(dt)) {
+    dt <- fread(path, encoding = "Latin-1", data.table = TRUE, showProgress = FALSE)
+  }
+  drop_empty_cols(as.data.table(dt))
 }
 
-# 按文件名前缀定位（用户给的名字可以没有扩展名）
-find_named_excel <- function(dirs, stem, fuzzy = NULL) {
+list_data_files <- function(dir) {
+  hits <- list.files(dir, pattern = "\\.(xlsx|xls|csv|tsv|txt)$", full.names = TRUE, ignore.case = TRUE)
+  hits[!grepl("(~\\$)|(^\\.)", basename(hits))]
+}
+
+# prefer：扩展名优先级（临床偏 Excel，FPKM 偏 CSV）
+find_named_file <- function(dirs, stem, fuzzy = NULL, prefer = c("csv", "xlsx", "xls", "tsv", "txt")) {
   dirs <- unique(dirs[dir.exists(dirs)])
+  cands <- list()
   for (dir in dirs) {
     hits <- list.files(dir, full.names = TRUE, ignore.case = TRUE)
     hits <- hits[!startsWith(basename(hits), "~$")]
     if (!length(hits)) next
     bn <- basename(hits)
+    if (!any(is_tabular(bn))) next
     stem_l <- tolower(stem)
-    sans <- tolower(sub("\\.(xlsx|xls)$", "", bn, ignore.case = TRUE))
-    exact <- which(sans == stem_l)
-    if (length(exact)) return(hits[[exact[[1]]]])
-    pref <- which(startsWith(sans, stem_l) & grepl("\\.(xlsx|xls)$", bn, ignore.case = TRUE))
-    if (length(pref)) return(hits[[pref[[1]]]])
-    if (!is.null(fuzzy)) {
-      fz <- which(grepl(fuzzy, bn, ignore.case = TRUE) & grepl("\\.(xlsx|xls)$", bn, ignore.case = TRUE))
-      if (length(fz)) return(hits[[fz[[1]]]])
+    sans <- tolower(sub("\\.(xlsx|xls|csv|tsv|txt)$", "", bn, ignore.case = TRUE))
+    ok_fuzzy <- if (is.null(fuzzy)) {
+      rep(FALSE, length(bn))
+    } else {
+      grepl(fuzzy, bn, ignore.case = TRUE)
     }
+    keep <- is_tabular(bn) & (sans == stem_l | startsWith(sans, stem_l) | ok_fuzzy)
+    if (any(keep)) cands[[length(cands) + 1L]] <- hits[keep]
   }
-  NULL
+  if (!length(cands)) return(NULL)
+  paths <- unique(unlist(cands, use.names = FALSE))
+  ext <- file_ext_lower(paths)
+  ord <- match(ext, tolower(prefer), nomatch = 99L)
+  exact <- tolower(sub("\\.(xlsx|xls|csv|tsv|txt)$", "", basename(paths), ignore.case = TRUE)) == tolower(stem)
+  paths[order(!exact, ord, basename(paths))][[1]]
 }
 
-locate_fusc_excels <- function(dirs = c(getwd(), "E:/R/FUSC")) {
+locate_fusc_inputs <- function(dirs = c(getwd(), "E:/R/FUSC")) {
   dirs <- unique(c(dirs, "E:/R/FUSC", "E:\\R\\FUSC"))
-  clin_path <- find_named_excel(dirs, "OEP00000155_样本_Human_1786804447300", fuzzy = "OEP00000155")
-  fpkm_path <- find_named_excel(
-    dirs,
-    "FUSCCTNBC_Expression_RNAseqFPKM",
-    fuzzy = "FUSCCTNBC.*FPKM|RNAseqFPKM"
+  clin_path <- find_named_file(
+    dirs, "OEP00000155_样本_Human_1786804447300",
+    fuzzy = "OEP00000155",
+    prefer = c("xlsx", "xls", "csv", "tsv")
+  )
+  fpkm_path <- find_named_file(
+    dirs, "FUSCCTNBC_Expression_RNAseqFPKM",
+    fuzzy = "FUSCCTNBC.*FPKM|RNAseqFPKM",
+    prefer = c("csv", "tsv", "txt", "xlsx", "xls")
   )
   if (is.null(clin_path) || is.null(fpkm_path)) {
     found <- unique(unlist(lapply(dirs[dir.exists(dirs)], function(d) {
       paste0(normalizePath(d, winslash = "/", mustWork = FALSE), ": ",
-             paste(basename(list_excel(d)), collapse = ", "))
+             paste(basename(list_data_files(d)), collapse = ", "))
     })))
     stop(
-      "未找到指定 Excel。R 当前工作目录是：", getwd(), "\n",
+      "未找到指定输入。R 当前工作目录是：", getwd(), "\n",
       "请先运行：setwd(\"E:/R/FUSC\")\n",
-      "需要：OEP00000155_样本_Human_1786804447300.xlsx\n",
-      "      FUSCCTNBC_Expression_RNAseqFPKM.xlsx\n",
-      "各目录中的 Excel：\n  ", paste(found, collapse = "\n  ")
+      "需要：OEP00000155_样本_Human_1786804447300.xlsx  （临床，Excel）\n",
+      "      FUSCCTNBC_Expression_RNAseqFPKM.csv         （表达，CSV）\n",
+      "各目录中的数据文件：\n  ", paste(found, collapse = "\n  ")
     )
   }
   list(clin = clin_path, fpkm = fpkm_path)
@@ -578,14 +610,14 @@ spearman_vs_score <- function(expr_mat, score) {
 }
 
 # ---------------------------------------------------------------------------
-# 读入指定的两份 Excel
+# 读入：临床 Excel + FPKM CSV
 # ---------------------------------------------------------------------------
-pair <- locate_fusc_excels(c(getwd(), work_dir, "E:/R/FUSC"))
-message("临床 Excel：", pair$clin)
-message("FPKM Excel：", pair$fpkm)
+pair <- locate_fusc_inputs(c(getwd(), work_dir, "E:/R/FUSC"))
+message("临床表：", pair$clin)
+message("FPKM表：", pair$fpkm)
 
-clin_raw <- read_excel_dt(pair$clin)
-fpkm_raw <- read_excel_dt(pair$fpkm)
+clin_raw <- read_table_dt(pair$clin)
+fpkm_raw <- read_table_dt(pair$fpkm)
 clin <- prepare_clinical(clin_raw)
 expr <- excel_to_expr(fpkm_raw)
 expr <- collapse_duplicate_genes(expr)

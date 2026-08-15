@@ -1,5 +1,5 @@
 ---
-description: E:/R/FUSC 中用 Excel 临床+FPKM，对每个神经/轴突 GO 单独做分型、预后气泡图与负相关基因
+description: E:/R/FUSC 中用 Excel 临床 + CSV FPKM，对每个神经/轴突 GO 单独做分型、预后气泡图与负相关基因
 globs:
   - "**/*.R"
   - "**/*.r"
@@ -7,37 +7,34 @@ globs:
 alwaysApply: true
 ---
 
-# FUSC：Excel 数据 + 每个 GO 单独分析
+# FUSC：每个 GO 单独分析
 
-工作目录固定为 `E:/R/FUSC`。控制台分析前必须 `setwd("E:/R/FUSC")`，不要在别的目录对 `"."` 找文件。只用下面两份 Excel（扩展名 `.xlsx` 或 `.xls` 均可），用 `readxl` 读表：
+工作目录固定为 `E:/R/FUSC`。控制台先 `setwd("E:/R/FUSC")`。输入文件：
 
-- 临床：`OEP00000155_样本_Human_1786804447300`（分型、预后）
-- 表达：`FUSCCTNBC_Expression_RNAseqFPKM`（RNA-seq FPKM）
+- 临床 Excel：`OEP00000155_样本_Human_1786804447300.xlsx`（`readxl`）
+- 表达 CSV：`FUSCCTNBC_Expression_RNAseqFPKM.csv`（`fread`，不要 `read_excel`）
 
-分型优先用表里的分子分型（Fudan TNBC：LAR / IM / BLIS / MES，或三阴性、HER2阳性等），不要把 BLIS 误标成 TNBC。输出也写在 `E:/R/FUSC`。
+分型优先 Fudan TNBC（LAR / IM / BLIS / MES），不要把 BLIS 误标成 TNBC。每个 GO **单独**取基因、打分、统计；禁止合并 17 条通路。通路活性 = 该 GO 基因 z-score 均值。表达用 `log2(FPKM+1)`。不要加载 `GSVA`、`SummarizedExperiment`、`heatmaps`。向量用小写 `c()`。
 
-**必须对列出的每一个 GO ID 单独取基因、单独打分、单独统计。** 禁止把 17 个 GO 合并成一条综合通路。通路活性 = 该 GO 基因在样本间 z-score 后取均值。表达用 `log2(FPKM+1)`。不要加载 `GSVA`、`SummarizedExperiment`、`heatmaps`。向量用小写 `c()`。
-
-## 固定 GO（逐个循环，不可合并）
+## 固定 GO（逐个循环）
 
 `GO:0023041`, `GO:1904457`, `GO:1904340`, `GO:2001224`, `GO:2001222`, `GO:0019227`, `GO:0019228`, `GO:1902847`, `GO:0031102`, `GO:0097492`, `GO:0097491`, `GO:0097374`, `GO:0007158`, `GO:1902667`, `GO:0031103`, `GO:0007411`, `GO:0007409`
 
 ## 任务
 
-1. **分型 + 预后气泡图**：每个 GO 的活性 vs 分子分型（Fudan：LAR/IM/BLIS/MES，或三阴性、HER2阳性等）以及 OS/RFS Cox。气泡图：x=指标，y=通路，点大小=`-log10(p)`，颜色=效应（分型=该亚型 vs 其余的 Δscore；预后=`log2(HR)`）。
-2. **负相关基因**：每个 GO 单独对全基因组 Spearman，保留 `rho < 0` 且 FDR < 0.05。禁止把 17 个通路的负相关基因取并集当成“每个通路”的结果。
+1. 每个 GO vs 分型、OS/RFS：气泡图 x=指标，y=通路，点大小=`-log10(p)`，颜色=Δscore 或 `log2(HR)`。
+2. 每个 GO 对全基因组 Spearman，保留 `rho < 0` 且 FDR < 0.05。禁止把 17 个通路的负相关基因取并集。
 
 ```r
-# ❌ BAD：合并所有 GO；也不要用错误文件名
-all_genes <- unique(unlist(go_genesets))
-go_score <- colMeans(expr[all_genes, ])
+# ❌ BAD：合并通路；也不要用 read_excel 读 FPKM CSV
+score <- colMeans(expr[unique(unlist(go_genesets)), ])
 
-# ✅ GOOD：读指定的两份 Excel；每个 GO 单独 z-score
+# ✅ GOOD
 clin <- readxl::read_excel("OEP00000155_样本_Human_1786804447300.xlsx")
-fpkm <- readxl::read_excel("FUSCCTNBC_Expression_RNAseqFPKM.xlsx")
+fpkm <- data.table::fread("FUSCCTNBC_Expression_RNAseqFPKM.csv")
 for (go_id in go_ids) {
   go_score <- colMeans(z[intersect(go_genesets[[go_id]], rownames(z)), , drop = FALSE])
 }
 ```
 
-可运行脚本：`scripts/analyze_go_excel_fusc.R`。放到 `E:/R/FUSC` 后整份 Source。
+可运行脚本：`scripts/analyze_go_excel_fusc.R`，在 `E:/R/FUSC` 整份 Source。
