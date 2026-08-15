@@ -5,6 +5,11 @@
 # 用法：将本脚本放在数据目录（默认 E:/R/BRCA）后，RStudio 中 Source 整份脚本
 # 或：setwd("E:/R/BRCA"); source("GO_pathway_individual_analysis.R")
 # 结果目录：results_GO_individual/  （每个 GO 一个子文件夹）
+#
+# ★★★ 请重新 Source 整份脚本，不要只接着跑旧的 score[...] 行 ★★★
+# 已修改处均用  “★★★ 已修改”  标记，全文搜索即可定位。
+#   1) pathway_zmean：不再使用 scale()/t()
+#   2) 通路分数变量由 score 改为 go_score（score 会撞上已有函数）
 # ============================================================
 
 ## 0. 可调参数 ------------------------------------------------
@@ -161,12 +166,12 @@ get_go_genes <- function(go_id) {
   res
 }
 
+# ★★★ 已修改开始：pathway_zmean 不再调用 scale()/t() ★★★
 pathway_zmean <- function(expr_mat, genes) {
   genes <- unique(intersect(as.character(genes), rownames(expr_mat)))
   if (length(genes) < min_pathway_genes) return(NULL)
   sub <- as.matrix(expr_mat[genes, , drop = FALSE])
   storage.mode(sub) <- "double"
-  # 不用 scale()/t()：BiocGenerics 会把它们变成 S4 泛型，普通 matrix 会报错
   gene_mean <- rowMeans(sub, na.rm = TRUE)
   gene_sd <- sqrt(rowMeans((sub - gene_mean)^2, na.rm = TRUE))
   gene_sd[!is.finite(gene_sd) | gene_sd < 1e-12] <- 1
@@ -178,6 +183,7 @@ pathway_zmean <- function(expr_mat, genes) {
   attr(sc, "genes") <- genes
   sc
 }
+# ★★★ 已修改结束 ★★★
 
 spearman_vs_score <- function(mat, score) {
   common <- intersect(colnames(mat), names(score))
@@ -187,7 +193,7 @@ spearman_vs_score <- function(mat, score) {
   keep <- apply(mat, 1, function(x) sd(x, na.rm = TRUE) > 0)
   mat <- mat[keep, , drop = FALSE]
   n <- ncol(mat)
-  r <- as.numeric(cor(base::t(as.matrix(mat)), score, method = "spearman", use = "pairwise.complete.obs"))
+  r <- as.numeric(cor(base::t(as.matrix(mat)), score, method = "spearman", use = "pairwise.complete.obs"))  # ★★★ 已修改：base::t
   names(r) <- rownames(mat)
   r <- pmin(pmax(r, -0.999999), 0.999999)
   tstat <- r * sqrt((n - 2) / pmax(1e-12, 1 - r^2))
@@ -448,6 +454,11 @@ for (go_id in go_list) {
     file.path(go_dir, "genes.csv")
   )
 
+  # ★★★ 已修改开始：变量名必须用 go_score，禁止再用 score ★★★
+  # 旧代码（会报 closure 不可取子集，请勿运行）：
+  #   score <- pathway_zmean(expr, genes_here)
+  #   clin_use <- clinical_data[sample_std %in% names(score)]
+  #   sc_clin <- score[clin_use$sample_std]
   go_score <- tryCatch(pathway_zmean(expr, genes_here), error = function(e) {
     message("  通路打分失败：", conditionMessage(e))
     NULL
@@ -467,6 +478,7 @@ for (go_id in go_list) {
   clin_use <- clinical_data[sample_std %in% names(go_score)]
   setkey(clin_use, sample_std)
   sc_clin <- go_score[clin_use$sample_std]
+  # ★★★ 已修改结束 ★★★
   clin_rows <- lapply(clin_features, function(ft) {
     if (!ft %in% names(clin_use)) return(NULL)
     assoc_clinical_feature(sc_clin, clin_use[[ft]], ft)
@@ -504,6 +516,7 @@ for (go_id in go_list) {
   }
 
   # ---- 7.2 生存分析（仅本通路分数） ----
+  # ★★★ 已修改：score -> go_score ★★★
   surv_use <- survival_data[sample_std %in% names(go_score)]
   sc_surv <- go_score[surv_use$sample_std]
   surv_rows <- list()
@@ -581,7 +594,7 @@ for (go_id in go_list) {
   }
 
   # ---- 7.3 全基因组负相关基因（仅对本通路分数） ----
-  cor_tab <- spearman_vs_score(expr, go_score)
+  cor_tab <- spearman_vs_score(expr, go_score)  # ★★★ 已修改：传入 go_score
   if (nrow(cor_tab) > 0) {
     setnames(cor_tab, "feature", "gene")
     cor_tab[, `:=`(
@@ -639,7 +652,7 @@ for (go_id in go_list) {
 
   # ---- 7.4 蛋白水平相关性（补充，仍按本通路分数） ----
   if (!is.null(prot_mat)) {
-    prot_common <- intersect(colnames(prot_mat), names(go_score))
+    prot_common <- intersect(colnames(prot_mat), names(go_score))  # ★★★ 已修改：go_score
     if (length(prot_common) >= 20) {
       prot_cor <- spearman_vs_score(prot_mat, go_score)
       if (nrow(prot_cor) > 0) {
@@ -676,7 +689,7 @@ if (length(all_scores) > 0) {
   }
   ha <- NULL
   if (ncol(anno_df) > 0) ha <- HeatmapAnnotation(df = anno_df)
-  z_score <- base::t(base::scale(as.matrix(score_mat)))   # GO x samples
+  z_score <- base::t(base::scale(as.matrix(score_mat)))   # ★★★ 已修改：base::scale / base::t
   z_score[!is.finite(z_score)] <- 0
   tryCatch({
     pdf(file.path(out_dir, "01_pathway_score_heatmap.pdf"), width = 12, height = 6)
