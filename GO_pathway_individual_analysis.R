@@ -79,9 +79,8 @@ go_name_map <- c(
 go_to_run <- go_list
 # ★★★ 已修改结束 ★★★
 #
-# 若 per_GO 里只有 GO_0007409 和 GO_0023041，把下面两行【一起】贴到控制台补跑其余 15 个。
-# 不要再逐行粘贴 for 循环内部（next、score、Heatmap 那些）。
-#   go_to_run <- setdiff(go_list, c("GO:0007409", "GO:0023041"))
+# 补跑全部通路：把下面两行一起贴到控制台（c 必须小写，不要写成 C()）。
+#   go_to_run <- go_list
 #   run_go_individual_analysis()
 
 ## 1. 加载包 --------------------------------------------------
