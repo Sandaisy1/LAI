@@ -14,6 +14,7 @@
 #   4) 生存分析 7.2：同样禁止 score[...]；打分成功后会把 go_score 同步到 score 以兼容旧行
 #   5) 汇总热图：禁止 t(scale(score_mat))，改用手写 z-score
 #   6) 热图绘制：必须用 ComplexHeatmap::Heatmap，避免被 heatmaps::Heatmap 覆盖
+#   7) OS 森林图：ggplot2 4.0 用 geom_errorbar(orientation="y")，不要漏掉行末 +
 #   8) 多个 GO：已写在 go_list；用 go_to_run 控制本次跑哪些，必须整段 for 循环，不要只跑一个文件夹
 # ============================================================
 
