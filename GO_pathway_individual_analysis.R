@@ -12,6 +12,7 @@
 #   2) 通路分数变量由 score 改为 go_score（score 会撞上已有函数）
 #   3) 临床箱线图：不再只打印 null device 1，改为报告保存了几张图
 #   4) 生存分析 7.2：同样禁止 score[...]；打分成功后会把 go_score 同步到 score 以兼容旧行
+#   5) 汇总热图：禁止 t(scale(score_mat))，改用手写 z-score
 # ============================================================
 
 ## 0. 可调参数 ------------------------------------------------
@@ -719,8 +720,25 @@ if (length(all_scores) > 0) {
   }
   ha <- NULL
   if (ncol(anno_df) > 0) ha <- HeatmapAnnotation(df = anno_df)
-  z_score <- base::t(base::scale(as.matrix(score_mat)))   # ★★★ 已修改：base::scale / base::t
+  # ★★★ 已修改开始：热图缩放，禁止 t(scale(score_mat)) ★★★
+  # 旧代码（会报 scale 找不到 matrix 方法，请勿运行）：
+  #   z_score <- t(scale(score_mat))
+  sm <- as.matrix(score_mat)
+  storage.mode(sm) <- "double"
+  z_score <- matrix(
+    NA_real_,
+    nrow = ncol(sm),
+    ncol = nrow(sm),
+    dimnames = list(colnames(sm), rownames(sm))
+  )
+  for (j in seq_len(ncol(sm))) {
+    x <- sm[, j]
+    sdx <- stats::sd(x, na.rm = TRUE)
+    if (!is.finite(sdx) || sdx < 1e-12) sdx <- 1
+    z_score[j, ] <- (x - mean(x, na.rm = TRUE)) / sdx
+  }
   z_score[!is.finite(z_score)] <- 0
+  # ★★★ 已修改结束 ★★★
   tryCatch({
     pdf(file.path(out_dir, "01_pathway_score_heatmap.pdf"), width = 12, height = 6)
     draw(Heatmap(
