@@ -438,16 +438,16 @@ message("与蛋白重叠：", if (is.null(prot_mat)) 0 else length(intersect(com
 # 然后再运行：run_go_individual_analysis()
 run_go_individual_analysis <- function(go_ids = NULL) {
     if (is.null(go_ids)) {
-      if (!exists("go_to_run", inherits = TRUE)) {
-        stop("请先设置 go_to_run，例如：go_to_run <- go_list")
-      }
-      go_ids <- go_to_run
+      go_ids <- get("go_to_run", envir = .GlobalEnv, inherits = FALSE)
     }
     go_to_run <- unique(as.character(go_ids))
     if (length(go_to_run) == 0) stop("go_to_run 是空的，没有要分析的 GO")
-    if (!exists("expr", inherits = TRUE) || is.null(expr)) {
+    if (!exists("expr", envir = .GlobalEnv, inherits = FALSE) || is.null(get("expr", .GlobalEnv))) {
       stop("还没有表达矩阵 expr。请先从脚本开头 Source 到数据预处理结束，再调用本函数。")
     }
+    out_dir_abs <- normalizePath(out_dir, mustWork = FALSE)
+    dir.create(file.path(out_dir_abs, "per_GO"), recursive = TRUE, showWarnings = FALSE)
+    message("输出根目录：", out_dir_abs)
 
   ## 6. 逐个 GO 取基因（绝不合并） ------------------------------
   # ★★★ 已修改：按 go_to_run 逐个取基因，不是合并成一个基因集 ★★★
@@ -466,7 +466,7 @@ run_go_individual_analysis <- function(go_ids = NULL) {
       genes_in_expression = paste(in_expr, collapse = ";")
     )
   }), fill = TRUE)
-  fwrite(go_set_summary, file.path(out_dir, "00_GO_gene_sets.csv"))
+  fwrite(go_set_summary, file.path(out_dir_abs, "00_GO_gene_sets.csv"))
 
   ## 7. 每个 GO 单独分析 ----------------------------------------
   all_scores <- list()
@@ -486,8 +486,11 @@ run_go_individual_analysis <- function(go_ids = NULL) {
     go_title <- unname(go_name_map[go_id])
     message("\n========== ", go_id, " | ", go_title, " ==========")
 
-    go_dir <- file.path(out_dir, "per_GO", paste0(safe_name(go_id), "_", safe_name(go_title)))
-    dir.create(go_dir, showWarnings = FALSE, recursive = TRUE)
+    go_dir <- file.path(out_dir_abs, "per_GO", safe_name(go_id))
+    if (!dir.create(go_dir, showWarnings = FALSE, recursive = TRUE) && !dir.exists(go_dir)) {
+      stop("无法创建目录：", go_dir)
+    }
+    message("  写入：", go_dir)
 
     genes_here <- unique(go_gene_list[[go_id]]$SYMBOL)
     fwrite(
@@ -508,6 +511,7 @@ run_go_individual_analysis <- function(go_ids = NULL) {
     if (!is.numeric(go_score) || length(go_score) == 0) {
       # ★★★ 已修改：不要用 next。next 只能写在 for 里，贴到控制台会报「没有可中断的循环」
       message("  可用基因 < ", min_pathway_genes, " 或打分失败，跳过该通路：", go_id)
+      writeLines(paste("SKIPPED", go_id, go_title), file.path(go_dir, "SKIPPED.txt"))
     } else {
     n_used <- attr(go_score, "n_genes")
     used_genes <- attr(go_score, "genes")
@@ -739,7 +743,7 @@ run_go_individual_analysis <- function(go_ids = NULL) {
     colnames(score_mat) <- names(all_scores)
     rownames(score_mat) <- colnames(expr)
     fwrite(data.table(sample = rownames(score_mat), as.data.table(score_mat)),
-           file.path(out_dir, "01_pathway_scores_each_GO.csv"))
+           file.path(out_dir_abs, "01_pathway_scores_each_GO.csv"))
 
     # ★★★ 已修改开始：汇总热图只用 ggplot，不要运行 Heatmap/draw ★★★
     sm <- as.matrix(score_mat)
@@ -757,7 +761,7 @@ run_go_individual_analysis <- function(go_ids = NULL) {
       z_score[j, ] <- (x - mean(x, na.rm = TRUE)) / sdx
     }
     z_score[!is.finite(z_score)] <- 0
-    pdf_hm <- file.path(out_dir, "01_pathway_score_heatmap.pdf")
+    pdf_hm <- file.path(out_dir_abs, "01_pathway_score_heatmap.pdf")
     plot_dt <- as.data.table(as.table(z_score))
     setnames(plot_dt, c("GO", "sample", "z"))
     p_hm <- ggplot(plot_dt, aes(x = sample, y = GO, fill = z)) +
@@ -774,13 +778,13 @@ run_go_individual_analysis <- function(go_ids = NULL) {
 
   if (length(all_clin) > 0) {
     clin_all <- rbindlist(all_clin, fill = TRUE)
-    fwrite(clin_all, file.path(out_dir, "02_clinical_association_each_GO.csv"))
+    fwrite(clin_all, file.path(out_dir_abs, "02_clinical_association_each_GO.csv"))
   }
 
   # ★★★ 已修改：这段在函数内部，不要单独在控制台运行；all_surv 不是全局变量 ★★★
   if (length(all_surv) > 0) {
     surv_all <- rbindlist(all_surv, fill = TRUE)
-    fwrite(surv_all, file.path(out_dir, "03_survival_cox_each_GO.csv"))
+    fwrite(surv_all, file.path(out_dir_abs, "03_survival_cox_each_GO.csv"))
 
     os_hl <- surv_all[surv_all[["endpoint"]] == "OS" & surv_all[["model"]] == "High_vs_Low"]
     if (nrow(os_hl) > 0) {
@@ -795,28 +799,32 @@ run_go_individual_analysis <- function(go_ids = NULL) {
         labs(title = "OS Cox: High vs Low (each GO separately)",
              x = "Hazard ratio", y = NULL, color = "p < 0.05") +
         theme_bw()
-      ggsave(file.path(out_dir, "03_OS_forest_each_GO.pdf"), pfor, width = 10, height = 6)
-      message("  已保存 OS 森林图：", file.path(out_dir, "03_OS_forest_each_GO.pdf"))
+      ggsave(file.path(out_dir_abs, "03_OS_forest_each_GO.pdf"), pfor, width = 10, height = 6)
+      message("  已保存 OS 森林图：", file.path(out_dir_abs, "03_OS_forest_each_GO.pdf"))
       # ★★★ 已修改结束 ★★★
     }  # 结束 if (nrow(os_hl) > 0)
   }    # ★★★ 必须有这一行：结束 if (length(all_surv) > 0)，少了 RStudio 会在 if 上打红叉
 
   if (length(all_neg) > 0) {
     neg_all <- rbindlist(all_neg, fill = TRUE)
-    fwrite(neg_all, file.path(out_dir, "04_negative_genes_each_GO.csv"))
+    fwrite(neg_all, file.path(out_dir_abs, "04_negative_genes_each_GO.csv"))
     neg_count <- neg_all[, .(n_negative_genes = .N,
                              n_strict_r0.3 = sum(spearman_r <= strict_r_cutoff)),
                          by = .(GO, GO_name)]
-    fwrite(neg_count, file.path(out_dir, "04_negative_genes_count_each_GO.csv"))
+    fwrite(neg_count, file.path(out_dir_abs, "04_negative_genes_count_each_GO.csv"))
   }
 
   if (length(all_prot) > 0) {
     fwrite(rbindlist(all_prot, fill = TRUE),
-           file.path(out_dir, "05_negative_proteins_each_GO.csv"))
+           file.path(out_dir_abs, "05_negative_proteins_each_GO.csv"))
   }
 
-  fwrite(go_set_summary, file.path(out_dir, "00_GO_gene_sets.csv"))
-  message("\n分析完成。每个 GO 的独立结果在：", normalizePath(out_dir, mustWork = FALSE))
+  fwrite(go_set_summary, file.path(out_dir_abs, "00_GO_gene_sets.csv"))
+  message("\n分析完成。每个 GO 的独立结果在：", normalizePath(out_dir_abs, mustWork = FALSE))
+  folders <- list.files(file.path(out_dir_abs, "per_GO"))
+  fwrite(data.table(folder = folders), file.path(out_dir_abs, "00_per_GO_folder_list.csv"))
+  message("per_GO 现有 ", length(folders), " 个文件夹：")
+  message(paste("  ", folders, collapse = "\n"))
   message("请重点查看 per_GO/ 下各通路文件夹，以及 04_negative_genes_each_GO.csv")
   invisible(TRUE)
 }
