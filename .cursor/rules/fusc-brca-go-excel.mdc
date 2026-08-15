@@ -1,0 +1,38 @@
+---
+description: E:/R/FUSC 中用 Excel 临床+FPKM，对每个神经/轴突 GO 单独做分型、预后气泡图与负相关基因
+globs:
+  - "**/*.R"
+  - "**/*.r"
+  - "**/*.Rmd"
+alwaysApply: true
+---
+
+# FUSC：Excel 数据 + 每个 GO 单独分析
+
+工作目录固定为 `E:/R/FUSC`。输入是**两份 Excel**（`.xlsx` / `.xls`）：病人分型/预后表 + 对应 RNA-seq FPKM。输出也写在该目录。用 `readxl` 读表，不要假设 TSV/TCGA 文件名。
+
+**必须对列出的每一个 GO ID 单独取基因、单独打分、单独统计。** 禁止把 17 个 GO 合并成一条综合通路。通路活性 = 该 GO 基因在样本间 z-score 后取均值。表达用 `log2(FPKM+1)`。不要加载 `GSVA`、`SummarizedExperiment`、`heatmaps`。向量用小写 `c()`。
+
+## 固定 GO（逐个循环，不可合并）
+
+`GO:0023041`, `GO:1904457`, `GO:1904340`, `GO:2001224`, `GO:2001222`, `GO:0019227`, `GO:0019228`, `GO:1902847`, `GO:0031102`, `GO:0097492`, `GO:0097491`, `GO:0097374`, `GO:0007158`, `GO:1902667`, `GO:0031103`, `GO:0007411`, `GO:0007409`
+
+## 任务
+
+1. **分型 + 预后气泡图**：每个 GO 的活性 vs PAM50/IHC（三阴性、HER2阳性、Luminal 等）以及 OS/DSS Cox。气泡图：x=指标，y=通路，点大小=`-log10(p)`，颜色=效应（分型=该亚型 vs 其余的 Δscore；预后=`log2(HR)`）。
+2. **负相关基因**：每个 GO 单独对全基因组 Spearman，保留 `rho < 0` 且 FDR < 0.05。禁止把 17 个通路的负相关基因取并集当成“每个通路”的结果。
+
+```r
+# ❌ BAD：合并所有 GO；也不要 read.csv 去读用户的 Excel
+all_genes <- unique(unlist(go_genesets))
+go_score <- colMeans(expr[all_genes, ])
+
+# ✅ GOOD：readxl 读 Excel；每个 GO 单独 z-score
+clin <- readxl::read_excel(clin_xlsx)
+fpkm <- readxl::read_excel(fpkm_xlsx)
+for (go_id in go_ids) {
+  go_score <- colMeans(z[intersect(go_genesets[[go_id]], rownames(z)), , drop = FALSE])
+}
+```
+
+可运行脚本：`scripts/analyze_go_excel_fusc.R`。放到 `E:/R/FUSC` 后整份 Source。
