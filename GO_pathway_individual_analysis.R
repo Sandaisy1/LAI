@@ -16,18 +16,24 @@
 #   6) 汇总热图只用 ggplot，不要运行 Heatmap()/draw()
 #   7) OS 森林图：ggplot2 4.0 用 geom_errorbar(orientation="y")，不要漏掉行末 +
 #   8) 多个 GO：已写在 go_list；用 go_to_run 控制本次跑哪些
-#   9) 禁止 source("run_go_individual_analysis.R")，这个文件不存在。
-#      只需 source("GO_pathway_individual_analysis.R")，或在本脚本里搜索
-#      run_go_individual_analysis <- function 后运行该函数
+#   10) 探索性阈值已放宽：负相关用名义 p<0.05；生存 10 人/3 事件；1 个基因也打分
 # ============================================================
 
 ## 0. 可调参数 ------------------------------------------------
-work_dir <- "E:/R/BRCA"   # 与当前工程一致；若不存在则使用当前目录
+# ★★★ 已修改：放宽探索性阈值。乳腺肿瘤里神经/轴突 GO 基因少、死亡事件少，
+#     原来 FDR<0.05 且 |r|>=0.3、生存至少 20 人/5 个事件，很多通路会空。
+work_dir <- "E:/R/BRCA"
 use_primary_tumor_only <- TRUE
-min_pathway_genes <- 2
-neg_fdr_cutoff <- 0.05
-neg_r_cutoff <- 0          # 负相关：Spearman r < 0
-strict_r_cutoff <- -0.3    # 高置信负相关附加阈值
+min_pathway_genes <- 1     # 有 1 个基因也计算通路分数
+neg_pvalue_cutoff <- 0.05  # 负相关主列表：名义 p（不再先卡 FDR）
+neg_fdr_cutoff <- 0.25     # 另存一份较宽的 FDR 列表
+neg_r_cutoff <- 0          # Spearman r < 0 即视为负相关
+strict_r_cutoff <- -0.15   # 高置信负相关（原 -0.3 对 BRCA 过严）
+min_surv_n <- 10           # 生存分析最少样本（原 20）
+min_surv_events <- 3       # 最少事件数（原 5）
+min_clin_n <- 6            # 临床关联最少样本（原 10）
+min_group_n <- 2           # 每组最少人数（原 3）
+clin_plot_p_cutoff <- 0.10 # 箱线图：p<0.10 也画（原 0.05）
 out_dir <- "results_GO_individual"
 
 # 用户指定的 GO 通路（每个都单独分析）
@@ -178,6 +184,19 @@ get_go_genes <- function(go_id) {
   }
   res <- suppressMessages(pick("GOALL"))
   if (is.null(res) || nrow(res) == 0) res <- suppressMessages(pick("GO"))
+  extra <- tryCatch({
+    go2eg <- as.list(org.Hs.eg.db::org.Hs.egGO2ALLEGS)
+    eg <- unique(as.character(go2eg[[go_id]]))
+    if (length(eg) == 0) NULL else {
+      AnnotationDbi::select(org.Hs.eg.db, keys = eg, keytype = "ENTREZID",
+                            columns = c("SYMBOL", "ENSEMBL"))
+    }
+  }, error = function(e) NULL)
+  if (!is.null(extra) && nrow(extra) > 0) {
+    extra <- as.data.table(extra)
+    extra[, GO := go_id]
+    res <- if (is.null(res) || nrow(res) == 0) extra else rbind(as.data.table(res), extra, fill = TRUE)
+  }
   if (is.null(res) || nrow(res) == 0) {
     return(data.table(GO = go_id, SYMBOL = character(), ENSEMBL = character(), ENTREZID = character()))
   }
@@ -209,7 +228,7 @@ pathway_zmean <- function(expr_mat, genes) {
 
 spearman_vs_score <- function(mat, score) {
   common <- intersect(colnames(mat), names(score))
-  if (length(common) < 10) return(data.table())
+  if (length(common) < 5) return(data.table())
   mat <- mat[, common, drop = FALSE]
   score <- score[common]
   keep <- apply(mat, 1, function(x) sd(x, na.rm = TRUE) > 0)
@@ -234,13 +253,13 @@ assoc_clinical_feature <- function(score, feature, feature_name) {
   df <- df[is.finite(df$score) & !is.na(df$feature), , drop = FALSE]
   df$feature <- as.character(df$feature)
   df <- df[df$feature != "" & !tolower(df$feature) %in% c("na", "nan", "not reported", "unknown", "[not available]", "[unknown]"), ]
-  if (nrow(df) < 10) return(NULL)
+  if (nrow(df) < min_clin_n) return(NULL)
 
   feat_num <- suppressWarnings(as.numeric(df$feature))
   if (mean(is.finite(feat_num)) >= 0.8) {
     df$feature <- feat_num
     df <- df[is.finite(df$feature), ]
-    if (nrow(df) < 10 || sd(df$feature) == 0) return(NULL)
+    if (nrow(df) < min_clin_n || sd(df$feature) == 0) return(NULL)
     ct <- suppressWarnings(cor.test(df$score, df$feature, method = "spearman", exact = FALSE))
     return(data.table(
       feature = feature_name, type = "continuous", n = nrow(df),
@@ -251,7 +270,7 @@ assoc_clinical_feature <- function(score, feature, feature_name) {
 
   df$feature <- droplevels(factor(df$feature))
   tab <- table(df$feature)
-  df <- df[df$feature %in% names(tab)[tab >= 3], ]
+  df <- df[df$feature %in% names(tab)[tab >= min_group_n], ]
   df$feature <- droplevels(factor(df$feature))
   if (nlevels(df$feature) < 2 || nlevels(df$feature) > 15) return(NULL)
 
@@ -447,6 +466,10 @@ run_go_individual_analysis <- function(go_ids = NULL) {
     out_dir_abs <- normalizePath(out_dir, mustWork = FALSE)
     dir.create(file.path(out_dir_abs, "per_GO"), recursive = TRUE, showWarnings = FALSE)
     message("输出根目录：", out_dir_abs)
+    fwrite(data.table(
+      min_pathway_genes, neg_pvalue_cutoff, neg_fdr_cutoff, neg_r_cutoff, strict_r_cutoff,
+      min_surv_n, min_surv_events, min_clin_n, min_group_n, clin_plot_p_cutoff
+    ), file.path(out_dir_abs, "00_thresholds_used.csv"))
 
   ## 6. 逐个 GO 取基因（绝不合并） ------------------------------
   # ★★★ 已修改：按 go_to_run 逐个取基因，不是合并成一个基因集 ★★★
@@ -539,10 +562,10 @@ run_go_individual_analysis <- function(go_ids = NULL) {
       # ★★★ 已修改开始：临床箱线图 ★★★
       # 旧输出 `null device 1` 只是 dev.off() 关闭 PDF，不是分析结果，也看不出画了几张图。
       # ★★★ 已修改：不要写 type == "categorical"；type 会撞上 BiocGenerics::type 函数 ★★★
-      sig_cat <- clin_tab[clin_tab[["type"]] == "categorical" & clin_tab[["pvalue"]] < 0.05]
+      sig_cat <- clin_tab[clin_tab[["type"]] == "categorical" & clin_tab[["pvalue"]] < clin_plot_p_cutoff]
       if (nrow(sig_cat) > 0) sig_cat <- sig_cat[order(sig_cat[["pvalue"]])]
       if (nrow(sig_cat) == 0) {
-        message("  本通路无显著分类临床变量（p < 0.05），不画箱线图")
+        message("  本通路无分类临床变量达到 p < ", clin_plot_p_cutoff, "，不画箱线图")
       } else {
         pdf_clin <- file.path(go_dir, "clinical_boxplots.pdf")
         n_box <- 0L
@@ -555,7 +578,7 @@ run_go_individual_analysis <- function(go_ids = NULL) {
           )
           plot_df <- plot_df[is.finite(plot_df$score) & !is.na(plot_df$group) & plot_df$group != "", ]
           tab <- table(plot_df$group)
-          plot_df <- plot_df[plot_df$group %in% names(tab)[tab >= 3], ]
+          plot_df <- plot_df[plot_df$group %in% names(tab)[tab >= min_group_n], ]
           if (length(unique(plot_df$group)) < 2) next
           ok <- tryCatch({
             p <- ggboxplot(plot_df, x = "group", y = "score", fill = "group", outlier.shape = NA) +
@@ -602,7 +625,7 @@ run_go_individual_analysis <- function(go_ids = NULL) {
         stringsAsFactors = FALSE
       )
       d <- d[is.finite(d$time) & d$time > 0 & d$event %in% c(0, 1) & is.finite(d$score), ]
-      if (nrow(d) < 20 || sum(d$event) < 5) next
+      if (nrow(d) < min_surv_n || sum(d$event) < min_surv_events) next
 
       d$group <- ifelse(d$score >= median(d$score, na.rm = TRUE), "High", "Low")
       d$group <- factor(d$group, levels = c("Low", "High"))
@@ -672,14 +695,16 @@ run_go_individual_analysis <- function(go_ids = NULL) {
       )]
       fwrite(cor_tab[order(-spearman_r)], file.path(go_dir, "all_gene_correlation.csv"))
 
-      neg_tab <- cor_tab[spearman_r < neg_r_cutoff & fdr < neg_fdr_cutoff]
+      neg_tab <- cor_tab[spearman_r < neg_r_cutoff & pvalue < neg_pvalue_cutoff]
       setorder(neg_tab, spearman_r)
       fwrite(neg_tab, file.path(go_dir, "negative_correlated_genes.csv"))
+      fwrite(cor_tab[spearman_r < 0 & fdr < neg_fdr_cutoff][order(spearman_r)],
+             file.path(go_dir, "negative_correlated_genes_fdr.csv"))
       fwrite(neg_tab[spearman_r <= strict_r_cutoff],
-             file.path(go_dir, "negative_correlated_genes_strict_r0.3.csv"))
+             file.path(go_dir, "negative_correlated_genes_strict.csv"))
       all_neg[[go_id]] <- neg_tab
-      message("  显著负相关基因：", nrow(neg_tab),
-              " ；|r|>=0.3：", nrow(neg_tab[spearman_r <= strict_r_cutoff]))
+      message("  负相关基因（r<0 且 p<", neg_pvalue_cutoff, "）：", nrow(neg_tab),
+              " ；r<=", strict_r_cutoff, "：", nrow(neg_tab[spearman_r <= strict_r_cutoff]))
 
       vol_df <- as.data.frame(cor_tab)
       rownames(vol_df) <- vol_df$gene
@@ -690,12 +715,12 @@ run_go_individual_analysis <- function(go_ids = NULL) {
           vol_df,
           lab = vol_df$gene,
           x = "spearman_r",
-          y = "fdr",
+          y = "pvalue",
           xlab = "Spearman r (gene vs this GO score)",
-          ylab = "-Log10 FDR",
+          ylab = "-Log10 p",
           title = paste(go_id, go_title),
-          pCutoff = neg_fdr_cutoff,
-          FCcutoff = 0.3,
+          pCutoff = neg_pvalue_cutoff,
+          FCcutoff = abs(strict_r_cutoff),
           xlim = c(-1, 1),
           selectLab = key_neg,
           drawConnectors = TRUE
@@ -727,7 +752,7 @@ run_go_individual_analysis <- function(go_ids = NULL) {
           setnames(prot_cor, "feature", "protein")
           prot_cor[, `:=`(GO = go_id, GO_name = go_title)]
           fwrite(prot_cor[order(spearman_r)], file.path(go_dir, "protein_correlation.csv"))
-          all_prot[[go_id]] <- prot_cor[spearman_r < 0 & fdr < neg_fdr_cutoff][order(spearman_r)]
+          all_prot[[go_id]] <- prot_cor[spearman_r < 0 & pvalue < neg_pvalue_cutoff][order(spearman_r)]
         }
       }
     }
@@ -808,7 +833,7 @@ run_go_individual_analysis <- function(go_ids = NULL) {
     neg_all <- rbindlist(all_neg, fill = TRUE)
     fwrite(neg_all, file.path(out_dir_abs, "04_negative_genes_each_GO.csv"))
     neg_count <- neg_all[, .(n_negative_genes = .N,
-                             n_strict_r0.3 = sum(spearman_r <= strict_r_cutoff)),
+                             n_strict = sum(spearman_r <= strict_r_cutoff)),
                          by = .(GO, GO_name)]
     fwrite(neg_count, file.path(out_dir_abs, "04_negative_genes_count_each_GO.csv"))
   }
