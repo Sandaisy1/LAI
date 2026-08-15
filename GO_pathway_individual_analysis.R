@@ -14,6 +14,7 @@
 #   4) 生存分析 7.2：同样禁止 score[...]；打分成功后会把 go_score 同步到 score 以兼容旧行
 #   5) 汇总热图：禁止 t(scale(score_mat))，改用手写 z-score
 #   6) 热图绘制：必须用 ComplexHeatmap::Heatmap，避免被 heatmaps::Heatmap 覆盖
+#   7) OS 森林图：ggplot2 4.0 用 geom_errorbar(orientation="y")，不再用 geom_errorbarh
 # ============================================================
 
 ## 0. 可调参数 ------------------------------------------------
@@ -780,7 +781,8 @@ if (length(all_surv) > 0) {
     os_hl[, lab := factor(lab, levels = rev(lab))]
     pfor <- ggplot(os_hl, aes(x = HR, y = lab)) +
       geom_vline(xintercept = 1, linetype = 2, color = "grey50") +
-      geom_errorbarh(aes(xmin = HR_low, xmax = HR_high), height = 0.2) +
+      # ★★★ 已修改：ggplot2 4.0 弃用 geom_errorbarh，改用 geom_errorbar(orientation = "y") ★★★
+      geom_errorbar(aes(xmin = HR_low, xmax = HR_high), orientation = "y", width = 0.2) +
       geom_point(aes(color = pvalue < 0.05), size = 3) +
       scale_x_log10() +
       labs(title = "OS Cox: High vs Low (each GO separately)",
