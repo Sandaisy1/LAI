@@ -13,6 +13,9 @@ alwaysApply: true
 
 - 临床 Excel：`OEP00000155_样本_Human_1786804447300.xlsx`（`readxl`）
 - 表达 CSV：`FUSCCTNBC_Expression_RNAseqFPKM.csv`（`fread`，不要 `read_excel`）
+- GO 基因：优先本地 `go_genesets.tsv`（不要依赖 QuickGO；国内常下到 0 个基因）
+
+不要把 `sample_name`（如 FUSCCTNBC001）当成分型列。分型必须是 LAR/IM/BLIS/MES 或三阴性/HER2阳性等。NODE 样本表若没有 OS/RFS，跳过预后气泡图并继续做分型与负相关基因。
 
 分型优先 Fudan TNBC（LAR / IM / BLIS / MES），不要把 BLIS 误标成 TNBC。每个 GO **单独**取基因、打分、统计；禁止合并 17 条通路。通路活性 = 该 GO 基因 z-score 均值。表达用 `log2(FPKM+1)`。不要加载 `GSVA`、`SummarizedExperiment`、`heatmaps`。向量用小写 `c()`。
 

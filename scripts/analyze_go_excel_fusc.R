@@ -14,7 +14,8 @@
 # 2. RStudio：Session -> Restart R
 # 3. 控制台先运行：setwd("E:/R/FUSC"); getwd(); list.files()
 # 4. 打开本文件，点 Source（整份运行）。不要从中间逐行粘贴。
-# 5. 不要把 17 个 GO 的基因合并后再打分
+# 5. 把 scripts/go_genesets.tsv 与本脚本一起放到 E:/R/FUSC（避免 QuickGO 下到 0 个基因）
+# 6. 不要把 17 个 GO 的基因合并后再打分
 # ====================================================================
 ################################################################################
 
@@ -45,9 +46,17 @@ if (dir.exists(work_dir)) {
   message("未找到 ", work_dir, " ，改用当前工作目录：", getwd())
   work_dir <- getwd()
 }
-message("当前工作目录：", getwd())
+this_script_dir <- (function() {
+  ofile <- tryCatch(sys.frame(1)$ofile, error = function(e) NULL)
+  if (!is.null(ofile) && nzchar(ofile)) return(dirname(normalizePath(ofile)))
+  ca <- commandArgs(trailingOnly = FALSE)
+  f <- sub("^--file=", "", ca[startsWith(ca, "--file=")])
+  if (length(f)) return(dirname(normalizePath(f[[1]])))
+  if (file.exists("/workspace/scripts")) return("/workspace/scripts")
+  getwd()
+})()
 
-min_pathway_genes <- 2
+min_pathway_genes <- 1
 min_clin_n <- 6
 min_group_n <- 2
 min_surv_n <- 10
@@ -172,8 +181,14 @@ read_table_dt <- function(path) {
   ext <- file_ext_lower(path)
   if (ext %in% c("xlsx", "xls")) {
     sheets <- tryCatch(excel_sheets(path), error = function(e) "Sheet1")
-    dt <- as.data.table(read_excel(path, sheet = sheets[[1]], .name_repair = "minimal"))
-    return(drop_empty_cols(dt))
+    message("Excel 工作表：", paste(sheets, collapse = ", "))
+    tabs <- lapply(sheets, function(sh) {
+      drop_empty_cols(as.data.table(read_excel(path, sheet = sh, .name_repair = "minimal")))
+    })
+    names(tabs) <- sheets
+    tabs <- tabs[vapply(tabs, function(x) is.data.table(x) && ncol(x) > 0 && nrow(x) > 0, logical(1))]
+    if (!length(tabs)) stop("Excel 为空：", path)
+    return(tabs[[which.max(vapply(tabs, ncol, integer(1)))]])
   }
   dt <- tryCatch(fread(path, data.table = TRUE, showProgress = FALSE), error = function(e) NULL)
   if (is.null(dt) || !ncol(dt)) {
@@ -358,7 +373,7 @@ normalize_subtype_label <- function(x) {
   out[is.na(out) & grepl("\\bBLIS\\b|basal-like immune|基底样免疫抑制", raw, ignore.case = TRUE)] <- "BLIS"
   out[is.na(out) & grepl("\\bMES\\b|mesenchymal|间充质", raw, ignore.case = TRUE)] <- "MES"
   out[is.na(out) & grepl("\\bIM\\b|immunomodulatory|免疫调节", raw, ignore.case = TRUE)] <- "IM"
-  out[is.na(out) & grepl("三阴|TNBC", raw, ignore.case = TRUE)] <- "TNBC"
+  out[is.na(out) & grepl("三阴|(^|[^A-Za-z])TNBC([^A-Za-z]|$)", raw, ignore.case = TRUE)] <- "TNBC"
   out[is.na(out) & grepl("HER2\\s*\\+|HER2阳性|Her2-?enr|HER2_pos", raw, ignore.case = TRUE) &
         !grepl("luminal|腔面|HR\\+|LAR", raw, ignore.case = TRUE)] <- "HER2+"
   out[is.na(out) & grepl("LumA|Luminal\\s*A|腔面\\s*A", raw, ignore.case = TRUE)] <- "Luminal A"
@@ -368,26 +383,42 @@ normalize_subtype_label <- function(x) {
   out
 }
 
+id_like_name <- function(nm) {
+  grepl("sample_name|sampleid|sample_id|^sample$|^patient$|barcode|submitter|^id$|样本名称|样品名称|样本编号|病人编号|^name$",
+        nm, ignore.case = TRUE)
+}
+
 guess_subtype_column <- function(clin) {
   named <- pick_col(clin, c(
     "subtype", "Subtype", "PAM50", "pam50", "BRCA_Subtype_PAM50",
     "molecular_subtype", "IHC_subtype", "Fudan_subtype", "TNBC_subtype",
-    "mRNA_subtype", "分型", "亚型", "分子分型", "乳腺癌分型", "转录组分型"
+    "mRNA_subtype", "FUSCC_subtype", "分型", "亚型", "分子分型", "乳腺癌分型", "转录组分型"
   ))
-  if (!is.null(named)) return(named)
-  rx <- "LAR|BLIS|\\bIM\\b|\\bMES\\b|三阴|TNBC|HER2|Luminal|腔面"
-  char_cols <- names(clin)[vapply(clin, function(x) is.character(x) || is.factor(x), logical(1))]
-  char_cols <- setdiff(char_cols, c("sample_id"))
-  best <- NULL
-  best_n <- 0
-  for (cc in char_cols) {
-    n <- sum(grepl(rx, as.character(clin[[cc]])), na.rm = TRUE)
-    if (n > best_n) {
-      best_n <- n
-      best <- cc
-    }
+  if (!is.null(named) && !id_like_name(named)) return(named)
+
+  score_col <- function(cc) {
+    if (id_like_name(cc) || identical(cc, "sample_id")) return(-1)
+    x <- as.character(clin[[cc]])
+    x <- x[!is.na(x) & x != ""]
+    if (length(x) < min_clin_n) return(-1)
+    if (uniqueN(x) > 0.5 * length(x)) return(-1)  # 像 ID
+    mapped <- unique(na.omit(normalize_subtype_label(x)))
+    fudan <- sum(mapped %in% c("LAR", "IM", "BLIS", "MES"))
+    ihc <- sum(mapped %in% c("TNBC", "HER2+", "Luminal A", "Luminal B", "Luminal",
+                             "Luminal (HR+/HER2-)", "Luminal-HER2 (HR+/HER2+)"))
+    if (fudan >= 2) return(100 + fudan)
+    if (ihc >= 2) return(50 + ihc)
+    -1
   }
-  if (!is.null(best) && best_n >= min_clin_n) best else NULL
+  scores <- vapply(names(clin), score_col, numeric(1))
+  if (max(scores) <= 0) return(NULL)
+  names(clin)[which.max(scores)]
+}
+
+guess_surv_pair <- function(clin, time_cands, event_cands) {
+  time_col <- pick_col(clin, time_cands)
+  event_col <- pick_col(clin, event_cands)
+  list(time = time_col, event = event_col)
 }
 
 parse_event <- function(ev) {
@@ -396,11 +427,13 @@ parse_event <- function(ev) {
 }
 
 prepare_clinical <- function(clin) {
+  message("临床表列名：", paste(names(clin), collapse = " | "))
   id_col <- pick_col(clin, c(
     "sample", "sampleID", "Sample", "SampleName", "sample_name", "patient", "Patient",
     "ID", "id", "bcr_patient_barcode", "submitter_id",
     "样本", "样本名称", "样品名称", "样本编号", "病人", "病人编号", names(clin)[1]
   ))
+  message("样本 ID 列：", id_col)
   clin[, sample_id := normalize_id(get(id_col))]
   clin <- clin[!is.na(sample_id) & sample_id != "" & !duplicated(sample_id)]
 
@@ -408,32 +441,35 @@ prepare_clinical <- function(clin) {
   if (!is.null(sub_col)) {
     message("分型列：", sub_col)
     clin[, subtype := normalize_subtype_label(get(sub_col))]
+    message("  分型取值：", paste(sort(unique(na.omit(clin$subtype))), collapse = ", "))
   } else {
+    message("未找到分子分型列（LAR/IM/BLIS/MES 或三阴性/HER2阳性）。sample_name 不会再被当成分型。")
     clin[, subtype := NA_character_]
   }
   derived <- derive_ihc_subtype(clin)
   clin[, subtype := fifelse(is.na(subtype) | subtype == "", derived, subtype)]
 
-  time_col <- pick_col(clin, c(
-    "OS.time", "OS_time", "os_time", "_OS", "overall_survival_time", "OS_months",
-    "生存时间", "总生存时间", "OS时间", "随访时间", "days_to_death", "days_to_last_followup"
-  ))
-  event_col <- pick_col(clin, c(
-    "OS", "OS.event", "os_event", "_EVENT", "event", "status", "vital_status",
-    "生存状态", "死亡", "预后", "结局", "死亡状态"
-  ))
-  if (!is.null(time_col)) clin[, os_time := as.numeric(get(time_col))]
-  if (!is.null(event_col)) clin[, os_event := parse_event(get(event_col))]
+  os <- guess_surv_pair(
+    clin,
+    c("OS.time", "OS_time", "os_time", "_OS", "overall_survival_time", "OS_months", "OS.months",
+      "生存时间", "总生存时间", "OS时间", "随访时间", "days_to_death", "days_to_last_followup",
+      "Overall Survival Time", "os_month"),
+    c("OS", "OS.event", "os_event", "_EVENT", "OS.status", "vital_status",
+      "生存状态", "死亡", "死亡状态", "Overall Survival", "os_status")
+  )
+  if (!is.null(os$time)) clin[, os_time := as.numeric(get(os$time))]
+  if (!is.null(os$event)) clin[, os_event := parse_event(get(os$event))]
 
-  rfs_time_col <- pick_col(clin, c(
-    "RFS.time", "RFS_time", "DFS.time", "DFS_time", "PFS.time", "DFI.time",
-    "无病生存时间", "无复发生存时间", "复发时间"
-  ))
-  rfs_event_col <- pick_col(clin, c(
-    "RFS", "RFS.event", "DFS", "DFS.event", "PFS", "复发", "复发生存状态", "无病生存状态"
-  ))
-  if (!is.null(rfs_time_col)) clin[, rfs_time := as.numeric(get(rfs_time_col))]
-  if (!is.null(rfs_event_col)) clin[, rfs_event := parse_event(get(rfs_event_col))]
+  rfs <- guess_surv_pair(
+    clin,
+    c("RFS.time", "RFS_time", "DFS.time", "DFS_time", "PFS.time", "DFI.time",
+      "RFS.months", "RFS_months", "无病生存时间", "无复发生存时间", "复发时间",
+      "Relapse Free Survival Time", "rfs_month"),
+    c("RFS", "RFS.event", "DFS", "DFS.event", "PFS", "RFS.status",
+      "复发", "复发生存状态", "无病生存状态", "Relapse", "rfs_status")
+  )
+  if (!is.null(rfs$time)) clin[, rfs_time := as.numeric(get(rfs$time))]
+  if (!is.null(rfs$event)) clin[, rfs_event := parse_event(get(rfs$event))]
   clin
 }
 
@@ -544,9 +580,18 @@ fetch_quickgo_one <- function(go_id) {
   tmp <- tempfile(fileext = ".tsv")
   ok <- FALSE
   if (nzchar(Sys.which("curl"))) {
-    st <- suppressWarnings(system2("curl", c("-sL", "-H", "Accept: text/tsv", "--fail", "-o", tmp, q),
-                                   stdout = FALSE, stderr = FALSE))
+    st <- suppressWarnings(system2(
+      "curl",
+      c("-sL", "-H", "Accept: text/tsv", "--fail", "--max-time", "60", "-o", tmp, q),
+      stdout = FALSE, stderr = FALSE
+    ))
     ok <- identical(st, 0L) && file.exists(tmp) && isTRUE(file.info(tmp)$size > 20)
+  }
+  if (!ok) {
+    ok <- tryCatch({
+      download.file(q, tmp, mode = "wb", quiet = TRUE, headers = c(Accept = "text/tsv"))
+      file.exists(tmp) && isTRUE(file.info(tmp)$size > 20)
+    }, error = function(e) FALSE)
   }
   if (!ok) return(character(0))
   dt <- tryCatch(fread(tmp, sep = "\t"), error = function(e) NULL)
@@ -556,17 +601,33 @@ fetch_quickgo_one <- function(go_id) {
   unique(na.omit(as.character(dt[[sym_col]])))
 }
 
+find_go_geneset_file <- function() {
+  dirs <- unique(c(
+    this_script_dir,
+    file.path(this_script_dir, "..", "data"),
+    file.path(this_script_dir, "data"),
+    "data", "scripts",
+    work_dir,
+    getwd()
+  ))
+  hits <- unlist(lapply(dirs, function(d) {
+    d <- tryCatch(normalizePath(d, mustWork = FALSE), error = function(e) d)
+    if (!dir.exists(d)) return(character(0))
+    list.files(d, pattern = "go_genesets\\.(tsv|txt|csv|xlsx|xls|gmt)$",
+               full.names = TRUE, ignore.case = TRUE)
+  }), use.names = FALSE)
+  hits <- unique(hits[file.exists(hits)])
+  if (!length(hits)) return(NULL)
+  hits[[1]]
+}
+
 load_go_genesets <- function(wanted) {
-  local_hits <- list.files(
-    ".",
-    pattern = "go_genesets\\.(tsv|txt|csv|xlsx|xls|gmt)$",
-    full.names = TRUE, ignore.case = TRUE
-  )
-  if (length(local_hits)) {
-    message("使用本地基因集：", local_hits[[1]])
-    return(read_local_genesets(local_hits[[1]], wanted))
+  local_hit <- find_go_geneset_file()
+  if (!is.null(local_hit)) {
+    message("使用本地基因集：", local_hit)
+    return(read_local_genesets(local_hit, wanted))
   }
-  message("从 QuickGO 逐个下载 GO 基因（含子术语）")
+  message("未找到 go_genesets.tsv，尝试 QuickGO（国内网络常失败）")
   out <- lapply(wanted, function(x) character(0))
   names(out) <- wanted
   n_ok <- 0L
@@ -583,8 +644,7 @@ load_go_genesets <- function(wanted) {
     message("  ", go_id, ": ", length(out[[go_id]]), " 个基因")
   }
   if (!n_ok) {
-    stop("无法获取 GO 基因。请在 ", getwd(),
-         " 放置 go_genesets.tsv（列：GO_ID, symbol）后重跑。")
+    stop("无法获取 GO 基因。请把 scripts/go_genesets.tsv 复制到 E:/R/FUSC 后重跑。")
   }
   out
 }
@@ -646,6 +706,11 @@ message("匹配样本数：", length(common),
         "；分型非空：", sum(!is.na(clin$subtype)),
         "；有 OS：", if ("os_time" %in% names(clin)) sum(is.finite(clin$os_time)) else 0,
         "；有 RFS：", if ("rfs_time" %in% names(clin)) sum(is.finite(clin$rfs_time)) else 0)
+if (!("os_time" %in% names(clin) && sum(is.finite(clin$os_time)) > 0) &&
+    !("rfs_time" %in% names(clin) && sum(is.finite(clin$rfs_time)) > 0)) {
+  message("NODE 样本表里没有识别到 OS/RFS 列。将跳过预后气泡图，仍做分型与负相关基因。")
+  message("若有生存表，请把含 OS.time/OS 或 RFS.time/RFS 的列并入该 Excel 后重跑。")
+}
 
 # ---------------------------------------------------------------------------
 # GO 基因集 + 每个通路单独打分
@@ -659,6 +724,9 @@ go_sizes <- rbindlist(lapply(go_ids, function(g) {
   )
 }))
 fwrite(go_sizes, file.path(out_dir, "00_GO_gene_set_sizes.csv"))
+if (mean(grepl("^ENSG", rownames(expr))) > 0.5) {
+  message("表达矩阵行名看起来是 Ensembl ID，GO 基因集是 SYMBOL。请把 FPKM 行名改成基因名，否则通路基因对不上。")
+}
 
 usable <- go_sizes$GO[go_sizes$n_in_expr >= min_pathway_genes]
 skipped <- setdiff(go_ids, usable)
