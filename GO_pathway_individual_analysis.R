@@ -78,6 +78,11 @@ go_name_map <- c(
 # 若要加新通路：先写进 go_list 和 go_name_map，再保持 go_to_run <- go_list
 go_to_run <- go_list
 # ★★★ 已修改结束 ★★★
+#
+# 若 per_GO 里只有 GO_0007409 和 GO_0023041，把下面两行【一起】贴到控制台补跑其余 15 个。
+# 不要再逐行粘贴 for 循环内部（next、score、Heatmap 那些）。
+#   go_to_run <- setdiff(go_list, c("GO:0007409", "GO:0023041"))
+#   run_go_individual_analysis()
 
 ## 1. 加载包 --------------------------------------------------
 # 数据处理
