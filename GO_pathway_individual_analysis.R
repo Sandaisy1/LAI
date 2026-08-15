@@ -16,7 +16,8 @@
 #   6) 热图绘制：必须用 ComplexHeatmap::Heatmap，避免被 heatmaps::Heatmap 覆盖
 #   7) OS 森林图：ggplot2 4.0 用 geom_errorbar(orientation="y")，不要漏掉行末 +
 #   8) 多个 GO：已写在 go_list；用 go_to_run 控制本次跑哪些
-#   9) 设完 go_to_run 不会自动分析，必须再运行 run_go_individual_analysis()
+#   9) 设完 go_to_run 后：先 source("run_go_individual_analysis.R")，再 run_go_individual_analysis()
+#      两个 .R 文件必须都放在 E:/R/BRCA
 # ============================================================
 
 ## 0. 可调参数 ------------------------------------------------
