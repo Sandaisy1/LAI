@@ -1207,3 +1207,178 @@ if (identical(run_mode, "bubbles_only")) {
   go_to_run <- go_list
   run_go_individual_analysis()
 }
+
+# ==============================================================================
+# 第九部分（追加，不改上面已有代码）：
+# 5 个神经/轴突 GO 与肿瘤增殖、转移通路的相关性气泡图
+# 横轴：肿瘤增殖 / 转移信号通路
+# 纵轴：下面 5 个 GO 与各肿瘤通路的 Spearman 相关
+#   GO:2001222  regulation of neuron migration
+#   GO:1904340  positive regulation of dopaminergic neuron differentiation
+#   GO:1902667  regulation of axon guidance
+#   GO:0097374  sensory neuron axon guidance
+#   GO:0036518  chemorepulsion of dopaminergic neuron axon
+# 需要已经有表达矩阵 expr（上面分析跑完即可）。也可单独选中本段运行。
+# ==============================================================================
+focus5_go_map <- c(
+  "GO:2001222" = "regulation of neuron migration",
+  "GO:1904340" = "positive regulation of dopaminergic neuron differentiation",
+  "GO:1902667" = "regulation of axon guidance",
+  "GO:0097374" = "sensory neuron axon guidance",
+  "GO:0036518" = "chemorepulsion of dopaminergic neuron axon"
+)
+
+tumor_path_dt <- data.table(
+  GO = c(
+    "GO:0008283", "GO:0008284", "GO:0007049", "GO:0051301",
+    "GO:0006260", "GO:0000082", "GO:0045787",
+    "GO:0016477", "GO:0030335", "GO:0001837", "GO:0001525",
+    "GO:0045766", "GO:0030198", "GO:0007155", "GO:0001666",
+    "GO:0000165", "GO:0016055", "GO:0007179", "GO:0048015"
+  ),
+  path_name = c(
+    "cell proliferation",
+    "pos. reg. of cell proliferation",
+    "cell cycle",
+    "cell division",
+    "DNA replication",
+    "G1/S transition",
+    "pos. reg. of cell cycle",
+    "cell migration",
+    "pos. reg. of cell migration",
+    "EMT",
+    "angiogenesis",
+    "pos. reg. of angiogenesis",
+    "ECM organization",
+    "cell adhesion",
+    "response to hypoxia",
+    "MAPK cascade",
+    "Wnt signaling",
+    "TGF-beta receptor signaling",
+    "PI3K-mediated signaling"
+  ),
+  category = c(
+    rep("增殖", 7),
+    rep("转移", 12)
+  )
+)
+
+plot_focus5_vs_tumor_pathways <- function() {
+  if (!exists("expr", inherits = TRUE) || is.null(get("expr", inherits = TRUE))) {
+    stop("还没有表达矩阵 expr。请先跑完上面的分析，或从脚本开头 Source 到数据预处理结束，再运行本段。")
+  }
+  expr_use <- get("expr", inherits = TRUE)
+  res_dir <- if (exists("out_dir", inherits = TRUE)) {
+    normalizePath(out_dir, mustWork = FALSE)
+  } else {
+    "results_GO_individual"
+  }
+  dir.create(res_dir, showWarnings = FALSE, recursive = TRUE)
+
+  get_score_one <- function(go_id) {
+    score_file <- file.path(res_dir, "01_pathway_scores_each_GO.csv")
+    if (file.exists(score_file)) {
+      sm <- fread(score_file)
+      if (go_id %in% names(sm)) {
+        v <- as.numeric(sm[[go_id]])
+        names(v) <- as.character(sm$sample)
+        return(v)
+      }
+    }
+    genes <- unique(get_go_genes(go_id)$SYMBOL)
+    sc <- tryCatch(pathway_zmean(expr_use, genes), error = function(e) NULL)
+    sc
+  }
+
+  message("计算 5 个关注 GO 的通路分数...")
+  focus_scores <- lapply(names(focus5_go_map), get_score_one)
+  names(focus_scores) <- names(focus5_go_map)
+  n_ok <- vapply(focus_scores, function(x) is.numeric(x) && length(x) > 0, logical(1))
+  if (!any(n_ok)) stop("5 个关注 GO 都没有得到通路分数")
+  for (g in names(focus_scores)[!n_ok]) {
+    message("  跳过（无基因或打分失败）：", g, " | ", unname(focus5_go_map[g]))
+  }
+
+  message("计算肿瘤增殖/转移通路分数...")
+  tumor_scores <- lapply(tumor_path_dt$GO, get_score_one)
+  names(tumor_scores) <- tumor_path_dt$GO
+  t_ok <- vapply(tumor_scores, function(x) is.numeric(x) && length(x) > 0, logical(1))
+  if (!any(t_ok)) stop("肿瘤增殖/转移通路都没有得到通路分数")
+  for (g in names(tumor_scores)[!t_ok]) {
+    message("  跳过肿瘤通路（无基因或打分失败）：", g, " | ", tumor_path_dt[GO == g, path_name])
+  }
+
+  cor_two <- function(a, b) {
+    common <- intersect(names(a), names(b))
+    if (length(common) < 10) return(NULL)
+    aa <- as.numeric(a[common])
+    bb <- as.numeric(b[common])
+    keep <- is.finite(aa) & is.finite(bb)
+    if (sum(keep) < 10) return(NULL)
+    ct <- suppressWarnings(cor.test(aa[keep], bb[keep], method = "spearman", exact = FALSE))
+    data.table(spearman_r = unname(ct$estimate), pvalue = ct$p.value, n = sum(keep))
+  }
+
+  cor_rows <- list()
+  for (fg in names(focus_scores)[n_ok]) {
+    for (tg in names(tumor_scores)[t_ok]) {
+      one <- cor_two(focus_scores[[fg]], tumor_scores[[tg]])
+      if (is.null(one)) next
+      one[, `:=`(
+        focus_GO = fg,
+        focus_name = unname(focus5_go_map[fg]),
+        tumor_GO = tg,
+        tumor_name = tumor_path_dt[GO == tg, path_name],
+        category = tumor_path_dt[GO == tg, category]
+      )]
+      cor_rows[[paste(fg, tg, sep = "_")]] <- one
+    }
+  }
+  cor_dt <- rbindlist(cor_rows, fill = TRUE)
+  if (nrow(cor_dt) == 0) stop("没有算出任何通路-通路相关")
+  cor_dt[, fdr := p.adjust(pvalue, method = "BH")]
+  cor_dt[, neglogp := pmin(10, -log10(pmax(pvalue, 1e-12)))]
+  cor_dt[, focus_lab := factor(
+    paste0(focus_GO, "\n", focus_name),
+    levels = rev(paste0(names(focus5_go_map), "\n", unname(focus5_go_map)))
+  )]
+  cor_dt[, tumor_lab := factor(tumor_name, levels = tumor_path_dt$path_name)]
+  cor_dt[, category := factor(category, levels = c("增殖", "转移"))]
+  fwrite(cor_dt, file.path(res_dir, "08_focus5GO_vs_prolif_met_correlation.csv"))
+
+  lim <- max(0.3, as.numeric(stats::quantile(abs(cor_dt$spearman_r), 0.98, na.rm = TRUE)), na.rm = TRUE)
+  p_bub <- ggplot(cor_dt, aes(x = tumor_lab, y = focus_lab, size = neglogp, color = spearman_r)) +
+    geom_point(alpha = 0.9) +
+    facet_grid(. ~ category, scales = "free_x", space = "free_x") +
+    scale_size_continuous(range = c(2, 11), name = expression(-log[10](p))) +
+    scale_color_gradient2(
+      low = "#3C5488", mid = "grey90", high = "#E64B35",
+      midpoint = 0, limits = c(-lim, lim), name = "Spearman r"
+    ) +
+    labs(
+      title = "5 个 GO 通路与肿瘤增殖、转移通路的相关性",
+      subtitle = "每个通路单独打分后做 Spearman；未把 GO 基因集合并",
+      x = "肿瘤增殖 / 转移信号通路",
+      y = "关注的 5 个 GO 通路"
+    ) +
+    theme_bw(base_size = 11) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      axis.text.y = element_text(size = 8),
+      strip.background = element_rect(fill = "grey95"),
+      panel.grid.major.x = element_blank()
+    )
+  pdf_out <- file.path(res_dir, "08_focus5GO_vs_prolif_met_bubble.pdf")
+  ggsave(pdf_out, p_bub, width = 13, height = 6.2)
+  ggsave(file.path(res_dir, "08_focus5GO_vs_prolif_met_bubble.png"), p_bub, width = 13, height = 6.2, dpi = 150)
+  message("已保存：", pdf_out)
+  print(p_bub)
+  invisible(cor_dt)
+}
+
+if (exists("expr", inherits = TRUE) && !is.null(get("expr", inherits = TRUE))) {
+  plot_focus5_vs_tumor_pathways()
+} else {
+  message("没有 expr，跳过 5 个 GO 与增殖/转移通路气泡图。有表达矩阵后运行：plot_focus5_vs_tumor_pathways()")
+}
+
