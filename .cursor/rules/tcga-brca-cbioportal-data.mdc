@@ -1,0 +1,23 @@
+---
+description: TCGA BRCA Nature 2012 cBioPortal 数据路径与文件约定
+alwaysApply: true
+---
+
+# 数据位置（必须遵守）
+
+cBioPortal 研究 **Breast Invasive Carcinoma (TCGA, Nature 2012)**（`brca_tcga_pub`）已下载到：
+
+`E:/R/TCGA_BRCA`
+
+后续 R 脚本、缓存、结果都写在这个目录，不要改用 Xena / GDC 文件名。
+
+## 主要文件（扩展名可能被隐藏）
+
+- `data_clinical_patient` / `data_clinical_sample`：临床（含 `PAM50_SUBTYPE`、`METASTASIS`=M0/M1、`NODES`=N0–N3）
+- `data_subtypes`、`case_lists/cases_basal|her2|luma|lumb|claudin|luminal`
+- `data_mrna_agilent_microarray`：表达（优先于 `*_zscores*`）
+- 读临床时跳过 `#` 注释行；表达矩阵用 `Hugo_Symbol`，`check.names = FALSE`
+
+## 临床事实
+
+本队列几乎全是原发灶。无骨/肺/肝/脑等解剖转移部位；转移分析用 M（远处）与 N（淋巴结）分期。
