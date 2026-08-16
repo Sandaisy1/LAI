@@ -1,0 +1,31 @@
+---
+description: 按每个 GO 独立做分型/转移气泡图与负相关基因，禁止合并通路
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: false
+---
+
+# 每个 GO 独立分析（禁止合并）
+
+GO ID 以 `scripts/analyze_go_subtype_metastasis.R` 的 `GO_IDS` 为准（用户写的 `GO_2001224s` 视为 `GO:2001224`）。
+
+禁止把全部 GO 基因取并集、对通路得分再平均/PCA，或只报告“所有神经元通路”一条结果。
+
+```r
+# ❌ BAD
+score <- colMeans(expr[unique(unlist(go_genesets)), , drop = FALSE])
+
+# ✅ GOOD
+for (gid in GO_IDS) {
+  score_i <- mean_z_score(expr, go_genesets[[gid]])  # 仅本通路
+  assoc_i <- test_subtype_metastasis(score_i, clinical)
+  neg_i   <- spearman_negative(score_i, expr)        # rho<0 且 BH-FDR<0.05
+  write_results(gid, assoc_i, neg_i)
+}
+```
+
+## 固定做法
+
+1. 每个 GO 单独从 QuickGO 取基因（含 descendants），缓存到 `E:/R/TCGA_BRCA/cache/go_genes/`。表达矩阵中基因数 < 2 则跳过并记录，不并入其他通路。不用 `AnnotationDbi` / `GSVA`。
+2. 通路得分 = 通路内基因跨样本 z-score 后取均值。
+3. 分型、转移（M0/M1、N0–N3）各自检验，画气泡图：点大小 `-log10(p)`，颜色 = 该组 vs 对照的得分差。
+4. 负相关基因表必须带 `go_id` 列；总表不能替代逐通路文件。
