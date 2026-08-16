@@ -1219,7 +1219,74 @@ if (identical(run_mode, "bubbles_only")) {
 #   GO:0097374  sensory neuron axon guidance
 #   GO:0036518  chemorepulsion of dopaminergic neuron axon
 # 需要已经有表达矩阵 expr（上面分析跑完即可）。也可单独选中本段运行。
+# 若只跑本段、会话里没有 get_go_genes，下面会自动补上。
 # ==============================================================================
+if (!exists("min_pathway_genes")) min_pathway_genes <- 1L
+if (!exists("get_go_genes", mode = "function")) {
+  message("当前会话没有 get_go_genes，使用本段内的定义")
+  library(org.Hs.eg.db)
+  library(AnnotationDbi)
+  library(data.table)
+  get_go_genes <- function(go_id) {
+    pick <- function(keytype) {
+      tryCatch(
+        AnnotationDbi::select(
+          org.Hs.eg.db,
+          keys = go_id,
+          keytype = keytype,
+          columns = c("SYMBOL", "ENSEMBL", "ENTREZID")
+        ),
+        error = function(e) NULL
+      )
+    }
+    res <- suppressMessages(pick("GOALL"))
+    if (is.null(res) || nrow(res) == 0) res <- suppressMessages(pick("GO"))
+    extra <- tryCatch({
+      go2eg <- as.list(org.Hs.eg.db::org.Hs.egGO2ALLEGS)
+      eg <- unique(as.character(go2eg[[go_id]]))
+      if (length(eg) == 0) {
+        NULL
+      } else {
+        suppressMessages(AnnotationDbi::select(
+          org.Hs.eg.db, keys = eg, keytype = "ENTREZID",
+          columns = c("SYMBOL", "ENSEMBL")
+        ))
+      }
+    }, error = function(e) NULL)
+    if (!is.null(extra) && nrow(extra) > 0) {
+      extra <- as.data.table(extra)
+      extra[, GO := go_id]
+      res <- if (is.null(res) || nrow(res) == 0) extra else rbind(as.data.table(res), extra, fill = TRUE)
+    }
+    if (is.null(res) || nrow(res) == 0) {
+      return(data.table(GO = go_id, SYMBOL = character(), ENSEMBL = character(), ENTREZID = character()))
+    }
+    res <- as.data.table(res)
+    if ("GOALL" %in% names(res)) setnames(res, "GOALL", "GO", skip_absent = TRUE)
+    if (!"GO" %in% names(res)) res[, GO := go_id]
+    unique(res[!is.na(SYMBOL) & SYMBOL != "", .(GO, SYMBOL, ENSEMBL, ENTREZID)])
+  }
+}
+if (!exists("pathway_zmean", mode = "function")) {
+  message("当前会话没有 pathway_zmean，使用本段内的定义")
+  pathway_zmean <- function(expr_mat, genes) {
+    genes <- unique(intersect(as.character(genes), rownames(expr_mat)))
+    if (length(genes) < min_pathway_genes) return(NULL)
+    sub <- as.matrix(expr_mat[genes, , drop = FALSE])
+    storage.mode(sub) <- "double"
+    gene_mean <- rowMeans(sub, na.rm = TRUE)
+    gene_sd <- sqrt(rowMeans((sub - gene_mean)^2, na.rm = TRUE))
+    gene_sd[!is.finite(gene_sd) | gene_sd < 1e-12] <- 1
+    z <- (sub - gene_mean) / gene_sd
+    z[!is.finite(z)] <- 0
+    sc <- colMeans(z, na.rm = TRUE)
+    names(sc) <- colnames(sub)
+    attr(sc, "n_genes") <- length(genes)
+    attr(sc, "genes") <- genes
+    sc
+  }
+}
+
 focus5_go_map <- c(
   "GO:2001222" = "regulation of neuron migration",
   "GO:1904340" = "positive regulation of dopaminergic neuron differentiation",
