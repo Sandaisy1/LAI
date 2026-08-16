@@ -1,0 +1,24 @@
+---
+description: 五个指定 GO 与肿瘤增殖/转移通路的相关性气泡图（附加脚本，不改主分析）
+globs:
+  - "**/*.R"
+  - "**/*.r"
+alwaysApply: false
+---
+
+# 附加气泡图：5 个 GO vs 增殖/转移
+
+不要改 `analyze_go_excel_fusc.R`。新增脚本：`scripts/plot_go_vs_prolif_metastasis.R`。
+
+- Y：`GO:2001222`, `GO:1904340`, `GO:1902667`, `GO:0097374`, `GO:0036518`（每个单独打分）
+- X：增殖（`GO:0008283`/`0008284`/`0000278`）与转移（`GO:0016477`/`0030335`/`0001837`/`0001525`）
+- 样本间通路活性做 Spearman；气泡图 x=增殖/转移通路，y=五个 GO，点大小=`-log10(p)`，颜色=ρ
+- 基因集：`go_genesets_prolif_meta.tsv`。禁止把多个 GO 合并后再相关。
+
+```r
+# ❌ BAD
+score <- colMeans(expr[unique(unlist(all_sets)), ])
+
+# ✅ GOOD：每个 GO 单独分数，再两两 Spearman
+for (y in y_go) for (x in x_go) cor.test(score_y[[y]], score_x[[x]], method = "spearman")
+```

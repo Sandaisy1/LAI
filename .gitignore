@@ -1,0 +1,9 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+results*/
+cache_GO/
+*.xlsx
+!scripts/**
+.DS_Store
