@@ -1,0 +1,34 @@
+---
+description: NTC / TG_sh1 / TG_sh5 细胞 RNA-seq：从 Cuffdiff 重建矩阵，做两两 vs NTC 以及 sh1+sh5 平均 vs NTC 的差异基因、火山图与 GO
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# TG knockdown vs NTC（Cuffdiff / 细胞 RNA-seq）
+
+数据与 R 脚本目录：`E:/R/TG_BRCA/TG`。组别：**NTC（对照）、TG_sh1、TG_sh5**。物种：`org.Hs.eg.db`。
+Excel `shTG(20220723)` **只有 NTC vs TG_sh1**，不能做 TG_sh5 或合并分析。优先 `genes.read_group_tracking` 重建矩阵。没有 FASTQ/BAM 时不要声称能重跑比对。
+
+## 必须做的两种分析（都要 DEG + 火山图 + GO）
+
+1. **分别比较**：`TG_sh1 vs NTC`，以及 `TG_sh5 vs NTC`。各出一套结果，禁止只做其中一组。
+2. **合并平均**：每个基因 `TG_avg = (mean(TG_sh1) + mean(TG_sh5)) / 2`（两个 shRNA 等权，不按样本数加权）。差异检验用两列 `TG_sh1_mean`、`TG_sh5_mean` 对 NTC 各重复。禁止平均成 1 列再当单样本做 DESeq2；Excel 不能做本分析。
+
+```r
+# ❌ BAD：只读 Excel（没有 TG_sh5）；或只做 sh1
+deg <- readxl::read_excel("shTG(20220723)")
+
+# ✅ GOOD：tracking 重建后，两种分析都跑
+# 1) TG_sh1 vs NTC；TG_sh5 vs NTC
+# 2) TG_avg <- (rowMeans(sh1) + rowMeans(sh5)) / 2
+#    DESeq2 列：NTC 重复 + TG_sh1_mean + TG_sh5_mean
+```
+
+## 输入与阈值
+
+- `genes.read_group_tracking`：样本级 `raw_frags` / FPKM；`read_groups.info`；`genes.fpkm_tracking`（symbol）
+- `gene_exp.diff` 仅作 pairwise 回退（Excel 同样只能回退 sh1 vs NTC）
+- 计数给 DESeq2，NTC 为参考；每组 <2 重复则该对比回退 Cuffdiff/简单检验
+- 火山图：x=`log2FC`，y=`-log10(padj)`；显著 `padj<0.05` 且 `|log2FC|>1`
+- GO：显著 SYMBOL→Entrez，`enrichGO`（BP/MF/CC）；`gene` 按逗号拆，丢掉 `-`
+- 结果分目录：`results/pairwise/TG_sh1_vs_NTC/`、`.../TG_sh5_vs_NTC/`、`results/pooled_avg/TG_sh1_sh5_avg_vs_NTC/`

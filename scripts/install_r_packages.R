@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# Install CRAN + Bioconductor packages used by tg_sh1_vs_ntc_deg_go.R
+# Install CRAN + Bioconductor packages used by tg_vs_ntc_deg_go.R
 
 cran <- c("data.table", "ggplot2", "ggrepel")
 bioc <- c("DESeq2", "clusterProfiler", "enrichplot", "org.Hs.eg.db")
