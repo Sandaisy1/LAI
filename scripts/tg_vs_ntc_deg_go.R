@@ -3,6 +3,7 @@
 #   从 Cuffdiff tracking 重建表达矩阵（不直接用 Excel）
 #   分析 1：TG_sh1 vs NTC、TG_sh5 vs NTC 各自 DEG + 火山图 + GO
 #   分析 2：TG_sh1 与 TG_sh5 组均值再平均，相对 NTC 做 DEG + 火山图 + GO
+#   GO 仅上调基因，按线性 FC>=1 / 1.25 / 1.5 / 2 四组分别富集
 #
 # 用法:
 #   Rscript scripts/tg_vs_ntc_deg_go.R [data_dir] [out_dir]
@@ -25,6 +26,8 @@ pooled_treat_label   <- "TG_sh1_sh5_avg"
 pooled_deseq_level   <- "TG"
 padj_cutoff          <- 0.05
 log2fc_cutoff        <- 1
+# GO：仅上调；线性 FC 阈值（1 倍 = FC>=1，不是 log2FC>=1）
+go_fc_cutoffs        <- c("up_FC1" = 1, "up_FC1.25" = 1.25, "up_FC1.5" = 1.5, "up_FC2" = 2)
 go_ontologies        <- c("BP", "MF", "CC")
 min_replicates       <- 2
 species_orgdb        <- "org.Hs.eg.db"
@@ -132,7 +135,17 @@ annotate_direction <- function(deg) {
   # 无 p 值时仍按 |log2FC| 标方向，便于平均后仅有倍数变化的情况
   deg[is.na(padj) & !is.na(log2FC) & log2FC >= log2fc_cutoff, direction := "Up"]
   deg[is.na(padj) & !is.na(log2FC) & log2FC <= -log2fc_cutoff, direction := "Down"]
+  deg[, fold_change := 2^log2FC]
   deg
+}
+
+select_up_by_fc <- function(deg, fc_cutoff) {
+  log2_cut <- log2(fc_cutoff)
+  up <- deg[!is.na(log2FC) & is.finite(log2FC) & log2FC >= log2_cut]
+  if ("padj" %in% names(up) && any(!is.na(up$padj))) {
+    up <- up[!is.na(padj) & padj < padj_cutoff]
+  }
+  up
 }
 
 plot_volcano <- function(deg, sig, title, pdf_path) {
@@ -198,32 +211,31 @@ plot_volcano <- function(deg, sig, title, pdf_path) {
 }
 
 run_go_analysis <- function(deg, sig, contrast_id, dest_dir) {
+  # GO 只用上调基因；线性 FC 四组各自富集，不用 sig 的上+下调合并集
+  invisible(sig)
+  need_pkg("ggplot2")
   need_pkg(c("clusterProfiler", "enrichplot", species_orgdb), bioc = TRUE)
   suppressPackageStartupMessages({
+    library(ggplot2)
     library(clusterProfiler)
     library(enrichplot)
     library(org.Hs.eg.db)
   })
   dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
 
-  gene_col <- if ("gene" %in% names(sig)) sig$gene else sig$tracking_id
-  uni_col  <- if ("gene" %in% names(deg)) deg$gene else deg$tracking_id
-  sig_symbols <- unique(split_cuff_genes(gene_col))
+  uni_col <- if ("gene" %in% names(deg)) deg$gene else deg$tracking_id
   universe_symbols <- unique(split_cuff_genes(uni_col))
-  if (!length(sig_symbols)) {
-    warning(contrast_id, ": 没有显著基因，跳过 GO")
-    return(invisible(NULL))
-  }
 
   map_ids <- function(symbols) {
+    if (!length(symbols)) {
+      return(data.frame(SYMBOL = character(), ENTREZID = character()))
+    }
     suppressMessages(bitr(
       symbols, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = species_orgdb
     ))
   }
-  sig_map <- map_ids(sig_symbols)
   uni_map <- map_ids(universe_symbols)
-  message(contrast_id, ": mapped ", nrow(sig_map), "/", length(sig_symbols), " symbols")
-  if (!nrow(sig_map)) return(invisible(NULL))
+  count_rows <- list()
 
   run_go <- function(entrez, ont, universe) {
     enrichGO(
@@ -239,40 +251,52 @@ run_go_analysis <- function(deg, sig, contrast_id, dest_dir) {
     )
   }
 
-  for (ont in go_ontologies) {
-    ego <- run_go(sig_map$ENTREZID, ont, uni_map$ENTREZID)
-    if (is.null(ego) || nrow(as.data.frame(ego)) == 0) {
-      message(contrast_id, " GO ", ont, ": no terms")
-      next
-    }
-    write_tsv(
-      as.data.table(as.data.frame(ego)),
-      file.path(dest_dir, paste0("GO_", ont, "_", contrast_id, ".tsv"))
-    )
-    pdf(file.path(dest_dir, paste0("GO_", ont, "_dotplot.pdf")), width = 8, height = 6)
-    print(dotplot(ego, showCategory = 15) + ggplot2::ggtitle(paste("GO", ont, contrast_id)))
-    dev.off()
-    pdf(file.path(dest_dir, paste0("GO_", ont, "_barplot.pdf")), width = 8, height = 6)
-    print(barplot(ego, showCategory = 15) + ggplot2::ggtitle(paste("GO", ont, contrast_id)))
-    dev.off()
-  }
+  for (tag in names(go_fc_cutoffs)) {
+    fc <- as.numeric(go_fc_cutoffs[[tag]])
+    up <- select_up_by_fc(deg, fc)
+    tag_dir <- file.path(dest_dir, tag)
+    dir.create(tag_dir, recursive = TRUE, showWarnings = FALSE)
 
-  for (dirn in c("Up", "Down")) {
-    sub <- sig[direction == dirn]
-    genes_dir <- unique(split_cuff_genes(if ("gene" %in% names(sub)) sub$gene else sub$tracking_id))
-    if (length(genes_dir) < 5) {
-      message(contrast_id, " skip GO for ", dirn, " (n=", length(genes_dir), ")")
+    gene_col <- if ("gene" %in% names(up)) up$gene else up$tracking_id
+    up_symbols <- unique(split_cuff_genes(gene_col))
+    write_tsv(up, file.path(tag_dir, paste0("up_genes_", tag, "_", contrast_id, ".tsv")))
+    message(contrast_id, " ", tag, " (linear FC>=", fc, "): ", length(up_symbols), " up symbols")
+    count_rows[[tag]] <- data.table(
+      contrast = contrast_id,
+      cutoff = tag,
+      linear_FC_min = fc,
+      n_up_rows = nrow(up),
+      n_up_symbols = length(up_symbols)
+    )
+
+    if (length(up_symbols) < 5) {
+      message(contrast_id, " skip GO for ", tag, " (need >=5 unique symbols)")
       next
     }
-    mapped <- map_ids(genes_dir)
-    if (!nrow(mapped)) next
-    ego_bp <- run_go(mapped$ENTREZID, "BP", uni_map$ENTREZID)
-    if (is.null(ego_bp) || nrow(as.data.frame(ego_bp)) == 0) next
-    write_tsv(
-      as.data.table(as.data.frame(ego_bp)),
-      file.path(dest_dir, paste0("GO_BP_", dirn, "_", contrast_id, ".tsv"))
-    )
+
+    sig_map <- map_ids(up_symbols)
+    message(contrast_id, " ", tag, ": mapped ", nrow(sig_map), "/", length(up_symbols), " symbols")
+    if (!nrow(sig_map)) next
+
+    for (ont in go_ontologies) {
+      ego <- run_go(sig_map$ENTREZID, ont, uni_map$ENTREZID)
+      if (is.null(ego) || nrow(as.data.frame(ego)) == 0) {
+        message(contrast_id, " ", tag, " GO ", ont, ": no terms")
+        next
+      }
+      write_tsv(
+        as.data.table(as.data.frame(ego)),
+        file.path(tag_dir, paste0("GO_", ont, "_", tag, "_", contrast_id, ".tsv"))
+      )
+      pdf(file.path(tag_dir, paste0("GO_", ont, "_", tag, "_dotplot.pdf")), width = 8, height = 6)
+      print(dotplot(ego, showCategory = 15) + ggtitle(paste(contrast_id, tag, "GO", ont)))
+      dev.off()
+      pdf(file.path(tag_dir, paste0("GO_", ont, "_", tag, "_barplot.pdf")), width = 8, height = 6)
+      print(barplot(ego, showCategory = 15) + ggtitle(paste(contrast_id, tag, "GO", ont)))
+      dev.off()
+    }
   }
+  write_tsv(rbindlist(count_rows), file.path(dest_dir, paste0("up_FC_gene_counts_", contrast_id, ".tsv")))
 }
 
 write_deg_outputs <- function(deg, contrast_id, dest_dir, deg_source, treat, control) {

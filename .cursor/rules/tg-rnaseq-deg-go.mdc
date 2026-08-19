@@ -29,6 +29,6 @@ deg <- readxl::read_excel("shTG(20220723)")
 - `genes.read_group_tracking`：样本级 `raw_frags` / FPKM；`read_groups.info`；`genes.fpkm_tracking`（symbol）
 - `gene_exp.diff` 仅作 pairwise 回退（Excel 同样只能回退 sh1 vs NTC）
 - 计数给 DESeq2，NTC 为参考；每组 <2 重复则该对比回退 Cuffdiff/简单检验
-- 火山图：x=`log2FC`，y=`-log10(padj)`；显著 `padj<0.05` 且 `|log2FC|>1`
-- GO：显著 SYMBOL→Entrez，`enrichGO`（BP/MF/CC）；`gene` 按逗号拆，丢掉 `-`
+- 火山图：x=`log2FC`，y=`-log10(padj)`；点颜色仍可标上/下调
+- **GO 只做上调基因**，禁止下调、禁止上调+下调合并。线性 FoldChange（不是 log2FC）分 **四组各自** `enrichGO`（BP/MF/CC），禁止把四组并成一次 GO：FC≥1（`log2FC≥0`）、FC≥1.25、FC≥1.5、FC≥2（`log2FC≥1`）。另需 `padj<0.05`（无 padj 时只用 FC）。输出 `go/up_FC1/`、`go/up_FC1.25/`、`go/up_FC1.5/`、`go/up_FC2/`
 - 结果分目录：`results/pairwise/TG_sh1_vs_NTC/`、`.../TG_sh5_vs_NTC/`、`results/pooled_avg/TG_sh1_sh5_avg_vs_NTC/`
