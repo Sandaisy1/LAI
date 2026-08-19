@@ -3,7 +3,7 @@
 #   从 Cuffdiff tracking 重建表达矩阵（不直接用 Excel）
 #   分析 1：TG_sh1 vs NTC、TG_sh5 vs NTC 各自 DEG + 火山图 + GO
 #   分析 2：TG_sh1 与 TG_sh5 组均值再平均，相对 NTC 做 DEG + 火山图 + GO
-#   GO + KEGG 仅上调基因，按线性 FC>=1 / 1.25 / 1.5 / 2 四组分别富集
+#   GO + KEGG + Reactome/WikiPathways 仅上调基因，按线性 FC>=1 / 1.25 / 1.5 / 2 四组分别富集
 #
 # 用法:
 #   Rscript scripts/tg_vs_ntc_deg_go.R [data_dir] [out_dir]
@@ -214,7 +214,7 @@ run_go_analysis <- function(deg, sig, contrast_id, dest_dir) {
   # GO 只用上调基因；线性 FC 四组各自富集，不用 sig 的上+下调合并集
   invisible(sig)
   need_pkg("ggplot2")
-  need_pkg(c("clusterProfiler", "enrichplot", species_orgdb), bioc = TRUE)
+  need_pkg(c("clusterProfiler", "enrichplot", "ReactomePA", species_orgdb), bioc = TRUE)
   suppressPackageStartupMessages({
     library(ggplot2)
     library(clusterProfiler)
@@ -260,7 +260,7 @@ run_go_analysis <- function(deg, sig, contrast_id, dest_dir) {
   )
   kegg_helper <- kegg_helper[!is.na(kegg_helper) & file.exists(kegg_helper)][1]
   if (is.na(kegg_helper)) stop("找不到 kegg_enrich_helpers.R")
-  if (!exists("save_kegg_enrichment", mode = "function")) source(kegg_helper, local = FALSE)
+  if (!exists("save_kegg_and_pathways", mode = "function")) source(kegg_helper, local = FALSE)
 
   for (tag in names(go_fc_cutoffs)) {
     fc <- as.numeric(go_fc_cutoffs[[tag]])
@@ -281,7 +281,7 @@ run_go_analysis <- function(deg, sig, contrast_id, dest_dir) {
     )
 
     if (length(up_symbols) < 5) {
-      message(contrast_id, " skip GO/KEGG for ", tag, " (need >=5 unique symbols)")
+      message(contrast_id, " skip GO/KEGG/pathway for ", tag, " (need >=5 unique symbols)")
       next
     }
 
@@ -307,7 +307,7 @@ run_go_analysis <- function(deg, sig, contrast_id, dest_dir) {
       dev.off()
     }
 
-    save_kegg_enrichment(
+    save_kegg_and_pathways(
       entrez = sig_map$ENTREZID,
       universe = uni_map$ENTREZID,
       dest_dir = tag_dir,

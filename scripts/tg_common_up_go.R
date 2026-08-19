@@ -2,8 +2,8 @@
 # 共同上调基因 GO（独立脚本，不修改 tg_vs_ntc_deg_go.R）
 #   1) 单独比较 TG_sh1 vs NTC、TG_sh5 vs NTC
 #   2) 取两组都上调的基因
-#   3a) 线性 FC>=1 / 1.25 / 1.5 / 2（两侧都达标）各自 GO + KEGG
-#   3b) 各组上调前 50/75/100/150/200/250/300 的交集，各自 GO + KEGG
+#   3a) 线性 FC>=1 / 1.25 / 1.5 / 2（两侧都达标）各自 GO + KEGG + Reactome/WikiPathways
+#   3b) 各组上调前 50/75/100/150/200/250/300 的交集，各自 GO + KEGG + Reactome/WikiPathways
 #
 # 用法:
 #   Rscript scripts/tg_common_up_go.R [data_dir] [out_dir]
@@ -313,7 +313,7 @@ message("Common upregulated genes: ", nrow(common_up))
 # GO helpers
 # ---------------------------------------------------------------------------
 need_pkg("ggplot2")
-need_pkg(c("clusterProfiler", "enrichplot", species_orgdb), bioc = TRUE)
+need_pkg(c("clusterProfiler", "enrichplot", "ReactomePA", species_orgdb), bioc = TRUE)
 suppressPackageStartupMessages({
   library(clusterProfiler)
   library(enrichplot)
@@ -363,7 +363,7 @@ go_one_set <- function(symbols, dest_dir, tag, gene_dt = NULL) {
   write_tsv(gene_dt, file.path(dest_dir, paste0("genes_", tag, ".tsv")))
   message(tag, ": ", length(symbols), " common up symbols")
   if (length(symbols) < 5) {
-    message("skip GO/KEGG for ", tag, " (need >=5 genes)")
+    message("skip GO/KEGG/pathway for ", tag, " (need >=5 genes)")
     return(invisible(NULL))
   }
   mapped <- map_ids(symbols)
@@ -382,7 +382,7 @@ go_one_set <- function(symbols, dest_dir, tag, gene_dt = NULL) {
     print(barplot(ego, showCategory = 15) + ggtitle(paste("common up", tag, ont)))
     dev.off()
   }
-  save_kegg_enrichment(
+  save_kegg_and_pathways(
     entrez = mapped$ENTREZID,
     universe = uni_map$ENTREZID,
     dest_dir = dest_dir,

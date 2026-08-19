@@ -30,16 +30,14 @@ deg <- readxl::read_excel("shTG(20220723)")
 - `gene_exp.diff` 仅作 pairwise 回退（Excel 同样只能回退 sh1 vs NTC）
 - 计数给 DESeq2，NTC 为参考；每组 <2 重复则该对比回退 Cuffdiff/简单检验
 - 火山图：x=`log2FC`，y=`-log10(padj)`；点颜色仍可标上/下调
-- **GO + KEGG 只做上调基因**，禁止下调、禁止上调+下调合并。每个基因集都要同时 `enrichGO`（BP/MF/CC）和 `enrichKEGG`（`organism="hsa"`），输出写在同一目录（`GO_*.tsv` 与 `KEGG_*.tsv`）。线性 FoldChange（不是 log2FC）分 **四组各自** 富集，禁止把四组并成一次：FC≥1（`log2FC≥0`）、FC≥1.25、FC≥1.5、FC≥2（`log2FC≥1`）。另需 `padj<0.05`（无 padj 时只用 FC）。输出 `go/up_FC1/`、`go/up_FC1.25/`、`go/up_FC1.5/`、`go/up_FC2/`
+- **GO + KEGG + 通路富集只做上调基因**，禁止下调、禁止上调+下调合并。每个基因集都要：`enrichGO`（BP/MF/CC）、`enrichKEGG`（hsa）、**Reactome**（`enrichPathway`）和 **WikiPathways**（`enrichWP`）。输出写在同一目录（`GO_*`、`KEGG_*`、`Reactome_*`、`WikiPathways_*`）。线性 FC 分四组各自富集，禁止合并：FC≥1、1.25、1.5、2。另需 `padj<0.05`（无 padj 时只用 FC）。
 - 结果分目录：`results/pairwise/TG_sh1_vs_NTC/`、`.../TG_sh5_vs_NTC/`、`results/pooled_avg/TG_sh1_sh5_avg_vs_NTC/`
 
-## 当前任务：两组共同上调基因 GO + KEGG（`scripts/tg_common_up_go.R`）
+## 当前任务：两组共同上调基因 GO + KEGG + 通路（`scripts/tg_common_up_go.R`）
 
-先单独比较 `TG_sh1 vs NTC` 和 `TG_sh5 vs NTC`，再取**两侧都上调**的基因做 GO **和** KEGG。禁止对单组代替共同基因；禁止把两组上调基因取并集。
+先单独比较 `TG_sh1 vs NTC` 和 `TG_sh5 vs NTC`，再取**两侧都上调**的基因做 GO、KEGG、Reactome、WikiPathways。禁止对单组代替共同基因；禁止把两组上调基因取并集。
 
-1. **按线性 FC**（两侧都达标，用 `min(FC_sh1, FC_sh5)`）：FC≥1、1.25、1.5、2 四组各自 GO+KEGG。
-2. **按排名交集**：各组上调基因按 log2FC 降序取前 50 / 75 / 100 / 150 / 200 / 250 / 300，对**两个 top-N 列表的交集**各自 GO+KEGG。禁止不同 N 合并。
+1. **按线性 FC**（两侧都达标，用 `min(FC_sh1, FC_sh5)`）：FC≥1、1.25、1.5、2 四组各自富集。
+2. **按排名交集**：各组上调前 50 / 75 / 100 / 150 / 200 / 250 / 300 的交集，各自富集。禁止不同 N 合并。
 
-输出：`results/common_up/pairwise/`、`.../go_fc/up_FC*/`、`.../go_topn/top*/`。KEGG 文件名为 `KEGG_<tag>.tsv` / `_dotplot.pdf` / `_barplot.pdf`。
-
-`scripts/tg_up_topn_go.R` 与 `scripts/tg_vs_ntc_deg_go.R` 的每个上调基因集同样要加 KEGG。共享函数在 `scripts/kegg_enrich_helpers.R`。
+通路层文件：`Reactome_<tag>.tsv`、`WikiPathways_<tag>.tsv` 及对应 dotplot/barplot。共享函数：`scripts/kegg_enrich_helpers.R` 中的 `save_kegg_and_pathways()`。

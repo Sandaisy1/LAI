@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # Additional GO analysis (does NOT modify scripts/tg_vs_ntc_deg_go.R):
 #   For each of the three contrasts, take the top 50 / 100 / 150 / 200 / 250 / 300
-#   upregulated genes (ranked by log2FC descending) and run enrichGO + enrichKEGG separately.
+#   upregulated genes (ranked by log2FC descending) and run GO + KEGG + Reactome/WikiPathways separately.
 #
 # 用法（先跑完原始 DEG 脚本）:
 #   Rscript scripts/tg_vs_ntc_deg_go.R "E:/R/TG_BRCA/TG" "E:/R/TG_BRCA/TG/results"
@@ -100,7 +100,7 @@ rank_up_genes <- function(deg) {
 }
 
 need_pkg("ggplot2")
-need_pkg(c("clusterProfiler", "enrichplot", species_orgdb), bioc = TRUE)
+need_pkg(c("clusterProfiler", "enrichplot", "ReactomePA", species_orgdb), bioc = TRUE)
 suppressPackageStartupMessages({
   library(ggplot2)
   library(clusterProfiler)
@@ -190,7 +190,7 @@ for (contrast_id in names(contrasts)) {
     message(contrast_id, " ", tag, ": ", n_use, " rows / ", length(symbols), " symbols")
 
     if (length(symbols) < 5) {
-      message("skip GO/KEGG for ", contrast_id, " ", tag, " (need >=5 unique symbols)")
+      message("skip GO/KEGG/pathway for ", contrast_id, " ", tag, " (need >=5 unique symbols)")
       next
     }
     sig_map <- map_ids(symbols)
@@ -214,7 +214,7 @@ for (contrast_id in names(contrasts)) {
       dev.off()
     }
 
-    save_kegg_enrichment(
+    save_kegg_and_pathways(
       entrez = sig_map$ENTREZID,
       universe = uni_map$ENTREZID,
       dest_dir = tag_dir,
