@@ -15,27 +15,102 @@
 # heatmap, GO ORA, Reactome ORA, KEGG ORA. GSEA is run once per comparison
 # on the full ranked list.
 #
-# Usage:
-#   Rscript R/analyze_tg_rnaseq.R [data_dir] [out_dir]
-# Defaults: E:/R/TG_BRCA/TG (or ./data) and <data_dir>/results
+# Usage (Windows R console — do not rely on Documents as the working directory):
+#   setwd("E:/R/TG_BRCA/TG")
+#   source("R/analyze_tg_rnaseq.R")
+# or:
+#   Rscript R/analyze_tg_rnaseq.R "E:/R/TG_BRCA/TG" "E:/R/TG_BRCA/TG/results"
+#
+# If 00_config.R is missing (e.g. the script was pasted into the console),
+# built-in defaults are used and data are read from E:/R/TG_BRCA/TG when present.
 
-suppressPackageStartupMessages({
-  source_path <- function() {
-    args_full <- commandArgs(trailingOnly = FALSE)
-    file_arg <- grep("^--file=", args_full, value = TRUE)
-    if (length(file_arg)) {
-      return(dirname(normalizePath(sub("^--file=", "", file_arg[[1]]))))
+# ---------------------------------------------------------------------------
+# Built-in config (overridden if 00_config.R is found)
+# ---------------------------------------------------------------------------
+CTRL_GROUP <- "NTC"
+TREAT_GROUPS <- c("TG_sh1", "TG_sh5")
+ALL_GROUPS <- c(CTRL_GROUP, TREAT_GROUPS)
+FC_CUTOFFS <- c(1, 1.25, 1.5, 2)
+TOP_N <- c(50, 75, 100, 150, 200, 250, 300)
+PSEUDOCOUNT <- 0.1
+HEATMAP_MAX_GENES <- 100
+ORA_MIN_GENES <- 10
+GSEA_MIN_GENES <- 15
+SPECIES_ORGDB <- "org.Hs.eg.db"
+KEGG_ORG <- "hsa"
+P_ADJUST <- "BH"
+ENRICH_P_CUTOFF <- 0.05
+ENRICH_Q_CUTOFF <- 0.20
+EXCEL_PATTERN <- "shTG"
+DIFF_FILENAME <- "gene_exp.diff"
+FPKM_FILENAME <- "genes.fpkm_tracking"
+
+default_data_dir <- function() {
+  candidates <- c(
+    Sys.getenv("TG_RNASEQ_DIR", unset = ""),
+    "E:/R/TG_BRCA/TG",
+    "E:\\R\\TG_BRCA\\TG",
+    file.path(".", "data")
+  )
+  candidates <- candidates[nzchar(candidates)]
+  for (p in candidates) {
+    if (dir.exists(p)) return(normalizePath(p, winslash = "/", mustWork = FALSE))
+  }
+  normalizePath("data", winslash = "/", mustWork = FALSE)
+}
+
+default_out_dir <- function(data_dir) {
+  file.path(data_dir, "results")
+}
+
+script_dirs_guess <- function() {
+  dirs <- character()
+  args_full <- commandArgs(trailingOnly = FALSE)
+  file_arg <- grep("^--file=", args_full, value = TRUE)
+  if (length(file_arg)) {
+    fp <- sub("^--file=", "", file_arg[[1]])
+    if (nzchar(fp) && file.exists(fp)) {
+      dirs <- c(dirs, dirname(normalizePath(fp, winslash = "/", mustWork = FALSE)))
     }
-    if (file.exists("R/00_config.R")) return("R")
-    getwd()
   }
-  src_dir <- source_path()
-  config_file <- file.path(src_dir, "00_config.R")
-  if (!file.exists(config_file)) {
-    config_file <- file.path(src_dir, "R", "00_config.R")
+  if (sys.nframe() > 0) {
+    for (i in sys.nframe():1) {
+      ev <- sys.frame(i)
+      if (exists("ofile", envir = ev, inherits = FALSE)) {
+        of <- get("ofile", envir = ev)
+        if (is.character(of) && length(of) && nzchar(of[[1]]) && file.exists(of[[1]])) {
+          dirs <- c(dirs, dirname(normalizePath(of[[1]], winslash = "/", mustWork = FALSE)))
+        }
+      }
+    }
   }
-  source(config_file)
-})
+  wd <- tryCatch(normalizePath(getwd(), winslash = "/", mustWork = FALSE), error = function(e) getwd())
+  unique(c(
+    dirs,
+    file.path(dirs, ".."),
+    wd,
+    file.path(wd, "R"),
+    "E:/R/TG_BRCA/TG",
+    "E:/R/TG_BRCA/TG/R"
+  ))
+}
+
+config_file <- NA_character_
+for (d in script_dirs_guess()) {
+  if (!is.character(d) || !nzchar(d)) next
+  cand <- file.path(d, "00_config.R")
+  if (file.exists(cand)) {
+    config_file <- cand
+    break
+  }
+}
+if (!is.na(config_file)) {
+  message("Loading config: ", config_file)
+  sys.source(config_file, envir = environment())
+} else {
+  message("00_config.R not found; using built-in defaults.")
+  message("Data directory default: E:/R/TG_BRCA/TG (if that folder exists).")
+}
 
 `%||%` <- function(a, b) if (is.null(a) || length(a) == 0 || (is.atomic(a) && all(is.na(a)))) b else a
 
@@ -785,7 +860,9 @@ main <- function(data_dir = NULL, out_dir = NULL) {
   message("Done. Results written to ", out_dir)
 }
 
-if (!interactive()) {
+# Run in both Rscript and interactive paste/source(). Set TG_RNASEQ_NO_AUTO <- TRUE
+# before sourcing if you only want to load functions.
+if (!exists("TG_RNASEQ_NO_AUTO") || isFALSE(get("TG_RNASEQ_NO_AUTO"))) {
   args <- commandArgs(trailingOnly = TRUE)
   data_dir <- if (length(args) >= 1) args[[1]] else NULL
   out_dir <- if (length(args) >= 2) args[[2]] else NULL

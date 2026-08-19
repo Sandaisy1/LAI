@@ -1,7 +1,6 @@
 data/*
 !data/.gitkeep
-results/*
-!results/.gitkeep
+results/
 .Rhistory
 .RData
 .Rproj.user

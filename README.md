@@ -29,12 +29,29 @@ Excel 里如果只有 NTC vs TG_sh1，脚本会再读同目录的 `genes.fpkm_tr
 
 ## 运行
 
+不要在默认工作目录 `C:/Users/.../Documents` 下零散粘贴脚本：那样会去读不存在的 `Documents/R/00_config.R`。把 `R/analyze_tg_rnaseq.R` 整文件运行即可（缺 `00_config.R` 时用内置默认值，数据仍读 `E:/R/TG_BRCA/TG`）。
+
+R 控制台 / RStudio：
+
+```r
+setwd("E:/R/TG_BRCA/TG")   # 数据所在目录
+source("R/analyze_tg_rnaseq.R")
+```
+
+若脚本不在该目录，把仓库里的 `R/analyze_tg_rnaseq.R` 拷进去再 `source`，或：
+
+```r
+source("你的路径/analyze_tg_rnaseq.R")   # 会自动找 E:/R/TG_BRCA/TG
+```
+
+命令行：
+
 ```bash
 Rscript scripts/install_r_packages.R
 Rscript R/analyze_tg_rnaseq.R "E:/R/TG_BRCA/TG" "E:/R/TG_BRCA/TG/results"
 ```
 
-未传路径时依次尝试 `TG_RNASEQ_DIR` 环境变量、`E:/R/TG_BRCA/TG`、`./data`。
+未传路径时依次尝试 `TG_RNASEQ_DIR`、`E:/R/TG_BRCA/TG`、`./data`。
 
 依赖：`ggplot2`、`ggrepel`、`pheatmap`、`readxl`、`clusterProfiler`、`org.Hs.eg.db`、`enrichplot`、`ReactomePA`。
 
