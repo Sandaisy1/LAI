@@ -13,9 +13,12 @@ FC_CUTOFFS <- c(1, 1.25, 1.5, 2)
 TOP_N <- c(50, 75, 100, 150, 200, 250, 300)
 
 PSEUDOCOUNT <- 0.1
+MIN_FPKM <- 1
 HEATMAP_MAX_GENES <- 100
 ORA_MIN_GENES <- 10
 GSEA_MIN_GENES <- 15
+# Keep all scored gene sets so plots can be drawn even if FDR is high.
+GSEA_PVALUE_CUTOFF <- 1
 SPECIES_ORGDB <- "org.Hs.eg.db"
 KEGG_ORG <- "hsa"
 P_ADJUST <- "BH"

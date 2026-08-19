@@ -33,9 +33,11 @@ ALL_GROUPS <- c(CTRL_GROUP, TREAT_GROUPS)
 FC_CUTOFFS <- c(1, 1.25, 1.5, 2)
 TOP_N <- c(50, 75, 100, 150, 200, 250, 300)
 PSEUDOCOUNT <- 0.1
+MIN_FPKM <- 1
 HEATMAP_MAX_GENES <- 100
 ORA_MIN_GENES <- 10
 GSEA_MIN_GENES <- 15
+GSEA_PVALUE_CUTOFF <- 1
 SPECIES_ORGDB <- "org.Hs.eg.db"
 KEGG_ORG <- "hsa"
 P_ADJUST <- "BH"
@@ -128,6 +130,59 @@ optional_library <- function(pkg) {
   }
 }
 
+# Cuffdiff gene_short_name is often empty (XLOC_*), or several symbols joined by commas.
+is_xloc_id <- function(x) {
+  grepl("^(XLOC_|CUFF\\.|TCONS_)", as.character(x), ignore.case = TRUE)
+}
+
+split_gene_tokens <- function(x) {
+  x <- as.character(x[[1]])
+  x <- gsub("///", ",", x)
+  toks <- unlist(strsplit(x, "[,;|/]+"), use.names = FALSE)
+  toks <- trimws(toks)
+  toks <- toks[!is.na(toks) & nzchar(toks) & toks != "-"]
+  toks <- toks[!tolower(toks) %in% c("na", "nan", "none", "n/a")]
+  unique(toks)
+}
+
+primary_gene_symbol <- function(x) {
+  vapply(as.character(x), function(one) {
+    if (is.na(one) || !nzchar(one)) return(NA_character_)
+    toks <- split_gene_tokens(one)
+    if (!length(toks)) return(NA_character_)
+    ann <- toks[!is_xloc_id(toks)]
+    if (length(ann)) ann[[1]] else toks[[1]]
+  }, character(1), USE.NAMES = FALSE)
+}
+
+flatten_symbols <- function(symbols) {
+  unique(unlist(lapply(as.character(symbols), function(s) {
+    toks <- split_gene_tokens(s)
+    toks[!is_xloc_id(toks)]
+  }), use.names = FALSE))
+}
+
+collapse_expr_rows <- function(mat, genes) {
+  raw <- as.character(genes)
+  primary <- primary_gene_symbol(raw)
+  keep <- !is.na(primary) & nzchar(primary)
+  mat <- mat[keep, , drop = FALSE]
+  raw <- raw[keep]
+  primary <- primary[keep]
+  if (!length(primary)) stop("No gene labels after cleaning Cuffdiff names")
+  ord <- order(rowMeans(mat, na.rm = TRUE), decreasing = TRUE)
+  mat <- mat[ord, , drop = FALSE]
+  raw <- raw[ord]
+  primary <- primary[ord]
+  uniq <- !duplicated(primary)
+  mat <- mat[uniq, , drop = FALSE]
+  raw <- raw[uniq]
+  primary <- primary[uniq]
+  rownames(mat) <- primary
+  attr(mat, "gene_raw") <- setNames(raw, primary)
+  mat
+}
+
 # ---------------------------------------------------------------------------
 # Input discovery and readers
 # ---------------------------------------------------------------------------
@@ -197,9 +252,11 @@ tidy_diff_df <- function(df) {
     else if ("gene_id" %in% names(df)) df$gene <- df$gene_id
     else df$gene <- df[[1]]
   }
-  df$gene <- ifelse(is.na(df$gene) | trimws(df$gene) == "",
-                    as.character(df$gene_id %||% df$test_id %||% seq_len(nrow(df))),
-                    trimws(as.character(df$gene)))
+  raw <- ifelse(is.na(df$gene) | trimws(as.character(df$gene)) == "",
+                as.character(df$gene_id %||% df$test_id %||% seq_len(nrow(df))),
+                trimws(as.character(df$gene)))
+  df$gene_raw <- raw
+  df$gene <- primary_gene_symbol(raw)
   num_cols <- intersect(c("value_1", "value_2", "log2_fold_change", "test_stat",
                           "p_value", "q_value"), names(df))
   for (cc in num_cols) {
@@ -245,16 +302,7 @@ read_fpkm_tracking <- function(path) {
   mat <- as.matrix(df[, fpkm_cols, drop = FALSE])
   storage.mode(mat) <- "numeric"
   colnames(mat) <- vapply(sub("_FPKM$", "", colnames(mat)), guess_group_name, character(1))
-  keep <- !is.na(genes) & genes != "" & genes != "-"
-  mat <- mat[keep, , drop = FALSE]
-  genes <- genes[keep]
-  # duplicate symbols: keep highest mean FPKM
-  ord <- order(rowMeans(mat, na.rm = TRUE), decreasing = TRUE)
-  mat <- mat[ord, , drop = FALSE]
-  genes <- genes[ord]
-  mat <- mat[!duplicated(genes), , drop = FALSE]
-  rownames(mat) <- genes[!duplicated(genes)]
-  mat
+  collapse_expr_rows(mat, genes)
 }
 
 fpkm_from_diff <- function(diff_df) {
@@ -268,19 +316,15 @@ fpkm_from_diff <- function(diff_df) {
   }
   mat <- cbind(as.numeric(diff_df$value_1), as.numeric(diff_df$value_2))
   colnames(mat) <- c(g1, g2)
-  genes <- diff_df$gene
+  genes <- diff_df$gene_raw %||% diff_df$gene
   keep <- !is.na(genes) & genes != ""
   mat <- mat[keep, , drop = FALSE]
   genes <- genes[keep]
   d <- diff_df[keep, , drop = FALSE]
-  ord <- order(rowMeans(mat, na.rm = TRUE), decreasing = TRUE)
-  mat <- mat[ord, , drop = FALSE]
-  genes <- genes[ord]
-  d <- d[ord, , drop = FALSE]
-  uniq <- !duplicated(genes)
-  mat <- mat[uniq, , drop = FALSE]
-  rownames(mat) <- genes[uniq]
-  list(mat = mat, diff = d[uniq, , drop = FALSE])
+  mat <- collapse_expr_rows(mat, genes)
+  d$gene <- primary_gene_symbol(d$gene_raw %||% d$gene)
+  d <- d[match(rownames(mat), d$gene), , drop = FALSE]
+  list(mat = mat, diff = d)
 }
 
 merge_fpkm <- function(pieces) {
@@ -288,9 +332,15 @@ merge_fpkm <- function(pieces) {
   groups <- unique(unlist(lapply(pieces, colnames)))
   out <- matrix(NA_real_, nrow = length(genes), ncol = length(groups),
                 dimnames = list(genes, groups))
+  raw_map <- character()
   for (m in pieces) {
     out[rownames(m), colnames(m)] <- m
+    gr <- attr(m, "gene_raw")
+    if (!is.null(gr)) {
+      raw_map[names(gr)] <- unname(gr)
+    }
   }
+  if (length(raw_map)) attr(out, "gene_raw") <- raw_map[rownames(out)]
   out
 }
 
@@ -355,8 +405,10 @@ load_inputs <- function(data_dir) {
          ". Current columns: ", paste(colnames(fpkm), collapse = ", "),
          ". Add genes.fpkm_tracking so TG_sh1 and TG_sh5 are both present.")
   }
+  rawmap <- attr(fpkm, "gene_raw")
   fpkm <- fpkm[, ALL_GROUPS, drop = FALSE]
   fpkm[is.na(fpkm)] <- 0
+  if (!is.null(rawmap)) attr(fpkm, "gene_raw") <- rawmap[rownames(fpkm)]
   list(fpkm = fpkm, diff_map = diff_map, excel_path = excel_path,
        diff_path = diff_path, fpkm_path = fpkm_path)
 }
@@ -405,8 +457,12 @@ make_deg <- function(fpkm, treat_vec, ctrl_name, label, diff_map = list(),
   stats <- match_diff_stats(rownames(fpkm),
                             treat = treat_name %||% label,
                             ctrl = ctrl_name, diff_map = diff_map)
+  rawmap <- attr(fpkm, "gene_raw")
+  gene_raw <- if (!is.null(rawmap)) as.character(rawmap[rownames(fpkm)]) else rownames(fpkm)
+  gene_raw[is.na(gene_raw) | !nzchar(gene_raw)] <- rownames(fpkm)
   deg <- data.frame(
     gene = rownames(fpkm),
+    gene_raw = gene_raw,
     ctrl_fpkm = as.numeric(ctrl),
     treat_fpkm = as.numeric(treat),
     log2FC = as.numeric(log2fc),
@@ -414,6 +470,7 @@ make_deg <- function(fpkm, treat_vec, ctrl_name, label, diff_map = list(),
     p_value = stats$p_value,
     q_value = stats$q_value,
     status = stats$status,
+    annotated = !is_xloc_id(rownames(fpkm)),
     stringsAsFactors = FALSE
   )
   if (label == "meanSH_vs_NTC") {
@@ -472,7 +529,7 @@ plot_volcano <- function(deg, highlight_genes, title, outfile,
   df$set[df$highlight] <- "selected_up"
   df$set <- factor(df$set, levels = c("selected_up", "up", "down", "other"))
   pal <- c(selected_up = "#B2182B", up = "#F4A582", down = "#2166AC", other = "grey75")
-  lab <- df[df$highlight, , drop = FALSE]
+  lab <- df[df$highlight & !is_xloc_id(df$gene) & !grepl(",", df$gene), , drop = FALSE]
   lab <- head(lab[order(lab$log2FC, decreasing = TRUE), ], 20)
   p <- ggplot2::ggplot(df, ggplot2::aes(x = log2FC, y = neglog10p, color = set)) +
     ggplot2::geom_point(alpha = 0.7, size = 1.4, na.rm = TRUE) +
@@ -498,7 +555,7 @@ plot_common_scatter <- function(sh1, sh5, highlight_genes, title, outfile) {
     stringsAsFactors = FALSE
   )
   df$highlight <- df$gene %in% highlight_genes
-  lab <- head(df[df$highlight, ], 20)
+  lab <- head(df[df$highlight & !is_xloc_id(df$gene) & !grepl(",", df$gene), ], 20)
   p <- ggplot2::ggplot(df, ggplot2::aes(x = log2FC_sh1, y = log2FC_sh5, color = highlight)) +
     ggplot2::geom_point(alpha = 0.65, size = 1.4, na.rm = TRUE) +
     ggplot2::scale_color_manual(values = c("FALSE" = "grey70", "TRUE" = "#B2182B"),
@@ -517,18 +574,23 @@ plot_common_scatter <- function(sh1, sh5, highlight_genes, title, outfile) {
 }
 
 plot_heatmap <- function(fpkm, genes, outfile, title) {
-  genes <- intersect(genes, rownames(fpkm))
+  genes <- intersect(as.character(genes), rownames(fpkm))
+  genes <- genes[!is_xloc_id(genes) & !grepl("[,;|/]", genes)]
+  if (exists("MIN_FPKM") && is.finite(MIN_FPKM) && length(genes)) {
+    mx <- apply(fpkm[genes, ALL_GROUPS, drop = FALSE], 1, max, na.rm = TRUE)
+    genes <- genes[is.finite(mx) & mx >= MIN_FPKM]
+  }
   if (length(genes) < 2) {
-    writeLines("Fewer than 2 genes; heatmap skipped.",
+    writeLines("Fewer than 2 annotated genes passing min FPKM; heatmap skipped.",
                con = sub("\\.pdf$", ".txt", outfile))
     return(invisible(NULL))
   }
   if (length(genes) > HEATMAP_MAX_GENES) {
-    # keep the most up-regulated among this list (highest mean sh vs NTC)
     fc <- log2((rowMeans(fpkm[genes, TREAT_GROUPS, drop = FALSE]) + PSEUDOCOUNT) /
                  (fpkm[genes, CTRL_GROUP] + PSEUDOCOUNT))
     genes <- names(sort(fc, decreasing = TRUE))[seq_len(HEATMAP_MAX_GENES)]
   }
+  title <- sprintf("%s | heatmap %d annotated genes", title, length(genes))
   mat <- log2(fpkm[genes, ALL_GROUPS, drop = FALSE] + 1)
   dir.create(dirname(outfile), recursive = TRUE, showWarnings = FALSE)
   if (need_pkg("pheatmap")) {
@@ -547,6 +609,7 @@ plot_heatmap <- function(fpkm, genes, outfile, title) {
 # ---------------------------------------------------------------------------
 
 symbol_to_entrez <- function(symbols) {
+  symbols <- flatten_symbols(symbols)
   symbols <- unique(as.character(symbols))
   symbols <- symbols[!is.na(symbols) & nzchar(symbols)]
   if (!length(symbols) || !need_pkg("clusterProfiler") || !need_pkg("org.Hs.eg.db")) {
@@ -560,32 +623,68 @@ symbol_to_entrez <- function(symbols) {
   mapped[!duplicated(mapped$SYMBOL), , drop = FALSE]
 }
 
+expand_deg_for_rank <- function(deg) {
+  src <- if ("gene_raw" %in% names(deg)) deg$gene_raw else deg$gene
+  src[is.na(src) | !nzchar(src)] <- deg$gene[is.na(src) | !nzchar(src)]
+  pieces <- vector("list", nrow(deg))
+  for (i in seq_len(nrow(deg))) {
+    toks <- split_gene_tokens(src[i])
+    toks <- toks[!is_xloc_id(toks)]
+    if (!length(toks)) next
+    pieces[[i]] <- data.frame(gene = toks, log2FC = deg$log2FC[i], stringsAsFactors = FALSE)
+  }
+  x <- do.call(rbind, pieces)
+  if (is.null(x) || !nrow(x)) {
+    return(data.frame(gene = character(), log2FC = numeric(), stringsAsFactors = FALSE))
+  }
+  stats::aggregate(log2FC ~ gene, data = x, FUN = mean)
+}
+
 write_empty_enrich <- function(path, reason) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(data.frame(reason = reason), path, row.names = FALSE)
 }
 
-save_enrich_result <- function(res, prefix) {
+save_plot_file <- function(path, plot, width = 8, height = 6) {
+  safe_ggsave(path, plot, width = width, height = height)
+  png <- sub("\\.pdf$", ".png", path)
+  if (need_pkg("ggplot2") && grepl("\\.pdf$", path)) {
+    try(ggplot2::ggsave(png, plot, width = width, height = height, dpi = 150), silent = TRUE)
+  }
+}
+
+save_enrich_result <- function(res, prefix, err = NULL) {
   dir.create(dirname(prefix), recursive = TRUE, showWarnings = FALSE)
-  if (is.null(res) || (is.data.frame(res) && !nrow(res)) ||
-      (inherits(res, "enrichResult") && !nrow(as.data.frame(res)))) {
-    write_empty_enrich(paste0(prefix, ".csv"), "no_significant_terms")
+  if (!is.null(err)) {
+    write_empty_enrich(paste0(prefix, ".csv"), paste("error:", err))
+    return(invisible(NULL))
+  }
+  empty <- is.null(res) ||
+    (is.data.frame(res) && !nrow(res)) ||
+    (inherits(res, "enrichResult") && !nrow(as.data.frame(res))) ||
+    (inherits(res, "gseaResult") && !nrow(as.data.frame(res)))
+  if (empty) {
+    write_empty_enrich(paste0(prefix, ".csv"), "no_terms_returned")
     return(invisible(NULL))
   }
   df <- as.data.frame(res)
-  utils::write.csv(df, paste0(prefix, ".csv"), row.names = FALSE)
+  utils::write.csv(df, paste0(prefix, "_all.csv"), row.names = FALSE)
+  if ("p.adjust" %in% names(df)) {
+    sig <- df[!is.na(df$p.adjust) & df$p.adjust < ENRICH_Q_CUTOFF, , drop = FALSE]
+    utils::write.csv(sig, paste0(prefix, "_significant.csv"), row.names = FALSE)
+  }
   if (need_pkg("enrichplot") && need_pkg("ggplot2") && nrow(df)) {
     n <- min(20, nrow(df))
-    try({
-      safe_ggsave(paste0(prefix, "_dotplot.pdf"),
-                  enrichplot::dotplot(res, showCategory = n) + ggplot2::ggtitle(basename(prefix)),
-                  width = 9, height = 7)
-    }, silent = TRUE)
-    try({
-      safe_ggsave(paste0(prefix, "_barplot.pdf"),
-                  enrichplot::barplot(res, showCategory = n) + ggplot2::ggtitle(basename(prefix)),
-                  width = 9, height = 7)
-    }, silent = TRUE)
+    tryCatch({
+      save_plot_file(paste0(prefix, "_dotplot.pdf"),
+                     enrichplot::dotplot(res, showCategory = n) + ggplot2::ggtitle(basename(prefix)),
+                     width = 9, height = 7)
+    }, error = function(e) writeLines(conditionMessage(e), paste0(prefix, "_dotplot_error.txt")))
+    tryCatch({
+      save_plot_file(paste0(prefix, "_barplot.pdf"),
+                     enrichplot::barplot(res, showCategory = n) + ggplot2::ggtitle(basename(prefix)),
+                     width = 9, height = 7)
+    }, error = function(e) writeLines(conditionMessage(e), paste0(prefix, "_barplot_error.txt")))
   }
 }
 
@@ -630,13 +729,17 @@ run_ora <- function(genes, universe_symbols, out_dir) {
       qvalueCutoff = ENRICH_Q_CUTOFF,
       universe = if (length(universe) > length(entrez)) universe else NULL
     ),
-    error = function(e) NULL
+    error = function(e) e
   )
-  if (!is.null(kegg) && need_pkg("clusterProfiler")) {
-    kegg <- tryCatch(clusterProfiler::setReadable(kegg, OrgDb = org.Hs.eg.db::org.Hs.eg.db,
-                                                  keyType = "ENTREZID"), error = function(e) kegg)
+  if (inherits(kegg, "error")) {
+    save_enrich_result(NULL, file.path(out_dir, "KEGG"), err = conditionMessage(kegg))
+  } else {
+    if (!is.null(kegg) && need_pkg("clusterProfiler")) {
+      kegg <- tryCatch(clusterProfiler::setReadable(kegg, OrgDb = org.Hs.eg.db::org.Hs.eg.db,
+                                                    keyType = "ENTREZID"), error = function(e) kegg)
+    }
+    save_enrich_result(kegg, file.path(out_dir, "KEGG"))
   }
-  save_enrich_result(kegg, file.path(out_dir, "KEGG"))
   if (need_pkg("ReactomePA")) {
     rea <- tryCatch(
       ReactomePA::enrichPathway(
@@ -654,54 +757,82 @@ run_ora <- function(genes, universe_symbols, out_dir) {
 
 run_gsea <- function(deg, out_dir) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  ranked <- expand_deg_for_rank(deg)
+  diag <- data.frame(
+    n_input_rows = nrow(deg),
+    n_xloc_input = sum(is_xloc_id(deg$gene)),
+    n_symbols_after_split = nrow(ranked),
+    n_mapped = NA_integer_,
+    n_ranked = NA_integer_,
+    stringsAsFactors = FALSE
+  )
   if (!need_pkg("clusterProfiler") || !need_pkg("org.Hs.eg.db")) {
+    diag$note <- "clusterProfiler/org.Hs.eg.db not installed"
+    utils::write.csv(diag, file.path(out_dir, "GSEA_diagnostics.csv"), row.names = FALSE)
     write_empty_enrich(file.path(out_dir, "GSEA_skipped.csv"),
                        "clusterProfiler/org.Hs.eg.db not installed")
     return(invisible(NULL))
   }
-  map <- symbol_to_entrez(deg$gene)
+  map <- symbol_to_entrez(ranked$gene)
+  diag$n_mapped <- nrow(map)
   if (nrow(map) < GSEA_MIN_GENES) {
-    write_empty_enrich(file.path(out_dir, "GSEA_skipped.csv"), "too few mapped genes")
+    diag$note <- "too few mapped Entrez IDs (XLOC/comma names dropped)"
+    utils::write.csv(diag, file.path(out_dir, "GSEA_diagnostics.csv"), row.names = FALSE)
+    write_empty_enrich(file.path(out_dir, "GSEA_skipped.csv"),
+                       paste("only", nrow(map), "mapped Entrez IDs"))
     return(invisible(NULL))
   }
-  stats <- deg$log2FC[match(map$SYMBOL, deg$gene)]
+  utils::write.csv(map, file.path(out_dir, "gsea_gene_id_map.csv"), row.names = FALSE)
+  stats <- ranked$log2FC[match(map$SYMBOL, ranked$gene)]
   names(stats) <- map$ENTREZID
   stats <- stats[is.finite(stats)]
   stats <- tapply(stats, names(stats), mean)
   stats <- sort(stats, decreasing = TRUE)
+  diag$n_ranked <- length(stats)
+  utils::write.csv(diag, file.path(out_dir, "GSEA_diagnostics.csv"), row.names = FALSE)
   if (length(stats) < GSEA_MIN_GENES) {
     write_empty_enrich(file.path(out_dir, "GSEA_skipped.csv"), "too few finite ranks")
     return(invisible(NULL))
   }
-  save_gsea <- function(res, prefix) {
-    save_enrich_result(res, prefix)
-    if (!is.null(res) && need_pkg("enrichplot") && nrow(as.data.frame(res))) {
-      nshow <- min(5, nrow(as.data.frame(res)))
-      for (i in seq_len(nshow)) {
-        try({
-          p <- enrichplot::gseaplot2(res, geneSetID = i, title = as.data.frame(res)$Description[i])
-          safe_ggsave(sprintf("%s_gseaplot_%02d.pdf", prefix, i), p, width = 8, height = 6)
-        }, silent = TRUE)
-      }
+
+  save_gsea <- function(res_or_err, prefix) {
+    if (inherits(res_or_err, "error") || inherits(res_or_err, "simpleError")) {
+      save_enrich_result(NULL, prefix, err = conditionMessage(res_or_err))
+      return(invisible(NULL))
+    }
+    save_enrich_result(res_or_err, prefix)
+    if (is.null(res_or_err)) return(invisible(NULL))
+    df <- tryCatch(as.data.frame(res_or_err), error = function(e) data.frame())
+    if (!nrow(df) || !need_pkg("enrichplot") || !need_pkg("ggplot2")) return(invisible(NULL))
+    nshow <- min(8, nrow(df))
+    for (i in seq_len(nshow)) {
+      tryCatch({
+        p <- enrichplot::gseaplot2(res_or_err, geneSetID = i, title = df$Description[i])
+        save_plot_file(sprintf("%s_gseaplot_%02d.pdf", prefix, i), p, width = 8, height = 6)
+      }, error = function(e) {
+        writeLines(conditionMessage(e), sprintf("%s_gseaplot_%02d_error.txt", prefix, i))
+      })
     }
   }
+
+  gsea_cut <- if (exists("GSEA_PVALUE_CUTOFF")) GSEA_PVALUE_CUTOFF else 1
   for (ont in c("BP", "MF", "CC")) {
     res <- tryCatch(
       clusterProfiler::gseGO(
         geneList = stats, OrgDb = org.Hs.eg.db::org.Hs.eg.db, ont = ont,
         keyType = "ENTREZID", minGSSize = 10, maxGSSize = 500,
-        pvalueCutoff = ENRICH_Q_CUTOFF, verbose = FALSE, eps = 0
+        pvalueCutoff = gsea_cut, verbose = FALSE, eps = 0
       ),
-      error = function(e) NULL
+      error = function(e) e
     )
     save_gsea(res, file.path(out_dir, paste0("GSEA_GO_", ont)))
   }
   kegg <- tryCatch(
     clusterProfiler::gseKEGG(
       geneList = stats, organism = KEGG_ORG, minGSSize = 10, maxGSSize = 500,
-      pvalueCutoff = ENRICH_Q_CUTOFF, verbose = FALSE, eps = 0
+      pvalueCutoff = gsea_cut, verbose = FALSE, eps = 0
     ),
-    error = function(e) NULL
+    error = function(e) e
   )
   save_gsea(kegg, file.path(out_dir, "GSEA_KEGG"))
 }
@@ -731,7 +862,9 @@ analyze_gene_set <- function(cmp_label, filter_label, deg_all, selected, fpkm,
                  file.path(out_dir, "volcano.pdf"), fc_cutoff = fc_cutoff)
   }
   plot_heatmap(fpkm, selected$gene, file.path(out_dir, "heatmap.pdf"), title)
-  run_ora(selected$gene, deg_all$gene, file.path(out_dir, "enrichment"))
+  ora_genes <- if ("gene_raw" %in% names(selected)) selected$gene_raw else selected$gene
+  ora_univ <- if ("gene_raw" %in% names(deg_all)) deg_all$gene_raw else deg_all$gene
+  run_ora(ora_genes, ora_univ, file.path(out_dir, "enrichment"))
 }
 
 run_two_strategies <- function(cmp_label, deg_all, fpkm, out_root,
@@ -815,6 +948,7 @@ main <- function(data_dir = NULL, out_dir = NULL) {
   genes <- intersect(deg_sh1$gene, deg_sh5$gene)
   deg_common <- data.frame(
     gene = genes,
+    gene_raw = deg_sh1$gene_raw[match(genes, deg_sh1$gene)],
     ctrl_fpkm = deg_sh1$ctrl_fpkm[match(genes, deg_sh1$gene)],
     treat_fpkm = rowMeans(cbind(
       deg_sh1$treat_fpkm[match(genes, deg_sh1$gene)],
@@ -829,6 +963,7 @@ main <- function(data_dir = NULL, out_dir = NULL) {
   deg_common$p_value <- NA_real_
   deg_common$q_value <- NA_real_
   deg_common$neglog10p <- abs(deg_common$log2FC)
+  deg_common$annotated <- !is_xloc_id(deg_common$gene)
   deg_common <- deg_common[order(deg_common$log2FC, decreasing = TRUE), ]
 
   run_two_strategies("sh1_vs_NTC", deg_sh1, fpkm, out_dir)

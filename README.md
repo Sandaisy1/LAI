@@ -15,7 +15,7 @@
 - 线性 FoldChange ≥ 1、1.25、1.5、2（FC≥1 即全部上调；“2 倍”不是 `|log2FC|≥2`）
 - 按 log2FC 降序取上调前 50、75、100、150、200、250、300
 
-每一套输出：差异表、火山图（共同上调为 sh1/sh5 散点图）、热图（列含三组）、GO、Reactome 通路、KEGG；GSEA 在每个比较上用全基因 log2FC 排序做一次。
+每一套输出：差异表、火山图（共同上调为 sh1/sh5 散点图）、热图（列含三组；只用官方基因名，不含 `XLOC_*` 和逗号拼接名）、GO、Reactome 通路、KEGG；GSEA 会写出 `gseaplot_*.pdf/png`（失败原因见 `GSEA_diagnostics.csv`）。
 
 Excel 里如果只有 NTC vs TG_sh1，脚本会再读同目录的 `genes.fpkm_tracking` / `gene_exp.diff` 补齐 TG_sh5。
 
