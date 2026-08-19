@@ -1,0 +1,14 @@
+data/*
+!data/.gitkeep
+results/*
+!results/.gitkeep
+.Rhistory
+.RData
+.Rproj.user
+*.xlsx
+*.xls
+*.fpkm_tracking
+*.count_tracking
+*.read_group_tracking
+*.diff
+*.info
