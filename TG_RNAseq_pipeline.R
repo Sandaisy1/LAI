@@ -10,7 +10,8 @@
 # 子集策略：
 #   A) 上调 FC >= 1 / 1.25 / 1.5 / 2
 #   B) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300
-# 每个子集：差异表、火山图、热图、GO、通路、KEGG、GSEA
+# 每个比较 × 每个 FC 阈值 × 每个 topN 都必须出图：
+#   差异基因表/柱状图、火山图、热图、GO图、通路富集图、KEGG图、GSEA图
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1)
@@ -21,11 +22,13 @@ Sys.setenv(LANGUAGE = "en")
 # -----------------------------------------------------------------------------
 cran_pkgs <- c(
   "readxl", "writexl", "dplyr", "tidyr", "tibble", "stringr", "ggplot2",
-  "ggrepel", "pheatmap", "RColorBrewer", "matrixStats", "ggvenn"
+  "ggrepel", "pheatmap", "RColorBrewer", "matrixStats", "ggvenn",
+  "cowplot", "ggridges", "ggnewscale"
 )
 bioc_pkgs <- c(
   "DESeq2", "edgeR", "limma", "clusterProfiler", "org.Hs.eg.db",
-  "enrichplot", "DOSE", "ReactomePA", "AnnotationDbi", "fgsea", "msigdbr"
+  "enrichplot", "DOSE", "ReactomePA", "AnnotationDbi", "fgsea", "msigdbr",
+  "pathview"
 )
 
 install_if_missing <- function() {
@@ -620,117 +623,427 @@ plot_pca <- function(heat_mat, sample_info, outfile) {
   save_gg(p, outfile)
 }
 
-# -----------------------------------------------------------------------------
-# 8. 富集分析
-# -----------------------------------------------------------------------------
-save_enrich <- function(x, stub) {
-  if (is.null(x) || nrow(as.data.frame(x)) == 0) return(invisible(NULL))
-  df <- as.data.frame(x)
-  utils::write.csv(df, paste0(stub, ".csv"), row.names = FALSE)
-  p1 <- tryCatch(enrichplot::dotplot(x, showCategory = 15) + ggplot2::ggtitle(basename(stub)), error = function(e) NULL)
-  p2 <- tryCatch(enrichplot::barplot(x, showCategory = 15) + ggplot2::ggtitle(basename(stub)), error = function(e) NULL)
-  if (!is.null(p1)) save_gg(p1, paste0(stub, "_dotplot"), width = 9, height = 7)
-  if (!is.null(p2)) save_gg(p2, paste0(stub, "_barplot"), width = 9, height = 7)
+plot_de_bar <- function(sub, title, outfile) {
+  if (nrow(sub) == 0) return(invisible(NULL))
+  df <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
+  if (nrow(df) > 60) df <- rbind(utils::head(df, 30), utils::tail(df, 30))
+  df$gene <- factor(df$gene, levels = rev(unique(df$gene)))
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = gene, y = log2FC)) +
+    ggplot2::geom_col(fill = "#D62828", width = 0.8) +
+    ggplot2::coord_flip() +
+    ggplot2::theme_bw(base_size = 11) +
+    ggplot2::labs(title = title, x = NULL, y = "log2 Fold Change")
+  save_gg(p, outfile, width = 8, height = max(5, min(16, 0.22 * nrow(df) + 2)))
 }
 
-run_ora <- function(genes, outdir) {
-  dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
-  mp <- map_to_entrez(genes)
-  entrez <- unique(mp$entrez)
-  if (length(entrez) < 5) {
-    log_msg("ORA skipped, mapped genes < 5: ", outdir)
-    writeLines(paste("mapped_entrez", length(entrez)), file.path(outdir, "ORA_skipped.txt"))
-    return(invisible(NULL))
-  }
-  for (ont in c("BP", "MF", "CC")) {
-    ego <- tryCatch(clusterProfiler::enrichGO(
-      gene = entrez, OrgDb = org.Hs.eg.db, keyType = "ENTREZID",
-      ont = ont, pAdjustMethod = "BH", pvalueCutoff = 0.05, qvalueCutoff = 0.2,
-      readable = TRUE
-    ), error = function(e) {
-      log_msg("enrichGO ", ont, " failed: ", e$message)
-      NULL
-    })
-    save_enrich(ego, file.path(outdir, paste0("GO_", ont)))
-  }
-  ek <- tryCatch(clusterProfiler::enrichKEGG(
-    gene = entrez, organism = "hsa", pvalueCutoff = 0.05, qvalueCutoff = 0.2
-  ), error = function(e) {
-    log_msg("enrichKEGG failed: ", e$message)
+# -----------------------------------------------------------------------------
+# 8. 富集分析与绘图（每个子集都必须出图）
+# -----------------------------------------------------------------------------
+try_save_plot <- function(fun, stub, width = 9, height = 7) {
+  p <- tryCatch(fun(), error = function(e) {
+    log_msg("Plot failed (", basename(stub), "): ", e$message)
     NULL
   })
+  if (is.null(p)) return(invisible(FALSE))
+  ok <- tryCatch({
+    save_gg(p, stub, width = width, height = height)
+    TRUE
+  }, error = function(e) {
+    log_msg("ggsave failed (", basename(stub), "): ", e$message)
+    FALSE
+  })
+  ok
+}
+
+note_empty <- function(stub, msg) {
+  writeLines(msg, paste0(stub, "_EMPTY.txt"))
+}
+
+plot_ora_object <- function(x, stub, title, fold_change = NULL) {
+  if (is.null(x) || nrow(as.data.frame(x)) == 0) {
+    note_empty(stub, "no enrichment terms")
+    return(invisible(NULL))
+  }
+  df <- as.data.frame(x)
+  utils::write.csv(df, paste0(stub, ".csv"), row.names = FALSE)
+  nshow <- min(15, nrow(df))
+  try_save_plot(function() enrichplot::dotplot(x, showCategory = nshow) + ggplot2::ggtitle(title),
+                paste0(stub, "_dotplot"), 9, 7)
+  try_save_plot(function() enrichplot::barplot(x, showCategory = nshow) + ggplot2::ggtitle(title),
+                paste0(stub, "_barplot"), 9, 7)
+  x2 <- tryCatch(enrichplot::pairwise_termsim(x), error = function(e) NULL)
+  if (!is.null(x2) && nrow(df) >= 2) {
+    try_save_plot(function() enrichplot::emapplot(x2, showCategory = min(20, nrow(df))) + ggplot2::ggtitle(title),
+                  paste0(stub, "_emapplot"), 10, 8)
+    try_save_plot(function() enrichplot::treeplot(x2, showCategory = min(20, nrow(df))) + ggplot2::ggtitle(title),
+                  paste0(stub, "_treeplot"), 11, 8)
+  }
+  try_save_plot(function() enrichplot::cnetplot(
+    x, showCategory = min(8, nshow), foldChange = fold_change, circular = FALSE
+  ) + ggplot2::ggtitle(title), paste0(stub, "_cnetplot"), 10, 8)
+  try_save_plot(function() enrichplot::heatplot(x, showCategory = nshow, foldChange = fold_change) +
+                  ggplot2::ggtitle(title), paste0(stub, "_heatplot"), 11, 6)
+}
+
+plot_gsea_object <- function(x, stub, title) {
+  if (is.null(x) || nrow(as.data.frame(x)) == 0) {
+    note_empty(stub, "no GSEA terms")
+    return(invisible(NULL))
+  }
+  df <- as.data.frame(x)
+  utils::write.csv(df, paste0(stub, ".csv"), row.names = FALSE)
+  nshow <- min(15, nrow(df))
+  try_save_plot(function() {
+    p <- enrichplot::dotplot(x, showCategory = nshow, split = ".sign")
+    p <- tryCatch(p + ggplot2::facet_grid(. ~ .sign) + ggplot2::ggtitle(title), error = function(e) p + ggplot2::ggtitle(title))
+    p
+  }, paste0(stub, "_dotplot"), 10, 7)
+  try_save_plot(function() enrichplot::ridgeplot(x, showCategory = nshow) + ggplot2::ggtitle(title),
+                paste0(stub, "_ridgeplot"), 10, 8)
+  ncurve <- min(5, nrow(df))
+  try_save_plot(function() enrichplot::gseaplot2(x, geneSetID = seq_len(ncurve), pvalue_table = TRUE, title = title),
+                paste0(stub, "_gseaplot"), 10, 8)
+  for (i in seq_len(min(3, nrow(df)))) {
+    desc <- as.character(df$Description[i])
+    try_save_plot(function() enrichplot::gseaplot2(x, geneSetID = i, title = desc),
+                  paste0(stub, "_gseaplot_top", i), 8, 6)
+  }
+  x2 <- tryCatch(enrichplot::pairwise_termsim(x), error = function(e) NULL)
+  if (!is.null(x2) && nrow(df) >= 2) {
+    try_save_plot(function() enrichplot::emapplot(x2, showCategory = min(20, nrow(df))) + ggplot2::ggtitle(title),
+                  paste0(stub, "_emapplot"), 10, 8)
+    try_save_plot(function() enrichplot::cnetplot(x, showCategory = min(8, nshow)) + ggplot2::ggtitle(title),
+                  paste0(stub, "_cnetplot"), 10, 8)
+  }
+}
+
+plot_gsea_selected_ids <- function(x, ids, stub, title) {
+  if (is.null(x) || length(ids) == 0) {
+    note_empty(stub, "no overlapping GSEA terms")
+    return(invisible(NULL))
+  }
+  ids <- ids[ids %in% as.data.frame(x)$ID]
+  if (length(ids) == 0) {
+    note_empty(stub, "no overlapping GSEA terms")
+    return(invisible(NULL))
+  }
+  ids <- utils::head(ids, 5)
+  try_save_plot(function() enrichplot::gseaplot2(x, geneSetID = ids, pvalue_table = TRUE, title = title),
+                stub, 10, 8)
+}
+
+enrich_or_relax <- function(fun_strict, fun_relax, label) {
+  obj <- tryCatch(fun_strict(), error = function(e) {
+    log_msg(label, " strict failed: ", e$message)
+    NULL
+  })
+  if (!is.null(obj) && nrow(as.data.frame(obj)) > 0) {
+    attr(obj, "relaxed") <- FALSE
+    return(obj)
+  }
+  obj <- tryCatch(fun_relax(), error = function(e) {
+    log_msg(label, " relaxed failed: ", e$message)
+    NULL
+  })
+  if (!is.null(obj)) attr(obj, "relaxed") <- TRUE
+  obj
+}
+
+title_maybe_relaxed <- function(obj, base) {
+  if (isTRUE(attr(obj, "relaxed"))) paste0(base, " (relaxed cutoff)") else base
+}
+
+msig_hallmark_map <- function() {
+  msig <- tryCatch(
+    msigdbr::msigdbr(species = "Homo sapiens", collection = "H"),
+    error = function(e) msigdbr::msigdbr(species = "Homo sapiens", category = "H")
+  )
+  gene_col <- intersect(c("ncbi_gene", "entrez_gene"), names(msig))[1]
+  msig[, c("gs_name", gene_col)]
+}
+
+build_gsea_cache <- function(de) {
+  stats <- ranked_entrez(de)
+  out <- list(stats = stats)
+  if (length(stats) < 10) return(out)
+  gsea_one <- function(fun, label) {
+    enrich_or_relax(
+      function() fun(pvalueCutoff = 0.05, minGSSize = 10),
+      function() fun(pvalueCutoff = 1, minGSSize = 5),
+      label
+    )
+  }
+  out$GO_BP <- gsea_one(function(pvalueCutoff, minGSSize) {
+    clusterProfiler::gseGO(
+      geneList = stats, OrgDb = org.Hs.eg.db, ont = "BP", keyType = "ENTREZID",
+      minGSSize = minGSSize, maxGSSize = 500, pvalueCutoff = pvalueCutoff,
+      verbose = FALSE, eps = 0
+    )
+  }, "gseGO_BP")
+  out$GO_MF <- gsea_one(function(pvalueCutoff, minGSSize) {
+    clusterProfiler::gseGO(
+      geneList = stats, OrgDb = org.Hs.eg.db, ont = "MF", keyType = "ENTREZID",
+      minGSSize = minGSSize, maxGSSize = 500, pvalueCutoff = pvalueCutoff,
+      verbose = FALSE, eps = 0
+    )
+  }, "gseGO_MF")
+  out$GO_CC <- gsea_one(function(pvalueCutoff, minGSSize) {
+    clusterProfiler::gseGO(
+      geneList = stats, OrgDb = org.Hs.eg.db, ont = "CC", keyType = "ENTREZID",
+      minGSSize = minGSSize, maxGSSize = 500, pvalueCutoff = pvalueCutoff,
+      verbose = FALSE, eps = 0
+    )
+  }, "gseGO_CC")
+  out$KEGG <- gsea_one(function(pvalueCutoff, minGSSize) {
+    clusterProfiler::gseKEGG(
+      geneList = stats, organism = "hsa", minGSSize = minGSSize, maxGSSize = 500,
+      pvalueCutoff = pvalueCutoff, verbose = FALSE, eps = 0
+    )
+  }, "gseKEGG")
+  out$Reactome <- gsea_one(function(pvalueCutoff, minGSSize) {
+    ReactomePA::gsePathway(
+      stats, organism = "human", minGSSize = minGSSize, maxGSSize = 500,
+      pvalueCutoff = pvalueCutoff, verbose = FALSE, eps = 0
+    )
+  }, "gsePathway")
+  term2gene <- tryCatch(msig_hallmark_map(), error = function(e) NULL)
+  if (!is.null(term2gene)) {
+    out$Hallmark <- gsea_one(function(pvalueCutoff, minGSSize) {
+      clusterProfiler::GSEA(
+        geneList = stats, TERM2GENE = term2gene, minGSSize = minGSSize,
+        maxGSSize = 500, pvalueCutoff = pvalueCutoff, eps = 0, verbose = FALSE
+      )
+    }, "GSEA_Hallmark")
+  }
+  for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
+    if (!is.null(out[[nm]]) && nrow(as.data.frame(out[[nm]])) > 0) {
+      out[[nm]] <- tryCatch(
+        clusterProfiler::setReadable(out[[nm]], OrgDb = org.Hs.eg.db, keyType = "ENTREZID"),
+        error = function(e) out[[nm]]
+      )
+    }
+  }
+  out
+}
+
+plot_fgsea_hallmark <- function(stats, outdir, title) {
+  if (length(stats) < 5) {
+    note_empty(file.path(outdir, "GSEA_Hallmark_fgsea"), "too few ranked genes")
+    return(invisible(NULL))
+  }
+  term2gene <- tryCatch(msig_hallmark_map(), error = function(e) NULL)
+  if (is.null(term2gene)) return(invisible(NULL))
+  pathways <- split(as.character(term2gene[[2]]), term2gene[[1]])
+  fg <- tryCatch(fgsea::fgsea(pathways = pathways, stats = stats, minSize = 5, maxSize = 500), error = function(e) {
+    log_msg("fgsea Hallmark failed: ", e$message)
+    NULL
+  })
+  if (is.null(fg) || nrow(fg) == 0) {
+    note_empty(file.path(outdir, "GSEA_Hallmark_fgsea"), "no fgsea terms")
+    return(invisible(NULL))
+  }
+  fg <- as.data.frame(fg)
+  fg <- fg[order(fg$pval), ]
+  utils::write.csv(fg, file.path(outdir, "GSEA_Hallmark_fgsea.csv"), row.names = FALSE)
+  plot_df <- utils::head(fg, 15)
+  plot_df$pathway <- factor(plot_df$pathway, levels = rev(plot_df$pathway))
+  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = NES, y = pathway, fill = padj < 0.05)) +
+    ggplot2::geom_col() +
+    ggplot2::scale_fill_manual(values = c("TRUE" = "#D62828", "FALSE" = "grey70")) +
+    ggplot2::theme_bw(base_size = 11) +
+    ggplot2::labs(title = title, y = NULL, fill = "padj < 0.05")
+  save_gg(p, file.path(outdir, "GSEA_Hallmark_fgsea_barplot"), 10, 7)
+  top_ids <- utils::head(fg$pathway[is.finite(fg$NES)], 3)
+  for (i in seq_along(top_ids)) {
+    pid <- top_ids[i]
+    pe <- tryCatch(fgsea::plotEnrichment(pathways[[pid]], stats) + ggplot2::labs(title = pid), error = function(e) NULL)
+    if (!is.null(pe)) save_gg(pe, file.path(outdir, paste0("GSEA_Hallmark_enrichment_top", i)), 8, 5)
+  }
+}
+
+gsea_ids_overlapping_genes <- function(gsea_obj, symbols, entrez) {
+  if (is.null(gsea_obj) || nrow(as.data.frame(gsea_obj)) == 0) return(character())
+  df <- as.data.frame(gsea_obj)
+  if (!"core_enrichment" %in% names(df)) return(character())
+  keep <- vapply(df$core_enrichment, function(s) {
+    gs <- unlist(strsplit(as.character(s), "/"))
+    any(gs %in% symbols) || any(gs %in% entrez)
+  }, logical(1))
+  df$ID[keep]
+}
+
+plot_kegg_pathview <- function(kegg_obj, stats, outdir) {
+  if (is.null(kegg_obj) || nrow(as.data.frame(kegg_obj)) == 0) return(invisible(NULL))
+  if (!requireNamespace("pathview", quietly = TRUE)) return(invisible(NULL))
+  ids <- utils::head(as.character(as.data.frame(kegg_obj)$ID), 3)
+  old <- getwd()
+  dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  setwd(outdir)
+  on.exit(setwd(old), add = TRUE)
+  for (id in ids) {
+    pid <- sub("^hsa", "", id)
+    tryCatch(
+      pathview::pathview(gene.data = stats, pathway.id = pid, species = "hsa", kegg.native = TRUE),
+      error = function(e) log_msg("pathview failed for ", id, ": ", e$message)
+    )
+  }
+}
+
+run_ora_plots <- function(genes, de_sub, outdir) {
+  go_dir <- file.path(outdir, "GO")
+  pw_dir <- file.path(outdir, "Pathway")
+  kg_dir <- file.path(outdir, "KEGG")
+  dir.create(go_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(pw_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(kg_dir, recursive = TRUE, showWarnings = FALSE)
+
+  mp <- map_to_entrez(genes)
+  entrez <- unique(mp$entrez)
+  fc_sym <- setNames(de_sub$log2FC, de_sub$gene)
+  fc_entrez <- setNames(de_sub$log2FC[match(mp$gene, de_sub$gene)], mp$entrez)
+  if (length(entrez) < 3) {
+    log_msg("ORA skipped, mapped genes < 3: ", outdir)
+    writeLines(paste("mapped_entrez", length(entrez)), file.path(outdir, "ORA_skipped.txt"))
+    note_empty(file.path(go_dir, "GO"), "too few mapped genes")
+    note_empty(file.path(pw_dir, "Pathway"), "too few mapped genes")
+    note_empty(file.path(kg_dir, "KEGG"), "too few mapped genes")
+    return(invisible(NULL))
+  }
+
+  for (ont in c("BP", "MF", "CC")) {
+    ego <- enrich_or_relax(
+      function() clusterProfiler::enrichGO(
+        gene = entrez, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = ont,
+        pAdjustMethod = "BH", pvalueCutoff = 0.05, qvalueCutoff = 0.2, readable = TRUE
+      ),
+      function() clusterProfiler::enrichGO(
+        gene = entrez, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = ont,
+        pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
+      ),
+      paste("enrichGO", ont)
+    )
+    plot_ora_object(ego, file.path(go_dir, paste0("GO_", ont)),
+                    title_maybe_relaxed(ego, paste("GO", ont)), fold_change = fc_sym)
+  }
+
+  ek <- enrich_or_relax(
+    function() clusterProfiler::enrichKEGG(
+      gene = entrez, organism = "hsa", pvalueCutoff = 0.05, qvalueCutoff = 0.2
+    ),
+    function() clusterProfiler::enrichKEGG(
+      gene = entrez, organism = "hsa", pvalueCutoff = 1, qvalueCutoff = 1
+    ),
+    "enrichKEGG"
+  )
   if (!is.null(ek) && nrow(as.data.frame(ek)) > 0) {
     ek <- tryCatch(clusterProfiler::setReadable(ek, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) ek)
   }
-  save_enrich(ek, file.path(outdir, "KEGG"))
-  er <- tryCatch(ReactomePA::enrichPathway(
-    gene = entrez, organism = "human", pvalueCutoff = 0.05, qvalueCutoff = 0.2, readable = TRUE
-  ), error = function(e) {
-    log_msg("enrichPathway failed: ", e$message)
-    NULL
-  })
-  save_enrich(er, file.path(outdir, "Reactome"))
-  hm <- tryCatch({
-    msig <- tryCatch(
-      msigdbr::msigdbr(species = "Homo sapiens", collection = "H"),
-      error = function(e) msigdbr::msigdbr(species = "Homo sapiens", category = "H")
-    )
-    gene_col <- intersect(c("ncbi_gene", "entrez_gene"), names(msig))[1]
-    term2gene <- msig[, c("gs_name", gene_col)]
-    clusterProfiler::enricher(entrez, TERM2GENE = term2gene, pvalueCutoff = 0.05, qvalueCutoff = 0.2)
-  }, error = function(e) {
-    log_msg("MSigDB Hallmark ORA failed: ", e$message)
-    NULL
-  })
-  save_enrich(hm, file.path(outdir, "MSigDB_Hallmark"))
+  plot_ora_object(ek, file.path(kg_dir, "KEGG"), title_maybe_relaxed(ek, "KEGG"), fold_change = fc_sym)
+  plot_kegg_pathview(ek, fc_entrez, kg_dir)
+
+  er <- enrich_or_relax(
+    function() ReactomePA::enrichPathway(
+      gene = entrez, organism = "human", pvalueCutoff = 0.05, qvalueCutoff = 0.2, readable = TRUE
+    ),
+    function() ReactomePA::enrichPathway(
+      gene = entrez, organism = "human", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
+    ),
+    "enrichPathway"
+  )
+  plot_ora_object(er, file.path(pw_dir, "Reactome"), title_maybe_relaxed(er, "Reactome"), fold_change = fc_sym)
+
+  hm <- enrich_or_relax(
+    function() {
+      term2gene <- msig_hallmark_map()
+      clusterProfiler::enricher(entrez, TERM2GENE = term2gene, pvalueCutoff = 0.05, qvalueCutoff = 0.2)
+    },
+    function() {
+      term2gene <- msig_hallmark_map()
+      clusterProfiler::enricher(entrez, TERM2GENE = term2gene, pvalueCutoff = 1, qvalueCutoff = 1)
+    },
+    "Hallmark"
+  )
+  if (!is.null(hm) && nrow(as.data.frame(hm)) > 0) {
+    hm <- tryCatch(clusterProfiler::setReadable(hm, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) hm)
+  }
+  plot_ora_object(hm, file.path(pw_dir, "MSigDB_Hallmark"),
+                  title_maybe_relaxed(hm, "MSigDB Hallmark"), fold_change = fc_sym)
 }
 
-run_gsea <- function(de, outdir, tag) {
+run_gsea_plots <- function(sub, gsea_cache, outdir, tag) {
+  gsea_dir <- file.path(outdir, "GSEA")
+  dir.create(gsea_dir, recursive = TRUE, showWarnings = FALSE)
+  sub_stats <- ranked_entrez(sub)
+  plot_fgsea_hallmark(sub_stats, gsea_dir, paste("GSEA Hallmark |", tag))
+
+  if (length(sub_stats) >= 8) {
+    term2gene <- tryCatch(msig_hallmark_map(), error = function(e) NULL)
+    if (!is.null(term2gene)) {
+      hm <- enrich_or_relax(
+        function() clusterProfiler::GSEA(
+          geneList = sub_stats, TERM2GENE = term2gene, minGSSize = 5,
+          maxGSSize = 500, pvalueCutoff = 0.05, eps = 0, verbose = FALSE
+        ),
+        function() clusterProfiler::GSEA(
+          geneList = sub_stats, TERM2GENE = term2gene, minGSSize = 3,
+          maxGSSize = 500, pvalueCutoff = 1, eps = 0, verbose = FALSE
+        ),
+        paste("subset Hallmark GSEA", tag)
+      )
+      plot_gsea_object(hm, file.path(gsea_dir, "GSEA_subset_Hallmark"),
+                       paste("GSEA Hallmark |", tag, "(subset ranked)"))
+    }
+    kegg <- enrich_or_relax(
+      function() clusterProfiler::gseKEGG(
+        geneList = sub_stats, organism = "hsa", minGSSize = 5, maxGSSize = 500,
+        pvalueCutoff = 0.05, verbose = FALSE, eps = 0
+      ),
+      function() clusterProfiler::gseKEGG(
+        geneList = sub_stats, organism = "hsa", minGSSize = 3, maxGSSize = 500,
+        pvalueCutoff = 1, verbose = FALSE, eps = 0
+      ),
+      paste("subset KEGG GSEA", tag)
+    )
+    if (!is.null(kegg) && nrow(as.data.frame(kegg)) > 0) {
+      kegg <- tryCatch(clusterProfiler::setReadable(kegg, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) kegg)
+    }
+    plot_gsea_object(kegg, file.path(gsea_dir, "GSEA_subset_KEGG"),
+                     paste("GSEA KEGG |", tag, "(subset ranked)"))
+  }
+
+  mp <- map_to_entrez(sub$gene)
+  for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
+    ids <- gsea_ids_overlapping_genes(gsea_cache[[nm]], sub$gene, mp$entrez)
+    plot_gsea_selected_ids(
+      gsea_cache[[nm]], ids,
+      file.path(gsea_dir, paste0("GSEA_fullrank_overlap_", nm)),
+      paste("GSEA", nm, "|", tag, "(full-rank overlap)")
+    )
+  }
+}
+
+emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de_for_volcano,
+                                 heat_mat, sample_info, gsea_cache, fc_line = 1) {
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
-  stats <- ranked_entrez(de)
-  if (length(stats) < 20) {
-    log_msg("GSEA skipped, ranked entrez < 20: ", tag)
-    writeLines("too few ranked genes", file.path(outdir, paste0("GSEA_", tag, "_skipped.txt")))
+  utils::write.csv(sub, file.path(outdir, "DE_selected_genes.csv"), row.names = FALSE)
+  writexl::write_xlsx(sub, file.path(outdir, "DE_selected_genes.xlsx"))
+  log_msg(comp_name, " ", tag, ": n = ", nrow(sub))
+  if (nrow(sub) == 0) {
+    writeLines("no genes", file.path(outdir, "EMPTY.txt"))
     return(invisible(NULL))
   }
-  g1 <- tryCatch(clusterProfiler::gseGO(
-    geneList = stats, OrgDb = org.Hs.eg.db, ont = "BP",
-    keyType = "ENTREZID", minGSSize = 10, maxGSSize = 500,
-    pvalueCutoff = 0.05, verbose = FALSE, eps = 0
-  ), error = function(e) {
-    log_msg("gseGO failed: ", e$message)
-    NULL
-  })
-  if (!is.null(g1) && nrow(as.data.frame(g1)) > 0) {
-    g1 <- tryCatch(clusterProfiler::setReadable(g1, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) g1)
+  plot_de_bar(sub, paste0(title, " | DE genes"), file.path(outdir, "DE_log2FC_barplot"))
+  plot_volcano(full_de_for_volcano, sub$gene, title, file.path(outdir, "volcano"), fc_line = fc_line)
+  if ("log2FC_sh1" %in% names(full_de_for_volcano)) {
+    plot_scatter_common(full_de_for_volcano, sub$gene, title, file.path(outdir, "scatter_sh1_sh5"))
   }
-  save_enrich(g1, file.path(outdir, paste0("GSEA_GO_BP_", tag)))
-  g2 <- tryCatch(clusterProfiler::gseKEGG(
-    geneList = stats, organism = "hsa",
-    minGSSize = 10, maxGSSize = 500, pvalueCutoff = 0.05, verbose = FALSE, eps = 0
-  ), error = function(e) {
-    log_msg("gseKEGG failed: ", e$message)
-    NULL
-  })
-  if (!is.null(g2) && nrow(as.data.frame(g2)) > 0) {
-    g2 <- tryCatch(clusterProfiler::setReadable(g2, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) g2)
-  }
-  save_enrich(g2, file.path(outdir, paste0("GSEA_KEGG_", tag)))
-  g3 <- tryCatch(ReactomePA::gsePathway(
-    stats, organism = "human", minGSSize = 10, maxGSSize = 500,
-    pvalueCutoff = 0.05, verbose = FALSE, eps = 0
-  ), error = function(e) {
-    log_msg("gsePathway failed: ", e$message)
-    NULL
-  })
-  if (!is.null(g3) && nrow(as.data.frame(g3)) > 0) {
-    g3 <- tryCatch(clusterProfiler::setReadable(g3, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) g3)
-  }
-  save_enrich(g3, file.path(outdir, paste0("GSEA_Reactome_", tag)))
+  plot_heatmap(heat_mat, sample_info, sub$gene, title, file.path(outdir, "heatmap"))
+  run_ora_plots(sub$gene, sub, outdir)
+  run_gsea_plots(sub, gsea_cache, outdir, tag)
 }
 
 # -----------------------------------------------------------------------------
-# 9. 对单个比较执行全部子集分析
+# 9. 对单个比较执行全部子集分析（4 个 FC x 7 个 topN，全部出图）
 # -----------------------------------------------------------------------------
 analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat, sample_info, have_pvalue, gsea_de = NULL) {
   if (is.null(gsea_de)) gsea_de <- de
@@ -738,60 +1051,35 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
   dir.create(base, recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(de, file.path(base, "DE_full.csv"), row.names = FALSE)
   writexl::write_xlsx(de, file.path(base, "DE_full.xlsx"))
-  dir.create(file.path(base, "GSEA_full_ranked"), recursive = TRUE, showWarnings = FALSE)
-  run_gsea(gsea_de, file.path(base, "GSEA_full_ranked"), "full")
 
-  # 火山图（全基因），后面子集再突出显示
+  log_msg("Building GSEA cache for ", comp_name)
+  gsea_cache <- build_gsea_cache(gsea_de)
+  full_gsea_dir <- file.path(base, "GSEA_full_ranked")
+  dir.create(full_gsea_dir, recursive = TRUE, showWarnings = FALSE)
+  for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
+    plot_gsea_object(gsea_cache[[nm]], file.path(full_gsea_dir, paste0("GSEA_", nm)),
+                     paste("GSEA", nm, "|", comp_name, "| full ranked list"))
+  }
+  plot_fgsea_hallmark(gsea_cache$stats, full_gsea_dir, paste("GSEA Hallmark |", comp_name))
+
   for (nm in names(fc_cutoffs)) {
     fc <- unname(fc_cutoffs[[nm]])
     sub <- select_by_fc(de, fc, have_pvalue)
-    outdir <- file.path(base, "FoldChange", nm)
-    dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
-    utils::write.csv(sub, file.path(outdir, "selected_genes.csv"), row.names = FALSE)
-    log_msg(comp_name, " ", nm, ": n = ", nrow(sub))
-    if (nrow(sub) == 0) {
-      writeLines("no genes", file.path(outdir, "EMPTY.txt"))
-      next
-    }
-    plot_volcano(
-      full_de_for_volcano, sub$gene,
-      paste0(comp_name, " | up FC >= ", fc),
-      file.path(outdir, "volcano"),
-      fc_line = fc
+    emit_subset_analysis(
+      comp_name, sub, nm, paste0(comp_name, " | up FC >= ", fc),
+      file.path(base, "FoldChange", nm),
+      full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = fc
     )
-    if ("log2FC_sh1" %in% names(full_de_for_volcano)) {
-      plot_scatter_common(full_de_for_volcano, sub$gene, paste0(comp_name, " | ", nm),
-                          file.path(outdir, "scatter_sh1_sh5"))
-    }
-    plot_heatmap(heat_mat, sample_info, sub$gene, paste0(comp_name, " ", nm), file.path(outdir, "heatmap"))
-    run_ora(sub$gene, outdir)
-    if (nrow(sub) >= 20) run_gsea(sub, outdir, nm)
   }
 
   for (n in top_ns) {
-    sub <- select_by_topn(de, n, have_pvalue)
     tag <- paste0("top", n)
-    outdir <- file.path(base, "TopRank", tag)
-    dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
-    utils::write.csv(sub, file.path(outdir, "selected_genes.csv"), row.names = FALSE)
-    log_msg(comp_name, " ", tag, ": n = ", nrow(sub))
-    if (nrow(sub) == 0) {
-      writeLines("no genes", file.path(outdir, "EMPTY.txt"))
-      next
-    }
-    plot_volcano(
-      full_de_for_volcano, sub$gene,
-      paste0(comp_name, " | upregulated top ", n),
-      file.path(outdir, "volcano"),
-      fc_line = 1
+    sub <- select_by_topn(de, n, have_pvalue)
+    emit_subset_analysis(
+      comp_name, sub, tag, paste0(comp_name, " | upregulated top ", n),
+      file.path(base, "TopRank", tag),
+      full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = 1
     )
-    if ("log2FC_sh1" %in% names(full_de_for_volcano)) {
-      plot_scatter_common(full_de_for_volcano, sub$gene, paste0(comp_name, " | ", tag),
-                          file.path(outdir, "scatter_sh1_sh5"))
-    }
-    plot_heatmap(heat_mat, sample_info, sub$gene, paste0(comp_name, " ", tag), file.path(outdir, "heatmap"))
-    run_ora(sub$gene, outdir)
-    if (nrow(sub) >= 20) run_gsea(sub, outdir, tag)
   }
 }
 
@@ -806,7 +1094,20 @@ plot_venn_up <- function(de_list, have_pvalue) {
     lst <- list(TG_sh1_up = a, TG_sh5_up = b)
     p <- tryCatch(ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
                     ggplot2::labs(title = paste0("Common up | FC >= ", fc)), error = function(e) NULL)
-    if (!is.null(p)) save_gg(p, file.path(outdir, paste0("venn_", nm)), width = 7, height = 6)
+    vdir <- file.path(outdir, "FoldChange", nm)
+    dir.create(vdir, recursive = TRUE, showWarnings = FALSE)
+    if (!is.null(p)) save_gg(p, file.path(vdir, paste0("venn_", nm)), width = 7, height = 6)
+  }
+  for (n in top_ns) {
+    tag <- paste0("top", n)
+    a <- select_by_topn(de_list$TG_sh1_vs_NTC, n, have_pvalue)$gene
+    b <- select_by_topn(de_list$TG_sh5_vs_NTC, n, have_pvalue)$gene
+    lst <- list(TG_sh1_up = a, TG_sh5_up = b)
+    p <- tryCatch(ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
+                    ggplot2::labs(title = paste0("Common up | ", tag)), error = function(e) NULL)
+    vdir <- file.path(outdir, "TopRank", tag)
+    dir.create(vdir, recursive = TRUE, showWarnings = FALSE)
+    if (!is.null(p)) save_gg(p, file.path(vdir, paste0("venn_", tag)), width = 7, height = 6)
   }
 }
 

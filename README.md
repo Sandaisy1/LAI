@@ -40,21 +40,38 @@ source("TG_RNAseq_pipeline.R")
 3. 每个比较再按两套策略取上调基因：
    - FoldChange：FC ≥ 1、1.25、1.5、2
    - 上调排名：top 50 / 75 / 100 / 150 / 200 / 250 / 300
-4. 每个非空基因集输出：差异表、火山图、热图、GO（BP/MF/CC）、Reactome、MSigDB Hallmark、KEGG、GSEA。默认 `padj < 0.05`；重复不足无法估计 P 值时改为仅按 FC/排名筛选。
+4. **每个比较 × 每个阈值都必须出图**，不能只出表格：
+   - 差异基因表 + log2FC 柱状图
+   - 火山图
+   - 热图
+   - GO 图（BP/MF/CC：barplot、dotplot、emapplot、cnetplot）
+   - 通路富集图（Reactome + MSigDB Hallmark）
+   - KEGG 图（barplot、dotplot、emapplot；并尽量输出 pathview 通路图）
+   - GSEA 图（dotplot、ridgeplot、gseaplot2、Hallmark enrichment curve）
+   默认 `padj < 0.05`；若无显著条目，会放宽阈值并在图标题标明 `relaxed cutoff`。
 
 ## 结果目录
+
+每个比较下都有完整的 4 个 FC 文件夹和 7 个 topN 文件夹：
 
 ```
 results/
   00_logs/
-  00_QC_PCA.*
-  normalized_log_matrix.csv
   TG_sh1_vs_NTC/
   TG_sh5_vs_NTC/
   TGsh_mean_vs_NTC/
   common_up/
-    FoldChange/FC_1 ... FC_2/
-    TopRank/top50 ... top300/
+    FoldChange/FC_1|FC_1.25|FC_1.5|FC_2/
+      DE_selected_genes.xlsx
+      DE_log2FC_barplot.pdf
+      volcano.pdf
+      heatmap.pdf
+      GO/
+      Pathway/
+      KEGG/
+      GSEA/
+    TopRank/top50|top75|top100|top150|top200|top250|top300/
+      （同上全套图）
 ```
 
 后续修改本仓库中的 R 分析时，请遵循 `.cursor/rules/tg-brca-rnaseq.mdc`。

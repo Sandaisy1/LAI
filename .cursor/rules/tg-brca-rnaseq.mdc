@@ -23,15 +23,23 @@ alwaysApply: true
 2. Combined: equal-weight average of the two knockdowns vs NTC, limma/DESeq2 contrast `(SH1 + SH5)/2 - NTC` (do not concatenate samples without equal weighting)
 3. Common up: intersection of upregulated genes from the two separate comparisons; rank remaining genes by mean log2FC, require both sides to pass a FC cutoff
 
-## Subset strategies (apply to each design; do not skip a cutoff)
+## Subset strategies (mandatory grid; never skip a cutoff)
+For **each** of the three comparisons (`TG_sh1_vs_NTC`, `TG_sh5_vs_NTC`, `TGsh_mean_vs_NTC`; plus `common_up` when both shRNAs exist), run **both** strategies in full:
 - FoldChange up: FC >= 1, 1.25, 1.5, 2 (log2FC >= 0, 0.3219, 0.5850, 1)
 - Ranked up genes: top 50, 75, 100, 150, 200, 250, 300 by log2FC (common-up uses mean log2FC)
-- Default: `padj < 0.05` plus the FC/rank filter; if no residual degrees of freedom, use FC-only and record that in the log
+- Default: `padj < 0.05` plus the FC/rank filter; if no residual DF, FC/rank only and log it
 
-## Downstream for every non-empty subset
-Export DE table, volcano, heatmap (row z-score, all samples), GO (BP/MF/CC), pathway (Reactome + MSigDB Hallmark), KEGG, GSEA.
+## Plots required in every non-empty subset folder
+Do not stop at tables. Each subset directory must contain figures for:
+1. DE: selected-gene table + log2FC barplot
+2. Volcano
+3. Heatmap (row z-score, all samples)
+4. GO plots (BP/MF/CC): barplot, dotplot, plus emap/cnet when terms >= 2
+5. Pathway plots (Reactome + Hallmark): barplot, dotplot, plus emap/cnet when terms >= 2
+6. KEGG plots: barplot, dotplot, plus emap/cnet; pathview maps when possible
+7. GSEA plots: dotplot, ridgeplot, gseaplot2 (never skip because n < 20; relax `minGSSize` / p-value and still draw)
 
-GSEA: run once on the full ranked list per comparison, and again on a subset if it has >= 20 genes. ORA is the primary test for small lists.
+If a test returns 0 significant terms, re-run with relaxed cutoffs and label the figure as relaxed; write `*_EMPTY.txt` only after that still fails. Put plots in `GO/`, `Pathway/`, `KEGG/`, `GSEA/` subfolders.
 
 ## Outputs
 - Write to `results/<comparison>/<strategy>/`
