@@ -131,6 +131,17 @@ run_go <- function(entrez, ont, universe) {
   )
 }
 
+kegg_helper <- c(
+  "scripts/kegg_enrich_helpers.R",
+  {
+    fa <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+    if (length(fa)) file.path(dirname(normalizePath(sub("^--file=", "", fa[[1]]))), "kegg_enrich_helpers.R") else NA_character_
+  }
+)
+kegg_helper <- kegg_helper[!is.na(kegg_helper) & file.exists(kegg_helper)][1]
+if (is.na(kegg_helper)) stop("找不到 kegg_enrich_helpers.R")
+source(kegg_helper, local = FALSE)
+
 summary_rows <- list()
 
 for (contrast_id in names(contrasts)) {
@@ -179,7 +190,7 @@ for (contrast_id in names(contrasts)) {
     message(contrast_id, " ", tag, ": ", n_use, " rows / ", length(symbols), " symbols")
 
     if (length(symbols) < 5) {
-      message("skip GO for ", contrast_id, " ", tag, " (need >=5 unique symbols)")
+      message("skip GO/KEGG for ", contrast_id, " ", tag, " (need >=5 unique symbols)")
       next
     }
     sig_map <- map_ids(symbols)
@@ -202,6 +213,14 @@ for (contrast_id in names(contrasts)) {
       print(barplot(ego, showCategory = 15) + ggtitle(paste(contrast_id, tag, "GO", ont)))
       dev.off()
     }
+
+    save_kegg_enrichment(
+      entrez = sig_map$ENTREZID,
+      universe = uni_map$ENTREZID,
+      dest_dir = tag_dir,
+      tag = tag,
+      title_prefix = paste(contrast_id, tag)
+    )
   }
 }
 

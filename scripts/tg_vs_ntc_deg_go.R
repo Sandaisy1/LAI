@@ -251,6 +251,17 @@ run_go_analysis <- function(deg, sig, contrast_id, dest_dir) {
     )
   }
 
+  kegg_helper <- c(
+    "scripts/kegg_enrich_helpers.R",
+    {
+      fa <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+      if (length(fa)) file.path(dirname(normalizePath(sub("^--file=", "", fa[[1]]))), "kegg_enrich_helpers.R") else NA_character_
+    }
+  )
+  kegg_helper <- kegg_helper[!is.na(kegg_helper) & file.exists(kegg_helper)][1]
+  if (is.na(kegg_helper)) stop("找不到 kegg_enrich_helpers.R")
+  if (!exists("save_kegg_enrichment", mode = "function")) source(kegg_helper, local = FALSE)
+
   for (tag in names(go_fc_cutoffs)) {
     fc <- as.numeric(go_fc_cutoffs[[tag]])
     up <- select_up_by_fc(deg, fc)
@@ -270,7 +281,7 @@ run_go_analysis <- function(deg, sig, contrast_id, dest_dir) {
     )
 
     if (length(up_symbols) < 5) {
-      message(contrast_id, " skip GO for ", tag, " (need >=5 unique symbols)")
+      message(contrast_id, " skip GO/KEGG for ", tag, " (need >=5 unique symbols)")
       next
     }
 
@@ -295,6 +306,14 @@ run_go_analysis <- function(deg, sig, contrast_id, dest_dir) {
       print(barplot(ego, showCategory = 15) + ggtitle(paste(contrast_id, tag, "GO", ont)))
       dev.off()
     }
+
+    save_kegg_enrichment(
+      entrez = sig_map$ENTREZID,
+      universe = uni_map$ENTREZID,
+      dest_dir = tag_dir,
+      tag = tag,
+      title_prefix = paste(contrast_id, tag)
+    )
   }
   write_tsv(rbindlist(count_rows), file.path(dest_dir, paste0("up_FC_gene_counts_", contrast_id, ".tsv")))
 }

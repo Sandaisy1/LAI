@@ -341,6 +341,17 @@ run_go <- function(entrez, ont) {
   )
 }
 
+kegg_helper <- c(
+  "scripts/kegg_enrich_helpers.R",
+  {
+    fa <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+    if (length(fa)) file.path(dirname(normalizePath(sub("^--file=", "", fa[[1]]))), "kegg_enrich_helpers.R") else NA_character_
+  }
+)
+kegg_helper <- kegg_helper[!is.na(kegg_helper) & file.exists(kegg_helper)][1]
+if (is.na(kegg_helper)) stop("找不到 kegg_enrich_helpers.R")
+source(kegg_helper, local = FALSE)
+
 go_one_set <- function(symbols, dest_dir, tag, gene_dt = NULL) {
   dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
   symbols <- unique(as.character(symbols))
@@ -352,7 +363,7 @@ go_one_set <- function(symbols, dest_dir, tag, gene_dt = NULL) {
   write_tsv(gene_dt, file.path(dest_dir, paste0("genes_", tag, ".tsv")))
   message(tag, ": ", length(symbols), " common up symbols")
   if (length(symbols) < 5) {
-    message("skip GO for ", tag, " (need >=5 genes)")
+    message("skip GO/KEGG for ", tag, " (need >=5 genes)")
     return(invisible(NULL))
   }
   mapped <- map_ids(symbols)
@@ -371,6 +382,13 @@ go_one_set <- function(symbols, dest_dir, tag, gene_dt = NULL) {
     print(barplot(ego, showCategory = 15) + ggtitle(paste("common up", tag, ont)))
     dev.off()
   }
+  save_kegg_enrichment(
+    entrez = mapped$ENTREZID,
+    universe = uni_map$ENTREZID,
+    dest_dir = dest_dir,
+    tag = tag,
+    title_prefix = paste("common up", tag)
+  )
 }
 
 # 1) FoldChange：两侧线性 FC 都 >= 阈值
