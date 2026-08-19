@@ -1,0 +1,10 @@
+.Rhistory
+.RData
+.Rproj.user
+.Ruserdata
+results/
+figures/
+*.html
+*.pdf
+.DS_Store
+Thumbs.db

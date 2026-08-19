@@ -1,0 +1,40 @@
+---
+description: TG BRCA RNA-seq analysis conventions for NTC vs TG_sh1/TG_sh5
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# TG BRCA RNA-seq pipeline
+
+## Data layout
+- Project dir: `E:/R/TG_BRCA/TG`; fallback to the repo/script directory if that path is absent
+- Primary matrix: `shTG(20220723).xlsx` (gene expression matrix)
+- Fallback: Cuffdiff `genes.read_group_tracking`, then `genes.count_tracking` / `genes.fpkm_tracking`
+- Groups: `NTC` (control), `TG_sh1`, `TG_sh5` (human BRCA cell RNA-seq)
+- Organism: human only (`org.Hs.eg.db`); convert SYMBOL/ENSEMBL to ENTREZID
+
+## Preprocess (required before every comparison)
+- Filter low-expression genes (do not analyze the raw unfiltered matrix)
+- Normalize to remove technical bias: DESeq2 size factors if counts; TMM/quantile + log2(x+1) if FPKM/TPM
+- Auto-detect counts vs FPKM; if `TG_sh5` columns are missing, skip sh5-dependent comparisons and log a warning
+
+## Three comparison designs (always run all that are possible)
+1. Separate DE: `TG_sh1 vs NTC` and `TG_sh5 vs NTC`
+2. Combined: equal-weight average of the two knockdowns vs NTC, limma/DESeq2 contrast `(SH1 + SH5)/2 - NTC` (do not concatenate samples without equal weighting)
+3. Common up: intersection of upregulated genes from the two separate comparisons; rank remaining genes by mean log2FC, require both sides to pass a FC cutoff
+
+## Subset strategies (apply to each design; do not skip a cutoff)
+- FoldChange up: FC >= 1, 1.25, 1.5, 2 (log2FC >= 0, 0.3219, 0.5850, 1)
+- Ranked up genes: top 50, 75, 100, 150, 200, 250, 300 by log2FC (common-up uses mean log2FC)
+- Default: `padj < 0.05` plus the FC/rank filter; if no residual degrees of freedom, use FC-only and record that in the log
+
+## Downstream for every non-empty subset
+Export DE table, volcano, heatmap (row z-score, all samples), GO (BP/MF/CC), pathway (Reactome + MSigDB Hallmark), KEGG, GSEA.
+
+GSEA: run once on the full ranked list per comparison, and again on a subset if it has >= 20 genes. ORA is the primary test for small lists.
+
+## Outputs
+- Write to `results/<comparison>/<strategy>/`
+- Skip empty gene sets after logging; do not abort the whole pipeline
+- Keep `project_dir` configurable; never hardcode a machine-only path without a fallback
+- Prefer one entry script `TG_RNAseq_pipeline.R`; add Chinese comments for analysis steps
