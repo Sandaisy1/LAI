@@ -32,3 +32,8 @@ deg <- readxl::read_excel("shTG(20220723)")
 - 火山图：x=`log2FC`，y=`-log10(padj)`；点颜色仍可标上/下调
 - **GO 只做上调基因**，禁止下调、禁止上调+下调合并。线性 FoldChange（不是 log2FC）分 **四组各自** `enrichGO`（BP/MF/CC），禁止把四组并成一次 GO：FC≥1（`log2FC≥0`）、FC≥1.25、FC≥1.5、FC≥2（`log2FC≥1`）。另需 `padj<0.05`（无 padj 时只用 FC）。输出 `go/up_FC1/`、`go/up_FC1.25/`、`go/up_FC1.5/`、`go/up_FC2/`
 - 结果分目录：`results/pairwise/TG_sh1_vs_NTC/`、`.../TG_sh5_vs_NTC/`、`results/pooled_avg/TG_sh1_sh5_avg_vs_NTC/`
+
+## 追加：上调 top-N GO（新脚本，禁止改 `tg_vs_ntc_deg_go.R`）
+
+三组各自做，禁止把三组基因合并后再 GO：`TG_sh1 vs NTC`、`TG_sh5 vs NTC`、`TG_sh1_sh5_avg vs NTC`。
+每组上调基因（`log2FC > 0`）按 log2FC 从大到小取前 **50 / 100 / 150 / 200 / 250 / 300**，**每个 N 单独** `enrichGO`（BP/MF/CC）。禁止把不同 N 并成一次 GO。读已有 `deg_*.tsv`，脚本：`scripts/tg_up_topn_go.R`，输出 `results/go_topn/<contrast>/top50/` … `top300/`。
