@@ -3,7 +3,7 @@
 #   从 Cuffdiff tracking 重建表达矩阵（不直接用 Excel）
 #   分析 1：TG_sh1 vs NTC、TG_sh5 vs NTC 各自 DEG + 火山图 + GO
 #   分析 2：TG_sh1 与 TG_sh5 组均值再平均，相对 NTC 做 DEG + 火山图 + GO
-#   GO 仅上调基因，按线性 FC>=1 / 1.25 / 1.5 / 2 四组分别富集
+#   GO + KEGG 仅上调基因，按线性 FC>=1 / 1.25 / 1.5 / 2 四组分别富集
 #
 # 用法:
 #   Rscript scripts/tg_vs_ntc_deg_go.R [data_dir] [out_dir]

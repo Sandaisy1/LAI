@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # Additional GO analysis (does NOT modify scripts/tg_vs_ntc_deg_go.R):
 #   For each of the three contrasts, take the top 50 / 100 / 150 / 200 / 250 / 300
-#   upregulated genes (ranked by log2FC descending) and run enrichGO separately.
+#   upregulated genes (ranked by log2FC descending) and run enrichGO + enrichKEGG separately.
 #
 # 用法（先跑完原始 DEG 脚本）:
 #   Rscript scripts/tg_vs_ntc_deg_go.R "E:/R/TG_BRCA/TG" "E:/R/TG_BRCA/TG/results"

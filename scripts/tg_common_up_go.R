@@ -2,8 +2,8 @@
 # 共同上调基因 GO（独立脚本，不修改 tg_vs_ntc_deg_go.R）
 #   1) 单独比较 TG_sh1 vs NTC、TG_sh5 vs NTC
 #   2) 取两组都上调的基因
-#   3a) 线性 FC>=1 / 1.25 / 1.5 / 2（两侧都达标）各自 GO
-#   3b) 各组上调前 50/75/100/150/200/250/300 的交集，各自 GO
+#   3a) 线性 FC>=1 / 1.25 / 1.5 / 2（两侧都达标）各自 GO + KEGG
+#   3b) 各组上调前 50/75/100/150/200/250/300 的交集，各自 GO + KEGG
 #
 # 用法:
 #   Rscript scripts/tg_common_up_go.R [data_dir] [out_dir]
