@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # Additional GO analysis (does NOT modify scripts/tg_vs_ntc_deg_go.R):
 #   For each of the three contrasts, take the top 50 / 100 / 150 / 200 / 250 / 300
-#   upregulated genes (ranked by log2FC descending) and run GO + KEGG + Reactome/WikiPathways separately.
+#   plus GSEA on each contrast's full ranked gene list.
 #
 # 用法（先跑完原始 DEG 脚本）:
 #   Rscript scripts/tg_vs_ntc_deg_go.R "E:/R/TG_BRCA/TG" "E:/R/TG_BRCA/TG/results"
@@ -167,6 +167,7 @@ for (contrast_id in names(contrasts)) {
   contrast_dir <- file.path(topn_root, contrast_id)
   dir.create(contrast_dir, recursive = TRUE, showWarnings = FALSE)
   write_tsv(up_all, file.path(contrast_dir, paste0("all_upregulated_ranked_", contrast_id, ".tsv")))
+  save_gsea_analyses(deg, file.path(contrast_dir, "gsea"), contrast_id, contrast_id)
 
   for (n in top_ns) {
     tag <- paste0("top", n)

@@ -3,7 +3,7 @@
 #   从 Cuffdiff tracking 重建表达矩阵（不直接用 Excel）
 #   分析 1：TG_sh1 vs NTC、TG_sh5 vs NTC 各自 DEG + 火山图 + GO
 #   分析 2：TG_sh1 与 TG_sh5 组均值再平均，相对 NTC 做 DEG + 火山图 + GO
-#   GO + KEGG + Reactome/WikiPathways 仅上调基因，按线性 FC>=1 / 1.25 / 1.5 / 2 四组分别富集
+#   GO + KEGG + Reactome/WikiPathways 仅上调基因；GSEA 用全列表排序
 #
 # 用法:
 #   Rscript scripts/tg_vs_ntc_deg_go.R [data_dir] [out_dir]
@@ -338,6 +338,7 @@ write_deg_outputs <- function(deg, contrast_id, dest_dir, deg_source, treat, con
     pdf_path = file.path(dest_dir, "plots", paste0("volcano_", contrast_id, ".pdf"))
   )
   run_go_analysis(deg, sig, contrast_id, file.path(dest_dir, "go"))
+  save_gsea_analyses(deg, file.path(dest_dir, "gsea"), contrast_id, contrast_id)
 }
 
 deseq2_contrast <- function(count_mat, coldata_df, treat, control) {

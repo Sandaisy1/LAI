@@ -3,7 +3,7 @@
 #   1) 单独比较 TG_sh1 vs NTC、TG_sh5 vs NTC
 #   2) 取两组都上调的基因
 #   3a) 线性 FC>=1 / 1.25 / 1.5 / 2（两侧都达标）各自 GO + KEGG + Reactome/WikiPathways
-#   3b) 各组上调前 50/75/100/150/200/250/300 的交集，各自 GO + KEGG + Reactome/WikiPathways
+#   4) 各组全列表 GSEA，以及两侧共有基因按 mean log2FC 的 GSEA
 #
 # 用法:
 #   Rscript scripts/tg_common_up_go.R [data_dir] [out_dir]
@@ -351,6 +351,17 @@ kegg_helper <- c(
 kegg_helper <- kegg_helper[!is.na(kegg_helper) & file.exists(kegg_helper)][1]
 if (is.na(kegg_helper)) stop("找不到 kegg_enrich_helpers.R")
 source(kegg_helper, local = FALSE)
+
+for (treat in treat_groups) {
+  cid <- paste0(treat, "_vs_", control_group)
+  save_gsea_analyses(deg_list[[treat]], file.path(root, "gsea", cid), cid, cid)
+}
+save_gsea_analyses(
+  common,
+  file.path(root, "gsea", "common_both_contrasts"),
+  "common_mean_log2FC",
+  "common genes ranked by mean log2FC"
+)
 
 go_one_set <- function(symbols, dest_dir, tag, gene_dt = NULL) {
   dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
