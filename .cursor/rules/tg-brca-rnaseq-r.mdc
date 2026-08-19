@@ -1,0 +1,31 @@
+---
+description: TG-BRCA RNA-seq 的 R 实现：Cuffdiff 读入、作图、ORA 与 GSEA 分工、输出目录
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: false
+---
+
+# R 实现细节
+
+主脚本：`R/analyze_tg_rnaseq.R`（**自带默认配置**）。找不到 `00_config.R` 时不得 `source()` 报错退出；改用内置默认值，数据目录默认 `E:/R/TG_BRCA/TG`。交互粘贴或 `source()` 后必须自动跑 `main()`。不要假设工作目录是仓库根目录（R 默认常是 `Documents`）。人类基因：`clusterProfiler` + `org.Hs.eg.db`。`inf` log2FC 用 `log2((v2+0.1)/(v1+0.1))` 重算。无 symbol 时用 `gene_id`。大热图最多 100 个基因，富集仍用完整列表。
+
+## 差异与作图
+
+```r
+# ❌ BAD：用 Excel 的 inf；热图只放 NTC 和 sh1
+# ✅ GOOD
+log2fc <- log2((treat + 0.1) / (ctrl + 0.1))
+pheatmap(log2(fpkm[genes, c("NTC", "TG_sh1", "TG_sh5")] + 1), scale = "row")
+```
+
+- 成对比较：火山图 x=log2FC、y=-log10(p)；当前 FC/TopN 上调高亮。
+- 共同上调：用 sh1 vs sh5 的 log2FC 散点图，不要捏造一次检验的 p 值。
+- 无重复时不要假做 limma/DESeq2；有 Cuffdiff p/q 则保留在表里，筛选仍以用户指定的 FC 或排名为准（不要擅自加 q<0.05）。
+
+## 富集分工
+
+- **GO / 通路 / KEGG**：对当前 FC 或 TopN **上调基因集做 ORA**（`enrichGO` BP/MF/CC、`enrichPathway`、`enrichKEGG`）。
+- **GSEA**：每个比较用**全基因 log2FC 降序**做一次 `gseGO`/`gseKEGG`（不要对 Top50 这种短列表重复 GSEA）。基因<15 或无显著通路时写空表并继续，不要报错退出。
+
+## 输出
+
+`results/<比较>/<筛选>/`，比较名：`sh1_vs_NTC`、`sh5_vs_NTC`、`meanSH_vs_NTC`、`common_up_sh1_sh5`。共同上调的 TopN 是两组各自 TopN 的交集（数量可小于 N）。
