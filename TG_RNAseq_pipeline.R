@@ -14,41 +14,66 @@
 #   差异基因表/柱状图、火山图、热图、GO图、通路富集图、KEGG图、GSEA图
 # =============================================================================
 
-options(stringsAsFactors = FALSE, warn = 1)
+options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
 Sys.setenv(LANGUAGE = "en")
+options(clusterProfiler.download.method = "auto")
 
 # -----------------------------------------------------------------------------
-# 0. 依赖包
+# 0. 依赖包（必需包失败才中止；pathview / ReactomePA 缺失时跳过对应图）
 # -----------------------------------------------------------------------------
-cran_pkgs <- c(
+cran_required <- c(
   "readxl", "writexl", "dplyr", "tidyr", "tibble", "stringr", "ggplot2",
-  "ggrepel", "pheatmap", "RColorBrewer", "matrixStats", "ggvenn",
-  "cowplot", "ggridges", "ggnewscale"
+  "ggrepel", "pheatmap", "RColorBrewer", "matrixStats", "cowplot",
+  "ggridges", "ggnewscale", "igraph"
 )
-bioc_pkgs <- c(
+cran_optional <- c("ggvenn")
+bioc_required <- c(
   "DESeq2", "edgeR", "limma", "clusterProfiler", "org.Hs.eg.db",
-  "enrichplot", "DOSE", "ReactomePA", "AnnotationDbi", "fgsea", "msigdbr",
-  "pathview"
+  "enrichplot", "DOSE", "AnnotationDbi", "fgsea", "msigdbr",
+  "SummarizedExperiment"
 )
+bioc_optional <- c("ReactomePA", "pathview")
 
-install_if_missing <- function() {
-  if (!requireNamespace("BiocManager", quietly = TRUE)) {
-    install.packages("BiocManager", repos = "https://cloud.r-project.org")
+install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
+  miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(miss) == 0) return(invisible(TRUE))
+  if (bioc) {
+    if (!requireNamespace("BiocManager", quietly = TRUE)) {
+      install.packages("BiocManager", repos = "https://cloud.r-project.org")
+    }
+    tryCatch(
+      BiocManager::install(miss, update = FALSE, ask = FALSE),
+      error = function(e) message("Bioconductor install failed: ", e$message)
+    )
+  } else {
+    tryCatch(
+      install.packages(miss, repos = "https://cloud.r-project.org"),
+      error = function(e) message("CRAN install failed: ", e$message)
+    )
   }
-  miss_cran <- cran_pkgs[!vapply(cran_pkgs, requireNamespace, logical(1), quietly = TRUE)]
-  if (length(miss_cran) > 0) {
-    install.packages(miss_cran, repos = "https://cloud.r-project.org")
+  still <- miss[!vapply(miss, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(still) > 0 && required) {
+    stop("缺少必需 R 包: ", paste(still, collapse = ", "))
   }
-  miss_bioc <- bioc_pkgs[!vapply(bioc_pkgs, requireNamespace, logical(1), quietly = TRUE)]
-  if (length(miss_bioc) > 0) {
-    BiocManager::install(miss_bioc, update = FALSE, ask = FALSE)
-  }
+  if (length(still) > 0) message("可选包未安装，相关分析将跳过: ", paste(still, collapse = ", "))
+  invisible(TRUE)
 }
 
-install_if_missing()
-invisible(lapply(c(cran_pkgs, bioc_pkgs), function(p) {
-  suppressPackageStartupMessages(library(p, character.only = TRUE))
-}))
+install_if_missing(cran_required, bioc = FALSE, required = TRUE)
+install_if_missing(cran_optional, bioc = FALSE, required = FALSE)
+install_if_missing(bioc_required, bioc = TRUE, required = TRUE)
+install_if_missing(bioc_optional, bioc = TRUE, required = FALSE)
+
+safe_library <- function(pkgs) {
+  for (p in pkgs) {
+    if (requireNamespace(p, quietly = TRUE)) {
+      suppressPackageStartupMessages(library(p, character.only = TRUE))
+    }
+  }
+}
+safe_library(c(cran_required, cran_optional, bioc_required, bioc_optional))
+
+has_pkg <- function(p) requireNamespace(p, quietly = TRUE)
 
 # -----------------------------------------------------------------------------
 # 1. 路径与分析参数
@@ -95,7 +120,7 @@ top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 # 2. 样本名识别
 # -----------------------------------------------------------------------------
 classify_sample <- function(name) {
-  n <- toupper(gsub("[._\\- ]", "", name))
+  n <- toupper(gsub("[^A-Za-z0-9]", "", name))
   if (grepl("SH5|SHRNA5|TGSH5", n)) return("TG_sh5")
   if (grepl("SH1|SHRNA1|TGSH1", n)) return("TG_sh1")
   if (grepl("NTC|SHNC|NEGCTRL|CTRL|CONTROL", n)) return("NTC")
@@ -158,10 +183,13 @@ read_excel_matrix <- function(xlsx) {
   groups <- vapply(num_cols, classify_sample, character(1))
   keep <- !is.na(groups)
   if (sum(keep) < 2) {
-    log_msg("Excel numeric columns could not be mapped to NTC/TG_sh1/TG_sh5: ",
-            paste(num_cols, collapse = ", "))
+    log_msg("Excel numeric columns could not be mapped to NTC/TG_sh1/TG_sh5.")
+    log_msg("Numeric columns: ", paste(num_cols, collapse = ", "))
+    log_msg("Gene column guessed as: ", gene_col)
     return(NULL)
   }
+  log_msg("Excel gene column: ", gene_col)
+  log_msg("Excel sample mapping: ", paste(paste0(num_cols[keep], "=", groups[keep]), collapse = "; "))
   mat <- as.matrix(df[, num_cols[keep], drop = FALSE])
   storage.mode(mat) <- "double"
   mat <- collapse_by_gene(mat, as.character(df[[gene_col]]))
@@ -329,7 +357,7 @@ normalize_expression <- function(mat, sample_info, value_type) {
     norm_counts <- DESeq2::counts(dds, normalized = TRUE)
     log_mat <- log2(norm_counts + 1)
     vsd <- tryCatch({
-      assay(DESeq2::vst(dds, blind = TRUE))
+      SummarizedExperiment::assay(DESeq2::vst(dds, blind = TRUE))
     }, error = function(e) {
       log_msg("vst failed, use log2(norm+1): ", e$message)
       log_mat
@@ -531,8 +559,11 @@ ranked_entrez <- function(de) {
 # 7. 绘图
 # -----------------------------------------------------------------------------
 save_gg <- function(plot, path_stub, width = 8, height = 6) {
-  ggplot2::ggsave(paste0(path_stub, ".pdf"), plot, width = width, height = height)
-  ggplot2::ggsave(paste0(path_stub, ".png"), plot, width = width, height = height, dpi = 300)
+  dir.create(dirname(path_stub), recursive = TRUE, showWarnings = FALSE)
+  tryCatch(ggplot2::ggsave(paste0(path_stub, ".pdf"), plot, width = width, height = height),
+           error = function(e) log_msg("pdf ggsave failed: ", e$message))
+  tryCatch(ggplot2::ggsave(paste0(path_stub, ".png"), plot, width = width, height = height, dpi = 300),
+           error = function(e) log_msg("png ggsave failed: ", e$message))
 }
 
 plot_volcano <- function(de, highlight, title, outfile, fc_line = 1) {
@@ -591,6 +622,9 @@ plot_heatmap <- function(heat_mat, sample_info, genes, title, outfile) {
     )
   }
   grDevices::pdf(paste0(outfile, ".pdf"), width = 8, height = max(6, min(18, 0.18 * nrow(sub) + 3)))
+  on.exit({
+    while (grDevices::dev.cur() > 1) grDevices::dev.off()
+  }, add = TRUE)
   draw_hm()
   grDevices::dev.off()
   grDevices::png(paste0(outfile, ".png"), width = 2400, height = max(1800, 40 * nrow(sub) + 400), res = 300)
@@ -800,12 +834,16 @@ build_gsea_cache <- function(de) {
       pvalueCutoff = pvalueCutoff, verbose = FALSE, eps = 0
     )
   }, "gseKEGG")
-  out$Reactome <- gsea_one(function(pvalueCutoff, minGSSize) {
-    ReactomePA::gsePathway(
-      stats, organism = "human", minGSSize = minGSSize, maxGSSize = 500,
-      pvalueCutoff = pvalueCutoff, verbose = FALSE, eps = 0
-    )
-  }, "gsePathway")
+  if (has_pkg("ReactomePA")) {
+    out$Reactome <- gsea_one(function(pvalueCutoff, minGSSize) {
+      ReactomePA::gsePathway(
+        stats, organism = "human", minGSSize = minGSSize, maxGSSize = 500,
+        pvalueCutoff = pvalueCutoff, verbose = FALSE, eps = 0
+      )
+    }, "gsePathway")
+  } else {
+    log_msg("ReactomePA not installed; skip Reactome GSEA")
+  }
   term2gene <- tryCatch(msig_hallmark_map(), error = function(e) NULL)
   if (!is.null(term2gene)) {
     out$Hallmark <- gsea_one(function(pvalueCutoff, minGSSize) {
@@ -874,7 +912,10 @@ gsea_ids_overlapping_genes <- function(gsea_obj, symbols, entrez) {
 
 plot_kegg_pathview <- function(kegg_obj, stats, outdir) {
   if (is.null(kegg_obj) || nrow(as.data.frame(kegg_obj)) == 0) return(invisible(NULL))
-  if (!requireNamespace("pathview", quietly = TRUE)) return(invisible(NULL))
+  if (!has_pkg("pathview")) {
+    log_msg("pathview not installed; skip KEGG pathway maps")
+    return(invisible(NULL))
+  }
   ids <- utils::head(as.character(as.data.frame(kegg_obj)$ID), 3)
   old <- getwd()
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
@@ -941,16 +982,20 @@ run_ora_plots <- function(genes, de_sub, outdir) {
   plot_ora_object(ek, file.path(kg_dir, "KEGG"), title_maybe_relaxed(ek, "KEGG"), fold_change = fc_sym)
   plot_kegg_pathview(ek, fc_entrez, kg_dir)
 
-  er <- enrich_or_relax(
-    function() ReactomePA::enrichPathway(
-      gene = entrez, organism = "human", pvalueCutoff = 0.05, qvalueCutoff = 0.2, readable = TRUE
-    ),
-    function() ReactomePA::enrichPathway(
-      gene = entrez, organism = "human", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
-    ),
-    "enrichPathway"
-  )
-  plot_ora_object(er, file.path(pw_dir, "Reactome"), title_maybe_relaxed(er, "Reactome"), fold_change = fc_sym)
+  if (has_pkg("ReactomePA")) {
+    er <- enrich_or_relax(
+      function() ReactomePA::enrichPathway(
+        gene = entrez, organism = "human", pvalueCutoff = 0.05, qvalueCutoff = 0.2, readable = TRUE
+      ),
+      function() ReactomePA::enrichPathway(
+        gene = entrez, organism = "human", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
+      ),
+      "enrichPathway"
+    )
+    plot_ora_object(er, file.path(pw_dir, "Reactome"), title_maybe_relaxed(er, "Reactome"), fold_change = fc_sym)
+  } else {
+    note_empty(file.path(pw_dir, "Reactome"), "ReactomePA not installed")
+  }
 
   hm <- enrich_or_relax(
     function() {
@@ -1026,20 +1071,30 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de_for
                                  heat_mat, sample_info, gsea_cache, fc_line = 1) {
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(sub, file.path(outdir, "DE_selected_genes.csv"), row.names = FALSE)
-  writexl::write_xlsx(sub, file.path(outdir, "DE_selected_genes.xlsx"))
+  tryCatch(writexl::write_xlsx(sub, file.path(outdir, "DE_selected_genes.xlsx")),
+           error = function(e) log_msg("xlsx write failed: ", e$message))
   log_msg(comp_name, " ", tag, ": n = ", nrow(sub))
   if (nrow(sub) == 0) {
     writeLines("no genes", file.path(outdir, "EMPTY.txt"))
     return(invisible(NULL))
   }
-  plot_de_bar(sub, paste0(title, " | DE genes"), file.path(outdir, "DE_log2FC_barplot"))
-  plot_volcano(full_de_for_volcano, sub$gene, title, file.path(outdir, "volcano"), fc_line = fc_line)
+  tryCatch(plot_de_bar(sub, paste0(title, " | DE genes"), file.path(outdir, "DE_log2FC_barplot")),
+           error = function(e) log_msg("DE barplot failed: ", e$message))
+  tryCatch(plot_volcano(full_de_for_volcano, sub$gene, title, file.path(outdir, "volcano"), fc_line = fc_line),
+           error = function(e) log_msg("volcano failed: ", e$message))
   if ("log2FC_sh1" %in% names(full_de_for_volcano)) {
-    plot_scatter_common(full_de_for_volcano, sub$gene, title, file.path(outdir, "scatter_sh1_sh5"))
+    tryCatch(plot_scatter_common(full_de_for_volcano, sub$gene, title, file.path(outdir, "scatter_sh1_sh5")),
+             error = function(e) log_msg("scatter failed: ", e$message))
   }
-  plot_heatmap(heat_mat, sample_info, sub$gene, title, file.path(outdir, "heatmap"))
-  run_ora_plots(sub$gene, sub, outdir)
-  run_gsea_plots(sub, gsea_cache, outdir, tag)
+  tryCatch(plot_heatmap(heat_mat, sample_info, sub$gene, title, file.path(outdir, "heatmap")),
+           error = function(e) {
+             while (grDevices::dev.cur() > 1) grDevices::dev.off()
+             log_msg("heatmap failed: ", e$message)
+           })
+  tryCatch(run_ora_plots(sub$gene, sub, outdir),
+           error = function(e) log_msg("ORA/plots failed: ", e$message))
+  tryCatch(run_gsea_plots(sub, gsea_cache, outdir, tag),
+           error = function(e) log_msg("GSEA/plots failed: ", e$message))
 }
 
 # -----------------------------------------------------------------------------
@@ -1092,8 +1147,14 @@ plot_venn_up <- function(de_list, have_pvalue) {
     a <- select_by_fc(de_list$TG_sh1_vs_NTC, fc, have_pvalue)$gene
     b <- select_by_fc(de_list$TG_sh5_vs_NTC, fc, have_pvalue)$gene
     lst <- list(TG_sh1_up = a, TG_sh5_up = b)
-    p <- tryCatch(ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
-                    ggplot2::labs(title = paste0("Common up | FC >= ", fc)), error = function(e) NULL)
+    p <- tryCatch({
+      if (!has_pkg("ggvenn")) stop("ggvenn not installed")
+      ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
+        ggplot2::labs(title = paste0("Common up | FC >= ", fc))
+    }, error = function(e) {
+      log_msg("venn failed: ", e$message)
+      NULL
+    })
     vdir <- file.path(outdir, "FoldChange", nm)
     dir.create(vdir, recursive = TRUE, showWarnings = FALSE)
     if (!is.null(p)) save_gg(p, file.path(vdir, paste0("venn_", nm)), width = 7, height = 6)
@@ -1103,8 +1164,14 @@ plot_venn_up <- function(de_list, have_pvalue) {
     a <- select_by_topn(de_list$TG_sh1_vs_NTC, n, have_pvalue)$gene
     b <- select_by_topn(de_list$TG_sh5_vs_NTC, n, have_pvalue)$gene
     lst <- list(TG_sh1_up = a, TG_sh5_up = b)
-    p <- tryCatch(ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
-                    ggplot2::labs(title = paste0("Common up | ", tag)), error = function(e) NULL)
+    p <- tryCatch({
+      if (!has_pkg("ggvenn")) stop("ggvenn not installed")
+      ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
+        ggplot2::labs(title = paste0("Common up | ", tag))
+    }, error = function(e) {
+      log_msg("venn failed: ", e$message)
+      NULL
+    })
     vdir <- file.path(outdir, "TopRank", tag)
     dir.create(vdir, recursive = TRUE, showWarnings = FALSE)
     if (!is.null(p)) save_gg(p, file.path(vdir, paste0("venn_", tag)), width = 7, height = 6)
@@ -1179,11 +1246,14 @@ for (nm in names(de_list)) {
     volcano_df <- common_full_rank
     gsea_de <- common_full_rank
   }
-  analyze_one_comparison(
-    nm, de_list[[nm]], volcano_df, norm$heat_mat, expr$sample_info, have_pvalue, gsea_de
+  tryCatch(
+    analyze_one_comparison(
+      nm, de_list[[nm]], volcano_df, norm$heat_mat, expr$sample_info, have_pvalue, gsea_de
+    ),
+    error = function(e) log_msg("ERROR in comparison ", nm, ": ", e$message)
   )
 }
-plot_venn_up(de_list, have_pvalue)
+tryCatch(plot_venn_up(de_list, have_pvalue), error = function(e) log_msg("venn error: ", e$message))
 
 utils::writeLines(capture.output(sessionInfo()), file.path(log_dir, "sessionInfo.txt"))
 log_msg("All done. Results in: ", result_dir)
