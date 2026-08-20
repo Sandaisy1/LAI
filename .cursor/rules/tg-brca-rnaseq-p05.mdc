@@ -37,7 +37,7 @@ alwaysApply: true
 
 ## 显著性（先 p，再倍数或排名）
 
-「p 值大于 0.05」按 **p < 0.05** 实现（保留显著基因；有 padj 时用 `padj < 0.05`）。能估计 p 时（重复或 Cuffdiff `gene_exp.diff`）先滤 p，再分层；1-vs-1 无法估计 p 时不要伪造，仍按 FC/排名分层并写日志。共同上调：两个 1-vs-1 都过同一套阈值后取交集。只分析上调。
+「p 值小于 0.05」或「p 值大于 0.05」均按 **p < 0.05** 实现（保留显著基因；有 padj 时用 `padj < 0.05`）。能估计 p 时（2 vs 2 的 limma，或 Cuffdiff `gene_exp.diff`）先滤 p，再分层；1-vs-1 与「KD 均值 vs 单个 NTC」无法估计 p 时不要伪造，仍按 FC/排名分层并写日志。共同上调：两个 1-vs-1 都过同一套阈值后取交集。只分析上调。
 
 ## 两套分层（六组都要跑，阈值一个都不能少）
 
@@ -48,14 +48,15 @@ alwaysApply: true
 
 ## 每个非空子集必须出的图
 
-差异基因表、火山图、热图、GO、通路富集、KEGG、GSEA。
+差异基因表、火山图、热图、GO、通路富集、KEGG、GSVA、GSEA。
 
-- ORA 放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头（不要写进 GSEA/）
+- ORA 放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头（不要写进 GSEA/ 或 GSVA/）
 - GSEA 放 `GSEA/`，文件名以 `GSEA_` 开头；全基因 GSEA 只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
+- GSVA 放 `GSVA/`，文件名以 `GSVA_` 开头；全基因 GSVA 只能放 `00_GSVA_all_genes_NOT_FC_or_topN`（不要写进 GSEA/）
 - 细胞骨架/线粒体假说放 `Focused_cytoskeleton_mito/`；全基因组表另出 `*_FOCUS_cytoskeleton_mito.csv`（保留原始 p 与 `genome_wide_rank`）
 
 ```r
-# ❌ BAD: 把 padj_cutoff 改成 0.01；结果写进 results/；跳过 FC>=1 或 top75
-# ❌ BAD: 为做 p<0.05 去改现有 0.01 脚本
-# ✅ GOOD: 独立 p05 脚本；results_p05/；每组 × (4 个 FC + 7 个 topN) 出齐表和图
+# ❌ BAD: 把 padj_cutoff 改成 0.01；结果写进 results/；跳过 FC>=1、top75 或 GSVA
+# ❌ BAD: 为做 p<0.05 去改现有 0.01 脚本；把 GSVA 图写进 GSEA/
+# ✅ GOOD: 独立 p05 脚本；results_p05/；每组 × (4 个 FC + 7 个 topN) 出齐表和图（含 GSVA）
 ```

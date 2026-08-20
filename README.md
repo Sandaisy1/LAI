@@ -97,3 +97,28 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## p < 0.05 平行轨道（独立脚本，不改上面的 0.01 流程）
+
+`TG_RNAseq_pipeline_p05.R` 与 `TG_RNAseq_TGsh_mean_vs_NTC_reps_p05.R` 用 **p < 0.05**（有 padj 时 `padj < 0.05`）。1-vs-1 和「KD 均值 vs 单个 NTC」无法估计 p 时不伪造，仍按 FC / 排名分层。结果只写 `results_p05/`。
+
+每个非空子集额外输出 **GSVA**（`GSVA/`，文件名以 `GSVA_` 开头；全基因 GSVA 在 `00_GSVA_all_genes_NOT_FC_or_topN`），不要和 GSEA 混放。
+
+```r
+setwd("E:/R/TG_BRCA/TG")
+source("TG_RNAseq_pipeline_p05.R")                 # 比较 1–4
+source("TG_RNAseq_TGsh_mean_vs_NTC_reps_p05.R")    # 比较 5–6
+```
+
+```
+results_p05/
+  TG_sh1_vs_NTC_rep0/
+  TG_sh5_vs_NTC_rep0/
+  TG_sh1_vs_NTC_rep1/
+  TG_sh5_vs_NTC_rep1/
+  TGsh_mean_vs_NTC/
+  common_up_vs_NTC_rep0/
+  common_up_vs_NTC_rep1/
+  TGsh_mean_vs_NTC_rep0/
+  TGsh_mean_vs_NTC_rep1/
+```
