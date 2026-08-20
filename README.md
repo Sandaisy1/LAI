@@ -54,3 +54,12 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 ```
 
 文件名和图标题都会带上 `FC_1.5` 或 `top100`。重新运行前建议先删掉旧的 `results/`。
+
+## 热图上的基因名（XLOC / 逗号）
+
+这些来自 Cuffdiff 的 `gene_short_name`，**不是 FC 算错**：
+
+- `XLOC_003812`：Cufflinks 组装出来的位点 ID，没有官方基因符号时会保留
+- `SAA2,SAA2-SAA4,SAA4`：重叠基因座被写成一条复合名；脚本会拆成官方符号（这里取 `SAA2`）
+
+读入时会清洗复合名并优先用官方符号。没有符号的 novel locus 仍会显示为 `XLOC_`，这些行会留在差异分析里，但 GO/KEGG 通常映射不上。

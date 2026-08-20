@@ -173,6 +173,58 @@ guess_gene_column <- function(df) {
   nms[1]
 }
 
+pick_official_symbol <- function(x) {
+  x <- trimws(as.character(x))
+  if (length(x) != 1 || is.na(x) || x %in% c("", "-", ".", "NA")) return(NA_character_)
+  parts <- unlist(strsplit(x, "[,;|/]+"))
+  parts <- trimws(parts)
+  parts <- parts[nzchar(parts) & !parts %in% c("-", ".", "NA")]
+  if (length(parts) == 0) return(NA_character_)
+  is_fusion <- vapply(parts, function(t) {
+    bits <- strsplit(t, "-", fixed = TRUE)[[1]]
+    length(bits) == 2 && (bits[1] %in% parts || bits[2] %in% parts)
+  }, logical(1))
+  if (any(!is_fusion)) parts <- parts[!is_fusion]
+  score <- vapply(parts, function(s) {
+    if (grepl("^(XLOC|TCONS|CUFF)_", s, ignore.case = TRUE)) return(0)
+    if (grepl("^MIR[0-9]", s, ignore.case = TRUE)) return(1)
+    if (grepl("^LOC[0-9]+$", s, ignore.case = TRUE)) return(2)
+    3
+  }, numeric(1))
+  parts[which.max(score)]
+}
+
+clean_gene_names <- function(symbols, tracking_ids = NULL, nearest_ref = NULL) {
+  out <- vapply(symbols, pick_official_symbol, character(1), USE.NAMES = FALSE)
+  if (!is.null(nearest_ref)) {
+    need <- is.na(out) | grepl("^(XLOC|TCONS|CUFF)_", out, ignore.case = TRUE)
+    ref <- vapply(nearest_ref, pick_official_symbol, character(1), USE.NAMES = FALSE)
+    use_ref <- need & !is.na(ref) & !grepl("^(XLOC|TCONS|CUFF|NM_|NR_|ENST)", ref, ignore.case = TRUE)
+    out[use_ref] <- ref[use_ref]
+  }
+  if (!is.null(tracking_ids)) {
+    still <- is.na(out) | !nzchar(out)
+    out[still] <- as.character(tracking_ids[still])
+  }
+  out
+}
+
+apply_gene_labels <- function(mat, symbols, tracking_ids = NULL, nearest_ref = NULL) {
+  raw <- as.character(symbols)
+  genes <- clean_gene_names(raw, tracking_ids = tracking_ids, nearest_ref = nearest_ref)
+  n_fused <- sum(grepl("[,;|/]", raw), na.rm = TRUE)
+  mat <- collapse_by_gene(mat, genes)
+  n_xloc <- sum(grepl("^(XLOC|TCONS|CUFF)_", rownames(mat), ignore.case = TRUE))
+  n_comma <- sum(grepl(",", rownames(mat), fixed = TRUE))
+  log_msg(
+    "Gene labels: ", nrow(mat), " unique after collapsing; ",
+    "Cufflinks fused/comma names cleaned: ", n_fused, "; ",
+    "remaining XLOC (novel/unannotated): ", n_xloc, "; ",
+    "remaining comma names: ", n_comma
+  )
+  mat
+}
+
 collapse_by_gene <- function(mat, genes) {
   genes[is.na(genes) | genes == "" | genes == "-"] <- NA
   keep <- !is.na(genes)
@@ -237,18 +289,22 @@ read_read_group_tracking <- function(path) {
   if (file.exists(fpkm_file)) {
     fp <- utils::read.delim(fpkm_file, check.names = FALSE, stringsAsFactors = FALSE)
     if (all(c("tracking_id", "gene_short_name") %in% names(fp))) {
-      gene_map <- fp[, c("tracking_id", "gene_short_name")]
+      gene_map <- fp
     }
   }
   genes <- wide$tracking_id
+  nearest <- NULL
   if (!is.null(gene_map)) {
-    genes <- gene_map$gene_short_name[match(wide$tracking_id, gene_map$tracking_id)]
-    genes[is.na(genes) | genes == "" | genes == "-"] <- wide$tracking_id[is.na(genes) | genes == "" | genes == "-"]
+    hit <- match(wide$tracking_id, gene_map$tracking_id)
+    genes <- gene_map$gene_short_name[hit]
+    if ("nearest_ref_id" %in% names(gene_map)) {
+      nearest <- gene_map$nearest_ref_id[hit]
+    }
   }
   mat <- as.matrix(wide[, setdiff(names(wide), "tracking_id"), drop = FALSE])
   storage.mode(mat) <- "double"
   mat[is.na(mat)] <- 0
-  mat <- collapse_by_gene(mat, genes)
+  mat <- apply_gene_labels(mat, genes, tracking_ids = wide$tracking_id, nearest_ref = nearest)
   sample_info <- unique(rg[, c("sample", "group")])
   sample_info <- sample_info[match(colnames(mat), sample_info$sample), ]
   log_msg("Sample mapping: ", paste(paste0(sample_info$sample, "=", sample_info$group), collapse = "; "))
@@ -280,7 +336,9 @@ read_tracking_matrix <- function(path, value_pattern) {
   storage.mode(mat) <- "double"
   mat[is.na(mat)] <- 0
   if (exists("colnames_keep")) colnames(mat) <- colnames_keep[keep]
-  mat <- collapse_by_gene(mat, as.character(tr[[gene_col]]))
+  tid <- if ("tracking_id" %in% names(tr)) tr$tracking_id else NULL
+  nearest <- if ("nearest_ref_id" %in% names(tr)) tr$nearest_ref_id else NULL
+  mat <- apply_gene_labels(mat, tr[[gene_col]], tracking_ids = tid, nearest_ref = nearest)
   list(
     mat = mat,
     sample_info = data.frame(sample = colnames(mat), group = unname(groups[keep]), stringsAsFactors = FALSE),

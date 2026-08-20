@@ -11,6 +11,7 @@ alwaysApply: true
 - Input: Cuffdiff `genes.read_group_tracking`, then `genes.count_tracking` / `genes.fpkm_tracking`
 - Samples: `NTC_rep0`, `NTC_rep1`, `TG_sh1`, `TG_sh5` (do not collapse the two NTC samples except in design 2)
 - Human `org.Hs.eg.db`
+- Cufflinks `gene_short_name` may be fused (`SAA2,SAA2-SAA4,SAA4`) or locus IDs (`XLOC_######`). Clean to one official symbol; keep remaining XLOC rows for DE but they will not map in GO/KEGG.
 
 ## Preprocess (once, all samples together)
 Filter low expression, then normalize (DESeq2 size factors if counts; quantile log2 if FPKM).
