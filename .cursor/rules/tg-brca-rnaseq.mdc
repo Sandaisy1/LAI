@@ -1,39 +1,42 @@
 ---
-description: TG BRCA RNA-seq analysis with NTC_rep0/rep1 kept separate
+description: TG BRCA RNA-seq six-design downregulation analysis
 globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
 
-# TG BRCA RNA-seq pipeline
+# TG BRCA RNA-seq pipeline (downregulation, six designs)
 
 ## Data
 - Dir: `E:/R/TG_BRCA/TG` (fallback: script/repo dir)
 - Input: Cuffdiff `genes.read_group_tracking`, then `genes.count_tracking` / `genes.fpkm_tracking`
-- Samples: `NTC_rep0`, `NTC_rep1`, `TG_sh1`, `TG_sh5` (do not collapse the two NTC samples except in design 2)
+- Samples: `NTC_rep0`, `NTC_rep1`, `TG_sh1`, `TG_sh5`
 - Human `org.Hs.eg.db`
 - Cufflinks `gene_short_name` may be fused (`SAA2,SAA2-SAA4,SAA4`) or locus IDs (`XLOC_######`). Clean to one official symbol; keep remaining XLOC rows for DE but they will not map in GO/KEGG.
 
 ## Preprocess (once, all samples together)
 Filter low expression, then normalize (DESeq2 size factors if counts; quantile log2 if FPKM).
 
-## Four designs (each gets its own plots; never merge NTC_rep0 with NTC_rep1 except design 2)
+## Six designs (each gets its own plots; never merge NTC_rep0 with NTC_rep1 except design 2)
 1. Pairwise 1-vs-1, separately: `TG_sh1 vs NTC_rep0`, `TG_sh5 vs NTC_rep0`, `TG_sh1 vs NTC_rep1`, `TG_sh5 vs NTC_rep1`. log2FC from normalized values; no p-value (1 vs 1).
 2. Combined: mean(TG_sh1, TG_sh5) vs NTC group mean(NTC_rep0, NTC_rep1). Equal weight to the two knockdowns.
-3. Common up vs NTC_rep0: intersection of upregulated genes from `TG_sh1 vs NTC_rep0` and `TG_sh5 vs NTC_rep0`.
-4. Common up vs NTC_rep1: intersection of upregulated genes from `TG_sh1 vs NTC_rep1` and `TG_sh5 vs NTC_rep1`.
-
-## Extra script (do not edit original pipeline for this)
-- File: `TG_RNAseq_TGsh_mean_vs_NTC_reps.R`
-- Adds `mean(TG_sh1, TG_sh5) vs NTC_rep0` and `mean(TG_sh1, TG_sh5) vs NTC_rep1`
-- Same FC 1/1.25/1.5/2 and top 50–300 volcano/heatmap/ORA/GSEA grid
-- Leave `TG_RNAseq_pipeline.R` designs 1–4 unchanged
+3. Common down vs NTC_rep0: intersection of downregulated genes from `TG_sh1 vs NTC_rep0` and `TG_sh5 vs NTC_rep0`.
+4. Common down vs NTC_rep1: intersection of downregulated genes from `TG_sh1 vs NTC_rep1` and `TG_sh5 vs NTC_rep1`.
+5. mean(TG_sh1, TG_sh5) vs NTC_rep0 (FC only).
+6. mean(TG_sh1, TG_sh5) vs NTC_rep1 (FC only).
 
 ## Subset grid (every design, do not skip a cutoff)
-- FC up: 1, 1.25, 1.5, 2
-- Top up: 50, 75, 100, 150, 200, 250, 300
-- Pairwise/common: FC/rank only. Combined: `padj < 0.05` if estimable, else FC/rank only.
+- FC down: treat/control ≤ 1, 0.8, 0.6, 0.5 (folders `FC_1` / `FC_0.8` / `FC_0.6` / `FC_0.5`)
+- Top down: 50, 75, 100, 150, 200, 250, 300 (most negative log2FC)
+- Pairwise / common / designs 5–6: FC/rank only. Design 2: `padj < 0.05` if estimable, else FC/rank only.
+
+## Run order (hard rule — do not invert)
+1. All `FoldChange/` and `TopRank/` volcano, heatmap, and ORA GO/pathway/KEGG first.
+2. Subset GSEA only after every subset has those plots.
+3. All-gene GSEA last (`99_GSEA_all_genes_NOT_FC_or_topN`). Never run it first. Wrap it so a GSEA error cannot skip volcano/heatmap/ORA or any FC/topN folder.
+4. GSEA is slow; isolate each GSEA block in `tryCatch`.
 
 ## Plots in every non-empty subset
+- DE table, volcano, heatmap
 - ORA (单独的 GO / 通路 / KEGG，不是 GSEA): `GO/`, `Pathway/`, `KEGG/`, filenames start with `ORA_`
-- GSEA: `GSEA/` and `00_GSEA_all_genes_NOT_FC_or_topN`, filenames start with `GSEA_`
-- Do not inflate genome-wide GO/KEGG p-values. Cytoskeleton-motility and mitochondria hypotheses go in `Focused_cytoskeleton_mito/` (custom gene-set GSEA/ORA). Genome-wide tables also emit `*_FOCUS_cytoskeleton_mito.csv` with original p-values and `genome_wide_rank`.
+- GSEA last: subset `GSEA/` then `99_GSEA_all_genes_NOT_FC_or_topN`; filenames start with `GSEA_`
+- Do not inflate genome-wide GO/KEGG p-values. Cytoskeleton-motility and mitochondria hypotheses go in `Focused_cytoskeleton_mito/`.
