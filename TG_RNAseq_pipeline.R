@@ -2,10 +2,12 @@
 # =============================================================================
 # TG BRCA 细胞 RNA-seq 分析流程
 # 组别：NTC（对照）、TG_sh1、TG_sh5
-# 三种比较：
-#   1) TG_sh1 vs NTC ； TG_sh5 vs NTC
-#   2) (TG_sh1 + TG_sh5)/2 vs NTC   （两个 knockdown 等权平均）
-#   3) 两次单独比较中的共同上调基因
+# 四种比较：
+#   1) 单独 1-vs-1：TG_sh1 vs NTC_rep0，TG_sh5 vs NTC_rep0，
+#                  TG_sh1 vs NTC_rep1，TG_sh5 vs NTC_rep1（各自单独作图）
+#   2) (TG_sh1 + TG_sh5)/2 vs NTC组均值(NTC_rep0, NTC_rep1)
+#   3) 共同上调：TG_sh1 vs NTC_rep0 与 TG_sh5 vs NTC_rep0 的交集
+#   4) 共同上调：TG_sh1 vs NTC_rep1 与 TG_sh5 vs NTC_rep1 的交集
 # 预处理：过滤低表达 + 标准化消除技术偏差
 # 子集策略：
 #   A) 上调 FC >= 1 / 1.25 / 1.5 / 2
@@ -128,6 +130,33 @@ classify_sample <- function(name) {
   if (grepl("NTC|SHNC|NEGCTRL|CTRL|CONTROL", n)) return("NTC")
   if (grepl("^NC[0-9]*$", n)) return("NTC")
   NA_character_
+}
+
+# 两个 NTC 样品单独标记为 NTC_rep0 / NTC_rep1，不在 1-vs-1 比较里合并
+add_ntc_ids <- function(sample_info) {
+  sample_info$ntc_id <- NA_character_
+  ntc <- which(sample_info$group == "NTC")
+  if (length(ntc) == 0) return(sample_info)
+  labs <- as.character(sample_info$sample[ntc])
+  ids <- rep(NA_character_, length(labs))
+  ids[grepl("rep1|[_-]1$", labs, ignore.case = TRUE)] <- "NTC_rep1"
+  ids[grepl("rep0|[_-]0$", labs, ignore.case = TRUE)] <- "NTC_rep0"
+  if (any(is.na(ids)) && length(ntc) == 2) {
+    ids[order(labs)] <- c("NTC_rep0", "NTC_rep1")
+  }
+  if (length(ntc) == 1 && is.na(ids[1])) ids[1] <- "NTC_rep0"
+  sample_info$ntc_id[ntc] <- ids
+  sample_info
+}
+
+find_sample <- function(sample_info, group, ntc_id = NULL) {
+  if (!is.null(ntc_id)) {
+    hit <- sample_info$sample[sample_info$group == "NTC" & sample_info$ntc_id == ntc_id]
+  } else {
+    hit <- sample_info$sample[sample_info$group == group]
+  }
+  if (length(hit) == 0) return(NA_character_)
+  hit[1]
 }
 
 guess_gene_column <- function(df) {
@@ -353,124 +382,82 @@ normalize_expression <- function(mat, sample_info, value_type) {
 
 # -----------------------------------------------------------------------------
 # 5. 差异分析
+#   1-vs-1 比较：标准化后的 log 值直接相减，无 P 值
+#   合并比较：两个 knockdown 等权平均 vs 两个 NTC 的组均值
 # -----------------------------------------------------------------------------
-safe_ebayes <- function(fit) {
-  tryCatch(limma::eBayes(fit, trend = TRUE, robust = TRUE), error = function(e) {
-    log_msg("eBayes(trend/robust) failed, fallback: ", e$message)
-    tryCatch(limma::eBayes(fit), error = function(e2) {
-      log_msg("eBayes failed: ", e2$message)
-      fit$p.value <- matrix(NA_real_, nrow = nrow(fit$coefficients), ncol = ncol(fit$coefficients))
-      fit$fdr <- fit$p.value
-      class(fit) <- c("MArrayLM", class(fit))
-      fit
-    })
-  })
+pairwise_de <- function(log_mat, treat_sample, ntc_sample, comp_name) {
+  if (is.na(treat_sample) || is.na(ntc_sample)) return(NULL)
+  if (!all(c(treat_sample, ntc_sample) %in% colnames(log_mat))) return(NULL)
+  log_msg(comp_name, " : ", treat_sample, " vs ", ntc_sample, " (1-vs-1, FC only)")
+  log2FC <- log_mat[, treat_sample] - log_mat[, ntc_sample]
+  ave <- (log_mat[, treat_sample] + log_mat[, ntc_sample]) / 2
+  data.frame(
+    gene = rownames(log_mat),
+    log2FC = as.numeric(log2FC),
+    AveExpr = as.numeric(ave),
+    pvalue = NA_real_,
+    padj = NA_real_,
+    treat_sample = treat_sample,
+    ntc_sample = ntc_sample,
+    stringsAsFactors = FALSE
+  )
 }
 
-run_limma_contrasts <- function(log_mat, sample_info) {
-  group <- factor(sample_info$group, levels = c("NTC", "TG_sh1", "TG_sh5"))
-  group <- droplevels(group)
-  design <- stats::model.matrix(~ 0 + group)
-  colnames(design) <- levels(group)
-  fit <- limma::lmFit(log_mat, design)
-  contrast_list <- list()
-  if (all(c("TG_sh1", "NTC") %in% colnames(design))) {
-    contrast_list$TG_sh1_vs_NTC <- "TG_sh1 - NTC"
-  }
-  if (all(c("TG_sh5", "NTC") %in% colnames(design))) {
-    contrast_list$TG_sh5_vs_NTC <- "TG_sh5 - NTC"
-  }
-  if (all(c("TG_sh1", "TG_sh5", "NTC") %in% colnames(design))) {
-    contrast_list$TGsh_mean_vs_NTC <- "(TG_sh1 + TG_sh5)/2 - NTC"
-  }
-  if (length(contrast_list) == 0) stop("无法构建任何对照：请检查样本是否包含 NTC 与 TG_sh1/TG_sh5")
-  cons <- unlist(contrast_list, use.names = TRUE)
-  cm <- limma::makeContrasts(contrasts = cons, levels = design)
-  colnames(cm) <- names(cons)
-  fit2 <- safe_ebayes(limma::contrasts.fit(fit, cm))
-  out <- lapply(colnames(cm), function(cn) {
-    tt <- tryCatch(
-      limma::topTable(fit2, coef = cn, number = Inf, sort.by = "none"),
-      error = function(e) {
-        log_msg("topTable failed for ", cn, ": ", e$message, " ; use coefficient only")
-        data.frame(
-          logFC = as.numeric(fit2$coefficients[, cn]),
-          AveExpr = rowMeans(log_mat),
-          t = NA_real_,
-          P.Value = NA_real_,
-          adj.P.Val = NA_real_,
-          B = NA_real_,
-          row.names = rownames(log_mat)
-        )
-      }
-    )
-    data.frame(
-      gene = rownames(tt),
-      log2FC = tt$logFC,
-      AveExpr = tt$AveExpr,
-      pvalue = tt$P.Value,
-      padj = tt$adj.P.Val,
-      stringsAsFactors = FALSE
-    )
-  })
-  names(out) <- colnames(cm)
-  out
+mean_kd_vs_ntc_de <- function(log_mat, sample_info) {
+  ntc <- sample_info$sample[sample_info$group == "NTC"]
+  sh1 <- find_sample(sample_info, "TG_sh1")
+  sh5 <- find_sample(sample_info, "TG_sh5")
+  if (length(ntc) < 1 || is.na(sh1) || is.na(sh5)) return(NULL)
+  log_msg("TGsh_mean_vs_NTC : mean(", sh1, ", ", sh5, ") vs mean(", paste(ntc, collapse = ", "), ")")
+  ntc_mean <- rowMeans(log_mat[, ntc, drop = FALSE])
+  sh_mean <- (log_mat[, sh1] + log_mat[, sh5]) / 2
+  data.frame(
+    gene = rownames(log_mat),
+    log2FC = as.numeric(sh_mean - ntc_mean),
+    AveExpr = as.numeric((sh_mean + ntc_mean) / 2),
+    pvalue = NA_real_,
+    padj = NA_real_,
+    stringsAsFactors = FALSE
+  )
 }
 
-run_deseq2_contrasts <- function(dds) {
-  dds$group <- stats::relevel(factor(dds$group), ref = "NTC")
-  DESeq2::design(dds) <- ~ group
-  dds <- DESeq2::DESeq(dds)
-  out <- list()
-  to_df <- function(res) {
-    data.frame(
-      gene = rownames(res),
-      log2FC = as.numeric(res$log2FoldChange),
-      AveExpr = as.numeric(res$baseMean),
-      pvalue = as.numeric(res$pvalue),
-      padj = as.numeric(res$padj),
-      stringsAsFactors = FALSE
-    )
-  }
-  levs <- levels(dds$group)
-  if (all(c("TG_sh1", "NTC") %in% levs)) {
-    out$TG_sh1_vs_NTC <- to_df(DESeq2::results(dds, contrast = c("group", "TG_sh1", "NTC")))
-  }
-  if (all(c("TG_sh5", "NTC") %in% levs)) {
-    out$TG_sh5_vs_NTC <- to_df(DESeq2::results(dds, contrast = c("group", "TG_sh5", "NTC")))
-  }
-  if (all(c("TG_sh1", "TG_sh5", "NTC") %in% levs)) {
-    rn <- DESeq2::resultsNames(dds)
-    vec <- setNames(rep(0, length(rn)), rn)
-    vec["groupTG_sh1"] <- 0.5
-    vec["groupTG_sh5"] <- 0.5
-    out$TGsh_mean_vs_NTC <- to_df(DESeq2::results(dds, contrast = vec))
-  }
-  out
-}
-
-build_common_up <- function(de_list) {
-  a <- de_list[["TG_sh1_vs_NTC"]]
-  b <- de_list[["TG_sh5_vs_NTC"]]
+build_common_up <- function(a, b) {
   if (is.null(a) || is.null(b)) return(NULL)
   a <- a[!is.na(a$log2FC), ]
   b <- b[!is.na(b$log2FC), ]
-  a_up <- a$gene[a$log2FC > 0]
-  b_up <- b$gene[b$log2FC > 0]
-  common <- intersect(a_up, b_up)
+  common <- intersect(a$gene[a$log2FC > 0], b$gene[b$log2FC > 0])
+  if (length(common) == 0) {
+    return(data.frame(
+      gene = character(), log2FC = numeric(), log2FC_sh1 = numeric(), log2FC_sh5 = numeric(),
+      AveExpr = numeric(), pvalue = numeric(), padj = numeric()
+    ))
+  }
   aa <- a[match(common, a$gene), ]
   bb <- b[match(common, b$gene), ]
-  padj_both <- pmax(aa$padj, bb$padj, na.rm = FALSE)
   data.frame(
     gene = common,
     log2FC = (aa$log2FC + bb$log2FC) / 2,
     log2FC_sh1 = aa$log2FC,
     log2FC_sh5 = bb$log2FC,
     AveExpr = (aa$AveExpr + bb$AveExpr) / 2,
-    pvalue = pmax(aa$pvalue, bb$pvalue, na.rm = FALSE),
-    padj = padj_both,
+    pvalue = NA_real_,
+    padj = NA_real_,
     stringsAsFactors = FALSE
   )
+}
+
+full_rank_two <- function(a, b) {
+  if (is.null(a) || is.null(b)) return(NULL)
+  both <- merge(
+    a[, c("gene", "log2FC", "AveExpr", "pvalue", "padj")],
+    b[, c("gene", "log2FC", "AveExpr", "pvalue", "padj")],
+    by = "gene", suffixes = c("_sh1", "_sh5")
+  )
+  both$log2FC <- (both$log2FC_sh1 + both$log2FC_sh5) / 2
+  both$AveExpr <- (both$AveExpr_sh1 + both$AveExpr_sh5) / 2
+  both$pvalue <- NA_real_
+  both$padj <- NA_real_
+  both
 }
 
 passes_padj <- function(padj, have_pvalue) {
@@ -543,18 +530,27 @@ save_gg <- function(plot, path_stub, width = 8, height = 6) {
 
 plot_volcano <- function(de, highlight, title, outfile, fc_line = 1) {
   df <- de
-  df$neglogp <- ifelse(is.na(df$pvalue), 0, -log10(pmax(df$pvalue, 1e-300)))
+  has_p <- "pvalue" %in% names(df) && any(!is.na(df$pvalue))
+  if (has_p) {
+    df$y <- -log10(pmax(df$pvalue, 1e-300))
+    ylab <- "-log10(p value)"
+    hline <- -log10(0.05)
+  } else {
+    df$y <- df$AveExpr
+    ylab <- "Average expression (1-vs-1, no p-value)"
+    hline <- NULL
+  }
   df$set <- ifelse(df$gene %in% highlight, "selected", "other")
   df$label <- ifelse(df$gene %in% utils::head(highlight, 15), df$gene, NA)
   lfc_line <- log2(fc_line)
-  p <- ggplot2::ggplot(df, ggplot2::aes(x = log2FC, y = neglogp, color = set)) +
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = log2FC, y = y, color = set)) +
     ggplot2::geom_point(alpha = 0.7, size = 1.4) +
     ggplot2::scale_color_manual(values = c(other = "grey70", selected = "#D62828")) +
     ggplot2::geom_vline(xintercept = c(-lfc_line, lfc_line), linetype = 2, color = "grey40") +
-    ggplot2::geom_hline(yintercept = -log10(0.05), linetype = 2, color = "grey40") +
     ggrepel::geom_text_repel(ggplot2::aes(label = label), size = 3, max.overlaps = 30, na.rm = TRUE) +
     ggplot2::theme_bw(base_size = 12) +
-    ggplot2::labs(title = title, x = "log2 Fold Change", y = "-log10(p value)", color = NULL)
+    ggplot2::labs(title = title, x = "log2 Fold Change", y = ylab, color = NULL)
+  if (!is.null(hline)) p <- p + ggplot2::geom_hline(yintercept = hline, linetype = 2, color = "grey40")
   save_gg(p, outfile)
 }
 
@@ -569,7 +565,7 @@ plot_scatter_common <- function(de, highlight, title, outfile) {
     ggplot2::scale_color_manual(values = c(other = "grey70", common_up = "#D62828")) +
     ggrepel::geom_text_repel(ggplot2::aes(label = label), size = 3, max.overlaps = 30, na.rm = TRUE) +
     ggplot2::theme_bw(base_size = 12) +
-    ggplot2::labs(title = title, x = "log2FC TG_sh1 vs NTC", y = "log2FC TG_sh5 vs NTC", color = NULL)
+    ggplot2::labs(title = title, x = "log2FC TG_sh1 vs this NTC", y = "log2FC TG_sh5 vs this NTC", color = NULL)
   save_gg(p, outfile)
 }
 
@@ -1113,19 +1109,21 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
   }
 }
 
-plot_venn_up <- function(de_list, have_pvalue) {
-  if (is.null(de_list$TG_sh1_vs_NTC) || is.null(de_list$TG_sh5_vs_NTC)) return(invisible(NULL))
-  outdir <- file.path(result_dir, "common_up")
+plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix) {
+  if (is.null(de_a) || is.null(de_b)) return(invisible(NULL))
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  have_pvalue <- FALSE
   for (nm in names(fc_cutoffs)) {
     fc <- unname(fc_cutoffs[[nm]])
-    a <- select_by_fc(de_list$TG_sh1_vs_NTC, fc, have_pvalue)$gene
-    b <- select_by_fc(de_list$TG_sh5_vs_NTC, fc, have_pvalue)$gene
-    lst <- list(TG_sh1_up = a, TG_sh5_up = b)
+    lst <- list(
+      x = select_by_fc(de_a, fc, have_pvalue)$gene,
+      y = select_by_fc(de_b, fc, have_pvalue)$gene
+    )
+    names(lst) <- c(label_a, label_b)
     p <- tryCatch({
       if (!has_pkg("ggvenn")) stop("ggvenn not installed")
       ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
-        ggplot2::labs(title = paste0("Common up | FC >= ", fc))
+        ggplot2::labs(title = paste0(title_prefix, " | FC >= ", fc))
     }, error = function(e) {
       log_msg("venn failed: ", e$message)
       NULL
@@ -1136,13 +1134,15 @@ plot_venn_up <- function(de_list, have_pvalue) {
   }
   for (n in top_ns) {
     tag <- paste0("top", n)
-    a <- select_by_topn(de_list$TG_sh1_vs_NTC, n, have_pvalue)$gene
-    b <- select_by_topn(de_list$TG_sh5_vs_NTC, n, have_pvalue)$gene
-    lst <- list(TG_sh1_up = a, TG_sh5_up = b)
+    lst <- list(
+      x = select_by_topn(de_a, n, have_pvalue)$gene,
+      y = select_by_topn(de_b, n, have_pvalue)$gene
+    )
+    names(lst) <- c(label_a, label_b)
     p <- tryCatch({
       if (!has_pkg("ggvenn")) stop("ggvenn not installed")
       ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
-        ggplot2::labs(title = paste0("Common up | ", tag))
+        ggplot2::labs(title = paste0(title_prefix, " | ", tag))
     }, error = function(e) {
       log_msg("venn failed: ", e$message)
       NULL
@@ -1158,15 +1158,18 @@ plot_venn_up <- function(de_list, have_pvalue) {
 # -----------------------------------------------------------------------------
 log_msg("Project dir: ", project_dir)
 expr <- load_expression(project_dir)
+expr$sample_info <- add_ntc_ids(expr$sample_info)
 log_msg("Loaded from ", expr$source, " | genes=", nrow(expr$mat), " samples=", ncol(expr$mat))
 print(expr$sample_info)
 utils::write.csv(expr$sample_info, file.path(log_dir, "sample_info.csv"), row.names = FALSE)
 
 present <- unique(expr$sample_info$group)
 log_msg("Detected groups: ", paste(present, collapse = ", "))
-if (!"NTC" %in% present) stop("未检测到 NTC 对照样本，请检查表达矩阵列名")
+ntc_ids <- unique(stats::na.omit(expr$sample_info$ntc_id))
+log_msg("NTC samples kept separate: ", paste(ntc_ids, collapse = ", "))
+if (!"NTC" %in% present) stop("未检测到 NTC 对照样本")
 if (!"TG_sh1" %in% present) log_msg("WARNING: 未检测到 TG_sh1")
-if (!"TG_sh5" %in% present) log_msg("WARNING: 未检测到 TG_sh5；将跳过 sh5 相关比较")
+if (!"TG_sh5" %in% present) log_msg("WARNING: 未检测到 TG_sh5")
 
 value_type <- detect_value_type(expr$mat)
 log_msg("Value type inferred as: ", value_type)
@@ -1174,6 +1177,7 @@ log_msg("Value type inferred as: ", value_type)
 filt <- filter_low_expression(expr$mat, expr$sample_info, value_type)
 norm <- normalize_expression(filt, expr$sample_info, value_type)
 expr$sample_info <- expr$sample_info[match(colnames(norm$log_mat), expr$sample_info$sample), ]
+expr$sample_info <- add_ntc_ids(expr$sample_info)
 utils::write.csv(
   cbind(gene = rownames(norm$log_mat), as.data.frame(norm$log_mat)),
   file.path(result_dir, "normalized_log_matrix.csv"),
@@ -1181,54 +1185,57 @@ utils::write.csv(
 )
 plot_pca(norm$heat_mat, expr$sample_info, file.path(result_dir, "00_QC_PCA"))
 
-have_pvalue <- TRUE
-if (!is.null(norm$dds) && value_type == "counts") {
-  log_msg("Differential expression: DESeq2")
-  de_list <- tryCatch(run_deseq2_contrasts(norm$dds), error = function(e) {
-    log_msg("DESeq2 failed, fallback to limma: ", e$message)
-    run_limma_contrasts(norm$log_mat, expr$sample_info)
-  })
-} else {
-  log_msg("Differential expression: limma on normalized log matrix")
-  de_list <- run_limma_contrasts(norm$log_mat, expr$sample_info)
-}
-have_pvalue <- any(vapply(de_list, function(x) any(!is.na(x$padj)), logical(1)))
-if (!have_pvalue) log_msg("No p-values available (likely too few replicates); FC/rank filters only")
+log_mat <- norm$log_mat
+si <- expr$sample_info
+sh1 <- find_sample(si, "TG_sh1")
+sh5 <- find_sample(si, "TG_sh5")
+ntc0 <- find_sample(si, "NTC", "NTC_rep0")
+ntc1 <- find_sample(si, "NTC", "NTC_rep1")
 
-common <- build_common_up(de_list)
-if (!is.null(common)) de_list$common_up <- common
+de_list <- list()
+# 设计1：四个 1-vs-1，各自单独作图，不用 NTC 均值
+de_list$TG_sh1_vs_NTC_rep0 <- pairwise_de(log_mat, sh1, ntc0, "TG_sh1_vs_NTC_rep0")
+de_list$TG_sh5_vs_NTC_rep0 <- pairwise_de(log_mat, sh5, ntc0, "TG_sh5_vs_NTC_rep0")
+de_list$TG_sh1_vs_NTC_rep1 <- pairwise_de(log_mat, sh1, ntc1, "TG_sh1_vs_NTC_rep1")
+de_list$TG_sh5_vs_NTC_rep1 <- pairwise_de(log_mat, sh5, ntc1, "TG_sh5_vs_NTC_rep1")
+# 设计2：两个 knockdown 等权平均 vs 两个 NTC 的组均值
+de_list$TGsh_mean_vs_NTC <- mean_kd_vs_ntc_de(log_mat, si)
+# 设计3 / 4：分别相对同一个 NTC 样品的共同上调
+de_list$common_up_vs_NTC_rep0 <- build_common_up(de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0)
+de_list$common_up_vs_NTC_rep1 <- build_common_up(de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1)
+de_list <- de_list[!vapply(de_list, is.null, logical(1))]
 
-common_full_rank <- NULL
-if (!is.null(de_list$TG_sh1_vs_NTC) && !is.null(de_list$TG_sh5_vs_NTC)) {
-  sh1 <- de_list$TG_sh1_vs_NTC
-  sh5 <- de_list$TG_sh5_vs_NTC
-  both <- merge(
-    sh1[, c("gene", "log2FC", "AveExpr", "pvalue", "padj")],
-    sh5[, c("gene", "log2FC", "AveExpr", "pvalue", "padj")],
-    by = "gene", suffixes = c("_sh1", "_sh5")
-  )
-  both$log2FC <- (both$log2FC_sh1 + both$log2FC_sh5) / 2
-  both$AveExpr <- (both$AveExpr_sh1 + both$AveExpr_sh5) / 2
-  both$pvalue <- pmax(both$pvalue_sh1, both$pvalue_sh5, na.rm = FALSE)
-  both$padj <- pmax(both$padj_sh1, both$padj_sh5, na.rm = FALSE)
-  common_full_rank <- both
-}
+gsea_rank <- list(
+  common_up_vs_NTC_rep0 = full_rank_two(de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0),
+  common_up_vs_NTC_rep1 = full_rank_two(de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1)
+)
 
 for (nm in names(de_list)) {
   volcano_df <- de_list[[nm]]
   gsea_de <- de_list[[nm]]
-  if (nm == "common_up" && !is.null(common_full_rank)) {
-    volcano_df <- common_full_rank
-    gsea_de <- common_full_rank
+  if (nm %in% names(gsea_rank) && !is.null(gsea_rank[[nm]])) {
+    volcano_df <- gsea_rank[[nm]]
+    gsea_de <- gsea_rank[[nm]]
   }
+  have_p <- any(!is.na(de_list[[nm]]$padj))
   tryCatch(
     analyze_one_comparison(
-      nm, de_list[[nm]], volcano_df, norm$heat_mat, expr$sample_info, have_pvalue, gsea_de
+      nm, de_list[[nm]], volcano_df, norm$heat_mat, si, have_p, gsea_de
     ),
     error = function(e) log_msg("ERROR in comparison ", nm, ": ", e$message)
   )
 }
-tryCatch(plot_venn_up(de_list, have_pvalue), error = function(e) log_msg("venn error: ", e$message))
+
+tryCatch(plot_venn_up(
+  de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0,
+  file.path(result_dir, "common_up_vs_NTC_rep0"),
+  "TG_sh1_vs_NTC_rep0", "TG_sh5_vs_NTC_rep0", "Common up vs NTC_rep0"
+), error = function(e) log_msg("venn NTC_rep0 error: ", e$message))
+tryCatch(plot_venn_up(
+  de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1,
+  file.path(result_dir, "common_up_vs_NTC_rep1"),
+  "TG_sh1_vs_NTC_rep1", "TG_sh5_vs_NTC_rep1", "Common up vs NTC_rep1"
+), error = function(e) log_msg("venn NTC_rep1 error: ", e$message))
 
 utils::writeLines(capture.output(sessionInfo()), file.path(log_dir, "sessionInfo.txt"))
 log_msg("All done. Results in: ", result_dir)

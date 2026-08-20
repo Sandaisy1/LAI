@@ -1,49 +1,30 @@
 ---
-description: TG BRCA RNA-seq analysis conventions for NTC vs TG_sh1/TG_sh5
+description: TG BRCA RNA-seq analysis with NTC_rep0/rep1 kept separate
 globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
 
 # TG BRCA RNA-seq pipeline
 
-## Data layout
-- Project dir: `E:/R/TG_BRCA/TG`; fallback to the repo/script directory if that path is absent
-- Primary input: Cuffdiff `genes.read_group_tracking` (per-replicate counts/FPKM)
-- Fallback: `genes.count_tracking`, then `genes.fpkm_tracking` (use `read_groups.info` to map qN columns)
-- Do not require `shTG(20220723).xlsx`; that file was removed
-- Groups: `NTC` (control), `TG_sh1`, `TG_sh5` (human BRCA cell RNA-seq)
-- Organism: human only (`org.Hs.eg.db`); convert SYMBOL/ENSEMBL to ENTREZID
+## Data
+- Dir: `E:/R/TG_BRCA/TG` (fallback: script/repo dir)
+- Input: Cuffdiff `genes.read_group_tracking`, then `genes.count_tracking` / `genes.fpkm_tracking`
+- Samples: `NTC_rep0`, `NTC_rep1`, `TG_sh1`, `TG_sh5` (do not collapse the two NTC samples except in design 2)
+- Human `org.Hs.eg.db`
 
-## Preprocess (required before every comparison)
-- Filter low-expression genes (do not analyze the raw unfiltered matrix)
-- Normalize to remove technical bias: DESeq2 size factors if counts; TMM/quantile + log2(x+1) if FPKM/TPM
-- Auto-detect counts vs FPKM; if `TG_sh5` columns are missing, skip sh5-dependent comparisons and log a warning
+## Preprocess (once, all samples together)
+Filter low expression, then normalize (DESeq2 size factors if counts; quantile log2 if FPKM).
 
-## Three comparison designs (always run all that are possible)
-1. Separate DE: `TG_sh1 vs NTC` and `TG_sh5 vs NTC`
-2. Combined: equal-weight average of the two knockdowns vs NTC, limma/DESeq2 contrast `(SH1 + SH5)/2 - NTC` (do not concatenate samples without equal weighting)
-3. Common up: intersection of upregulated genes from the two separate comparisons; rank remaining genes by mean log2FC, require both sides to pass a FC cutoff
+## Four designs (each gets its own plots; never merge NTC_rep0 with NTC_rep1 except design 2)
+1. Pairwise 1-vs-1, separately: `TG_sh1 vs NTC_rep0`, `TG_sh5 vs NTC_rep0`, `TG_sh1 vs NTC_rep1`, `TG_sh5 vs NTC_rep1`. log2FC from normalized values; no p-value (1 vs 1).
+2. Combined: mean(TG_sh1, TG_sh5) vs NTC group mean(NTC_rep0, NTC_rep1). Equal weight to the two knockdowns.
+3. Common up vs NTC_rep0: intersection of upregulated genes from `TG_sh1 vs NTC_rep0` and `TG_sh5 vs NTC_rep0`.
+4. Common up vs NTC_rep1: intersection of upregulated genes from `TG_sh1 vs NTC_rep1` and `TG_sh5 vs NTC_rep1`.
 
-## Subset strategies (mandatory grid; never skip a cutoff)
-For **each** of the three comparisons (`TG_sh1_vs_NTC`, `TG_sh5_vs_NTC`, `TGsh_mean_vs_NTC`; plus `common_up` when both shRNAs exist), run **both** strategies in full:
-- FoldChange up: FC >= 1, 1.25, 1.5, 2 (log2FC >= 0, 0.3219, 0.5850, 1)
-- Ranked up genes: top 50, 75, 100, 150, 200, 250, 300 by log2FC (common-up uses mean log2FC)
-- Default: `padj < 0.05` plus the FC/rank filter; if no residual DF, FC/rank only and log it
+## Subset grid (every design, do not skip a cutoff)
+- FC up: 1, 1.25, 1.5, 2
+- Top up: 50, 75, 100, 150, 200, 250, 300
+- Pairwise/common: FC/rank only. Combined: `padj < 0.05` if estimable, else FC/rank only.
 
-## Plots required in every non-empty subset folder
-Do not stop at tables. Each subset directory must contain figures for:
-1. DE: selected-gene table + log2FC barplot
-2. Volcano
-3. Heatmap (row z-score, all samples)
-4. GO plots (BP/MF/CC): barplot, dotplot, plus emap/cnet when terms >= 2
-5. Pathway plots (Reactome + Hallmark): barplot, dotplot, plus emap/cnet when terms >= 2
-6. KEGG plots: barplot, dotplot, plus emap/cnet; pathview maps when possible
-7. GSEA plots: dotplot, ridgeplot, gseaplot2 (never skip because n < 20; relax `minGSSize` / p-value and still draw)
-
-If a test returns 0 significant terms, re-run with relaxed cutoffs and label the figure as relaxed; write `*_EMPTY.txt` only after that still fails. Put plots in `GO/`, `Pathway/`, `KEGG/`, `GSEA/` subfolders.
-
-## Outputs
-- Write to `results/<comparison>/<strategy>/`
-- Skip empty gene sets after logging; do not abort the whole pipeline
-- Keep `project_dir` configurable; never hardcode a machine-only path without a fallback
-- Prefer one entry script `TG_RNAseq_pipeline.R`; add Chinese comments for analysis steps
+## Plots in every non-empty subset
+DE table + barplot, volcano (or MA if no p-value), heatmap, GO, pathway, KEGG, GSEA. Folders: `GO/`, `Pathway/`, `KEGG/`, `GSEA/`. Relax cutoffs and label figures if no significant terms.
