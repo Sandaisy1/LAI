@@ -40,3 +40,13 @@ results/
 ```
 
 每个比较下都有 `FoldChange/FC_*` 和 `TopRank/top*`，里面再分 `GO/`、`Pathway/`、`KEGG/`、`GSEA/`。
+
+**注意：** 比较目录里的 `00_GSEA_all_genes_NOT_FC_or_topN` 是全部基因的 GSEA，**不是** FC/topN 分层图。分层图在：
+
+```
+results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/FC_1.5_volcano.pdf
+results/TG_sh1_vs_NTC_rep0/TopRank/top100/top100_heatmap.pdf
+results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
+```
+
+文件名和图标题都会带上 `FC_1.5` 或 `top100`。重新运行前建议先删掉旧的 `results/`。

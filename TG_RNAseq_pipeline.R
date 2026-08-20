@@ -835,9 +835,10 @@ build_gsea_cache <- function(de) {
   out
 }
 
-plot_fgsea_hallmark <- function(stats, outdir, title) {
+plot_fgsea_hallmark <- function(stats, outdir, title, prefix = "") {
+  stub <- function(x) file.path(outdir, paste0(prefix, x))
   if (length(stats) < 5) {
-    note_empty(file.path(outdir, "GSEA_Hallmark_fgsea"), "too few ranked genes")
+    note_empty(stub("GSEA_Hallmark_fgsea"), "too few ranked genes")
     return(invisible(NULL))
   }
   term2gene <- tryCatch(msig_hallmark_map(), error = function(e) NULL)
@@ -848,12 +849,12 @@ plot_fgsea_hallmark <- function(stats, outdir, title) {
     NULL
   })
   if (is.null(fg) || nrow(fg) == 0) {
-    note_empty(file.path(outdir, "GSEA_Hallmark_fgsea"), "no fgsea terms")
+    note_empty(stub("GSEA_Hallmark_fgsea"), "no fgsea terms")
     return(invisible(NULL))
   }
   fg <- as.data.frame(fg)
   fg <- fg[order(fg$pval), ]
-  utils::write.csv(fg, file.path(outdir, "GSEA_Hallmark_fgsea.csv"), row.names = FALSE)
+  utils::write.csv(fg, stub("GSEA_Hallmark_fgsea.csv"), row.names = FALSE)
   plot_df <- utils::head(fg, 15)
   plot_df$pathway <- factor(plot_df$pathway, levels = rev(plot_df$pathway))
   p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = NES, y = pathway, fill = padj < 0.05)) +
@@ -861,12 +862,12 @@ plot_fgsea_hallmark <- function(stats, outdir, title) {
     ggplot2::scale_fill_manual(values = c("TRUE" = "#D62828", "FALSE" = "grey70")) +
     ggplot2::theme_bw(base_size = 11) +
     ggplot2::labs(title = title, y = NULL, fill = "padj < 0.05")
-  save_gg(p, file.path(outdir, "GSEA_Hallmark_fgsea_barplot"), 10, 7)
+  save_gg(p, stub("GSEA_Hallmark_fgsea_barplot"), 10, 7)
   top_ids <- utils::head(fg$pathway[is.finite(fg$NES)], 3)
   for (i in seq_along(top_ids)) {
     pid <- top_ids[i]
-    pe <- tryCatch(fgsea::plotEnrichment(pathways[[pid]], stats) + ggplot2::labs(title = pid), error = function(e) NULL)
-    if (!is.null(pe)) save_gg(pe, file.path(outdir, paste0("GSEA_Hallmark_enrichment_top", i)), 8, 5)
+    pe <- tryCatch(fgsea::plotEnrichment(pathways[[pid]], stats) + ggplot2::labs(title = paste(title, "|", pid)), error = function(e) NULL)
+    if (!is.null(pe)) save_gg(pe, stub(paste0("GSEA_Hallmark_enrichment_top", i)), 8, 5)
   }
 }
 
@@ -901,13 +902,14 @@ plot_kegg_pathview <- function(kegg_obj, stats, outdir) {
   }
 }
 
-run_ora_plots <- function(genes, de_sub, outdir) {
+run_ora_plots <- function(genes, de_sub, outdir, label, tag) {
   go_dir <- file.path(outdir, "GO")
   pw_dir <- file.path(outdir, "Pathway")
   kg_dir <- file.path(outdir, "KEGG")
   dir.create(go_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(pw_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(kg_dir, recursive = TRUE, showWarnings = FALSE)
+  pref <- paste0(tag, "_")
 
   mp <- map_to_entrez(genes)
   entrez <- unique(mp$entrez)
@@ -915,10 +917,10 @@ run_ora_plots <- function(genes, de_sub, outdir) {
   fc_entrez <- setNames(de_sub$log2FC[match(mp$gene, de_sub$gene)], mp$entrez)
   if (length(entrez) < 3) {
     log_msg("ORA skipped, mapped genes < 3: ", outdir)
-    writeLines(paste("mapped_entrez", length(entrez)), file.path(outdir, "ORA_skipped.txt"))
-    note_empty(file.path(go_dir, "GO"), "too few mapped genes")
-    note_empty(file.path(pw_dir, "Pathway"), "too few mapped genes")
-    note_empty(file.path(kg_dir, "KEGG"), "too few mapped genes")
+    writeLines(paste("mapped_entrez", length(entrez)), file.path(outdir, paste0(pref, "ORA_skipped.txt")))
+    note_empty(file.path(go_dir, paste0(pref, "GO")), "too few mapped genes")
+    note_empty(file.path(pw_dir, paste0(pref, "Pathway")), "too few mapped genes")
+    note_empty(file.path(kg_dir, paste0(pref, "KEGG")), "too few mapped genes")
     return(invisible(NULL))
   }
 
@@ -934,8 +936,8 @@ run_ora_plots <- function(genes, de_sub, outdir) {
       ),
       paste("enrichGO", ont)
     )
-    plot_ora_object(ego, file.path(go_dir, paste0("GO_", ont)),
-                    title_maybe_relaxed(ego, paste("GO", ont)), fold_change = fc_sym)
+    plot_ora_object(ego, file.path(go_dir, paste0(pref, "GO_", ont)),
+                    title_maybe_relaxed(ego, paste(label, "| GO", ont)), fold_change = fc_sym)
   }
 
   ek <- enrich_or_relax(
@@ -950,7 +952,8 @@ run_ora_plots <- function(genes, de_sub, outdir) {
   if (!is.null(ek) && nrow(as.data.frame(ek)) > 0) {
     ek <- tryCatch(clusterProfiler::setReadable(ek, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) ek)
   }
-  plot_ora_object(ek, file.path(kg_dir, "KEGG"), title_maybe_relaxed(ek, "KEGG"), fold_change = fc_sym)
+  plot_ora_object(ek, file.path(kg_dir, paste0(pref, "KEGG")),
+                  title_maybe_relaxed(ek, paste(label, "| KEGG")), fold_change = fc_sym)
   plot_kegg_pathview(ek, fc_entrez, kg_dir)
 
   if (has_pkg("ReactomePA")) {
@@ -963,9 +966,10 @@ run_ora_plots <- function(genes, de_sub, outdir) {
       ),
       "enrichPathway"
     )
-    plot_ora_object(er, file.path(pw_dir, "Reactome"), title_maybe_relaxed(er, "Reactome"), fold_change = fc_sym)
+    plot_ora_object(er, file.path(pw_dir, paste0(pref, "Reactome")),
+                    title_maybe_relaxed(er, paste(label, "| Reactome")), fold_change = fc_sym)
   } else {
-    note_empty(file.path(pw_dir, "Reactome"), "ReactomePA not installed")
+    note_empty(file.path(pw_dir, paste0(pref, "Reactome")), "ReactomePA not installed")
   }
 
   hm <- enrich_or_relax(
@@ -982,15 +986,15 @@ run_ora_plots <- function(genes, de_sub, outdir) {
   if (!is.null(hm) && nrow(as.data.frame(hm)) > 0) {
     hm <- tryCatch(clusterProfiler::setReadable(hm, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) hm)
   }
-  plot_ora_object(hm, file.path(pw_dir, "MSigDB_Hallmark"),
-                  title_maybe_relaxed(hm, "MSigDB Hallmark"), fold_change = fc_sym)
+  plot_ora_object(hm, file.path(pw_dir, paste0(pref, "MSigDB_Hallmark")),
+                  title_maybe_relaxed(hm, paste(label, "| MSigDB Hallmark")), fold_change = fc_sym)
 }
-
-run_gsea_plots <- function(sub, gsea_cache, outdir, tag) {
+run_gsea_plots <- function(sub, gsea_cache, outdir, tag, label) {
   gsea_dir <- file.path(outdir, "GSEA")
   dir.create(gsea_dir, recursive = TRUE, showWarnings = FALSE)
+  pref <- paste0(tag, "_")
   sub_stats <- ranked_entrez(sub)
-  plot_fgsea_hallmark(sub_stats, gsea_dir, paste("GSEA Hallmark |", tag))
+  plot_fgsea_hallmark(sub_stats, gsea_dir, paste(label, "| GSEA Hallmark"), prefix = pref)
 
   if (length(sub_stats) >= 8) {
     term2gene <- tryCatch(msig_hallmark_map(), error = function(e) NULL)
@@ -1006,8 +1010,8 @@ run_gsea_plots <- function(sub, gsea_cache, outdir, tag) {
         ),
         paste("subset Hallmark GSEA", tag)
       )
-      plot_gsea_object(hm, file.path(gsea_dir, "GSEA_subset_Hallmark"),
-                       paste("GSEA Hallmark |", tag, "(subset ranked)"))
+      plot_gsea_object(hm, file.path(gsea_dir, paste0(pref, "GSEA_Hallmark")),
+                       paste(label, "| GSEA Hallmark (subset ranked)"))
     }
     kegg <- enrich_or_relax(
       function() clusterProfiler::gseKEGG(
@@ -1023,8 +1027,8 @@ run_gsea_plots <- function(sub, gsea_cache, outdir, tag) {
     if (!is.null(kegg) && nrow(as.data.frame(kegg)) > 0) {
       kegg <- tryCatch(clusterProfiler::setReadable(kegg, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) kegg)
     }
-    plot_gsea_object(kegg, file.path(gsea_dir, "GSEA_subset_KEGG"),
-                     paste("GSEA KEGG |", tag, "(subset ranked)"))
+    plot_gsea_object(kegg, file.path(gsea_dir, paste0(pref, "GSEA_KEGG")),
+                     paste(label, "| GSEA KEGG (subset ranked)"))
   }
 
   mp <- map_to_entrez(sub$gene)
@@ -1032,8 +1036,8 @@ run_gsea_plots <- function(sub, gsea_cache, outdir, tag) {
     ids <- gsea_ids_overlapping_genes(gsea_cache[[nm]], sub$gene, mp$entrez)
     plot_gsea_selected_ids(
       gsea_cache[[nm]], ids,
-      file.path(gsea_dir, paste0("GSEA_fullrank_overlap_", nm)),
-      paste("GSEA", nm, "|", tag, "(full-rank overlap)")
+      file.path(gsea_dir, paste0(pref, "GSEA_fullrank_overlap_", nm)),
+      paste(label, "| GSEA", nm, "(full-rank overlap)")
     )
   }
 }
@@ -1041,30 +1045,37 @@ run_gsea_plots <- function(sub, gsea_cache, outdir, tag) {
 emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de_for_volcano,
                                  heat_mat, sample_info, gsea_cache, fc_line = 1) {
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
-  utils::write.csv(sub, file.path(outdir, "DE_selected_genes.csv"), row.names = FALSE)
-  tryCatch(writexl::write_xlsx(sub, file.path(outdir, "DE_selected_genes.xlsx")),
+  writeLines(
+    c(paste("comparison:", comp_name),
+      paste("subset:", tag),
+      paste("title:", title),
+      paste("n_genes:", nrow(sub))),
+    file.path(outdir, paste0("00_", tag, "_THIS_FOLDER.txt"))
+  )
+  utils::write.csv(sub, file.path(outdir, paste0(tag, "_DE_selected_genes.csv")), row.names = FALSE)
+  tryCatch(writexl::write_xlsx(sub, file.path(outdir, paste0(tag, "_DE_selected_genes.xlsx"))),
            error = function(e) log_msg("xlsx write failed: ", e$message))
   log_msg(comp_name, " ", tag, ": n = ", nrow(sub))
   if (nrow(sub) == 0) {
-    writeLines("no genes", file.path(outdir, "EMPTY.txt"))
+    writeLines("no genes", file.path(outdir, paste0(tag, "_EMPTY.txt")))
     return(invisible(NULL))
   }
-  tryCatch(plot_de_bar(sub, paste0(title, " | DE genes"), file.path(outdir, "DE_log2FC_barplot")),
+  tryCatch(plot_de_bar(sub, paste0(title, " | DE genes"), file.path(outdir, paste0(tag, "_DE_log2FC_barplot"))),
            error = function(e) log_msg("DE barplot failed: ", e$message))
-  tryCatch(plot_volcano(full_de_for_volcano, sub$gene, title, file.path(outdir, "volcano"), fc_line = fc_line),
+  tryCatch(plot_volcano(full_de_for_volcano, sub$gene, title, file.path(outdir, paste0(tag, "_volcano")), fc_line = fc_line),
            error = function(e) log_msg("volcano failed: ", e$message))
   if ("log2FC_sh1" %in% names(full_de_for_volcano)) {
-    tryCatch(plot_scatter_common(full_de_for_volcano, sub$gene, title, file.path(outdir, "scatter_sh1_sh5")),
+    tryCatch(plot_scatter_common(full_de_for_volcano, sub$gene, title, file.path(outdir, paste0(tag, "_scatter_sh1_sh5"))),
              error = function(e) log_msg("scatter failed: ", e$message))
   }
-  tryCatch(plot_heatmap(heat_mat, sample_info, sub$gene, title, file.path(outdir, "heatmap")),
+  tryCatch(plot_heatmap(heat_mat, sample_info, sub$gene, title, file.path(outdir, paste0(tag, "_heatmap"))),
            error = function(e) {
              while (grDevices::dev.cur() > 1) grDevices::dev.off()
              log_msg("heatmap failed: ", e$message)
            })
-  tryCatch(run_ora_plots(sub$gene, sub, outdir),
+  tryCatch(run_ora_plots(sub$gene, sub, outdir, title, tag),
            error = function(e) log_msg("ORA/plots failed: ", e$message))
-  tryCatch(run_gsea_plots(sub, gsea_cache, outdir, tag),
+  tryCatch(run_gsea_plots(sub, gsea_cache, outdir, tag, title),
            error = function(e) log_msg("GSEA/plots failed: ", e$message))
 }
 
@@ -1078,15 +1089,36 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
   utils::write.csv(de, file.path(base, "DE_full.csv"), row.names = FALSE)
   writexl::write_xlsx(de, file.path(base, "DE_full.xlsx"))
 
+  writeLines(
+    c("FC / topN 标记图不在本文件夹。",
+      "本文件夹是：全部基因排序后的 GSEA（没有 FC 或 topN 筛选）。",
+      "",
+      "请到上一级目录打开：",
+      "  FoldChange/FC_1/",
+      "  FoldChange/FC_1.25/",
+      "  FoldChange/FC_1.5/",
+      "  FoldChange/FC_2/",
+      "  TopRank/top50/",
+      "  TopRank/top75/",
+      "  TopRank/top100/",
+      "  TopRank/top150/",
+      "  TopRank/top200/",
+      "  TopRank/top250/",
+      "  TopRank/top300/",
+      "每个文件夹里才有该阈值的火山图、热图、GO、通路、KEGG、GSEA。"),
+    file.path(base, "00_WHERE_ARE_FC_and_topN.txt")
+  )
   log_msg("Building GSEA cache for ", comp_name)
   gsea_cache <- build_gsea_cache(gsea_de)
-  full_gsea_dir <- file.path(base, "GSEA_full_ranked")
+  full_gsea_dir <- file.path(base, "00_GSEA_all_genes_NOT_FC_or_topN")
   dir.create(full_gsea_dir, recursive = TRUE, showWarnings = FALSE)
+  writeLines("This is GSEA on the full ranked gene list. It is NOT an FC or topN subset.",
+             file.path(full_gsea_dir, "00_README.txt"))
   for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
-    plot_gsea_object(gsea_cache[[nm]], file.path(full_gsea_dir, paste0("GSEA_", nm)),
-                     paste("GSEA", nm, "|", comp_name, "| full ranked list"))
+    plot_gsea_object(gsea_cache[[nm]], file.path(full_gsea_dir, paste0("allGenes_GSEA_", nm)),
+                     paste("GSEA", nm, "|", comp_name, "| ALL genes, NOT FC/topN"))
   }
-  plot_fgsea_hallmark(gsea_cache$stats, full_gsea_dir, paste("GSEA Hallmark |", comp_name))
+  plot_fgsea_hallmark(gsea_cache$stats, full_gsea_dir, paste("GSEA Hallmark |", comp_name, "| ALL genes"), prefix = "allGenes_")
 
   for (nm in names(fc_cutoffs)) {
     fc <- unname(fc_cutoffs[[nm]])

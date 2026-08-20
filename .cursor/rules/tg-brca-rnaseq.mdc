@@ -27,4 +27,5 @@ Filter low expression, then normalize (DESeq2 size factors if counts; quantile l
 - Pairwise/common: FC/rank only. Combined: `padj < 0.05` if estimable, else FC/rank only.
 
 ## Plots in every non-empty subset
-DE table + barplot, volcano (or MA if no p-value), heatmap, GO, pathway, KEGG, GSEA. Folders: `GO/`, `Pathway/`, `KEGG/`, `GSEA/`. Relax cutoffs and label figures if no significant terms.
+- FC / topN plots live in `results/<comparison>/FoldChange/FC_*` and `TopRank/top*`. File names and plot titles include the tag (`FC_1.5_volcano.pdf`).
+- `00_GSEA_all_genes_NOT_FC_or_topN` is full-list GSEA only; it is not a cutoff subset.
