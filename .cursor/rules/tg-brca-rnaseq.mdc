@@ -1,14 +1,12 @@
 ---
 description: TG BRCA RNA-seq 显著性与变化倍数分析（六组比较 + FC/topN 分层）
-globs: "**/*.{R,r,Rmd}"
-alwaysApply: true
+globs: "TG_RNAseq_pipeline.R,TG_RNAseq_TGsh_mean_vs_NTC_reps.R"
+alwaysApply: false
 ---
 
 # TG BRCA RNA-seq：显著性与变化倍数分析
 
-写或改 **tracking 六组** 流程（`TG_RNAseq_pipeline.R`、`TG_RNAseq_TGsh_mean_vs_NTC_reps.R`）时必须按本规则。输入是 Cuffdiff tracking，不是 Excel。
-
-OLD盘已有 `gene_exp.diff` 的三思路分析（FC / topN 含 4000 / `p <= 0.5` 不分上下调 / **GSVA**）见 `tg-brca-rnaseq-old-gene-exp-diff.mdc`。不要把本规则的 `p < 0.01`、无 GSVA、无 top4000 套到 OLD盘脚本。
+仅在编辑 `TG_RNAseq_pipeline.R` 或 `TG_RNAseq_TGsh_mean_vs_NTC_reps.R` 时使用本规则。OLD盘 Excel 分析见 `tg-brca-rnaseq-old-excel.mdc`，不要把本规则套到那份表上。
 
 ## 数据
 
@@ -39,7 +37,7 @@ OLD盘已有 `gene_exp.diff` 的三思路分析（FC / topN 含 4000 / `p <= 0.5
 
 ## 显著性（先 p，再倍数或排名）
 
-「p 值大于 0.01」按 **p < 0.01** 实现（保留显著基因）。能估计 p 时（重复或 Cuffdiff `gene_exp.diff`）先滤 p，再分层；1-vs-1 无法估计 p 时不要伪造，仍按 FC/排名分层并写日志。共同上调：两个 1-vs-1 都过同一套阈值后取交集。只分析上调。
+「p 值大于 0.01」按 **p < 0.01** 实现（保留显著基因）。能估计 p 时先滤 p，再分层；1-vs-1 无法估计 p 时不要伪造，仍按 FC/排名分层并写日志。共同上调：两个 1-vs-1 都过同一套阈值后取交集。只分析上调。
 
 ## 两套分层（六组都要跑，阈值一个都不能少）
 
