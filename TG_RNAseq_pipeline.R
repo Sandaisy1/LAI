@@ -571,6 +571,10 @@ plot_scatter_common <- function(de, highlight, title, outfile) {
 
 plot_heatmap <- function(heat_mat, sample_info, genes, title, outfile) {
   genes <- intersect(genes, rownames(heat_mat))
+  if (length(genes) > 200) {
+    log_msg("Heatmap truncated to 200 genes from ", length(genes), ": ", title)
+    genes <- genes[seq_len(200)]
+  }
   if (length(genes) < 2) {
     log_msg("Heatmap skipped (<2 genes): ", title)
     return(invisible(NULL))
@@ -1092,58 +1096,67 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
   base <- file.path(result_dir, comp_name)
   dir.create(base, recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(de, file.path(base, "DE_full.csv"), row.names = FALSE)
-  writexl::write_xlsx(de, file.path(base, "DE_full.xlsx"))
+  tryCatch(writexl::write_xlsx(de, file.path(base, "DE_full.xlsx")),
+           error = function(e) log_msg("DE_full xlsx failed: ", e$message))
 
+  # 先建好 FC / topN 目录，避免只看到 GSEA 文件夹
+  fc_dirs <- file.path(base, "FoldChange", names(fc_cutoffs))
+  top_dirs <- file.path(base, "TopRank", paste0("top", top_ns))
+  invisible(lapply(c(fc_dirs, top_dirs), dir.create, recursive = TRUE, showWarnings = FALSE))
   writeLines(
-    c("FC / topN 标记图不在本文件夹。",
-      "本文件夹是：全部基因排序后的 GSEA（没有 FC 或 topN 筛选）。",
-      "",
-      "请到上一级目录打开：",
-      "  FoldChange/FC_1/",
-      "  FoldChange/FC_1.25/",
-      "  FoldChange/FC_1.5/",
-      "  FoldChange/FC_2/",
-      "  TopRank/top50/",
-      "  TopRank/top75/",
-      "  TopRank/top100/",
-      "  TopRank/top150/",
-      "  TopRank/top200/",
-      "  TopRank/top250/",
-      "  TopRank/top300/",
-      "每个文件夹里才有该阈值的火山图、热图、GO、通路、KEGG、GSEA。"),
-    file.path(base, "00_WHERE_ARE_FC_and_topN.txt")
+    c("请打开下面两个文件夹，不要只看 GSEA：",
+      "  1_FoldChange_and_TopRank_are_here",
+      "  FoldChange/FC_1  FC_1.25  FC_1.5  FC_2",
+      "  TopRank/top50 ... top300",
+      "每个子文件夹里：火山图、热图、ORA_GO、ORA通路、ORA_KEGG、以及 GSEA。",
+      "00_GSEA_all_genes_NOT_FC_or_topN 只是全基因 GSEA，不是分层图。"),
+    file.path(base, "00_READ_ME_先看这里.txt")
   )
-  log_msg("Building GSEA cache for ", comp_name)
-  gsea_cache <- build_gsea_cache(gsea_de)
-  full_gsea_dir <- file.path(base, "00_GSEA_all_genes_NOT_FC_or_topN")
-  dir.create(full_gsea_dir, recursive = TRUE, showWarnings = FALSE)
-  writeLines("This is GSEA on the full ranked gene list. It is NOT an FC or topN subset.",
-             file.path(full_gsea_dir, "00_README.txt"))
-  for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
-    plot_gsea_object(gsea_cache[[nm]], file.path(full_gsea_dir, paste0("allGenes_GSEA_", nm)),
-                     paste("GSEA", nm, "|", comp_name, "| ALL genes, NOT FC/topN"))
-  }
-  plot_fgsea_hallmark(gsea_cache$stats, full_gsea_dir, paste("GSEA Hallmark |", comp_name, "| ALL genes"), prefix = "allGenes_")
+
+  gsea_cache <- list()
+  log_msg("Subset plots first (volcano/heatmap/ORA), GSEA-all-genes later: ", comp_name)
 
   for (nm in names(fc_cutoffs)) {
     fc <- unname(fc_cutoffs[[nm]])
     sub <- select_by_fc(de, fc, have_pvalue)
-    emit_subset_analysis(
-      comp_name, sub, nm, paste0(comp_name, " | up FC >= ", fc),
-      file.path(base, "FoldChange", nm),
-      full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = fc
+    if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
+    tryCatch(
+      emit_subset_analysis(
+        comp_name, sub, nm, paste0(comp_name, " | up FC >= ", fc),
+        file.path(base, "FoldChange", nm),
+        full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = fc
+      ),
+      error = function(e) log_msg("ERROR subset ", comp_name, " ", nm, ": ", e$message)
     )
   }
 
   for (n in top_ns) {
     tag <- paste0("top", n)
     sub <- select_by_topn(de, n, have_pvalue)
-    emit_subset_analysis(
-      comp_name, sub, tag, paste0(comp_name, " | upregulated top ", n),
-      file.path(base, "TopRank", tag),
-      full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = 1
+    tryCatch(
+      emit_subset_analysis(
+        comp_name, sub, tag, paste0(comp_name, " | upregulated top ", n),
+        file.path(base, "TopRank", tag),
+        full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = 1
+      ),
+      error = function(e) log_msg("ERROR subset ", comp_name, " ", tag, ": ", e$message)
     )
   }
+
+  tryCatch({
+    log_msg("Building full-list GSEA after subset plots: ", comp_name)
+    gsea_cache <- build_gsea_cache(gsea_de)
+    full_gsea_dir <- file.path(base, "00_GSEA_all_genes_NOT_FC_or_topN")
+    dir.create(full_gsea_dir, recursive = TRUE, showWarnings = FALSE)
+    writeLines("全基因 GSEA，不是 FC/topN 分层结果。分层图在 FoldChange/ 和 TopRank/。",
+               file.path(full_gsea_dir, "00_README.txt"))
+    for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
+      plot_gsea_object(gsea_cache[[nm]], file.path(full_gsea_dir, paste0("allGenes_GSEA_", nm)),
+                       paste("GSEA", nm, "|", comp_name, "| ALL genes, NOT FC/topN"))
+    }
+    plot_fgsea_hallmark(gsea_cache$stats, full_gsea_dir,
+                        paste("GSEA Hallmark |", comp_name, "| ALL genes"), prefix = "allGenes_")
+  }, error = function(e) log_msg("full-list GSEA failed for ", comp_name, ": ", e$message))
 }
 
 plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix) {
