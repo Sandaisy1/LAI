@@ -14,8 +14,8 @@
 # 子集策略：
 #   A) 下调 FC <= 1 / 0.8 / 0.6 / 0.5
 #   B) 下调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300（log2FC 最负）
-# 每个比较 × 每个 FC 阈值 × 每个 topN 都必须出图：
-#   差异基因表/柱状图、火山图、热图、GO图、通路富集图、KEGG图、GSEA图
+# 每个比较必须先出 FoldChange/TopRank 的火山图、热图、单独 GO/通路/KEGG，
+# 再跑子集 GSEA；全基因 GSEA 放在最后。GSEA 慢且易报错，放最前面会跳过后面整段。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -1481,61 +1481,78 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag) {
     file.path(outdir, paste0(pref, "00_ORA_is_not_GSEA.txt"))
   )
 }
-run_gsea_plots <- function(sub, gsea_cache, outdir, tag, label) {
+run_gsea_plots <- function(sub, gsea_cache, outdir, tag, label,
+                           include_ranked = TRUE, include_overlap = TRUE) {
   gsea_dir <- file.path(outdir, "GSEA")
   dir.create(gsea_dir, recursive = TRUE, showWarnings = FALSE)
   pref <- paste0(tag, "_")
-  sub_stats <- ranked_entrez(sub)
-  plot_fgsea_hallmark(sub_stats, gsea_dir, paste(label, "| GSEA Hallmark"), prefix = pref)
 
-  if (length(sub_stats) >= 8) {
-    term2gene <- tryCatch(msig_hallmark_map(), error = function(e) NULL)
-    if (!is.null(term2gene)) {
-      hm <- enrich_or_relax(
-        function() clusterProfiler::GSEA(
-          geneList = sub_stats, TERM2GENE = term2gene, minGSSize = 5,
-          maxGSSize = 500, pvalueCutoff = 0.05, eps = 0, verbose = FALSE
-        ),
-        function() clusterProfiler::GSEA(
-          geneList = sub_stats, TERM2GENE = term2gene, minGSSize = 3,
-          maxGSSize = 500, pvalueCutoff = 1, eps = 0, verbose = FALSE
-        ),
-        paste("subset Hallmark GSEA", tag)
-      )
-      plot_gsea_object(hm, file.path(gsea_dir, paste0(pref, "GSEA_Hallmark")),
-                       paste(label, "| GSEA Hallmark (subset ranked)"))
-    }
-    kegg <- enrich_or_relax(
-      function() clusterProfiler::gseKEGG(
-        geneList = sub_stats, organism = "hsa", minGSSize = 5, maxGSSize = 500,
-        pvalueCutoff = 0.05, verbose = FALSE, eps = 0
-      ),
-      function() clusterProfiler::gseKEGG(
-        geneList = sub_stats, organism = "hsa", minGSSize = 3, maxGSSize = 500,
-        pvalueCutoff = 1, verbose = FALSE, eps = 0
-      ),
-      paste("subset KEGG GSEA", tag)
+  if (isTRUE(include_ranked)) {
+    sub_stats <- ranked_entrez(sub)
+    tryCatch(
+      plot_fgsea_hallmark(sub_stats, gsea_dir, paste(label, "| GSEA Hallmark"), prefix = pref),
+      error = function(e) log_msg("subset fgsea failed (", tag, "): ", e$message)
     )
-    if (!is.null(kegg) && nrow(as.data.frame(kegg)) > 0) {
-      kegg <- tryCatch(clusterProfiler::setReadable(kegg, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) kegg)
+
+    if (length(sub_stats) >= 8) {
+      term2gene <- tryCatch(msig_hallmark_map(), error = function(e) NULL)
+      if (!is.null(term2gene)) {
+        hm <- enrich_or_relax(
+          function() clusterProfiler::GSEA(
+            geneList = sub_stats, TERM2GENE = term2gene, minGSSize = 5,
+            maxGSSize = 500, pvalueCutoff = 0.05, eps = 0, verbose = FALSE
+          ),
+          function() clusterProfiler::GSEA(
+            geneList = sub_stats, TERM2GENE = term2gene, minGSSize = 3,
+            maxGSSize = 500, pvalueCutoff = 1, eps = 0, verbose = FALSE
+          ),
+          paste("subset Hallmark GSEA", tag)
+        )
+        tryCatch(
+          plot_gsea_object(hm, file.path(gsea_dir, paste0(pref, "GSEA_Hallmark")),
+                           paste(label, "| GSEA Hallmark (subset ranked)")),
+          error = function(e) log_msg("subset Hallmark GSEA plot failed (", tag, "): ", e$message)
+        )
+      }
+      kegg <- enrich_or_relax(
+        function() clusterProfiler::gseKEGG(
+          geneList = sub_stats, organism = "hsa", minGSSize = 5, maxGSSize = 500,
+          pvalueCutoff = 0.05, verbose = FALSE, eps = 0
+        ),
+        function() clusterProfiler::gseKEGG(
+          geneList = sub_stats, organism = "hsa", minGSSize = 3, maxGSSize = 500,
+          pvalueCutoff = 1, verbose = FALSE, eps = 0
+        ),
+        paste("subset KEGG GSEA", tag)
+      )
+      if (!is.null(kegg) && nrow(as.data.frame(kegg)) > 0) {
+        kegg <- tryCatch(clusterProfiler::setReadable(kegg, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) kegg)
+      }
+      tryCatch(
+        plot_gsea_object(kegg, file.path(gsea_dir, paste0(pref, "GSEA_KEGG")),
+                         paste(label, "| GSEA KEGG (subset ranked)")),
+        error = function(e) log_msg("subset KEGG GSEA plot failed (", tag, "): ", e$message)
+      )
     }
-    plot_gsea_object(kegg, file.path(gsea_dir, paste0(pref, "GSEA_KEGG")),
-                     paste(label, "| GSEA KEGG (subset ranked)"))
   }
 
-  mp <- map_to_entrez(sub$gene)
-  for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
-    ids <- gsea_ids_overlapping_genes(gsea_cache[[nm]], sub$gene, mp$entrez)
-    plot_gsea_selected_ids(
-      gsea_cache[[nm]], ids,
-      file.path(gsea_dir, paste0(pref, "GSEA_fullrank_overlap_", nm)),
-      paste(label, "| GSEA", nm, "(full-rank overlap)")
-    )
+  if (isTRUE(include_overlap) && length(gsea_cache) > 0) {
+    mp <- map_to_entrez(sub$gene)
+    for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
+      tryCatch({
+        ids <- gsea_ids_overlapping_genes(gsea_cache[[nm]], sub$gene, mp$entrez)
+        plot_gsea_selected_ids(
+          gsea_cache[[nm]], ids,
+          file.path(gsea_dir, paste0(pref, "GSEA_fullrank_overlap_", nm)),
+          paste(label, "| GSEA", nm, "(full-rank overlap)")
+        )
+      }, error = function(e) log_msg("GSEA overlap failed (", tag, " ", nm, "): ", e$message))
+    }
   }
 }
 
 emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de_for_volcano,
-                                 heat_mat, sample_info, gsea_cache, fc_line = 1) {
+                                 heat_mat, sample_info, gsea_cache = NULL, fc_line = 1) {
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   writeLines(
     c(paste("comparison:", comp_name),
@@ -1567,12 +1584,24 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de_for
            })
   tryCatch(run_ora_plots(sub$gene, sub, outdir, title, tag),
            error = function(e) log_msg("ORA/plots failed: ", e$message))
-  tryCatch(run_gsea_plots(sub, gsea_cache, outdir, tag, title),
-           error = function(e) log_msg("GSEA/plots failed: ", e$message))
+  # GSEA is not run here. All-gene and subset GSEA run only after every
+  # FoldChange/TopRank volcano, heatmap, and ORA has finished.
+}
+
+emit_subset_gsea <- function(sub, tag, title, outdir, gsea_cache = list(),
+                             include_ranked = TRUE, include_overlap = FALSE) {
+  if (is.null(sub) || nrow(sub) == 0) return(invisible(NULL))
+  tryCatch(
+    run_gsea_plots(sub, gsea_cache, outdir, tag, title,
+                   include_ranked = include_ranked, include_overlap = include_overlap),
+    error = function(e) log_msg("GSEA/plots failed (", tag, "): ", e$message)
+  )
 }
 
 # -----------------------------------------------------------------------------
 # 9. 对单个比较执行全部子集分析（4 个下调 FC x 7 个 topN，全部出图）
+#    硬顺序：先 FoldChange/TopRank 火山图+热图+ORA，再子集 GSEA，最后才全基因 GSEA。
+#    全基因 GSEA 慢且易报错，绝不能放在最前面，否则后面整段会被跳过。
 # -----------------------------------------------------------------------------
 analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat, sample_info, have_pvalue, gsea_de = NULL) {
   if (is.null(gsea_de)) gsea_de <- de
@@ -1591,63 +1620,96 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
       "  1_FoldChange_and_TopRank_are_here",
       "  FoldChange/FC_1  FC_0.8  FC_0.6  FC_0.5  （下调 FC <= 阈值）",
       "  TopRank/top50 ... top300  （下调排名，log2FC 最负）",
-      "每个子文件夹里：火山图、热图、ORA_GO、ORA通路、ORA_KEGG、以及 GSEA。",
+      "每个子文件夹里：火山图、热图、ORA_GO、ORA通路、ORA_KEGG；GSEA 在其后单独跑。",
       "细胞骨架运动 / 线粒体专项结果在 Focused_cytoskeleton_mito/（不是改全库排名）。",
-      "00_GSEA_all_genes_NOT_FC_or_topN 只是全基因 GSEA，不是分层图。"),
+      "99_GSEA_all_genes_NOT_FC_or_topN 只是全基因 GSEA，最后才跑，不是分层图。"),
     file.path(base, "00_READ_ME_先看这里.txt")
   )
 
-  gsea_cache <- list()
-  log_msg("Subset plots first (volcano/heatmap/ORA), GSEA-all-genes later: ", comp_name)
-
+  subset_jobs <- list()
   for (nm in names(fc_cutoffs)) {
     fc <- unname(fc_cutoffs[[nm]])
-    sub <- select_by_fc(de, fc, have_pvalue)
-    tryCatch(
-      emit_subset_analysis(
-        comp_name, sub, nm, paste0(comp_name, " | down FC <= ", fc),
-        file.path(base, "FoldChange", nm),
-        full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = fc
-      ),
-      error = function(e) log_msg("ERROR subset ", comp_name, " ", nm, ": ", e$message)
+    subset_jobs[[length(subset_jobs) + 1]] <- list(
+      sub = select_by_fc(de, fc, have_pvalue),
+      tag = nm,
+      title = paste0(comp_name, " | down FC <= ", fc),
+      outdir = file.path(base, "FoldChange", nm),
+      fc_line = fc
     )
   }
-
   for (n in top_ns) {
     tag <- paste0("top", n)
-    sub <- select_by_topn(de, n, have_pvalue)
-    tryCatch(
-      emit_subset_analysis(
-        comp_name, sub, tag, paste0(comp_name, " | downregulated top ", n),
-        file.path(base, "TopRank", tag),
-        full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = 1
-      ),
-      error = function(e) log_msg("ERROR subset ", comp_name, " ", tag, ": ", e$message)
+    subset_jobs[[length(subset_jobs) + 1]] <- list(
+      sub = select_by_topn(de, n, have_pvalue),
+      tag = tag,
+      title = paste0(comp_name, " | downregulated top ", n),
+      outdir = file.path(base, "TopRank", tag),
+      fc_line = 1
     )
   }
 
+  # Pass 1: volcano / heatmap / ORA for every cutoff. No GSEA.
+  log_msg("Pass 1/3: volcano, heatmap, ORA for all FoldChange/TopRank (no GSEA yet): ", comp_name)
+  for (job in subset_jobs) {
+    tryCatch(
+      emit_subset_analysis(
+        comp_name, job$sub, job$tag, job$title, job$outdir,
+        full_de_for_volcano, heat_mat, sample_info, fc_line = job$fc_line
+      ),
+      error = function(e) log_msg("ERROR subset plots ", comp_name, " ", job$tag, ": ", e$message)
+    )
+  }
+
+  # Pass 2: subset GSEA only after every volcano/heatmap/ORA exists.
+  log_msg("Pass 2/3: subset GSEA after all FoldChange/TopRank plots: ", comp_name)
+  for (job in subset_jobs) {
+    tryCatch(
+      emit_subset_gsea(job$sub, job$tag, job$title, job$outdir, gsea_cache = list(),
+                       include_ranked = TRUE, include_overlap = FALSE),
+      error = function(e) log_msg("ERROR subset GSEA ", comp_name, " ", job$tag, ": ", e$message)
+    )
+  }
+
+  # Pass 3 LAST: all-gene GSEA. Isolated so failure cannot skip plots above.
+  gsea_cache <- list()
   tryCatch({
-    log_msg("Building full-list GSEA after subset plots: ", comp_name)
+    log_msg("Pass 3/3 LAST: all-gene GSEA (must not run before FoldChange/TopRank): ", comp_name)
     gsea_cache <- build_gsea_cache(gsea_de)
-    full_gsea_dir <- file.path(base, "00_GSEA_all_genes_NOT_FC_or_topN")
+    full_gsea_dir <- file.path(base, "99_GSEA_all_genes_NOT_FC_or_topN")
     dir.create(full_gsea_dir, recursive = TRUE, showWarnings = FALSE)
-    writeLines("全基因 GSEA，不是 FC/topN 分层结果。分层图在 FoldChange/ 和 TopRank/。",
-               file.path(full_gsea_dir, "00_README.txt"))
+    writeLines(
+      c("全基因 GSEA，最后才跑，不是 FC/topN 分层结果。",
+        "分层图在 FoldChange/ 和 TopRank/。"),
+      file.path(full_gsea_dir, "00_README.txt")
+    )
     for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
-      plot_gsea_object(gsea_cache[[nm]], file.path(full_gsea_dir, paste0("allGenes_GSEA_", nm)),
-                       paste("GSEA", nm, "|", comp_name, "| ALL genes, NOT FC/topN"))
+      tryCatch(
+        plot_gsea_object(gsea_cache[[nm]], file.path(full_gsea_dir, paste0("allGenes_GSEA_", nm)),
+                         paste("GSEA", nm, "|", comp_name, "| ALL genes, NOT FC/topN")),
+        error = function(e) log_msg("all-gene GSEA plot failed (", nm, "): ", e$message)
+      )
     }
-    plot_fgsea_hallmark(gsea_cache$stats, full_gsea_dir,
-                        paste("GSEA Hallmark |", comp_name, "| ALL genes"), prefix = "allGenes_")
+    tryCatch(
+      plot_fgsea_hallmark(gsea_cache$stats, full_gsea_dir,
+                          paste("GSEA Hallmark |", comp_name, "| ALL genes"), prefix = "allGenes_"),
+      error = function(e) log_msg("all-gene fgsea failed: ", e$message)
+    )
   }, error = function(e) log_msg("full-list GSEA failed for ", comp_name, ": ", e$message))
 
-  tryCatch({
-    log_msg("Focused cytoskeleton / mitochondria GSEA: ", comp_name)
-    focus_stats <- if (exists("gsea_cache", inherits = FALSE) && !is.null(gsea_cache$stats)) {
-      gsea_cache$stats
-    } else {
-      ranked_entrez(gsea_de)
+  if (length(gsea_cache) > 0) {
+    log_msg("Full-rank GSEA overlap plots (after all-gene GSEA): ", comp_name)
+    for (job in subset_jobs) {
+      tryCatch(
+        emit_subset_gsea(job$sub, job$tag, job$title, job$outdir, gsea_cache = gsea_cache,
+                         include_ranked = FALSE, include_overlap = TRUE),
+        error = function(e) log_msg("GSEA overlap skipped ", job$tag, ": ", e$message)
+      )
     }
+  }
+
+  tryCatch({
+    log_msg("Focused cytoskeleton / mitochondria GSEA (after plots + all-gene GSEA): ", comp_name)
+    focus_stats <- if (!is.null(gsea_cache$stats)) gsea_cache$stats else ranked_entrez(gsea_de)
     run_focused_gsea(
       focus_stats, gsea_de, heat_mat, sample_info,
       file.path(base, "Focused_cytoskeleton_mito"),

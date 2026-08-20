@@ -29,8 +29,14 @@ Filter low expression, then normalize (DESeq2 size factors if counts; quantile l
 - Top down: 50, 75, 100, 150, 200, 250, 300 (most negative log2FC)
 - Pairwise / common / designs 5–6: FC/rank only. Design 2: `padj < 0.05` if estimable, else FC/rank only.
 
+## Run order (hard rule — do not invert)
+1. All `FoldChange/` and `TopRank/` volcano, heatmap, and ORA GO/pathway/KEGG first.
+2. Subset GSEA only after every subset has those plots.
+3. All-gene GSEA last (`99_GSEA_all_genes_NOT_FC_or_topN`). Never run it first. Wrap it so a GSEA error cannot skip volcano/heatmap/ORA or any FC/topN folder.
+4. GSEA is slow; isolate each GSEA block in `tryCatch`.
+
 ## Plots in every non-empty subset
 - DE table, volcano, heatmap
 - ORA (单独的 GO / 通路 / KEGG，不是 GSEA): `GO/`, `Pathway/`, `KEGG/`, filenames start with `ORA_`
-- GSEA: `GSEA/` and `00_GSEA_all_genes_NOT_FC_or_topN`, filenames start with `GSEA_`
-- Do not inflate genome-wide GO/KEGG p-values. Cytoskeleton-motility and mitochondria hypotheses go in `Focused_cytoskeleton_mito/` (custom gene-set GSEA/ORA).
+- GSEA last: subset `GSEA/` then `99_GSEA_all_genes_NOT_FC_or_topN`; filenames start with `GSEA_`
+- Do not inflate genome-wide GO/KEGG p-values. Cytoskeleton-motility and mitochondria hypotheses go in `Focused_cytoskeleton_mito/`.

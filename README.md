@@ -28,7 +28,7 @@ source("TG_RNAseq_pipeline.R")
 5. `(TG_sh1 + TG_sh5)/2` vs `NTC_rep0`
 6. `(TG_sh1 + TG_sh5)/2` vs `NTC_rep1`
 
-每个比较再按两种子集策略分别做差异表、火山图、热图、GO、通路、KEGG、GSEA：
+每个比较**先**按两种子集策略出差异表、火山图、热图、单独 GO/通路/KEGG；**全部子集图完成后再**跑 GSEA。全基因 GSEA 放在最后，报错不会跳过前面的图：
 
 1. 下调 FoldChange：treat/control ≤ 1 / 0.8 / 0.6 / 0.5
 2. 下调排名：top 50 / 75 / 100 / 150 / 200 / 250 / 300（log2FC 最负）
@@ -53,7 +53,7 @@ results/
 - `GO/`、`Pathway/`、`KEGG/`：单独的过表达分析（ORA），文件名以 `ORA_` 开头
 - `GSEA/`：GSEA 分析，文件名以 `GSEA_` 开头
 
-**注意：** 比较目录里的 `00_GSEA_all_genes_NOT_FC_or_topN` 是全部基因的 GSEA，**不是** FC/topN 分层图。分层图在：
+**注意：** 比较目录里的 `99_GSEA_all_genes_NOT_FC_or_topN` 是全部基因的 GSEA，**最后才跑**，**不是** FC/topN 分层图。分层图在：
 
 ```
 results/TG_sh1_vs_NTC_rep0/FoldChange/FC_0.5/FC_0.5_volcano.pdf
