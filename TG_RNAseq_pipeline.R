@@ -1,17 +1,19 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# TG BRCA 细胞 RNA-seq 分析流程
-# 组别：NTC（对照）、TG_sh1、TG_sh5
-# 四种比较：
+# TG BRCA 细胞 RNA-seq 分析流程（下调方向，六种设计）
+# 组别：NTC_rep0、NTC_rep1、TG_sh1、TG_sh5
+# 六种比较（各自单独作图；仅设计 2 合并两个 NTC）：
 #   1) 单独 1-vs-1：TG_sh1 vs NTC_rep0，TG_sh5 vs NTC_rep0，
-#                  TG_sh1 vs NTC_rep1，TG_sh5 vs NTC_rep1（各自单独作图）
+#                  TG_sh1 vs NTC_rep1，TG_sh5 vs NTC_rep1
 #   2) (TG_sh1 + TG_sh5)/2 vs NTC组均值(NTC_rep0, NTC_rep1)
-#   3) 共同上调：TG_sh1 vs NTC_rep0 与 TG_sh5 vs NTC_rep0 的交集
-#   4) 共同上调：TG_sh1 vs NTC_rep1 与 TG_sh5 vs NTC_rep1 的交集
+#   3) 共同下调：TG_sh1 vs NTC_rep0 与 TG_sh5 vs NTC_rep0 的交集
+#   4) 共同下调：TG_sh1 vs NTC_rep1 与 TG_sh5 vs NTC_rep1 的交集
+#   5) (TG_sh1 + TG_sh5)/2 vs NTC_rep0
+#   6) (TG_sh1 + TG_sh5)/2 vs NTC_rep1
 # 预处理：过滤低表达 + 标准化消除技术偏差
 # 子集策略：
-#   A) 上调 FC >= 1 / 1.25 / 1.5 / 2
-#   B) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300
+#   A) 下调 FC <= 1 / 0.8 / 0.6 / 0.5
+#   B) 下调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300（log2FC 最负）
 # 每个比较 × 每个 FC 阈值 × 每个 topN 都必须出图：
 #   差异基因表/柱状图、火山图、热图、GO图、通路富集图、KEGG图、GSEA图
 # =============================================================================
@@ -115,8 +117,10 @@ log_msg <- function(...) {
 }
 
 padj_cutoff <- 0.05
-fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
+# 下调倍数：treat/control <= 1 / 0.8 / 0.6 / 0.5
+fc_cutoffs <- c("FC_1" = 1, "FC_0.8" = 0.8, "FC_0.6" = 0.6, "FC_0.5" = 0.5)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
+down_fill  <- "#1D4E89"
 
 # -----------------------------------------------------------------------------
 # 2. 样本名识别
@@ -479,17 +483,40 @@ mean_kd_vs_ntc_de <- function(log_mat, sample_info) {
   )
 }
 
-build_common_up <- function(a, b) {
+mean_kd_vs_one_ntc_de <- function(log_mat, sample_info, ntc_id, comp_name) {
+  sh1 <- find_sample(sample_info, "TG_sh1")
+  sh5 <- find_sample(sample_info, "TG_sh5")
+  ntc <- find_sample(sample_info, "NTC", ntc_id)
+  if (is.na(sh1) || is.na(sh5) || is.na(ntc)) return(NULL)
+  if (!all(c(sh1, sh5, ntc) %in% colnames(log_mat))) return(NULL)
+  log_msg(comp_name, " : mean(", sh1, ", ", sh5, ") vs ", ntc, " (KD mean vs one NTC, FC only)")
+  sh_mean <- (log_mat[, sh1] + log_mat[, sh5]) / 2
+  ntc_val <- log_mat[, ntc]
+  data.frame(
+    gene = rownames(log_mat),
+    log2FC = as.numeric(sh_mean - ntc_val),
+    AveExpr = as.numeric((sh_mean + ntc_val) / 2),
+    pvalue = NA_real_,
+    padj = NA_real_,
+    treat_sample = paste0("mean(", sh1, ",", sh5, ")"),
+    ntc_sample = ntc,
+    stringsAsFactors = FALSE
+  )
+}
+
+empty_common_de <- function() {
+  data.frame(
+    gene = character(), log2FC = numeric(), log2FC_sh1 = numeric(), log2FC_sh5 = numeric(),
+    AveExpr = numeric(), pvalue = numeric(), padj = numeric()
+  )
+}
+
+build_common_down <- function(a, b) {
   if (is.null(a) || is.null(b)) return(NULL)
   a <- a[!is.na(a$log2FC), ]
   b <- b[!is.na(b$log2FC), ]
-  common <- intersect(a$gene[a$log2FC > 0], b$gene[b$log2FC > 0])
-  if (length(common) == 0) {
-    return(data.frame(
-      gene = character(), log2FC = numeric(), log2FC_sh1 = numeric(), log2FC_sh5 = numeric(),
-      AveExpr = numeric(), pvalue = numeric(), padj = numeric()
-    ))
-  }
+  common <- intersect(a$gene[a$log2FC < 0], b$gene[b$log2FC < 0])
+  if (length(common) == 0) return(empty_common_de())
   aa <- a[match(common, a$gene), ]
   bb <- b[match(common, b$gene), ]
   data.frame(
@@ -503,6 +530,9 @@ build_common_up <- function(a, b) {
     stringsAsFactors = FALSE
   )
 }
+
+# 保留旧名，避免外部脚本调用时报错
+build_common_up <- function(a, b) build_common_down(a, b)
 
 full_rank_two <- function(a, b) {
   if (is.null(a) || is.null(b)) return(NULL)
@@ -523,23 +553,27 @@ passes_padj <- function(padj, have_pvalue) {
   !is.na(padj) & padj < padj_cutoff
 }
 
+order_down <- function(de) {
+  if (is.null(de) || nrow(de) == 0) return(de)
+  de[order(de$log2FC, decreasing = FALSE, na.last = TRUE), , drop = FALSE]
+}
+
 select_by_fc <- function(de, fc, have_pvalue) {
-  keep <- !is.na(de$log2FC) & (2^de$log2FC >= fc) & passes_padj(de$padj, have_pvalue)
+  keep <- !is.na(de$log2FC) & (2^de$log2FC <= fc) & passes_padj(de$padj, have_pvalue)
   if ("log2FC_sh1" %in% names(de)) {
-    keep <- keep & (2^de$log2FC_sh1 >= fc) & (2^de$log2FC_sh5 >= fc)
+    keep <- keep & (2^de$log2FC_sh1 <= fc) & (2^de$log2FC_sh5 <= fc)
   }
-  de[keep, , drop = FALSE]
+  order_down(de[keep, , drop = FALSE])
 }
 
 select_by_topn <- function(de, n, have_pvalue) {
-  x <- de[!is.na(de$log2FC) & de$log2FC > 0, , drop = FALSE]
+  x <- de[!is.na(de$log2FC) & de$log2FC < 0, , drop = FALSE]
   if ("log2FC_sh1" %in% names(x)) {
-    x <- x[x$log2FC_sh1 > 0 & x$log2FC_sh5 > 0, , drop = FALSE]
+    x <- x[x$log2FC_sh1 < 0 & x$log2FC_sh5 < 0, , drop = FALSE]
   }
   sig <- x[passes_padj(x$padj, have_pvalue), , drop = FALSE]
   if (nrow(sig) == 0) sig <- x
-  sig <- sig[order(sig$log2FC, decreasing = TRUE), , drop = FALSE]
-  utils::head(sig, n)
+  utils::head(order_down(sig), n)
 }
 
 # -----------------------------------------------------------------------------
@@ -600,11 +634,11 @@ plot_volcano <- function(de, highlight, title, outfile, fc_line = 1) {
   }
   df$set <- ifelse(df$gene %in% highlight, "selected", "other")
   df$label <- ifelse(df$gene %in% utils::head(highlight, 15), df$gene, NA)
-  lfc_line <- log2(fc_line)
+  lfc_abs <- abs(log2(fc_line))
   p <- ggplot2::ggplot(df, ggplot2::aes(x = log2FC, y = y, color = set)) +
     ggplot2::geom_point(alpha = 0.7, size = 1.4) +
-    ggplot2::scale_color_manual(values = c(other = "grey70", selected = "#D62828")) +
-    ggplot2::geom_vline(xintercept = c(-lfc_line, lfc_line), linetype = 2, color = "grey40") +
+    ggplot2::scale_color_manual(values = c(other = "grey70", selected = down_fill)) +
+    ggplot2::geom_vline(xintercept = c(-lfc_abs, lfc_abs), linetype = 2, color = "grey40") +
     ggrepel::geom_text_repel(ggplot2::aes(label = label), size = 3, max.overlaps = 30, na.rm = TRUE) +
     ggplot2::theme_bw(base_size = 12) +
     ggplot2::labs(title = title, x = "log2 Fold Change", y = ylab, color = NULL)
@@ -615,12 +649,12 @@ plot_volcano <- function(de, highlight, title, outfile, fc_line = 1) {
 plot_scatter_common <- function(de, highlight, title, outfile) {
   if (!all(c("log2FC_sh1", "log2FC_sh5") %in% names(de))) return(invisible(NULL))
   df <- de
-  df$set <- ifelse(df$gene %in% highlight, "common_up", "other")
+  df$set <- ifelse(df$gene %in% highlight, "common_down", "other")
   df$label <- ifelse(df$gene %in% utils::head(highlight, 15), df$gene, NA)
   p <- ggplot2::ggplot(df, ggplot2::aes(x = log2FC_sh1, y = log2FC_sh5, color = set)) +
     ggplot2::geom_point(alpha = 0.75, size = 1.6) +
     ggplot2::geom_abline(slope = 1, intercept = 0, linetype = 2, color = "grey50") +
-    ggplot2::scale_color_manual(values = c(other = "grey70", common_up = "#D62828")) +
+    ggplot2::scale_color_manual(values = c(other = "grey70", common_down = down_fill)) +
     ggrepel::geom_text_repel(ggplot2::aes(label = label), size = 3, max.overlaps = 30, na.rm = TRUE) +
     ggplot2::theme_bw(base_size = 12) +
     ggplot2::labs(title = title, x = "log2FC TG_sh1 vs this NTC", y = "log2FC TG_sh5 vs this NTC", color = NULL)
@@ -692,11 +726,11 @@ plot_pca <- function(heat_mat, sample_info, outfile) {
 
 plot_de_bar <- function(sub, title, outfile) {
   if (nrow(sub) == 0) return(invisible(NULL))
-  df <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
-  if (nrow(df) > 60) df <- rbind(utils::head(df, 30), utils::tail(df, 30))
+  df <- order_down(sub)
+  if (nrow(df) > 60) df <- utils::head(df, 60)
   df$gene <- factor(df$gene, levels = rev(unique(df$gene)))
   p <- ggplot2::ggplot(df, ggplot2::aes(x = gene, y = log2FC)) +
-    ggplot2::geom_col(fill = "#D62828", width = 0.8) +
+    ggplot2::geom_col(fill = down_fill, width = 0.8) +
     ggplot2::coord_flip() +
     ggplot2::theme_bw(base_size = 11) +
     ggplot2::labs(title = title, x = NULL, y = "log2 Fold Change")
@@ -1538,7 +1572,7 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de_for
 }
 
 # -----------------------------------------------------------------------------
-# 9. 对单个比较执行全部子集分析（4 个 FC x 7 个 topN，全部出图）
+# 9. 对单个比较执行全部子集分析（4 个下调 FC x 7 个 topN，全部出图）
 # -----------------------------------------------------------------------------
 analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat, sample_info, have_pvalue, gsea_de = NULL) {
   if (is.null(gsea_de)) gsea_de <- de
@@ -1555,8 +1589,8 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
   writeLines(
     c("请打开下面两个文件夹，不要只看 GSEA：",
       "  1_FoldChange_and_TopRank_are_here",
-      "  FoldChange/FC_1  FC_1.25  FC_1.5  FC_2",
-      "  TopRank/top50 ... top300",
+      "  FoldChange/FC_1  FC_0.8  FC_0.6  FC_0.5  （下调 FC <= 阈值）",
+      "  TopRank/top50 ... top300  （下调排名，log2FC 最负）",
       "每个子文件夹里：火山图、热图、ORA_GO、ORA通路、ORA_KEGG、以及 GSEA。",
       "细胞骨架运动 / 线粒体专项结果在 Focused_cytoskeleton_mito/（不是改全库排名）。",
       "00_GSEA_all_genes_NOT_FC_or_topN 只是全基因 GSEA，不是分层图。"),
@@ -1569,10 +1603,9 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
   for (nm in names(fc_cutoffs)) {
     fc <- unname(fc_cutoffs[[nm]])
     sub <- select_by_fc(de, fc, have_pvalue)
-    if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
     tryCatch(
       emit_subset_analysis(
-        comp_name, sub, nm, paste0(comp_name, " | up FC >= ", fc),
+        comp_name, sub, nm, paste0(comp_name, " | down FC <= ", fc),
         file.path(base, "FoldChange", nm),
         full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = fc
       ),
@@ -1585,7 +1618,7 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
     sub <- select_by_topn(de, n, have_pvalue)
     tryCatch(
       emit_subset_analysis(
-        comp_name, sub, tag, paste0(comp_name, " | upregulated top ", n),
+        comp_name, sub, tag, paste0(comp_name, " | downregulated top ", n),
         file.path(base, "TopRank", tag),
         full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = 1
       ),
@@ -1623,7 +1656,7 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
   }, error = function(e) log_msg("focused GSEA failed for ", comp_name, ": ", e$message))
 }
 
-plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix) {
+plot_venn_down <- function(de_a, de_b, outdir, label_a, label_b, title_prefix) {
   if (is.null(de_a) || is.null(de_b)) return(invisible(NULL))
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   have_pvalue <- FALSE
@@ -1637,7 +1670,7 @@ plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix) {
     p <- tryCatch({
       if (!has_pkg("ggvenn")) stop("ggvenn not installed")
       ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
-        ggplot2::labs(title = paste0(title_prefix, " | FC >= ", fc))
+        ggplot2::labs(title = paste0(title_prefix, " | FC <= ", fc))
     }, error = function(e) {
       log_msg("venn failed: ", e$message)
       NULL
@@ -1666,6 +1699,8 @@ plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix) {
     if (!is.null(p)) save_gg(p, file.path(vdir, paste0("venn_", tag)), width = 7, height = 6)
   }
 }
+
+plot_venn_up <- function(...) plot_venn_down(...)
 
 # -----------------------------------------------------------------------------
 # 10. 主流程
@@ -1714,14 +1749,17 @@ de_list$TG_sh1_vs_NTC_rep1 <- pairwise_de(log_mat, sh1, ntc1, "TG_sh1_vs_NTC_rep
 de_list$TG_sh5_vs_NTC_rep1 <- pairwise_de(log_mat, sh5, ntc1, "TG_sh5_vs_NTC_rep1")
 # 设计2：两个 knockdown 等权平均 vs 两个 NTC 的组均值
 de_list$TGsh_mean_vs_NTC <- mean_kd_vs_ntc_de(log_mat, si)
-# 设计3 / 4：分别相对同一个 NTC 样品的共同上调
-de_list$common_up_vs_NTC_rep0 <- build_common_up(de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0)
-de_list$common_up_vs_NTC_rep1 <- build_common_up(de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1)
+# 设计3 / 4：分别相对同一个 NTC 样品的共同下调
+de_list$common_down_vs_NTC_rep0 <- build_common_down(de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0)
+de_list$common_down_vs_NTC_rep1 <- build_common_down(de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1)
+# 设计5 / 6：两个 knockdown 等权平均 vs 单个 NTC
+de_list$TGsh_mean_vs_NTC_rep0 <- mean_kd_vs_one_ntc_de(log_mat, si, "NTC_rep0", "TGsh_mean_vs_NTC_rep0")
+de_list$TGsh_mean_vs_NTC_rep1 <- mean_kd_vs_one_ntc_de(log_mat, si, "NTC_rep1", "TGsh_mean_vs_NTC_rep1")
 de_list <- de_list[!vapply(de_list, is.null, logical(1))]
 
 gsea_rank <- list(
-  common_up_vs_NTC_rep0 = full_rank_two(de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0),
-  common_up_vs_NTC_rep1 = full_rank_two(de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1)
+  common_down_vs_NTC_rep0 = full_rank_two(de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0),
+  common_down_vs_NTC_rep1 = full_rank_two(de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1)
 )
 
 for (nm in names(de_list)) {
@@ -1740,15 +1778,15 @@ for (nm in names(de_list)) {
   )
 }
 
-tryCatch(plot_venn_up(
+tryCatch(plot_venn_down(
   de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0,
-  file.path(result_dir, "common_up_vs_NTC_rep0"),
-  "TG_sh1_vs_NTC_rep0", "TG_sh5_vs_NTC_rep0", "Common up vs NTC_rep0"
+  file.path(result_dir, "common_down_vs_NTC_rep0"),
+  "TG_sh1_vs_NTC_rep0", "TG_sh5_vs_NTC_rep0", "Common down vs NTC_rep0"
 ), error = function(e) log_msg("venn NTC_rep0 error: ", e$message))
-tryCatch(plot_venn_up(
+tryCatch(plot_venn_down(
   de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1,
-  file.path(result_dir, "common_up_vs_NTC_rep1"),
-  "TG_sh1_vs_NTC_rep1", "TG_sh5_vs_NTC_rep1", "Common up vs NTC_rep1"
+  file.path(result_dir, "common_down_vs_NTC_rep1"),
+  "TG_sh1_vs_NTC_rep1", "TG_sh5_vs_NTC_rep1", "Common down vs NTC_rep1"
 ), error = function(e) log_msg("venn NTC_rep1 error: ", e$message))
 
 base::writeLines(capture.output(sessionInfo()), file.path(log_dir, "sessionInfo.txt"))
