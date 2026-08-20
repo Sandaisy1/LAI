@@ -1,39 +1,61 @@
 ---
-description: TG BRCA RNA-seq analysis with NTC_rep0/rep1 kept separate
+description: TG BRCA RNA-seq 显著性与变化倍数分析（六组比较 + FC/topN 分层）
 globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
 
-# TG BRCA RNA-seq pipeline
+# TG BRCA RNA-seq：显著性与变化倍数分析
 
-## Data
-- Dir: `E:/R/TG_BRCA/TG` (fallback: script/repo dir)
-- Input: Cuffdiff `genes.read_group_tracking`, then `genes.count_tracking` / `genes.fpkm_tracking`
-- Samples: `NTC_rep0`, `NTC_rep1`, `TG_sh1`, `TG_sh5` (do not collapse the two NTC samples except in design 2)
-- Human `org.Hs.eg.db`
-- Cufflinks `gene_short_name` may be fused (`SAA2,SAA2-SAA4,SAA4`) or locus IDs (`XLOC_######`). Clean to one official symbol; keep remaining XLOC rows for DE but they will not map in GO/KEGG.
+写或改本仓库 R 分析时必须按本规则。输入是 Cuffdiff，不是 Excel。
 
-## Preprocess (once, all samples together)
-Filter low expression, then normalize (DESeq2 size factors if counts; quantile log2 if FPKM).
+## 数据
 
-## Four designs (each gets its own plots; never merge NTC_rep0 with NTC_rep1 except design 2)
-1. Pairwise 1-vs-1, separately: `TG_sh1 vs NTC_rep0`, `TG_sh5 vs NTC_rep0`, `TG_sh1 vs NTC_rep1`, `TG_sh5 vs NTC_rep1`. log2FC from normalized values; no p-value (1 vs 1).
-2. Combined: mean(TG_sh1, TG_sh5) vs NTC group mean(NTC_rep0, NTC_rep1). Equal weight to the two knockdowns.
-3. Common up vs NTC_rep0: intersection of upregulated genes from `TG_sh1 vs NTC_rep0` and `TG_sh5 vs NTC_rep0`.
-4. Common up vs NTC_rep1: intersection of upregulated genes from `TG_sh1 vs NTC_rep1` and `TG_sh5 vs NTC_rep1`.
+- 目录：`E:/R/TG_BRCA/TG`（脚本与结果同目录；缺失则回退仓库根）
+- 首选 `genes.read_group_tracking`，否则 `genes.count_tracking` / `genes.fpkm_tracking`；样本映射用 `read_groups.info`
+- 四个样品独立保留：`NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5`
+- 物种：人 `org.Hs.eg.db`
+- `gene_short_name` 可能是复合名（`SAA2,SAA2-SAA4,SAA4`）或 `XLOC_######`：清洗为一个官方符号；无符号的 XLOC 留在差异分析，GO/KEGG 可不映射
 
-## Extra script (do not edit original pipeline for this)
-- File: `TG_RNAseq_TGsh_mean_vs_NTC_reps.R`
-- Adds `mean(TG_sh1, TG_sh5) vs NTC_rep0` and `mean(TG_sh1, TG_sh5) vs NTC_rep1`
-- Same FC 1/1.25/1.5/2 and top 50–300 volcano/heatmap/ORA/GSEA grid
-- Leave `TG_RNAseq_pipeline.R` designs 1–4 unchanged
+## 预处理（四个样品一起做一次，再做六组比较）
 
-## Subset grid (every design, do not skip a cutoff)
-- FC up: 1, 1.25, 1.5, 2
-- Top up: 50, 75, 100, 150, 200, 250, 300
-- Pairwise/common: FC/rank only. Combined: `padj < 0.05` if estimable, else FC/rank only.
+1. 过滤低表达（count 全样品总和过低，或多数样品 FPKM≈0）
+2. 标准化消除技术偏差：有 count 用 DESeq2 size factor；仅 FPKM 则 log2 后分位数标准化
+3. 不要用未过滤、未标准化的原始值算 FC
 
-## Plots in every non-empty subset
-- ORA (单独的 GO / 通路 / KEGG，不是 GSEA): `GO/`, `Pathway/`, `KEGG/`, filenames start with `ORA_`
-- GSEA: `GSEA/` and `00_GSEA_all_genes_NOT_FC_or_topN`, filenames start with `GSEA_`
-- Do not inflate genome-wide GO/KEGG p-values. Cytoskeleton-motility and mitochondria hypotheses go in `Focused_cytoskeleton_mito/` (custom gene-set GSEA/ORA). Genome-wide tables also emit `*_FOCUS_cytoskeleton_mito.csv` with original p-values and `genome_wide_rank`.
+## 六组比较（每组单独出表、单独作图）
+
+禁止把 `NTC_rep0` 与 `NTC_rep1` 悄悄合并，除非该组设计明确要求。
+
+1. 四个 1-vs-1，各自独立：`TG_sh1 vs NTC_rep0`、`TG_sh5 vs NTC_rep0`、`TG_sh1 vs NTC_rep1`、`TG_sh5 vs NTC_rep1`
+2. `mean(TG_sh1, TG_sh5)` vs NTC 组 `mean(NTC_rep0, NTC_rep1)`（两个 knockdown 等权）
+3. 先做 `TG_sh1 vs NTC_rep0` 与 `TG_sh5 vs NTC_rep0`，再取**共同上调**
+4. 先做 `TG_sh1 vs NTC_rep1` 与 `TG_sh5 vs NTC_rep1`，再取**共同上调**
+5. `mean(TG_sh1, TG_sh5)` vs `NTC_rep0`（不要混入 NTC_rep1）
+6. `mean(TG_sh1, TG_sh5)` vs `NTC_rep1`（不要混入 NTC_rep0）
+
+脚本分工：1–4 在 `TG_RNAseq_pipeline.R`；5–6 在 `TG_RNAseq_TGsh_mean_vs_NTC_reps.R`，不要为加 5–6 而改 1–4。
+
+## 显著性（先 p，再倍数或排名）
+
+「p 值大于 0.01」按 **p < 0.01** 实现（保留显著基因）。能估计 p 时（重复或 Cuffdiff `gene_exp.diff`）先滤 p，再分层；1-vs-1 无法估计 p 时不要伪造，仍按 FC/排名分层并写日志。共同上调：两个 1-vs-1 都过同一套阈值后取交集。只分析上调。
+
+## 两套分层（六组都要跑，阈值一个都不能少）
+
+1. FoldChange：`p < 0.01` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2
+2. 上调排名：`p < 0.01` 后按 FC 降序取 top 50 / 75 / 100 / 150 / 200 / 250 / 300
+
+目录：`FoldChange/FC_1.5/`、`TopRank/top100/`。文件名和图标题必须带档位标签。
+
+## 每个非空子集必须出的图
+
+差异基因表、火山图、热图、GO、通路富集、KEGG、GSEA。
+
+- ORA 放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头（不要写进 GSEA/）
+- GSEA 放 `GSEA/`，文件名以 `GSEA_` 开头；全基因 GSEA 只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
+- 细胞骨架/线粒体假说放 `Focused_cytoskeleton_mito/`；全基因组表另出 `*_FOCUS_cytoskeleton_mito.csv`（保留原始 p 与 `genome_wide_rank`），不要为凸显假说去改全基因组 p 值
+
+```r
+# ❌ BAD: 把两个 NTC 并成一组再做 sh1 vs NTC；跳过 FC>=1 或 top75
+# ❌ BAD: 只出 GSEA，或把 ORA 图写进 GSEA/
+# ✅ GOOD: 六组各自目录；每组 × (4 个 FC + 7 个 topN) 都出齐表和图
+```
