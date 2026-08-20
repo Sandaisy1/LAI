@@ -726,7 +726,7 @@ note_empty <- function(stub, msg) {
   writeLines(msg, paste0(stub, "_EMPTY.txt"))
 }
 
-plot_ora_object <- function(x, stub, title, fold_change = NULL) {
+plot_ora_object <- function(x, stub, title, fold_change = NULL, also_export_focus = TRUE) {
   if (is.null(x) || nrow(as.data.frame(x)) == 0) {
     note_empty(stub, "no enrichment terms")
     return(invisible(NULL))
@@ -750,9 +750,10 @@ plot_ora_object <- function(x, stub, title, fold_change = NULL) {
   ) + ggplot2::ggtitle(title), paste0(stub, "_cnetplot"), 10, 8)
   try_save_plot(function() enrichplot::heatplot(x, showCategory = nshow, foldChange = fold_change) +
                   ggplot2::ggtitle(title), paste0(stub, "_heatplot"), 11, 6)
+  if (isTRUE(also_export_focus)) export_focus_terms(x, stub, title)
 }
 
-plot_gsea_object <- function(x, stub, title) {
+plot_gsea_object <- function(x, stub, title, also_export_focus = TRUE) {
   if (is.null(x) || nrow(as.data.frame(x)) == 0) {
     note_empty(stub, "no GSEA terms")
     return(invisible(NULL))
@@ -782,6 +783,7 @@ plot_gsea_object <- function(x, stub, title) {
     try_save_plot(function() enrichplot::cnetplot(x, showCategory = min(8, nshow)) + ggplot2::ggtitle(title),
                   paste0(stub, "_cnetplot"), 10, 8)
   }
+  if (isTRUE(also_export_focus)) export_focus_terms(x, stub, title)
 }
 
 plot_gsea_selected_ids <- function(x, ids, stub, title) {
@@ -827,6 +829,391 @@ msig_hallmark_map <- function() {
   )
   gene_col <- intersect(c("ncbi_gene", "entrez_gene"), names(msig))[1]
   msig[, c("gs_name", gene_col)]
+}
+
+# -----------------------------------------------------------------------------
+# 8b. 细胞骨架运动 / 线粒体专项富集（不改全库 GO/KEGG 的 p 值）
+# -----------------------------------------------------------------------------
+.focus_env <- new.env(parent = emptyenv())
+
+focus_keyword_patterns <- function() {
+  list(
+    cytoskeleton_motility = paste(
+      "cytoskelet", "\\bactin\\b", "microtubul", "\\bmyosin\\b", "kinesin", "dynein",
+      "lamellipod", "filopod", "stress fiber", "focal adhesion",
+      "cell migration", "cell motility", "cell locomotion", "chemotaxis",
+      "actin filament", "actin cytoskeleton", "microfilament",
+      "rho gtpase", "\\bcdc42\\b", "pseudopod", "podosome", "invadopod",
+      "adherens junction", "tight junction", "gap junction",
+      "ameboid", "amoeboid", "cell leading edge", "cortical actin",
+      "regulation of actin", "myofibril", "sarcomere", "ruffle",
+      sep = "|"
+    ),
+    mitochondria = paste(
+      "mitochondr", "oxidative phosphorylat", "respiratory chain",
+      "electron transport", "citric acid", "tca cycle", "krebs",
+      "mitophag", "oxphos", "respiratory electron", "atp synthase",
+      "mitochondrial translation", "cristae", "complex i",
+      "inner mitochondrial", "mitochondrial gene", "mitochondrial respir",
+      "fatty acid beta-oxidation", "proton-transporting atp",
+      "thermogenesis",
+      sep = "|"
+    )
+  )
+}
+
+focus_kegg_ids <- function() {
+  list(
+    cytoskeleton_motility = c(
+      "hsa04810", "hsa04510", "hsa04520", "hsa04530", "hsa04540",
+      "hsa04512", "hsa04670", "04810", "04510", "04520", "04530", "04540", "04512", "04670"
+    ),
+    mitochondria = c(
+      "hsa00190", "hsa00020", "hsa04137", "hsa04714", "hsa00071", "hsa01212",
+      "00190", "00020", "04137", "04714", "00071", "01212"
+    )
+  )
+}
+
+classify_focus_term <- function(id, desc) {
+  id <- as.character(id)[1]
+  desc <- as.character(desc)[1]
+  if (is.na(id)) id <- ""
+  if (is.na(desc)) desc <- ""
+  kid <- focus_kegg_ids()
+  if (id %in% kid$mitochondria || grepl("^MITO_", id)) return("mitochondria")
+  if (id %in% kid$cytoskeleton_motility || grepl("^CYTO_", id)) return("cytoskeleton_motility")
+  txt <- tolower(paste(id, desc))
+  pats <- focus_keyword_patterns()
+  is_mito <- grepl(pats$mitochondria, txt, perl = TRUE, ignore.case = TRUE)
+  is_cyto <- grepl(pats$cytoskeleton_motility, txt, perl = TRUE, ignore.case = TRUE)
+  if (is_cyto && is_mito) return("both")
+  if (is_mito) return("mitochondria")
+  if (is_cyto) return("cytoskeleton_motility")
+  NA_character_
+}
+
+plot_focus_term_bar <- function(df, stub, title) {
+  if (nrow(df) == 0) return(invisible(NULL))
+  lab <- if ("Description" %in% names(df)) as.character(df$Description) else as.character(df$ID)
+  df$lab <- paste0(df$focus_class, " | ", lab)
+  if ("NES" %in% names(df) && any(is.finite(df$NES))) {
+    df <- df[order(abs(df$NES), decreasing = TRUE), , drop = FALSE]
+    df <- utils::head(df, 20)
+    df$lab <- factor(df$lab, levels = rev(unique(df$lab)))
+    p <- ggplot2::ggplot(df, ggplot2::aes(x = NES, y = lab, fill = focus_class)) +
+      ggplot2::geom_col() +
+      ggplot2::theme_bw(base_size = 11) +
+      ggplot2::labs(title = title, y = NULL, fill = NULL)
+  } else {
+    yv <- if ("p.adjust" %in% names(df)) df$p.adjust else df$pvalue
+    df$neglog <- -log10(pmax(as.numeric(yv), 1e-300))
+    df <- df[order(yv), , drop = FALSE]
+    df <- utils::head(df, 20)
+    df$lab <- factor(df$lab, levels = rev(unique(df$lab)))
+    p <- ggplot2::ggplot(df, ggplot2::aes(x = neglog, y = lab, fill = focus_class)) +
+      ggplot2::geom_col() +
+      ggplot2::theme_bw(base_size = 11) +
+      ggplot2::labs(title = title, x = "-log10(p.adjust)", y = NULL, fill = NULL)
+  }
+  save_gg(p, stub, width = 12, height = max(5, min(12, 0.38 * nrow(df) + 2)))
+}
+
+export_focus_terms <- function(x, stub, title) {
+  if (is.null(x) || nrow(as.data.frame(x)) == 0) return(invisible(NULL))
+  df <- as.data.frame(x)
+  desc <- if ("Description" %in% names(df)) df$Description else df$ID
+  df$genome_wide_rank <- seq_len(nrow(df))
+  df$focus_class <- vapply(seq_len(nrow(df)), function(i) {
+    classify_focus_term(df$ID[i], desc[i])
+  }, character(1))
+  hit <- df[!is.na(df$focus_class), , drop = FALSE]
+  if (nrow(hit) == 0) {
+    note_empty(paste0(stub, "_FOCUS_cytoskeleton_mito"), "no cytoskeleton/mitochondria terms in this result")
+    return(invisible(NULL))
+  }
+  utils::write.csv(hit, paste0(stub, "_FOCUS_cytoskeleton_mito.csv"), row.names = FALSE)
+  plot_focus_term_bar(
+    hit, paste0(stub, "_FOCUS_cytoskeleton_mito_barplot"),
+    paste(title, "| cytoskeleton / mitochondria terms (original p-values)")
+  )
+}
+
+entrez_for_go <- function(go_id) {
+  ids <- tryCatch(
+    AnnotationDbi::mapIds(
+      org.Hs.eg.db, keys = go_id, column = "ENTREZID",
+      keytype = "GOALL", multiVals = "list"
+    )[[go_id]],
+    error = function(e) {
+      tryCatch(
+        AnnotationDbi::mapIds(
+          org.Hs.eg.db, keys = go_id, column = "ENTREZID",
+          keytype = "GO", multiVals = "list"
+        )[[go_id]],
+        error = function(e2) character()
+      )
+    }
+  )
+  unique(as.character(ids[!is.na(ids)]))
+}
+
+entrez_for_kegg_path <- function(path_id) {
+  pid <- sub("^hsa", "", as.character(path_id))
+  hits <- tryCatch(
+    AnnotationDbi::select(org.Hs.eg.db, keys = pid, columns = "ENTREZID", keytype = "PATH"),
+    error = function(e) NULL
+  )
+  if (is.null(hits) || nrow(hits) == 0) return(character())
+  unique(as.character(hits$ENTREZID[!is.na(hits$ENTREZID)]))
+}
+
+append_term2gene <- function(lst, name, entrez) {
+  entrez <- unique(as.character(entrez))
+  entrez <- entrez[nzchar(entrez) & !is.na(entrez)]
+  if (length(entrez) < 8) return(lst)
+  lst[[length(lst) + 1]] <- data.frame(
+    gs_name = name, entrez = entrez, stringsAsFactors = FALSE
+  )
+  lst
+}
+
+get_focus_term2gene <- function() {
+  if (exists("term2gene", envir = .focus_env, inherits = FALSE)) {
+    return(.focus_env$term2gene)
+  }
+  rows <- list()
+  go_sets <- c(
+    CYTO_GO_cytoskeleton = "GO:0005856",
+    CYTO_GO_actin_cytoskeleton = "GO:0015629",
+    CYTO_GO_cytoskeleton_organization = "GO:0007010",
+    CYTO_GO_actin_cytoskeleton_organization = "GO:0030036",
+    CYTO_GO_actin_filament_based_process = "GO:0030029",
+    CYTO_GO_actin_filament_organization = "GO:0007015",
+    CYTO_GO_regulation_of_actin_cytoskeleton = "GO:0032956",
+    CYTO_GO_microtubule_based_process = "GO:0007017",
+    CYTO_GO_microtubule = "GO:0005874",
+    CYTO_GO_cell_motility = "GO:0048870",
+    CYTO_GO_cell_migration = "GO:0016477",
+    CYTO_GO_regulation_of_cell_migration = "GO:0030334",
+    CYTO_GO_cell_leading_edge = "GO:0031252",
+    CYTO_GO_lamellipodium = "GO:0030027",
+    CYTO_GO_focal_adhesion = "GO:0005925",
+    CYTO_GO_stress_fiber = "GO:0001725",
+    CYTO_GO_actin_binding = "GO:0003779",
+    CYTO_GO_cytoskeletal_protein_binding = "GO:0008092",
+    CYTO_GO_adherens_junction = "GO:0005912",
+    MITO_GO_mitochondrion = "GO:0005739",
+    MITO_GO_mitochondrial_envelope = "GO:0005740",
+    MITO_GO_mitochondrial_inner_membrane = "GO:0005743",
+    MITO_GO_mitochondrial_matrix = "GO:0005759",
+    MITO_GO_mitochondrion_organization = "GO:0007005",
+    MITO_GO_oxidative_phosphorylation = "GO:0006119",
+    MITO_GO_electron_transport_chain = "GO:0022900",
+    MITO_GO_mito_ATP_synthesis_ETC = "GO:0042775",
+    MITO_GO_TCA_cycle = "GO:0006099",
+    MITO_GO_mitochondrial_translation = "GO:0032543",
+    MITO_GO_mitophagy = "GO:0000422",
+    MITO_GO_mitochondrial_transport = "GO:0006839",
+    MITO_GO_mitochondrial_respiratory_chain = "GO:0005746",
+    MITO_GO_respiratory_chain_complex_assembly = "GO:0033108",
+    MITO_GO_fatty_acid_beta_oxidation = "GO:0006635"
+  )
+  log_msg("Building focused cytoskeleton / mitochondria gene sets from GO")
+  for (nm in names(go_sets)) {
+    rows <- append_term2gene(rows, nm, entrez_for_go(go_sets[[nm]]))
+  }
+  kegg_sets <- c(
+    CYTO_KEGG_regulation_of_actin_cytoskeleton = "04810",
+    CYTO_KEGG_focal_adhesion = "04510",
+    CYTO_KEGG_adherens_junction = "04520",
+    CYTO_KEGG_tight_junction = "04530",
+    CYTO_KEGG_gap_junction = "04540",
+    CYTO_KEGG_ECM_receptor_interaction = "04512",
+    CYTO_KEGG_leukocyte_transendothelial_migration = "04670",
+    MITO_KEGG_oxidative_phosphorylation = "00190",
+    MITO_KEGG_citrate_cycle_TCA = "00020",
+    MITO_KEGG_mitophagy = "04137",
+    MITO_KEGG_thermogenesis = "04714",
+    MITO_KEGG_fatty_acid_degradation = "00071"
+  )
+  for (nm in names(kegg_sets)) {
+    rows <- append_term2gene(rows, nm, entrez_for_kegg_path(kegg_sets[[nm]]))
+  }
+  if (!any(grepl("^CYTO_KEGG_|^MITO_KEGG_", vapply(rows, function(x) x$gs_name[1], character(1))))) {
+    msig_kegg <- tryCatch({
+      tryCatch(
+        msigdbr::msigdbr(species = "Homo sapiens", collection = "C2", subcollection = "CP:KEGG"),
+        error = function(e) msigdbr::msigdbr(species = "Homo sapiens", category = "C2", subcategory = "CP:KEGG")
+      )
+    }, error = function(e) {
+      tryCatch(msigdbr::msigdbr(species = "Homo sapiens", category = "C2", subcategory = "KEGG"), error = function(e2) NULL)
+    })
+    if (!is.null(msig_kegg) && nrow(msig_kegg) > 0) {
+      gcol <- intersect(c("ncbi_gene", "entrez_gene"), names(msig_kegg))[1]
+      kegg_name_map <- c(
+        KEGG_REGULATION_OF_ACTIN_CYTOSKELETON = "CYTO_KEGG_regulation_of_actin_cytoskeleton",
+        KEGG_FOCAL_ADHESION = "CYTO_KEGG_focal_adhesion",
+        KEGG_ADHERENS_JUNCTION = "CYTO_KEGG_adherens_junction",
+        KEGG_TIGHT_JUNCTION = "CYTO_KEGG_tight_junction",
+        KEGG_GAP_JUNCTION = "CYTO_KEGG_gap_junction",
+        KEGG_ECM_RECEPTOR_INTERACTION = "CYTO_KEGG_ECM_receptor_interaction",
+        KEGG_LEUKOCYTE_TRANSENDOTHELIAL_MIGRATION = "CYTO_KEGG_leukocyte_transendothelial_migration",
+        KEGG_OXIDATIVE_PHOSPHORYLATION = "MITO_KEGG_oxidative_phosphorylation",
+        KEGG_CITRATE_CYCLE_TCA_CYCLE = "MITO_KEGG_citrate_cycle_TCA",
+        KEGG_FATTY_ACID_DEGRADATION = "MITO_KEGG_fatty_acid_degradation"
+      )
+      for (old in names(kegg_name_map)) {
+        hit <- grepl(paste0("^", old, "$"), msig_kegg$gs_name)
+        if (!any(hit)) hit <- grepl(old, msig_kegg$gs_name, ignore.case = TRUE)
+        rows <- append_term2gene(rows, kegg_name_map[[old]], msig_kegg[[gcol]][hit])
+      }
+    }
+  }
+  hm <- tryCatch(msig_hallmark_map(), error = function(e) NULL)
+  if (!is.null(hm) && nrow(hm) > 0) {
+    hall_map <- c(
+      HALLMARK_OXIDATIVE_PHOSPHORYLATION = "MITO_HALLMARK_OXIDATIVE_PHOSPHORYLATION",
+      HALLMARK_FATTY_ACID_METABOLISM = "MITO_HALLMARK_FATTY_ACID_METABOLISM",
+      HALLMARK_REACTIVE_OXYGEN_SPECIES_PATHWAY = "MITO_HALLMARK_REACTIVE_OXYGEN_SPECIES",
+      HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION = "CYTO_HALLMARK_EMT",
+      HALLMARK_APICAL_JUNCTION = "CYTO_HALLMARK_APICAL_JUNCTION",
+      HALLMARK_MYOGENESIS = "CYTO_HALLMARK_MYOGENESIS"
+    )
+    gcol <- names(hm)[2]
+    for (old in names(hall_map)) {
+      rows <- append_term2gene(rows, hall_map[[old]], hm[[gcol]][hm[[1]] == old])
+    }
+  }
+  if (length(rows) == 0) {
+    log_msg("WARNING: focused cytoskeleton/mito gene sets are empty")
+    .focus_env$term2gene <- data.frame(gs_name = character(), entrez = character())
+    return(.focus_env$term2gene)
+  }
+  t2g <- do.call(rbind, rows)
+  t2g <- unique(t2g)
+  log_msg(
+    "Focused gene sets: ", length(unique(t2g$gs_name)),
+    " terms, ", length(unique(t2g$entrez)), " unique Entrez genes"
+  )
+  .focus_env$term2gene <- t2g
+  t2g
+}
+
+plot_focus_gene_heatmap <- function(de, t2g, prefix, heat_mat, sample_info, outfile, title) {
+  sets <- unique(t2g$gs_name[startsWith(t2g$gs_name, prefix)])
+  entrez <- unique(t2g$entrez[t2g$gs_name %in% sets])
+  mp <- map_to_entrez(de$gene)
+  genes <- unique(mp$gene[mp$entrez %in% entrez])
+  genes <- intersect(genes, rownames(heat_mat))
+  if (length(genes) < 2) {
+    note_empty(outfile, "fewer than 2 mapped genes in this focused set")
+    return(invisible(NULL))
+  }
+  lfc <- de$log2FC[match(genes, de$gene)]
+  genes <- genes[order(abs(lfc), decreasing = TRUE, na.last = TRUE)]
+  utils::write.csv(
+    data.frame(gene = genes, log2FC = lfc[order(abs(lfc), decreasing = TRUE, na.last = TRUE)], stringsAsFactors = FALSE),
+    paste0(outfile, "_genes.csv"),
+    row.names = FALSE
+  )
+  plot_heatmap(heat_mat, sample_info, utils::head(genes, 80), title, outfile)
+}
+
+run_focused_ora <- function(entrez, de_sub, outdir, label, tag, fc_sym) {
+  t2g <- get_focus_term2gene()
+  if (is.null(t2g) || nrow(t2g) < 8) return(invisible(NULL))
+  fdir <- file.path(outdir, "Focused_cytoskeleton_mito")
+  dir.create(fdir, recursive = TRUE, showWarnings = FALSE)
+  pref <- paste0(tag, "_")
+  obj <- enrich_or_relax(
+    function() clusterProfiler::enricher(
+      entrez, TERM2GENE = t2g, minGSSize = 5, maxGSSize = 2500,
+      pvalueCutoff = 0.05, qvalueCutoff = 0.2
+    ),
+    function() clusterProfiler::enricher(
+      entrez, TERM2GENE = t2g, minGSSize = 5, maxGSSize = 2500,
+      pvalueCutoff = 1, qvalueCutoff = 1
+    ),
+    "focused ORA cytoskeleton/mito"
+  )
+  if (!is.null(obj) && nrow(as.data.frame(obj)) > 0) {
+    obj <- tryCatch(
+      clusterProfiler::setReadable(obj, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"),
+      error = function(e) obj
+    )
+  }
+  plot_ora_object(
+    obj, file.path(fdir, paste0(pref, "ORA_focused_cytoskeleton_mito")),
+    title_maybe_relaxed(obj, paste(label, "| ORA focused cytoskeleton / mitochondria")),
+    fold_change = fc_sym, also_export_focus = FALSE
+  )
+}
+
+run_focused_gsea <- function(stats, de, heat_mat, sample_info, outdir, label) {
+  t2g <- get_focus_term2gene()
+  dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  writeLines(
+    c("这不是改全库 GO/KEGG 的 p 值或排名。",
+      "全基因组 GO/KEGG/GSEA 仍按原统计量排序。",
+      "本文件夹只检验细胞骨架运动、细胞迁移、线粒体相关基因集，",
+      "所以这些条目会排在这里的结果前面。",
+      "全库结果旁边的 *_FOCUS_cytoskeleton_mito.csv 保留原始 p 值和 genome_wide_rank。",
+      "若专项 GSEA 仍不显著，说明这些通路在本数据里没有协同变化，不能人为抬到全库第一。"),
+    file.path(outdir, "00_README.txt")
+  )
+  if (is.null(t2g) || nrow(t2g) < 8 || length(stats) < 10) {
+    note_empty(file.path(outdir, "GSEA_focused_cytoskeleton_mito"), "too few genes or empty gene sets")
+    return(invisible(NULL))
+  }
+  obj <- enrich_or_relax(
+    function() clusterProfiler::GSEA(
+      geneList = stats, TERM2GENE = t2g, minGSSize = 8, maxGSSize = 2500,
+      pvalueCutoff = 0.05, eps = 0, verbose = FALSE
+    ),
+    function() clusterProfiler::GSEA(
+      geneList = stats, TERM2GENE = t2g, minGSSize = 5, maxGSSize = 2500,
+      pvalueCutoff = 1, eps = 0, verbose = FALSE
+    ),
+    "focused GSEA cytoskeleton/mito"
+  )
+  if (!is.null(obj) && nrow(as.data.frame(obj)) > 0) {
+    obj <- tryCatch(
+      clusterProfiler::setReadable(obj, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"),
+      error = function(e) obj
+    )
+  }
+  plot_gsea_object(
+    obj, file.path(outdir, "GSEA_focused_cytoskeleton_mito"),
+    paste(label, "| GSEA focused cytoskeleton / mitochondria"),
+    also_export_focus = FALSE
+  )
+  if (!is.null(obj) && nrow(as.data.frame(obj)) > 0) {
+    df <- as.data.frame(obj)
+    df$focus_class <- vapply(seq_len(nrow(df)), function(i) {
+      classify_focus_term(df$ID[i], df$Description[i])
+    }, character(1))
+    cyto <- df[df$focus_class %in% c("cytoskeleton_motility", "both"), , drop = FALSE]
+    mito <- df[df$focus_class %in% c("mitochondria", "both"), , drop = FALSE]
+    if (nrow(cyto) > 0) {
+      plot_focus_term_bar(cyto, file.path(outdir, "GSEA_cytoskeleton_motility_barplot"),
+                          paste(label, "| cytoskeleton / motility (focused GSEA)"))
+    }
+    if (nrow(mito) > 0) {
+      plot_focus_term_bar(mito, file.path(outdir, "GSEA_mitochondria_barplot"),
+                          paste(label, "| mitochondria (focused GSEA)"))
+    }
+  }
+  plot_focus_gene_heatmap(
+    de, t2g, "CYTO_", heat_mat, sample_info,
+    file.path(outdir, "heatmap_cytoskeleton_motility_genes"),
+    paste(label, "| cytoskeleton / motility genes")
+  )
+  plot_focus_gene_heatmap(
+    de, t2g, "MITO_", heat_mat, sample_info,
+    file.path(outdir, "heatmap_mitochondria_genes"),
+    paste(label, "| mitochondria genes")
+  )
 }
 
 build_gsea_cache <- function(de) {
@@ -1050,6 +1437,10 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag) {
   }
   plot_ora_object(hm, file.path(pw_dir, paste0(pref, "ORA_MSigDB_Hallmark_pathway")),
                   title_maybe_relaxed(hm, paste(label, "| ORA Hallmark pathway (not GSEA)")), fold_change = fc_sym)
+  tryCatch(
+    run_focused_ora(entrez, de_sub, outdir, label, tag, fc_sym),
+    error = function(e) log_msg("focused ORA failed: ", e$message)
+  )
   writeLines(
     c("This GO/Pathway/KEGG folder is ORA (over-representation), NOT GSEA.",
       "GSEA files are in the sibling folder named GSEA/ and start with GSEA_."),
@@ -1167,6 +1558,7 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
       "  FoldChange/FC_1  FC_1.25  FC_1.5  FC_2",
       "  TopRank/top50 ... top300",
       "每个子文件夹里：火山图、热图、ORA_GO、ORA通路、ORA_KEGG、以及 GSEA。",
+      "细胞骨架运动 / 线粒体专项结果在 Focused_cytoskeleton_mito/（不是改全库排名）。",
       "00_GSEA_all_genes_NOT_FC_or_topN 只是全基因 GSEA，不是分层图。"),
     file.path(base, "00_READ_ME_先看这里.txt")
   )
@@ -1215,6 +1607,20 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
     plot_fgsea_hallmark(gsea_cache$stats, full_gsea_dir,
                         paste("GSEA Hallmark |", comp_name, "| ALL genes"), prefix = "allGenes_")
   }, error = function(e) log_msg("full-list GSEA failed for ", comp_name, ": ", e$message))
+
+  tryCatch({
+    log_msg("Focused cytoskeleton / mitochondria GSEA: ", comp_name)
+    focus_stats <- if (exists("gsea_cache", inherits = FALSE) && !is.null(gsea_cache$stats)) {
+      gsea_cache$stats
+    } else {
+      ranked_entrez(gsea_de)
+    }
+    run_focused_gsea(
+      focus_stats, gsea_de, heat_mat, sample_info,
+      file.path(base, "Focused_cytoskeleton_mito"),
+      paste(comp_name, "| all genes")
+    )
+  }, error = function(e) log_msg("focused GSEA failed for ", comp_name, ": ", e$message))
 }
 
 plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix) {

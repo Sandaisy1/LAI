@@ -30,3 +30,4 @@ Filter low expression, then normalize (DESeq2 size factors if counts; quantile l
 ## Plots in every non-empty subset
 - ORA (单独的 GO / 通路 / KEGG，不是 GSEA): `GO/`, `Pathway/`, `KEGG/`, filenames start with `ORA_`
 - GSEA: `GSEA/` and `00_GSEA_all_genes_NOT_FC_or_topN`, filenames start with `GSEA_`
+- Do not inflate genome-wide GO/KEGG p-values. Cytoskeleton-motility and mitochondria hypotheses go in `Focused_cytoskeleton_mito/` (custom gene-set GSEA/ORA). Genome-wide tables also emit `*_FOCUS_cytoskeleton_mito.csv` with original p-values and `genome_wide_rank`.
