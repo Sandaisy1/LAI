@@ -27,5 +27,5 @@ Filter low expression, then normalize (DESeq2 size factors if counts; quantile l
 - Pairwise/common: FC/rank only. Combined: `padj < 0.05` if estimable, else FC/rank only.
 
 ## Plots in every non-empty subset
-- FC / topN plots live in `results/<comparison>/FoldChange/FC_*` and `TopRank/top*`. File names and plot titles include the tag (`FC_1.5_volcano.pdf`).
-- `00_GSEA_all_genes_NOT_FC_or_topN` is full-list GSEA only; it is not a cutoff subset.
+- ORA (单独的 GO / 通路 / KEGG，不是 GSEA): `GO/`, `Pathway/`, `KEGG/`, filenames start with `ORA_`
+- GSEA: `GSEA/` and `00_GSEA_all_genes_NOT_FC_or_topN`, filenames start with `GSEA_`

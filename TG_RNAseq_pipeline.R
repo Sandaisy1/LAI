@@ -918,9 +918,9 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag) {
   if (length(entrez) < 3) {
     log_msg("ORA skipped, mapped genes < 3: ", outdir)
     writeLines(paste("mapped_entrez", length(entrez)), file.path(outdir, paste0(pref, "ORA_skipped.txt")))
-    note_empty(file.path(go_dir, paste0(pref, "GO")), "too few mapped genes")
-    note_empty(file.path(pw_dir, paste0(pref, "Pathway")), "too few mapped genes")
-    note_empty(file.path(kg_dir, paste0(pref, "KEGG")), "too few mapped genes")
+    note_empty(file.path(go_dir, paste0(pref, "ORA_GO")), "too few mapped genes")
+    note_empty(file.path(pw_dir, paste0(pref, "ORA_Pathway")), "too few mapped genes")
+    note_empty(file.path(kg_dir, paste0(pref, "ORA_KEGG")), "too few mapped genes")
     return(invisible(NULL))
   }
 
@@ -936,8 +936,8 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag) {
       ),
       paste("enrichGO", ont)
     )
-    plot_ora_object(ego, file.path(go_dir, paste0(pref, "GO_", ont)),
-                    title_maybe_relaxed(ego, paste(label, "| GO", ont)), fold_change = fc_sym)
+    plot_ora_object(ego, file.path(go_dir, paste0(pref, "ORA_GO_", ont)),
+                    title_maybe_relaxed(ego, paste(label, "| ORA GO", ont, "(not GSEA)")), fold_change = fc_sym)
   }
 
   ek <- enrich_or_relax(
@@ -952,8 +952,8 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag) {
   if (!is.null(ek) && nrow(as.data.frame(ek)) > 0) {
     ek <- tryCatch(clusterProfiler::setReadable(ek, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) ek)
   }
-  plot_ora_object(ek, file.path(kg_dir, paste0(pref, "KEGG")),
-                  title_maybe_relaxed(ek, paste(label, "| KEGG")), fold_change = fc_sym)
+  plot_ora_object(ek, file.path(kg_dir, paste0(pref, "ORA_KEGG")),
+                  title_maybe_relaxed(ek, paste(label, "| ORA KEGG (not GSEA)")), fold_change = fc_sym)
   plot_kegg_pathview(ek, fc_entrez, kg_dir)
 
   if (has_pkg("ReactomePA")) {
@@ -966,10 +966,10 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag) {
       ),
       "enrichPathway"
     )
-    plot_ora_object(er, file.path(pw_dir, paste0(pref, "Reactome")),
-                    title_maybe_relaxed(er, paste(label, "| Reactome")), fold_change = fc_sym)
+    plot_ora_object(er, file.path(pw_dir, paste0(pref, "ORA_Reactome_pathway")),
+                    title_maybe_relaxed(er, paste(label, "| ORA Reactome pathway (not GSEA)")), fold_change = fc_sym)
   } else {
-    note_empty(file.path(pw_dir, paste0(pref, "Reactome")), "ReactomePA not installed")
+    note_empty(file.path(pw_dir, paste0(pref, "ORA_Reactome_pathway")), "ReactomePA not installed")
   }
 
   hm <- enrich_or_relax(
@@ -986,8 +986,13 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag) {
   if (!is.null(hm) && nrow(as.data.frame(hm)) > 0) {
     hm <- tryCatch(clusterProfiler::setReadable(hm, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) hm)
   }
-  plot_ora_object(hm, file.path(pw_dir, paste0(pref, "MSigDB_Hallmark")),
-                  title_maybe_relaxed(hm, paste(label, "| MSigDB Hallmark")), fold_change = fc_sym)
+  plot_ora_object(hm, file.path(pw_dir, paste0(pref, "ORA_MSigDB_Hallmark_pathway")),
+                  title_maybe_relaxed(hm, paste(label, "| ORA Hallmark pathway (not GSEA)")), fold_change = fc_sym)
+  writeLines(
+    c("This GO/Pathway/KEGG folder is ORA (over-representation), NOT GSEA.",
+      "GSEA files are in the sibling folder named GSEA/ and start with GSEA_."),
+    file.path(outdir, paste0(pref, "00_ORA_is_not_GSEA.txt"))
+  )
 }
 run_gsea_plots <- function(sub, gsea_cache, outdir, tag, label) {
   gsea_dir <- file.path(outdir, "GSEA")

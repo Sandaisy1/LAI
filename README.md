@@ -39,7 +39,11 @@ results/
   common_up_vs_NTC_rep1/
 ```
 
-每个比较下都有 `FoldChange/FC_*` 和 `TopRank/top*`，里面再分 `GO/`、`Pathway/`、`KEGG/`、`GSEA/`。
+同一档里有两套富集，不要只看 GSEA 文件夹：
+
+- `GO/`、`Pathway/`、`KEGG/`：单独的过表达分析（ORA），文件名以 `ORA_` 开头
+- `GSEA/`：GSEA 分析，文件名以 `GSEA_` 开头
+
 
 **注意：** 比较目录里的 `00_GSEA_all_genes_NOT_FC_or_topN` 是全部基因的 GSEA，**不是** FC/topN 分层图。分层图在：
 
