@@ -1,0 +1,61 @@
+---
+description: TG BRCA RNA-seq p<0.05 显著性与变化倍数分析（与 p<0.01 平行，勿混用）
+globs: "**/*p05*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# TG BRCA RNA-seq：p < 0.05 显著性与变化倍数分析
+
+本规则只约束 **p < 0.05** 流程。不要改 `TG_RNAseq_pipeline.R` / `TG_RNAseq_TGsh_mean_vs_NTC_reps.R` 的 0.01 阈值，也不要写入 `results/`。输入是 Cuffdiff，不是 Excel。
+
+## 数据
+
+- 目录：`E:/R/TG_BRCA/TG`（脚本与结果同目录；缺失则回退仓库根）
+- 首选 `genes.read_group_tracking`，否则 `genes.count_tracking` / `genes.fpkm_tracking`；样本映射用 `read_groups.info`
+- 四个样品独立保留：`NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5`
+- 物种：人 `org.Hs.eg.db`
+- `gene_short_name` 可能是复合名或 `XLOC_######`：清洗为一个官方符号；无符号的 XLOC 留在差异分析，GO/KEGG 可不映射
+
+## 预处理（四个样品一起做一次，再做六组比较）
+
+1. 过滤低表达（count 全样品总和过低，或多数样品 FPKM≈0）
+2. 标准化消除技术偏差：有 count 用 DESeq2 size factor；仅 FPKM 则 log2 后分位数标准化
+3. 不要用未过滤、未标准化的原始值算 FC
+
+## 六组比较（每组单独出表、单独作图）
+
+禁止把 `NTC_rep0` 与 `NTC_rep1` 悄悄合并，除非该组设计明确要求。
+
+1. 四个 1-vs-1，各自独立：`TG_sh1 vs NTC_rep0`、`TG_sh5 vs NTC_rep0`、`TG_sh1 vs NTC_rep1`、`TG_sh5 vs NTC_rep1`
+2. `mean(TG_sh1, TG_sh5)` vs NTC 组 `mean(NTC_rep0, NTC_rep1)`（两个 knockdown 等权）
+3. 先做 `TG_sh1 vs NTC_rep0` 与 `TG_sh5 vs NTC_rep0`，再取**共同上调**
+4. 先做 `TG_sh1 vs NTC_rep1` 与 `TG_sh5 vs NTC_rep1`，再取**共同上调**
+5. `mean(TG_sh1, TG_sh5)` vs `NTC_rep0`（不要混入 NTC_rep1）
+6. `mean(TG_sh1, TG_sh5)` vs `NTC_rep1`（不要混入 NTC_rep0）
+
+脚本分工：1–4 在 `TG_RNAseq_pipeline_p05.R`；5–6 在 `TG_RNAseq_TGsh_mean_vs_NTC_reps_p05.R`。结果只写 `results_p05/`。
+
+## 显著性（先 p，再倍数或排名）
+
+「p 值大于 0.05」按 **p < 0.05** 实现（保留显著基因；有 padj 时用 `padj < 0.05`）。能估计 p 时（重复或 Cuffdiff `gene_exp.diff`）先滤 p，再分层；1-vs-1 无法估计 p 时不要伪造，仍按 FC/排名分层并写日志。共同上调：两个 1-vs-1 都过同一套阈值后取交集。只分析上调。
+
+## 两套分层（六组都要跑，阈值一个都不能少）
+
+1. FoldChange：`p < 0.05` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2
+2. 上调排名：`p < 0.05` 后按 FC 降序取 top 50 / 75 / 100 / 150 / 200 / 250 / 300
+
+目录：`results_p05/<比较>/FoldChange/FC_1.5/`、`results_p05/<比较>/TopRank/top100/`。文件名和图标题必须带档位标签。
+
+## 每个非空子集必须出的图
+
+差异基因表、火山图、热图、GO、通路富集、KEGG、GSEA。
+
+- ORA 放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头（不要写进 GSEA/）
+- GSEA 放 `GSEA/`，文件名以 `GSEA_` 开头；全基因 GSEA 只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
+- 细胞骨架/线粒体假说放 `Focused_cytoskeleton_mito/`；全基因组表另出 `*_FOCUS_cytoskeleton_mito.csv`（保留原始 p 与 `genome_wide_rank`）
+
+```r
+# ❌ BAD: 把 padj_cutoff 改成 0.01；结果写进 results/；跳过 FC>=1 或 top75
+# ❌ BAD: 为做 p<0.05 去改现有 0.01 脚本
+# ✅ GOOD: 独立 p05 脚本；results_p05/；每组 × (4 个 FC + 7 个 topN) 出齐表和图
+```
