@@ -6,7 +6,9 @@ alwaysApply: true
 
 # TG BRCA RNA-seq：显著性与变化倍数分析
 
-写或改本仓库 R 分析时必须按本规则。输入是 Cuffdiff，不是 Excel。
+写或改 **tracking 六组** 流程（`TG_RNAseq_pipeline.R`、`TG_RNAseq_TGsh_mean_vs_NTC_reps.R`）时必须按本规则。输入是 Cuffdiff tracking，不是 Excel。
+
+OLD盘已有 `gene_exp.diff` 的三思路分析（FC / topN 含 4000 / `p <= 0.5` 不分上下调 / **GSVA**）见 `tg-brca-rnaseq-old-gene-exp-diff.mdc`。不要把本规则的 `p < 0.01`、无 GSVA、无 top4000 套到 OLD盘脚本。
 
 ## 数据
 

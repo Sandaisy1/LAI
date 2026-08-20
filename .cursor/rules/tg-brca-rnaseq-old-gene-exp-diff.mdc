@@ -1,0 +1,42 @@
+---
+description: OLD盘 Cuffdiff gene_exp.diff 三思路差异分析（FC / topN / p≤0.5 + GSVA）
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# TG BRCA RNA-seq：OLD盘已有表达/差异矩阵
+
+写或改 **OLD盘** 分析时必须按本规则。不要套用 tracking 六组流程（`TG_RNAseq_pipeline.R` / `p < 0.01` / 无 GSVA）。输入是 Cuffdiff 表，不是 Excel。新脚本单独放，不要为加本分析去改 1–6 组脚本。
+
+## 数据
+
+- 目录：`E:/R/TG_BRCA/TG/OLD盘`（脚本与结果同目录；缺失则回退仓库根 `OLD盘/`）
+- 首选已有 `gene_exp.diff`（或同结构表）。列：`test_id`, `gene_id`, `gene`, `locus`, `sample_1`, `sample_2`, `status`, `value_1`, `value_2`, `log2(fold_change)`, `test_stat`, `p_value`, `q_value`, `significant`
+- 截图表为 `sample_1=NTC`、`sample_2=TG_sh1`：按文件里实际组别出目录，有多对比较则每对单独出表、单独作图
+- 只保留 `status == "OK"`；不要用 `NOTEST` 行算 FC / p
+- `FoldChange = 2^log2(fold_change)`；上调 = `log2(fold_change) >= 0`（即 FC ≥ 1）
+- 富集用 `gene` 列；复合名/XLOC 清洗同一套六组规则；物种：人 `org.Hs.eg.db`
+- 热图/GSVA 需要表达矩阵：同目录有 `genes.read_group_tracking`（或 count/FPKM tracking）则用样品级矩阵；只有 `value_1`/`value_2` 时用这两列，并在日志写明 n=2
+
+## 三套思路（阈值一个都不能少；各档单独目录）
+
+1. **FoldChange（只上调）**：FC ≥ 1 / 1.25 / 1.5 / 2（对应 log2FC ≥ 0 / 0.322 / 0.585 / 1）。**不要**把本规则的 `p <= 0.5` 或六组的 `p < 0.01` 套进来
+2. **上调排名**：按 log2FC **降序**取 top 50 / 75 / 100 / 150 / 200 / 250 / 300 / **4000**（不足 N 则全取并写日志）
+3. **p ≤ 0.5 全基因**（**不区分上调下调**）：`p_value <= 0.5` 的 OK 基因全部进入；ORA/通路/KEGG/GSVA 用这一整集，不要再拆成只上调
+
+目录：`FoldChange/FC_1.5/`、`TopRank/top4000/`、`Pvalue/p_le_0.5/`。文件名和图标题必须带档位标签。
+
+## 每个非空子集必须出的图
+
+差异基因表、火山图、热图、GO、通路富集、KEGG、GSEA、**GSVA**。
+
+- ORA 放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头（不要写进 GSEA/ 或 GSVA/）
+- GSEA 放 `GSEA/`，文件名以 `GSEA_` 开头；全基因 GSEA 只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
+- GSVA 放 `GSVA/`，文件名以 `GSVA_` 开头；用样品（或两组均值）表达矩阵，不要拿 DE 子集去冒充 GSVA 输入矩阵
+- 火山图画全基因组点，高亮当前子集；p≤0.5 档上下调都要标
+
+```r
+# ❌ BAD: 沿用六组 p<0.01；丢掉 top4000；p<=0.5 还只留上调；无 GSVA
+# ❌ BAD: 把 ORA 图画进 GSEA/ 或 GSVA/；用 NOTEST 行
+# ✅ GOOD: OLD盘单独脚本；4 个 FC + 8 个 topN + 1 个 p≤0.5，每档表和图（含 GSVA）出齐
+```
