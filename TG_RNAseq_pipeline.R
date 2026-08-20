@@ -89,10 +89,10 @@ resolve_project_dir <- function() {
   candidates <- unique(candidates[nzchar(candidates)])
   for (d in candidates) {
     if (dir.exists(d) && (
-      file.exists(file.path(d, "shTG(20220723).xlsx")) ||
       file.exists(file.path(d, "genes.read_group_tracking")) ||
       file.exists(file.path(d, "genes.fpkm_tracking")) ||
-      file.exists(file.path(d, "genes.count_tracking"))
+      file.exists(file.path(d, "genes.count_tracking")) ||
+      file.exists(file.path(d, "read_groups.info"))
     )) {
       return(normalizePath(d, winslash = "/", mustWork = FALSE))
     }
@@ -121,8 +121,10 @@ top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 # -----------------------------------------------------------------------------
 classify_sample <- function(name) {
   n <- toupper(gsub("[^A-Za-z0-9]", "", name))
-  if (grepl("SH5|SHRNA5|TGSH5", n)) return("TG_sh5")
-  if (grepl("SH1|SHRNA1|TGSH1", n)) return("TG_sh1")
+  if (grepl("SH5|SHRNA5|TGSH5|SHTG5", n)) return("TG_sh5")
+  if (grepl("SH1|SHRNA1|TGSH1|SHTG1", n)) return("TG_sh1")
+  if (grepl("SHTG|TGS", n) && grepl("5", n)) return("TG_sh5")
+  if (grepl("SHTG|TGS", n)) return("TG_sh1")
   if (grepl("NTC|SHNC|NEGCTRL|CTRL|CONTROL", n)) return("NTC")
   if (grepl("^NC[0-9]*$", n)) return("NTC")
   NA_character_
@@ -161,53 +163,15 @@ collapse_by_gene <- function(mat, genes) {
 }
 
 # -----------------------------------------------------------------------------
-# 3. 读入表达矩阵
+# 3. 读入表达矩阵（Cuffdiff tracking；不再使用已删除的 Excel）
 # -----------------------------------------------------------------------------
-read_excel_matrix <- function(xlsx) {
-  sheets <- readxl::excel_sheets(xlsx)
-  log_msg("Excel sheets: ", paste(sheets, collapse = ", "))
-  sheet_use <- sheets[1]
-  hit <- grep("matrix|fpkm|count|expr|tpm", sheets, ignore.case = TRUE)
-  if (length(hit) > 0) sheet_use <- sheets[hit[1]]
-  log_msg("Reading Excel sheet: ", sheet_use)
-  df <- as.data.frame(readxl::read_excel(xlsx, sheet = sheet_use), stringsAsFactors = FALSE)
-  gene_col <- guess_gene_column(df)
-  maybe_num <- setdiff(names(df), gene_col)
-  for (cc in maybe_num) {
-    if (!is.numeric(df[[cc]])) {
-      conv <- suppressWarnings(as.numeric(df[[cc]]))
-      if (mean(is.finite(conv)) > 0.8) df[[cc]] <- conv
-    }
-  }
-  num_cols <- names(df)[vapply(df, is.numeric, logical(1))]
-  groups <- vapply(num_cols, classify_sample, character(1))
-  keep <- !is.na(groups)
-  if (sum(keep) < 2) {
-    log_msg("Excel numeric columns could not be mapped to NTC/TG_sh1/TG_sh5.")
-    log_msg("Numeric columns: ", paste(num_cols, collapse = ", "))
-    log_msg("Gene column guessed as: ", gene_col)
-    return(NULL)
-  }
-  log_msg("Excel gene column: ", gene_col)
-  log_msg("Excel sample mapping: ", paste(paste0(num_cols[keep], "=", groups[keep]), collapse = "; "))
-  mat <- as.matrix(df[, num_cols[keep], drop = FALSE])
-  storage.mode(mat) <- "double"
-  mat <- collapse_by_gene(mat, as.character(df[[gene_col]]))
-  list(
-    mat = mat,
-    sample_info = data.frame(
-      sample = colnames(mat),
-      group = unname(groups[keep]),
-      stringsAsFactors = FALSE
-    ),
-    source = basename(xlsx)
-  )
-}
-
 read_read_group_tracking <- function(path) {
   rg <- utils::read.delim(path, check.names = FALSE, stringsAsFactors = FALSE)
   need <- c("tracking_id", "condition", "replicate")
-  if (!all(need %in% names(rg))) return(NULL)
+  if (!all(need %in% names(rg))) {
+    log_msg("genes.read_group_tracking 缺少必要列: ", paste(setdiff(need, names(rg)), collapse = ", "))
+    return(NULL)
+  }
   value_col <- if ("raw_frags" %in% names(rg)) {
     "raw_frags"
   } else if ("external_scaled_frags" %in% names(rg)) {
@@ -217,11 +181,20 @@ read_read_group_tracking <- function(path) {
   } else {
     return(NULL)
   }
+  log_msg("Cuffdiff conditions: ", paste(unique(as.character(rg$condition)), collapse = ", "))
+  log_msg("Cuffdiff value column: ", value_col)
   rg$sample <- paste(rg$condition, rg$replicate, sep = "_rep")
   rg$group <- vapply(as.character(rg$condition), classify_sample, character(1))
   if (all(is.na(rg$group))) {
     rg$group <- vapply(rg$sample, classify_sample, character(1))
   }
+  if (all(is.na(rg$group))) {
+    log_msg("无法把 Cuffdiff condition 映射到 NTC/TG_sh1/TG_sh5: ",
+            paste(unique(as.character(rg$condition)), collapse = ", "))
+    return(NULL)
+  }
+  dropped <- unique(as.character(rg$condition[is.na(rg$group)]))
+  if (length(dropped) > 0) log_msg("Unmapped conditions dropped: ", paste(dropped, collapse = ", "))
   rg <- rg[!is.na(rg$group), , drop = FALSE]
   if (nrow(rg) == 0) return(NULL)
   wide <- tidyr::pivot_wider(
@@ -249,6 +222,7 @@ read_read_group_tracking <- function(path) {
   mat <- collapse_by_gene(mat, genes)
   sample_info <- unique(rg[, c("sample", "group")])
   sample_info <- sample_info[match(colnames(mat), sample_info$sample), ]
+  log_msg("Sample mapping: ", paste(paste0(sample_info$sample, "=", sample_info$group), collapse = "; "))
   list(mat = mat, sample_info = sample_info, source = basename(path), value_col = value_col)
 }
 
@@ -286,16 +260,9 @@ read_tracking_matrix <- function(path, value_pattern) {
 }
 
 load_expression <- function(project_dir) {
-  xlsx <- file.path(project_dir, "shTG(20220723).xlsx")
-  if (file.exists(xlsx)) {
-    obj <- tryCatch(read_excel_matrix(xlsx), error = function(e) {
-      log_msg("Excel import failed: ", e$message)
-      NULL
-    })
-    if (!is.null(obj)) return(obj)
-  }
   rg <- file.path(project_dir, "genes.read_group_tracking")
   if (file.exists(rg)) {
+    log_msg("Reading Cuffdiff replicate file: genes.read_group_tracking")
     obj <- tryCatch(read_read_group_tracking(rg), error = function(e) {
       log_msg("read_group_tracking import failed: ", e$message)
       NULL
@@ -304,15 +271,23 @@ load_expression <- function(project_dir) {
   }
   ct <- file.path(project_dir, "genes.count_tracking")
   if (file.exists(ct)) {
-    obj <- read_tracking_matrix(ct, "_count$|^q[0-9]+_count$")
+    log_msg("Reading Cuffdiff count file: genes.count_tracking")
+    obj <- tryCatch(read_tracking_matrix(ct, "_count$|^q[0-9]+_count$"), error = function(e) {
+      log_msg("count_tracking import failed: ", e$message)
+      NULL
+    })
     if (!is.null(obj)) return(obj)
   }
   fp <- file.path(project_dir, "genes.fpkm_tracking")
   if (file.exists(fp)) {
-    obj <- read_tracking_matrix(fp, "_FPKM$|^q[0-9]+_FPKM$")
+    log_msg("Reading Cuffdiff FPKM file: genes.fpkm_tracking")
+    obj <- tryCatch(read_tracking_matrix(fp, "_FPKM$|^q[0-9]+_FPKM$"), error = function(e) {
+      log_msg("fpkm_tracking import failed: ", e$message)
+      NULL
+    })
     if (!is.null(obj)) return(obj)
   }
-  stop("未找到可用表达矩阵。请确认项目目录含 shTG(20220723).xlsx 或 Cuffdiff tracking 文件: ", project_dir)
+  stop("未找到 Cuffdiff 表达文件。请确认目录中有 genes.read_group_tracking / genes.count_tracking / genes.fpkm_tracking: ", project_dir)
 }
 
 detect_value_type <- function(mat) {

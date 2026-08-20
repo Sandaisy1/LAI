@@ -10,13 +10,13 @@
 Sys.setenv(TG_RNASEQ_DIR = "E:/R/TG_BRCA/TG")
 ```
 
-优先读取表达矩阵 `shTG(20220723).xlsx`。若 Excel 列名无法识别分组，会回退到同目录下 Cuffdiff 文件：
+优先读取同目录下 Cuffdiff 文件（已不再使用 `shTG(20220723).xlsx`）：
 
-- `genes.read_group_tracking`
+- `genes.read_group_tracking`（首选，含重复）
 - `genes.count_tracking`
 - `genes.fpkm_tracking`
 
-Excel 中样本列名需能对应到 `NTC`、`TG_sh1`、`TG_sh5`（例如 `NTC_1`、`TG_sh1-2`、`shTG5` 均可）。若缺少 TG_sh5，脚本会跳过 sh5 相关比较并写入日志。
+Cuffdiff 的 `condition` 名需能对应到 `NTC`、`TG_sh1`、`TG_sh5`（例如 `NTC`、`shTG1`、`shTG5` 均可）。若缺少 TG_sh5，脚本会跳过 sh5 相关比较并写入日志。
 
 ## 运行
 

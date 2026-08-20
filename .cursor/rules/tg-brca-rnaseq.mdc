@@ -8,8 +8,9 @@ alwaysApply: true
 
 ## Data layout
 - Project dir: `E:/R/TG_BRCA/TG`; fallback to the repo/script directory if that path is absent
-- Primary matrix: `shTG(20220723).xlsx` (gene expression matrix)
-- Fallback: Cuffdiff `genes.read_group_tracking`, then `genes.count_tracking` / `genes.fpkm_tracking`
+- Primary input: Cuffdiff `genes.read_group_tracking` (per-replicate counts/FPKM)
+- Fallback: `genes.count_tracking`, then `genes.fpkm_tracking` (use `read_groups.info` to map qN columns)
+- Do not require `shTG(20220723).xlsx`; that file was removed
 - Groups: `NTC` (control), `TG_sh1`, `TG_sh5` (human BRCA cell RNA-seq)
 - Organism: human only (`org.Hs.eg.db`); convert SYMBOL/ENSEMBL to ENTREZID
 
