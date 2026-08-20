@@ -1287,5 +1287,5 @@ tryCatch(plot_venn_up(
   "TG_sh1_vs_NTC_rep1", "TG_sh5_vs_NTC_rep1", "Common up vs NTC_rep1"
 ), error = function(e) log_msg("venn NTC_rep1 error: ", e$message))
 
-utils::writeLines(capture.output(sessionInfo()), file.path(log_dir, "sessionInfo.txt"))
+base::writeLines(capture.output(sessionInfo()), file.path(log_dir, "sessionInfo.txt"))
 log_msg("All done. Results in: ", result_dir)
