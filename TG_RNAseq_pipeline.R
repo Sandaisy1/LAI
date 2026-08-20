@@ -8,6 +8,9 @@
 #   2) (TG_sh1 + TG_sh5)/2 vs NTC组均值(NTC_rep0, NTC_rep1)
 #   3) 共同上调：TG_sh1 vs NTC_rep0 与 TG_sh5 vs NTC_rep0 的交集
 #   4) 共同上调：TG_sh1 vs NTC_rep1 与 TG_sh5 vs NTC_rep1 的交集
+# 另加两组（不替代上面任何一组）：
+#   5) (TG_sh1 + TG_sh5)/2 vs NTC_rep0
+#   6) (TG_sh1 + TG_sh5)/2 vs NTC_rep1
 # 预处理：过滤低表达 + 标准化消除技术偏差
 # 子集策略：
 #   A) 上调 FC >= 1 / 1.25 / 1.5 / 2
@@ -475,6 +478,27 @@ mean_kd_vs_ntc_de <- function(log_mat, sample_info) {
     AveExpr = as.numeric((sh_mean + ntc_mean) / 2),
     pvalue = NA_real_,
     padj = NA_real_,
+    stringsAsFactors = FALSE
+  )
+}
+
+mean_kd_vs_one_ntc_de <- function(log_mat, sample_info, ntc_id, comp_name) {
+  sh1 <- find_sample(sample_info, "TG_sh1")
+  sh5 <- find_sample(sample_info, "TG_sh5")
+  ntc <- find_sample(sample_info, "NTC", ntc_id)
+  if (is.na(sh1) || is.na(sh5) || is.na(ntc)) return(NULL)
+  if (!all(c(sh1, sh5, ntc) %in% colnames(log_mat))) return(NULL)
+  log_msg(comp_name, " : mean(", sh1, ", ", sh5, ") vs ", ntc, " (KD mean vs one NTC, FC only)")
+  sh_mean <- (log_mat[, sh1] + log_mat[, sh5]) / 2
+  ntc_val <- log_mat[, ntc]
+  data.frame(
+    gene = rownames(log_mat),
+    log2FC = as.numeric(sh_mean - ntc_val),
+    AveExpr = as.numeric((sh_mean + ntc_val) / 2),
+    pvalue = NA_real_,
+    padj = NA_real_,
+    treat_sample = paste0("mean(", sh1, ",", sh5, ")"),
+    ntc_sample = ntc,
     stringsAsFactors = FALSE
   )
 }
@@ -1714,6 +1738,9 @@ de_list$TG_sh1_vs_NTC_rep1 <- pairwise_de(log_mat, sh1, ntc1, "TG_sh1_vs_NTC_rep
 de_list$TG_sh5_vs_NTC_rep1 <- pairwise_de(log_mat, sh5, ntc1, "TG_sh5_vs_NTC_rep1")
 # 设计2：两个 knockdown 等权平均 vs 两个 NTC 的组均值
 de_list$TGsh_mean_vs_NTC <- mean_kd_vs_ntc_de(log_mat, si)
+# 另加：两个 knockdown 等权平均分别 vs 单个 NTC（不替代设计2）
+de_list$TGsh_mean_vs_NTC_rep0 <- mean_kd_vs_one_ntc_de(log_mat, si, "NTC_rep0", "TGsh_mean_vs_NTC_rep0")
+de_list$TGsh_mean_vs_NTC_rep1 <- mean_kd_vs_one_ntc_de(log_mat, si, "NTC_rep1", "TGsh_mean_vs_NTC_rep1")
 # 设计3 / 4：分别相对同一个 NTC 样品的共同上调
 de_list$common_up_vs_NTC_rep0 <- build_common_up(de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0)
 de_list$common_up_vs_NTC_rep1 <- build_common_up(de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1)

@@ -17,12 +17,14 @@ setwd("E:/R/TG_BRCA/TG")
 source("TG_RNAseq_pipeline.R")
 ```
 
-## 四种比较（各自单独出图）
+## 比较（各自单独出图）
 
 1. 四个 1-vs-1：`TG_sh1 vs NTC_rep0`、`TG_sh5 vs NTC_rep0`、`TG_sh1 vs NTC_rep1`、`TG_sh5 vs NTC_rep1`（标准化后直接算 FC，无 P 值）
 2. `(TG_sh1 + TG_sh5)/2` vs NTC 组均值（`NTC_rep0` 与 `NTC_rep1`）
 3. 共同上调：相对 `NTC_rep0` 的 sh1 与 sh5 上调基因交集
 4. 共同上调：相对 `NTC_rep1` 的 sh1 与 sh5 上调基因交集
+5. `(TG_sh1 + TG_sh5)/2` vs `NTC_rep0`（不替代第 2 组）
+6. `(TG_sh1 + TG_sh5)/2` vs `NTC_rep1`（不替代第 2 组）
 
 每个比较再按 FC ≥ 1 / 1.25 / 1.5 / 2，以及上调 top 50–300，分别输出差异表、火山图、热图、GO、通路、KEGG、GSEA。
 
@@ -35,6 +37,8 @@ results/
   TG_sh1_vs_NTC_rep1/
   TG_sh5_vs_NTC_rep1/
   TGsh_mean_vs_NTC/
+  TGsh_mean_vs_NTC_rep0/
+  TGsh_mean_vs_NTC_rep1/
   common_up_vs_NTC_rep0/
   common_up_vs_NTC_rep1/
 ```
