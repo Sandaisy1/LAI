@@ -1,5 +1,38 @@
 # TG BRCA 细胞 RNA-seq 分析
 
+## OLD盘 Excel 分析（NTC vs TG_sh1）——脚本在这里
+
+分析脚本：**`TG_RNAseq_OLD_excel.R`**（仓库根目录，和本 README 同一层）。
+
+把截图那份 Excel 放到 `E:/R/TG_BRCA/TG/OLD盘/`，然后在 R 里运行：
+
+```r
+setwd("E:/R/TG_BRCA/TG")
+source("TG_RNAseq_OLD_excel.R")
+```
+
+如果脚本还在 Git 仓库目录、Excel 在 OLD盘，也可以：
+
+```r
+setwd("你的仓库路径")   # 含 TG_RNAseq_OLD_excel.R 的目录
+Sys.setenv(TG_RNASEQ_OLD_DIR = "E:/R/TG_BRCA/TG/OLD盘")
+source("TG_RNAseq_OLD_excel.R")
+```
+
+脚本会读 Excel 里现成的 `value_1`（NTC）、`value_2`（TG_sh1）、`log2(fold_change)`、`p_value`，只保留 `status==OK`，然后做：
+
+1. 上调 FC ≥ 1 / 1.25 / 1.5 / 2
+2. 上调 top 50 / 75 / 100 / 150 / 200 / 250 / 300 / 4000
+3. `p_value <= 0.5`（上调下调都保留）
+
+每个非空子集输出差异表、火山图、热图、GO、通路、KEGG、GSEA、GSVA。
+
+结果目录：`E:/R/TG_BRCA/TG/OLD盘/results_TG_sh1_vs_NTC/`，先看里面的 `00_READ_ME_先看这里.txt`。
+
+---
+
+## 下面是旧的四样品 tracking 流程（可忽略）
+
 针对 `NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5` 四个样品的 RNA-seq 分析。两个 NTC **不在 1-vs-1 比较里合并**。
 
 ## 数据位置
