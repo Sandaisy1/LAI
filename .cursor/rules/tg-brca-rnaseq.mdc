@@ -1,12 +1,12 @@
 ---
-description: TG BRCA RNA-seq 显著性与变化倍数分析（六组比较 + FC/topN 分层）
+description: TG BRCA RNA-seq p<0.01 显著性与变化倍数分析（与 p<0.05 平行，勿混用）
 globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
 
-# TG BRCA RNA-seq：显著性与变化倍数分析
+# TG BRCA RNA-seq：p < 0.01 显著性与变化倍数分析
 
-写或改本仓库 R 分析时必须按本规则。输入是 Cuffdiff，不是 Excel。
+本规则只约束 **p < 0.01** 流程（`TG_RNAseq_pipeline.R`、`TG_RNAseq_TGsh_mean_vs_NTC_reps.R`，结果在 `results/`）。p < 0.05 走独立脚本与 `results_p05/`，见 `tg-brca-rnaseq-p05.mdc`。输入是 Cuffdiff，不是 Excel。
 
 ## 数据
 
@@ -56,6 +56,6 @@ alwaysApply: true
 
 ```r
 # ❌ BAD: 把两个 NTC 并成一组再做 sh1 vs NTC；跳过 FC>=1 或 top75
-# ❌ BAD: 只出 GSEA，或把 ORA 图写进 GSEA/
+# ❌ BAD: 只出 GSEA，或把 ORA 图写进 GSEA/；把本流程改成 p<0.05 并覆盖 results/
 # ✅ GOOD: 六组各自目录；每组 × (4 个 FC + 7 个 topN) 都出齐表和图
 ```

@@ -3,6 +3,7 @@
 .Rproj.user
 .Ruserdata
 results/
+results_p05/
 figures/
 *.html
 *.pdf
