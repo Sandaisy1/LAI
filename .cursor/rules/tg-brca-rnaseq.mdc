@@ -21,8 +21,12 @@ Filter low expression, then normalize (DESeq2 size factors if counts; quantile l
 2. Combined: mean(TG_sh1, TG_sh5) vs NTC group mean(NTC_rep0, NTC_rep1). Equal weight to the two knockdowns.
 3. Common up vs NTC_rep0: intersection of upregulated genes from `TG_sh1 vs NTC_rep0` and `TG_sh5 vs NTC_rep0`.
 4. Common up vs NTC_rep1: intersection of upregulated genes from `TG_sh1 vs NTC_rep1` and `TG_sh5 vs NTC_rep1`.
-5. Additional (do not replace 2): mean(TG_sh1, TG_sh5) vs NTC_rep0.
-6. Additional (do not replace 2): mean(TG_sh1, TG_sh5) vs NTC_rep1.
+
+## Extra script (do not edit original pipeline for this)
+- File: `TG_RNAseq_TGsh_mean_vs_NTC_reps.R`
+- Adds `mean(TG_sh1, TG_sh5) vs NTC_rep0` and `mean(TG_sh1, TG_sh5) vs NTC_rep1`
+- Same FC 1/1.25/1.5/2 and top 50–300 volcano/heatmap/ORA/GSEA grid
+- Leave `TG_RNAseq_pipeline.R` designs 1–4 unchanged
 
 ## Subset grid (every design, do not skip a cutoff)
 - FC up: 1, 1.25, 1.5, 2

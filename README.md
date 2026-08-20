@@ -17,14 +17,12 @@ setwd("E:/R/TG_BRCA/TG")
 source("TG_RNAseq_pipeline.R")
 ```
 
-## 比较（各自单独出图）
+## 四种比较（各自单独出图）
 
 1. 四个 1-vs-1：`TG_sh1 vs NTC_rep0`、`TG_sh5 vs NTC_rep0`、`TG_sh1 vs NTC_rep1`、`TG_sh5 vs NTC_rep1`（标准化后直接算 FC，无 P 值）
 2. `(TG_sh1 + TG_sh5)/2` vs NTC 组均值（`NTC_rep0` 与 `NTC_rep1`）
 3. 共同上调：相对 `NTC_rep0` 的 sh1 与 sh5 上调基因交集
 4. 共同上调：相对 `NTC_rep1` 的 sh1 与 sh5 上调基因交集
-5. `(TG_sh1 + TG_sh5)/2` vs `NTC_rep0`（不替代第 2 组）
-6. `(TG_sh1 + TG_sh5)/2` vs `NTC_rep1`（不替代第 2 组）
 
 每个比较再按 FC ≥ 1 / 1.25 / 1.5 / 2，以及上调 top 50–300，分别输出差异表、火山图、热图、GO、通路、KEGG、GSEA。
 
@@ -37,8 +35,6 @@ results/
   TG_sh1_vs_NTC_rep1/
   TG_sh5_vs_NTC_rep1/
   TGsh_mean_vs_NTC/
-  TGsh_mean_vs_NTC_rep0/
-  TGsh_mean_vs_NTC_rep1/
   common_up_vs_NTC_rep0/
   common_up_vs_NTC_rep1/
 ```
@@ -79,3 +75,25 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 3. 每个 FC / topN 子文件夹里也有 `Focused_cytoskeleton_mito/`，是针对该基因子集的专项 ORA。
 
 看专项结果请先看比较目录下的 `Focused_cytoskeleton_mito/`（全基因 GSEA），不要只看 topN 的 ORA。若专项分析仍不显著，说明这些通路在本数据里没有协同变化。
+
+## 额外两组（新脚本，不改原流程）
+
+`TG_RNAseq_TGsh_mean_vs_NTC_reps.R` 在原四种比较之外再做：
+
+1. `mean(TG_sh1, TG_sh5)` vs `NTC_rep0`
+2. `mean(TG_sh1, TG_sh5)` vs `NTC_rep1`
+
+同样按 FC ≥ 1 / 1.25 / 1.5 / 2 和上调 top 50–300 出差异表、火山图、热图、GO、通路、KEGG、GSEA。结果在：
+
+```
+results/TGsh_mean_vs_NTC_rep0/
+results/TGsh_mean_vs_NTC_rep1/
+```
+
+```r
+setwd("E:/R/TG_BRCA/TG")
+source("TG_RNAseq_pipeline.R")                 # 原四种比较，不变
+source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
+```
+
+也可以只跑这个新脚本（会自己读入并标准化数据）。
