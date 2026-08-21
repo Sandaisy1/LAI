@@ -44,7 +44,7 @@ ALB 特例：成熟 N 端 D25 前面是 R24，胰酶消化后 `DAHK...` 看起�
 
 ## 输出（`ZZX/cleavage_ALB/` 或数据目录下 `cleavage_ALB/`）
 
-`ALB_peptide_map.csv`、`ALB_candidate_cleavage_sites.csv`、`ALB_residue_abundance.csv`、`ALB_peptide_coverage.svg`、`ALB_processing_schematic.svg`、`00_inference_log.txt`。不要写 ORA/GSEA。
+`ALB_peptide_map.csv`、`ALB_candidate_cleavage_sites.csv`、`ALB_residue_abundance.csv`、`ALB_peptide_coverage.svg`、`ALB_processing_schematic.svg`、**`ALB_full_length_cleavage.svg`（全长前体逐步剪切：信号肽 18|19 → propeptide 24|25 → 成熟链分泌，有 neo 末端再画内部片段）**、`00_inference_log.txt`。不要写 ORA/GSEA。
 
 ```python
 # ❌ BAD: 用 pg_matrix 蛋白丰度猜剪切；把 K/R 或 ALB 的 R24|D25 当细胞剪切

@@ -383,6 +383,221 @@ def write_schematic_svg(path: Path, seq: str, candidates: list[dict], n_term_cov
     path.write_text("\n".join(parts), encoding="utf-8")
 
 
+def _fmt_cov(value) -> str:
+    if value is None:
+        return "supernatant: not detected"
+    return f"supernatant: detected ({value:.3g})"
+
+
+def write_full_length_cleavage_svg(
+    path: Path,
+    seq: str,
+    candidates: list[dict],
+    n_term_cov: dict,
+) -> None:
+    """Stepwise cartoon: full-length prepro-ALB -> signal cut -> propeptide cut -> mature (+ optional internal)."""
+    n = len(seq)
+    internals = [
+        c
+        for c in candidates
+        if c.get("type") == "internal" and c.get("source") in {"neo_N", "neo_C"}
+    ]
+    internals.sort(key=lambda c: int(c["after_residue"]))
+    # unique cut sites, strongest first then residue order
+    uniq = []
+    seen = set()
+    for c in internals:
+        after = int(c["after_residue"])
+        if after in seen or after <= 24 or after >= n:
+            continue
+        seen.add(after)
+        uniq.append(c)
+        if len(uniq) >= 4:
+            break
+
+    n_steps = 3 + (1 if uniq else 0)
+    width = 1120
+    left, bar_w, bar_h = 130, 920, 42
+    zoom_w = 300  # residues 1–24 expanded so SIGNAL/PRO are visible
+    rest_w = bar_w - zoom_w
+    step_gap = 152
+    top = 96
+    height = 86 + n_steps * step_gap + 56
+    if uniq:
+        height += 36
+
+    def x_left(res: int) -> float:
+        if res <= 24:
+            return left + zoom_w * (res - 1) / 24.0
+        return left + zoom_w + rest_w * (res - 25) / float(n - 24)
+
+    def x_right(res: int) -> float:
+        if res <= 24:
+            return left + zoom_w * res / 24.0
+        return left + zoom_w + rest_w * (res - 24) / float(n - 24)
+
+    def x_cut(after: int) -> float:
+        return x_right(after)
+
+    domains = (
+        (1, 18, "#e74c3c", "#fadbd8", "SIGNAL", "1–18"),
+        (19, 24, "#e67e22", "#fdebd0", "PRO", "19–24"),
+        (25, n, "#1e8449", "#d5f5e3", "MATURE", f"25–{n}"),
+    )
+
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        "<rect width='100%' height='100%' fill='#ffffff'/>",
+        '<style>text{font-family:"Microsoft YaHei","SimHei","Noto Sans SC","PingFang SC",Arial,Helvetica,sans-serif}</style>',
+        '<text x="40" y="28" font-size="18" font-weight="700">Full-length ALB cleavage  全长蛋白如何剪切</text>',
+        '<text x="40" y="50" font-size="12" fill="#555">P02768 prepro-albumin (1–609). Cellular processing only (not trypsin). '
+        "N-terminus (1–24) is expanded so SIGNAL / PROPEPTIDE cuts are visible.</text>",
+    ]
+
+    def draw_domains(y: float, keep_from: int, keep_to: int, ghost: bool = False) -> None:
+        for a, b, stroke, fill, name, rng in domains:
+            lo, hi = max(a, keep_from), min(b, keep_to)
+            if lo > hi:
+                continue
+            x1, x2 = x_left(lo), x_right(hi)
+            w = max(x2 - x1, 2)
+            opacity = 0.22 if ghost else 1.0
+            dash = ' stroke-dasharray="5 3"' if ghost else ""
+            parts.append(
+                f'<rect x="{x1:.1f}" y="{y}" width="{w:.1f}" height="{bar_h}" rx="6" '
+                f'fill="{fill}" stroke="{stroke}" stroke-width="1.6"{dash} opacity="{opacity}"/>'
+            )
+            label_x = x1 + w / 2
+            if w >= 36:
+                parts.append(
+                    f'<text x="{label_x:.1f}" y="{y + 17}" text-anchor="middle" font-size="11" font-weight="700" fill="{stroke}">{name}</text>'
+                )
+                parts.append(
+                    f'<text x="{label_x:.1f}" y="{y + 32}" text-anchor="middle" font-size="10" fill="#333">{rng if (lo, hi) == (a, b) else f"{lo}–{hi}"}</text>'
+                )
+
+    def draw_scissors(after: int, y: float, color: str, label: str, motif_txt: str) -> None:
+        x = x_cut(after)
+        y0 = y - 16
+        y1 = y + bar_h + 8
+        parts.append(
+            f'<line x1="{x:.1f}" y1="{y0}" x2="{x:.1f}" y2="{y1}" stroke="{color}" stroke-width="2.2"/>'
+        )
+        # scissors head
+        parts.append(f'<polygon points="{x-7:.1f},{y0-2} {x+7:.1f},{y0-2} {x:.1f},{y0+12}" fill="{color}"/>')
+        parts.append(
+            f'<text x="{x:.1f}" y="{y + bar_h + 22}" text-anchor="middle" font-size="11" font-weight="700" fill="{color}">{svg_escape(label)}</text>'
+        )
+        parts.append(
+            f'<text x="{x:.1f}" y="{y + bar_h + 36}" text-anchor="middle" font-size="10" fill="#666">{svg_escape(motif_txt)}</text>'
+        )
+
+    def step_badge(num: int, y: float, title: str, subtitle: str) -> None:
+        cy = y + bar_h / 2
+        parts.append(f'<circle cx="48" cy="{cy:.1f}" r="16" fill="#2c3e50"/>')
+        parts.append(
+            f'<text x="48" y="{cy + 5:.1f}" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">{num}</text>'
+        )
+        parts.append(f'<text x="130" y="{y - 22}" font-size="13" font-weight="700">{svg_escape(title)}</text>')
+        parts.append(f'<text x="130" y="{y - 6}" font-size="11" fill="#555">{svg_escape(subtitle)}</text>')
+
+    def down_arrow(y_from: float, caption: str) -> None:
+        x = left + bar_w / 2
+        y1 = y_from + bar_h + 40
+        y2 = y1 + 22
+        parts.append(f'<line x1="{x:.1f}" y1="{y1}" x2="{x:.1f}" y2="{y2}" stroke="#2c3e50" stroke-width="2"/>')
+        parts.append(f'<polygon points="{x-6:.1f},{y2} {x+6:.1f},{y2} {x:.1f},{y2+10}" fill="#2c3e50"/>')
+        parts.append(
+            f'<text x="{x + 12:.1f}" y="{y1 + 16}" font-size="11" fill="#2c3e50">{svg_escape(caption)}</text>'
+        )
+
+    # residue ticks on step 1
+    def ticks(y: float) -> None:
+        for res in (1, 18, 19, 24, 25, n):
+            x = x_left(res) if res != n else x_right(n)
+            parts.append(f'<line x1="{x:.1f}" y1="{y - 4}" x2="{x:.1f}" y2="{y}" stroke="#888" stroke-width="1"/>')
+            parts.append(
+                f'<text x="{x:.1f}" y="{y - 8}" text-anchor="middle" font-size="9" fill="#666">{res}</text>'
+            )
+
+    y1 = top
+    step_badge(1, y1, "Full-length precursor  全长前体 prepro-ALB", f"residues 1–{n} (signal + propeptide + mature chain)")
+    draw_domains(y1, 1, n)
+    ticks(y1)
+    draw_scissors(18, y1, "#c0392b", "cut 18|19", "SAYS|RGVF  signal peptidase (ER)")
+    down_arrow(y1, "ER: remove SIGNAL 1–18")
+
+    y2 = y1 + step_gap
+    step_badge(
+        2,
+        y2,
+        "After signal-peptide cleavage  切掉信号肽",
+        f"released 1–18 ({_fmt_cov(n_term_cov.get('signal'))}); remaining proalbumin 19–{n}",
+    )
+    draw_domains(y2, 1, 18, ghost=True)
+    draw_domains(y2, 19, n)
+    draw_scissors(24, y2, "#d35400", "cut 24|25", "VFRR|DAHK  furin-like (Golgi, RXXR)")
+    down_arrow(y2, "Golgi: remove PROPEPTIDE 19–24")
+
+    y3 = y2 + step_gap
+    step_badge(
+        3,
+        y3,
+        "Mature albumin secreted  成熟链进入细胞上清",
+        f"chain 25–{n}  ({_fmt_cov(n_term_cov.get('mature_n'))} at N-term 25–80; "
+        f"{_fmt_cov(n_term_cov.get('mature_rest'))} for 81–{n})",
+    )
+    draw_domains(y3, 1, 24, ghost=True)
+    draw_domains(y3, 25, n)
+    # outline secreted product
+    parts.append(
+        f'<rect x="{x_left(25):.1f}" y="{y3 - 4}" width="{x_right(n) - x_left(25):.1f}" height="{bar_h + 8}" '
+        f'rx="8" fill="none" stroke="#1e8449" stroke-width="2.4"/>'
+    )
+
+    if uniq:
+        y4 = y3 + step_gap
+        cuts = ", ".join(f"{int(c['after_residue'])}|{int(c['before_residue'])}" for c in uniq)
+        step_badge(
+            4,
+            y4,
+            "Additional cellular cuts on the mature chain  成熟链上的内部剪切",
+            f"neo-N / neo-C peptide evidence (not trypsin K/R): {cuts}",
+        )
+        draw_domains(y4, 25, n)
+        for c in uniq:
+            after = int(c["after_residue"])
+            motif_txt = str(c.get("motif_P4_P4prime") or "")
+            hint = str(c.get("protease_hint") or "cellular protease")
+            draw_scissors(after, y4, "#6c3483", f"cut {after}|{after + 1}", f"{motif_txt}  {hint}")
+        # fragment labels under mature bar
+        bounds = [25] + [int(c["after_residue"]) + 1 for c in uniq] + [n + 1]
+        frag_y = y4 + bar_h + 48
+        for i in range(len(bounds) - 1):
+            a, b = bounds[i], bounds[i + 1] - 1
+            if a > b:
+                continue
+            mx = (x_left(a) + x_right(b)) / 2
+            parts.append(
+                f'<text x="{mx:.1f}" y="{frag_y}" text-anchor="middle" font-size="11" fill="#6c3483">'
+                f"fragment {a}–{b}</text>"
+            )
+
+    # legend
+    ly = height - 28
+    legend = [
+        (left, "#e74c3c", "SIGNAL 1–18"),
+        (left + 160, "#e67e22", "PROPEPTIDE 19–24"),
+        (left + 360, "#1e8449", "MATURE 25–609 (secreted)"),
+        (left + 620, "#888888", "dashed = released / not kept"),
+    ]
+    for x, color, lab in legend:
+        parts.append(f'<rect x="{x}" y="{ly - 12}" width="16" height="12" fill="{color}" opacity="0.35" stroke="{color}"/>')
+        parts.append(f'<text x="{x + 22}" y="{ly}" font-size="11" fill="#333">{lab}</text>')
+    parts.append("</svg>")
+    path.write_text("\n".join(parts), encoding="utf-8")
+
+
 def write_coverage_svg(
     path: Path,
     seq: str,
@@ -865,6 +1080,9 @@ def run(data_dir: Path | None, outdir: Path | None, n_last: int) -> Path:
     )
 
     write_schematic_svg(outdir / "ALB_processing_schematic.svg", seq, candidates, n_term_cov)
+    write_full_length_cleavage_svg(
+        outdir / "ALB_full_length_cleavage.svg", seq, candidates, n_term_cov
+    )
     write_coverage_svg(
         outdir / "ALB_peptide_coverage.svg",
         seq,
@@ -887,6 +1105,7 @@ def run(data_dir: Path | None, outdir: Path | None, n_last: int) -> Path:
     else:
         log(logs, "未发现内部 neo-N/neo-C。若搜库仅为胰酶特异性，内部剪切可能不可见。")
     log(logs, f"结果目录: {outdir}")
+    log(logs, "全长剪切示意图: ALB_full_length_cleavage.svg")
 
     (outdir / "00_inference_log.txt").write_text("\n".join(logs) + "\n", encoding="utf-8")
     return outdir
@@ -956,6 +1175,10 @@ def self_test() -> None:
     assert "signal" in types and "propeptide" in types, types
     assert any(r["source"] == "neo_N" for r in sites), "missing cellular neo-N candidate"
     assert any(r["Stripped.Sequence"] == "DAHKSEVAHR" for r in peps)
+    schematic = (out / "ALB_full_length_cleavage.svg").read_text(encoding="utf-8")
+    assert "Full-length ALB cleavage" in schematic
+    assert "cut 18|19" in schematic and "cut 24|25" in schematic
+    assert "cut 66|67" in schematic
     print(f"[self-test] OK  outputs in {out}")
 
 
