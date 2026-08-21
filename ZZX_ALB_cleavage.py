@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-ZZX DIA-NN：根据上清肽段丰度推断 ALB（P02768）的细胞剪切，不是胰酶酶切。
-
-输入：report.pr_matrix（TSV；也接受 report.pr.matri）
-  元数据列：Protein.Group, Protein.Ids, Protein.Names, Genes, Proteotypic,
-            Stripped.Sequence, Modified.Sequence, Precursor.Charge, Precursor.Id
-  其余列：样品强度；默认最后两列为细胞上清。
-
-用法：
-  python ZZX_ALB_cleavage.py
-  python ZZX_ALB_cleavage.py --data-dir "C:/Users/Lenovo/Desktop/ZZX"
-"""
+# ZZX DIA-NN：根据上清肽段丰度推断 ALB（P02768）的细胞剪切，不是胰酶酶切。
+# 输入：report.pr_matrix（TSV；也接受 report.pr.matri）
+# 元数据列：Protein.Group, Protein.Ids, Protein.Names, Genes, Proteotypic,
+#           Stripped.Sequence, Modified.Sequence, Precursor.Charge, Precursor.Id
+# 其余列：样品强度；默认最后两列为细胞上清。
+# 用法：
+#   python ZZX_ALB_cleavage.py
+#   python ZZX_ALB_cleavage.py --data-dir C:/Users/Lenovo/Desktop/ZZX
 
 from __future__ import annotations
 
