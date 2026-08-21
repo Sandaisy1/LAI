@@ -1,16 +1,18 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# 额外两组比较（不修改 TG_RNAseq_pipeline.R）
-#   1) mean(TG_sh1, TG_sh5) vs NTC_rep0
-#   2) mean(TG_sh1, TG_sh5) vs NTC_rep1
-# 每个比较都走原流程的 FC / topN 网格：
-#   火山图、热图、GO、通路、KEGG、GSEA
+# 额外两组比较（不修改 TG_RNAseq_pipeline.R 的比较 1–4）
+#   5) mean(TG_sh1, TG_sh5) vs NTC_rep0（不要混入 NTC_rep1）
+#   6) mean(TG_sh1, TG_sh5) vs NTC_rep1（不要混入 NTC_rep0）
+# 每个比较都走原流程的 p < 0.01 + FC / topN / AllDE 网格：
+#   火山图、热图、GO、通路、KEGG、GSVA、GSEA
 #   FoldChange: 上调 >= 1 / 1.25 / 1.5 / 2
 #   TopRank: 上调前 50 / 75 / 100 / 150 / 200 / 250 / 300
+#   AllDE: p < 0.01 的全部上调 + 下调
+# 1-vs-1 式「KD 均值 vs 单个 NTC」无法估计 p，不伪造，仍按 FC/排名分层并写日志。
 #
 # 用法：
 #   setwd("E:/R/TG_BRCA/TG")
-#   source("TG_RNAseq_pipeline.R")                 # 可选：先跑原四种比较
+#   source("TG_RNAseq_pipeline.R")                 # 可选：先跑比较 1–4
 #   source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加这两组
 # =============================================================================
 
@@ -37,7 +39,9 @@ mean_kd_vs_one_ntc_de <- function(log_mat, sample_info, ntc_id, comp_name) {
   ntc <- find_sample(sample_info, "NTC", ntc_id)
   if (is.na(sh1) || is.na(sh5) || is.na(ntc)) return(NULL)
   if (!all(c(sh1, sh5, ntc) %in% colnames(log_mat))) return(NULL)
-  log_msg(comp_name, " : mean(", sh1, ", ", sh5, ") vs ", ntc, " (KD mean vs one NTC, FC only)")
+  log_msg(comp_name, " : mean(", sh1, ", ", sh5, ") vs ", ntc,
+          " (KD mean vs one NTC, FC only; cannot estimate p, skip p < ",
+          pvalue_cutoff, " filter)")
   sh_mean <- (log_mat[, sh1] + log_mat[, sh5]) / 2
   ntc_val <- log_mat[, ntc]
   data.frame(
@@ -90,7 +94,7 @@ prepare_extra_expression <- function() {
   list(log_mat = norm_obj$log_mat, heat_mat = norm_obj$heat_mat, sample_info = si_df)
 }
 
-log_msg("Extra comparisons (new file, original pipeline unchanged): mean(TG_sh1, TG_sh5) vs each NTC")
+log_msg("Extra comparisons (new file, original 1–4 unchanged): mean(TG_sh1, TG_sh5) vs each NTC")
 prep <- prepare_extra_expression()
 log_mat_extra <- prep$log_mat
 heat_mat_extra <- prep$heat_mat
@@ -110,7 +114,7 @@ if (length(extra_list) == 0) {
 }
 
 for (nm in names(extra_list)) {
-  have_p <- any(!is.na(extra_list[[nm]]$padj))
+  have_p <- has_real_pvalue(extra_list[[nm]])
   tryCatch(
     analyze_one_comparison(
       nm, extra_list[[nm]], extra_list[[nm]],
