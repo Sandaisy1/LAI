@@ -1,19 +1,22 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# TG BRCA 细胞 RNA-seq 分析流程
-# 组别：NTC（对照）、TG_sh1、TG_sh5
-# 四种比较：
+# TG BRCA 细胞 RNA-seq 分析流程（p < 0.01）
+# 组别：NTC_rep0、NTC_rep1、TG_sh1、TG_sh5（四个样品独立保留）
+# 比较 1–4（比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R）：
 #   1) 单独 1-vs-1：TG_sh1 vs NTC_rep0，TG_sh5 vs NTC_rep0，
 #                  TG_sh1 vs NTC_rep1，TG_sh5 vs NTC_rep1（各自单独作图）
-#   2) (TG_sh1 + TG_sh5)/2 vs NTC组均值(NTC_rep0, NTC_rep1)
+#   2) mean(TG_sh1, TG_sh5) vs NTC 组均值(NTC_rep0, NTC_rep1)；2 vs 2 用 limma 估 p
 #   3) 共同上调：TG_sh1 vs NTC_rep0 与 TG_sh5 vs NTC_rep0 的交集
 #   4) 共同上调：TG_sh1 vs NTC_rep1 与 TG_sh5 vs NTC_rep1 的交集
-# 预处理：过滤低表达 + 标准化消除技术偏差
-# 子集策略：
+# 预处理：四个样品一起过滤低表达 + 标准化（有 count 用 DESeq2 size factor，
+#         仅 FPKM 则 log2 后分位数标准化）；不要用原始值算 FC
+# 显著性：先 p < 0.01，再分层。1-vs-1 无法估 p 时不伪造，仍按 FC/排名分层并写日志。
+# 子集策略（六组都要跑）：
 #   A) 上调 FC >= 1 / 1.25 / 1.5 / 2
 #   B) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300
-# 每个比较 × 每个 FC 阈值 × 每个 topN 都必须出图：
-#   差异基因表/柱状图、火山图、热图、GO图、通路富集图、KEGG图、GSEA图
+#   C) AllDE：p < 0.01 的全部上调 + 下调（共同比较：两个 1-vs-1 同向）
+# 每个非空子集都必须出图：
+#   差异基因表/柱状图、火山图、热图、GO、通路、KEGG、GSVA、GSEA
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -34,7 +37,7 @@ bioc_required <- c(
   "enrichplot", "DOSE", "AnnotationDbi", "fgsea", "msigdbr",
   "SummarizedExperiment"
 )
-bioc_optional <- c("ReactomePA", "pathview")
+bioc_optional <- c("ReactomePA", "pathview", "GSVA", "GSEABase")
 
 install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
   miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
@@ -114,7 +117,8 @@ log_msg <- function(...) {
   cat(msg, "\n", file = log_file, append = TRUE)
 }
 
-padj_cutoff <- 0.05
+# p < 0.01（用原始 p 值，不用 padj 冒充）
+pvalue_cutoff <- 0.01
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 
@@ -391,15 +395,18 @@ detect_value_type <- function(mat) {
 # 4. 过滤低表达 + 标准化
 # -----------------------------------------------------------------------------
 filter_low_expression <- function(mat, sample_info, value_type) {
-  min_n <- max(2, min(table(sample_info$group)))
+  n <- ncol(mat)
+  majority <- max(2, floor(n / 2) + 1)
   if (value_type == "counts") {
-    keep <- rowSums(mat >= 10, na.rm = TRUE) >= min_n
+    keep <- rowSums(mat, na.rm = TRUE) >= 10
+    log_msg("Low-expression filter: drop genes with count row-sum < 10")
   } else {
-    keep <- rowSums(mat > 1, na.rm = TRUE) >= min_n
+    keep <- rowSums(mat > 1e-6, na.rm = TRUE) >= majority
+    log_msg("Low-expression filter: drop genes with FPKM ~0 in majority of samples")
   }
   if (sum(keep) < 200) {
-    keep <- rowSums(mat > 0, na.rm = TRUE) >= min_n
-    log_msg("Strict filter left too few genes; fallback to expressed-in-", min_n, "-samples")
+    keep <- rowSums(mat > 0, na.rm = TRUE) >= max(2, floor(n / 2))
+    log_msg("Strict filter left too few genes; fallback to expressed-in-half-of-samples")
   }
   log_msg("Low-expression filter: keep ", sum(keep), " / ", nrow(mat), " genes")
   mat[keep, , drop = FALSE]
@@ -440,16 +447,106 @@ normalize_expression <- function(mat, sample_info, value_type) {
 
 # -----------------------------------------------------------------------------
 # 5. 差异分析
-#   1-vs-1 比较：标准化后的 log 值直接相减，无 P 值
-#   合并比较：两个 knockdown 等权平均 vs 两个 NTC 的组均值
+#   1-vs-1：标准化后的 log 值直接相减；无重复则不伪造 p，可尝试 gene_exp.diff
+#   合并比较：两个 knockdown 等权平均 vs 两个 NTC 的组均值；2 vs 2 时用 limma 估 p
 # -----------------------------------------------------------------------------
-pairwise_de <- function(log_mat, treat_sample, ntc_sample, comp_name) {
+norm_sample_key <- function(x) toupper(gsub("[^A-Za-z0-9]", "", as.character(x)))
+
+read_gene_exp_diff <- function(project_dir) {
+  path <- file.path(project_dir, "gene_exp.diff")
+  if (!file.exists(path)) {
+    log_msg("No gene_exp.diff; 1-vs-1 cannot use Cuffdiff p-values")
+    return(NULL)
+  }
+  ge <- tryCatch(
+    utils::read.delim(path, check.names = FALSE, stringsAsFactors = FALSE),
+    error = function(e) {
+      log_msg("gene_exp.diff read failed: ", e$message)
+      NULL
+    }
+  )
+  if (is.null(ge) || !all(c("sample_1", "sample_2", "p_value") %in% names(ge))) {
+    log_msg("gene_exp.diff missing sample_1/sample_2/p_value")
+    return(NULL)
+  }
+  gene_col <- if ("gene" %in% names(ge)) {
+    "gene"
+  } else if ("gene_id" %in% names(ge)) {
+    "gene_id"
+  } else {
+    names(ge)[1]
+  }
+  tid <- if ("test_id" %in% names(ge)) ge$test_id else NULL
+  ge$gene_clean <- clean_gene_names(ge[[gene_col]], tracking_ids = tid)
+  pairs <- unique(paste(ge$sample_1, ge$sample_2, sep = " vs "))
+  log_msg("gene_exp.diff comparisons: ", paste(utils::head(pairs, 12), collapse = "; "))
+  ge
+}
+
+cuffdiff_pair_mask <- function(ge, treat_sample, ntc_sample) {
+  extract_rep <- function(x) {
+    k <- norm_sample_key(x)
+    if (grepl("REP1", k, fixed = TRUE)) return("1")
+    if (grepl("REP0", k, fixed = TRUE)) return("0")
+    NA_character_
+  }
+  name_hit <- function(cuff_name, query_name) {
+    a <- norm_sample_key(cuff_name)
+    b <- unique(c(norm_sample_key(query_name), norm_sample_key(classify_sample(query_name))))
+    b <- b[nzchar(b) & !b %in% c("NA", "NAN")]
+    if (!nzchar(a) || length(b) == 0) return(FALSE)
+    qrep <- extract_rep(query_name)
+    crep <- extract_rep(cuff_name)
+    if (!is.na(qrep) && (is.na(crep) || crep != qrep)) return(FALSE)
+    any(a == b | vapply(b, function(z) identical(a, z) || grepl(z, a, fixed = TRUE), logical(1)))
+  }
+  treat_s1 <- vapply(ge$sample_1, name_hit, logical(1), query_name = treat_sample)
+  treat_s2 <- vapply(ge$sample_2, name_hit, logical(1), query_name = treat_sample)
+  ntc_s1 <- vapply(ge$sample_1, name_hit, logical(1), query_name = ntc_sample)
+  ntc_s2 <- vapply(ge$sample_2, name_hit, logical(1), query_name = ntc_sample)
+  (treat_s1 & ntc_s2) | (treat_s2 & ntc_s1)
+}
+
+attach_cuffdiff_pvalues <- function(de, ge, treat_sample, ntc_sample, comp_name) {
+  if (is.null(de)) return(de)
+  if (is.null(ge)) {
+    log_msg(comp_name, ": cannot estimate p (no gene_exp.diff); skip p < ", pvalue_cutoff, " filter")
+    return(de)
+  }
+  hit <- tryCatch(cuffdiff_pair_mask(ge, treat_sample, ntc_sample), error = function(e) {
+    log_msg(comp_name, ": gene_exp.diff pair match failed: ", e$message)
+    rep(FALSE, nrow(ge))
+  })
+  if (!any(hit, na.rm = TRUE)) {
+    log_msg(comp_name, ": gene_exp.diff has no replicate-level match for ",
+            treat_sample, " vs ", ntc_sample, "; cannot estimate p, skip p < ",
+            pvalue_cutoff, " filter")
+    return(de)
+  }
+  sub <- ge[hit, , drop = FALSE]
+  pairs <- unique(paste(sub$sample_1, sub$sample_2, sep = " vs "))
+  if (length(pairs) > 1) {
+    log_msg(comp_name, ": ambiguous gene_exp.diff matches (", paste(pairs, collapse = "; "),
+            "); do not attach p")
+    return(de)
+  }
+  idx <- match(de$gene, sub$gene_clean)
+  if (all(is.na(idx))) idx <- match(de$gene, sub[[if ("gene" %in% names(sub)) "gene" else 1]])
+  de$pvalue <- as.numeric(sub$p_value[idx])
+  if ("q_value" %in% names(sub)) de$padj <- as.numeric(sub$q_value[idx])
+  n_p <- sum(!is.na(de$pvalue))
+  log_msg(comp_name, ": attached Cuffdiff p-values for ", n_p, " / ", nrow(de),
+          " genes from ", pairs, "; filter p < ", pvalue_cutoff)
+  de
+}
+
+pairwise_de <- function(log_mat, treat_sample, ntc_sample, comp_name, gene_exp = NULL) {
   if (is.na(treat_sample) || is.na(ntc_sample)) return(NULL)
   if (!all(c(treat_sample, ntc_sample) %in% colnames(log_mat))) return(NULL)
-  log_msg(comp_name, " : ", treat_sample, " vs ", ntc_sample, " (1-vs-1, FC only)")
+  log_msg(comp_name, " : ", treat_sample, " vs ", ntc_sample, " (1-vs-1)")
   log2FC <- log_mat[, treat_sample] - log_mat[, ntc_sample]
   ave <- (log_mat[, treat_sample] + log_mat[, ntc_sample]) / 2
-  data.frame(
+  de <- data.frame(
     gene = rownames(log_mat),
     log2FC = as.numeric(log2FC),
     AveExpr = as.numeric(ave),
@@ -459,6 +556,7 @@ pairwise_de <- function(log_mat, treat_sample, ntc_sample, comp_name) {
     ntc_sample = ntc_sample,
     stringsAsFactors = FALSE
   )
+  attach_cuffdiff_pvalues(de, gene_exp, treat_sample, ntc_sample, comp_name)
 }
 
 mean_kd_vs_ntc_de <- function(log_mat, sample_info) {
@@ -469,7 +567,7 @@ mean_kd_vs_ntc_de <- function(log_mat, sample_info) {
   log_msg("TGsh_mean_vs_NTC : mean(", sh1, ", ", sh5, ") vs mean(", paste(ntc, collapse = ", "), ")")
   ntc_mean <- rowMeans(log_mat[, ntc, drop = FALSE])
   sh_mean <- (log_mat[, sh1] + log_mat[, sh5]) / 2
-  data.frame(
+  out <- data.frame(
     gene = rownames(log_mat),
     log2FC = as.numeric(sh_mean - ntc_mean),
     AveExpr = as.numeric((sh_mean + ntc_mean) / 2),
@@ -477,6 +575,39 @@ mean_kd_vs_ntc_de <- function(log_mat, sample_info) {
     padj = NA_real_,
     stringsAsFactors = FALSE
   )
+  kd <- c(sh1, sh5)
+  cols <- c(kd, ntc)
+  cols <- cols[cols %in% colnames(log_mat)]
+  n_kd <- sum(cols %in% kd)
+  n_ntc <- sum(cols %in% ntc)
+  if (n_kd >= 2 && n_ntc >= 2) {
+    grp <- factor(ifelse(cols %in% kd, "KD", "NTC"), levels = c("NTC", "KD"))
+    design <- stats::model.matrix(~ grp)
+    tt <- tryCatch({
+      fit <- limma::lmFit(log_mat[, cols, drop = FALSE], design)
+      fit <- limma::eBayes(fit)
+      limma::topTable(fit, coef = "grpKD", number = Inf, sort.by = "none")
+    }, error = function(e) {
+      log_msg("limma p-value failed for TGsh_mean_vs_NTC: ", e$message)
+      NULL
+    })
+    if (!is.null(tt) && nrow(tt) > 0) {
+      idx <- match(out$gene, rownames(tt))
+      out$pvalue <- as.numeric(tt$P.Value[idx])
+      out$padj <- as.numeric(tt$adj.P.Val[idx])
+      log_msg("TGsh_mean_vs_NTC: limma p-values estimated (2 vs 2); filter p < ", pvalue_cutoff)
+    }
+  } else {
+    log_msg("TGsh_mean_vs_NTC: not enough replicates for p; FC/rank only, skip p < ",
+            pvalue_cutoff, " filter")
+  }
+  out
+}
+
+combine_two_p <- function(p1, p2) {
+  out <- pmax(p1, p2)
+  out[is.na(p1) | is.na(p2)] <- NA_real_
+  out
 }
 
 build_common_up <- function(a, b) {
@@ -484,12 +615,12 @@ build_common_up <- function(a, b) {
   a <- a[!is.na(a$log2FC), ]
   b <- b[!is.na(b$log2FC), ]
   common <- intersect(a$gene[a$log2FC > 0], b$gene[b$log2FC > 0])
-  if (length(common) == 0) {
-    return(data.frame(
-      gene = character(), log2FC = numeric(), log2FC_sh1 = numeric(), log2FC_sh5 = numeric(),
-      AveExpr = numeric(), pvalue = numeric(), padj = numeric()
-    ))
-  }
+  empty <- data.frame(
+    gene = character(), log2FC = numeric(), log2FC_sh1 = numeric(), log2FC_sh5 = numeric(),
+    AveExpr = numeric(), pvalue = numeric(), padj = numeric(),
+    pvalue_sh1 = numeric(), pvalue_sh5 = numeric()
+  )
+  if (length(common) == 0) return(empty)
   aa <- a[match(common, a$gene), ]
   bb <- b[match(common, b$gene), ]
   data.frame(
@@ -498,8 +629,10 @@ build_common_up <- function(a, b) {
     log2FC_sh1 = aa$log2FC,
     log2FC_sh5 = bb$log2FC,
     AveExpr = (aa$AveExpr + bb$AveExpr) / 2,
-    pvalue = NA_real_,
-    padj = NA_real_,
+    pvalue = combine_two_p(aa$pvalue, bb$pvalue),
+    padj = combine_two_p(aa$padj, bb$padj),
+    pvalue_sh1 = aa$pvalue,
+    pvalue_sh5 = bb$pvalue,
     stringsAsFactors = FALSE
   )
 }
@@ -513,18 +646,22 @@ full_rank_two <- function(a, b) {
   )
   both$log2FC <- (both$log2FC_sh1 + both$log2FC_sh5) / 2
   both$AveExpr <- (both$AveExpr_sh1 + both$AveExpr_sh5) / 2
-  both$pvalue <- NA_real_
-  both$padj <- NA_real_
+  both$pvalue <- combine_two_p(both$pvalue_sh1, both$pvalue_sh5)
+  both$padj <- combine_two_p(both$padj_sh1, both$padj_sh5)
   both
 }
 
-passes_padj <- function(padj, have_pvalue) {
-  if (!have_pvalue) return(rep(TRUE, length(padj)))
-  !is.na(padj) & padj < padj_cutoff
+has_real_pvalue <- function(de) {
+  !is.null(de) && "pvalue" %in% names(de) && any(!is.na(de$pvalue))
+}
+
+passes_pvalue <- function(pvalue, have_pvalue) {
+  if (!have_pvalue) return(rep(TRUE, length(pvalue)))
+  !is.na(pvalue) & pvalue < pvalue_cutoff
 }
 
 select_by_fc <- function(de, fc, have_pvalue) {
-  keep <- !is.na(de$log2FC) & (2^de$log2FC >= fc) & passes_padj(de$padj, have_pvalue)
+  keep <- !is.na(de$log2FC) & (2^de$log2FC >= fc) & passes_pvalue(de$pvalue, have_pvalue)
   if ("log2FC_sh1" %in% names(de)) {
     keep <- keep & (2^de$log2FC_sh1 >= fc) & (2^de$log2FC_sh5 >= fc)
   }
@@ -536,10 +673,31 @@ select_by_topn <- function(de, n, have_pvalue) {
   if ("log2FC_sh1" %in% names(x)) {
     x <- x[x$log2FC_sh1 > 0 & x$log2FC_sh5 > 0, , drop = FALSE]
   }
-  sig <- x[passes_padj(x$padj, have_pvalue), , drop = FALSE]
-  if (nrow(sig) == 0) sig <- x
+  sig <- x[passes_pvalue(x$pvalue, have_pvalue), , drop = FALSE]
+  if (nrow(sig) == 0) {
+    if (have_pvalue) {
+      log_msg("topN: no genes pass p < ", pvalue_cutoff)
+      return(sig)
+    }
+    sig <- x
+  }
   sig <- sig[order(sig$log2FC, decreasing = TRUE), , drop = FALSE]
   utils::head(sig, n)
+}
+
+select_all_up_down <- function(de, have_pvalue) {
+  keep <- !is.na(de$log2FC) & de$log2FC != 0 & passes_pvalue(de$pvalue, have_pvalue)
+  if ("log2FC_sh1" %in% names(de) && "log2FC_sh5" %in% names(de)) {
+    same_dir <- (de$log2FC_sh1 > 0 & de$log2FC_sh5 > 0) |
+      (de$log2FC_sh1 < 0 & de$log2FC_sh5 < 0)
+    keep <- keep & same_dir
+    if (have_pvalue && "pvalue_sh1" %in% names(de) && "pvalue_sh5" %in% names(de)) {
+      keep <- keep & passes_pvalue(de$pvalue_sh1, TRUE) & passes_pvalue(de$pvalue_sh5, TRUE)
+    }
+  }
+  out <- de[keep, , drop = FALSE]
+  if (nrow(out) > 0) out$direction <- ifelse(out$log2FC > 0, "up", "down")
+  out
 }
 
 # -----------------------------------------------------------------------------
@@ -592,7 +750,7 @@ plot_volcano <- function(de, highlight, title, outfile, fc_line = 1) {
   if (has_p) {
     df$y <- -log10(pmax(df$pvalue, 1e-300))
     ylab <- "-log10(p value)"
-    hline <- -log10(0.05)
+    hline <- -log10(pvalue_cutoff)
   } else {
     df$y <- df$AveExpr
     ylab <- "Average expression (1-vs-1, no p-value)"
@@ -695,8 +853,10 @@ plot_de_bar <- function(sub, title, outfile) {
   df <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
   if (nrow(df) > 60) df <- rbind(utils::head(df, 30), utils::tail(df, 30))
   df$gene <- factor(df$gene, levels = rev(unique(df$gene)))
-  p <- ggplot2::ggplot(df, ggplot2::aes(x = gene, y = log2FC)) +
-    ggplot2::geom_col(fill = "#D62828", width = 0.8) +
+  df$fill <- ifelse(df$log2FC >= 0, "#D62828", "#1D4E89")
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = gene, y = log2FC, fill = fill)) +
+    ggplot2::geom_col(width = 0.8) +
+    ggplot2::scale_fill_identity() +
     ggplot2::coord_flip() +
     ggplot2::theme_bw(base_size = 11) +
     ggplot2::labs(title = title, x = NULL, y = "log2 Fold Change")
@@ -1500,6 +1660,275 @@ run_gsea_plots <- function(sub, gsea_cache, outdir, tag, label) {
   }
 }
 
+# -----------------------------------------------------------------------------
+# 8c. GSVA（基因集变异分析；结果只写 GSVA/，不要写进 GSEA/）
+# -----------------------------------------------------------------------------
+.gsva_env <- new.env(parent = emptyenv())
+
+msig_collection_map <- function(collection, subcollection = NULL) {
+  msig <- tryCatch({
+    if (is.null(subcollection)) {
+      msigdbr::msigdbr(species = "Homo sapiens", collection = collection)
+    } else {
+      msigdbr::msigdbr(
+        species = "Homo sapiens", collection = collection, subcollection = subcollection
+      )
+    }
+  }, error = function(e) {
+    if (is.null(subcollection)) {
+      msigdbr::msigdbr(species = "Homo sapiens", category = collection)
+    } else {
+      tryCatch(
+        msigdbr::msigdbr(
+          species = "Homo sapiens", category = collection, subcategory = subcollection
+        ),
+        error = function(e2) NULL
+      )
+    }
+  })
+  if (is.null(msig) || nrow(msig) == 0) return(NULL)
+  gene_col <- intersect(c("ncbi_gene", "entrez_gene"), names(msig))[1]
+  if (is.na(gene_col) || !nzchar(gene_col)) return(NULL)
+  msig[, c("gs_name", gene_col), drop = FALSE]
+}
+
+gsva_term2gene <- function() {
+  if (!is.null(.gsva_env$term2gene)) return(.gsva_env$term2gene)
+  parts <- list(
+    msig_collection_map("H"),
+    msig_collection_map("C2", "CP:KEGG"),
+    msig_collection_map("C2", "CP:REACTOME")
+  )
+  parts <- parts[!vapply(parts, is.null, logical(1))]
+  if (length(parts) == 0) {
+    hm <- tryCatch(msig_hallmark_map(), error = function(e) NULL)
+    if (is.null(hm)) return(NULL)
+    parts <- list(hm)
+  }
+  t2g <- do.call(rbind, parts)
+  names(t2g) <- c("gs_name", "entrez")
+  t2g$entrez <- as.character(t2g$entrez)
+  t2g <- t2g[!is.na(t2g$gs_name) & !is.na(t2g$entrez) & nzchar(t2g$entrez), , drop = FALSE]
+  t2g <- unique(t2g)
+  .gsva_env$term2gene <- t2g
+  t2g
+}
+
+gsva_gene_sets_list <- function(expr_ids) {
+  t2g <- gsva_term2gene()
+  if (is.null(t2g) || nrow(t2g) == 0) return(NULL)
+  t2g <- t2g[t2g$entrez %in% expr_ids, , drop = FALSE]
+  split(as.character(t2g$entrez), t2g$gs_name)
+}
+
+expr_entrez_matrix <- function(heat_mat) {
+  mp <- map_to_entrez(rownames(heat_mat))
+  if (nrow(mp) < 20) return(NULL)
+  keep <- mp$gene %in% rownames(heat_mat)
+  mp <- mp[keep, , drop = FALSE]
+  mat <- heat_mat[mp$gene, , drop = FALSE]
+  rownames(mat) <- as.character(mp$entrez)
+  if (anyDuplicated(rownames(mat))) {
+    idx <- split(seq_len(nrow(mat)), rownames(mat))
+    mat <- do.call(rbind, lapply(idx, function(i) {
+      if (length(i) == 1L) {
+        mat[i, , drop = FALSE]
+      } else {
+        m <- matrix(colMeans(mat[i, , drop = FALSE]), nrow = 1)
+        rownames(m) <- rownames(mat)[i[1]]
+        colnames(m) <- colnames(mat)
+        m
+      }
+    }))
+  }
+  storage.mode(mat) <- "double"
+  mat
+}
+
+compute_gsva_scores <- function(heat_mat) {
+  if (!is.null(.gsva_env$scores) &&
+      identical(.gsva_env$sample_names, colnames(heat_mat)) &&
+      identical(.gsva_env$n_genes, nrow(heat_mat))) {
+    return(.gsva_env$scores)
+  }
+  if (!has_pkg("GSVA")) {
+    log_msg("GSVA package not installed; skip GSVA")
+    return(NULL)
+  }
+  expr <- expr_entrez_matrix(heat_mat)
+  if (is.null(expr) || nrow(expr) < 20) {
+    log_msg("GSVA skipped: too few mapped genes")
+    return(NULL)
+  }
+  gsets <- gsva_gene_sets_list(rownames(expr))
+  if (is.null(gsets) || length(gsets) == 0) {
+    log_msg("GSVA skipped: no gene sets")
+    return(NULL)
+  }
+  gsets <- gsets[vapply(gsets, function(x) length(unique(x)) >= 5, logical(1))]
+  if (length(gsets) == 0) return(NULL)
+  log_msg("Running GSVA: ", nrow(expr), " genes, ", length(gsets), " sets, ", ncol(expr), " samples")
+  scores <- tryCatch({
+    if (isTRUE("gsvaParam" %in% getNamespaceExports("GSVA"))) {
+      param <- GSVA::gsvaParam(exprData = expr, geneSets = gsets, kcdf = "Gaussian")
+      GSVA::gsva(param, verbose = FALSE)
+    } else {
+      GSVA::gsva(expr, gsets, method = "gsva", kcdf = "Gaussian", verbose = FALSE, parallel.sz = 1)
+    }
+  }, error = function(e) {
+    log_msg("GSVA failed: ", e$message)
+    NULL
+  })
+  if (inherits(scores, "SummarizedExperiment")) {
+    scores <- SummarizedExperiment::assay(scores)
+  }
+  if (is.null(scores)) return(NULL)
+  scores <- as.matrix(scores)
+  .gsva_env$scores <- scores
+  .gsva_env$sample_names <- colnames(heat_mat)
+  .gsva_env$n_genes <- nrow(heat_mat)
+  scores
+}
+
+plot_gsva_heatmap <- function(score_mat, sample_info, title, outfile, max_rows = 50) {
+  if (is.null(score_mat) || nrow(score_mat) == 0 || ncol(score_mat) < 2) return(invisible(NULL))
+  v <- matrixStats::rowVars(score_mat)
+  v[!is.finite(v)] <- -Inf
+  keep <- order(v, decreasing = TRUE)
+  keep <- keep[seq_len(min(max_rows, length(keep)))]
+  m <- score_mat[keep, , drop = FALSE]
+  rownames(m) <- substr(rownames(m), 1, 80)
+  ann <- NULL
+  if (!is.null(sample_info) && "sample" %in% names(sample_info)) {
+    si <- sample_info[match(colnames(m), sample_info$sample), , drop = FALSE]
+    if ("group" %in% names(si)) {
+      ann <- data.frame(group = si$group, row.names = colnames(m))
+    }
+  }
+  draw <- function() {
+    args <- list(
+      mat = m,
+      scale = if (nrow(m) >= 2 && ncol(m) >= 2) "row" else "none",
+      cluster_cols = ncol(m) >= 3,
+      cluster_rows = nrow(m) >= 2,
+      show_rownames = TRUE, fontsize_row = 7, main = title, border_color = NA,
+      color = grDevices::colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(101)
+    )
+    if (!is.null(ann)) args$annotation_col <- ann
+    do.call(pheatmap::pheatmap, args)
+  }
+  grDevices::pdf(paste0(outfile, ".pdf"), width = 9, height = max(6, min(14, 0.22 * nrow(m) + 3)))
+  on.exit({
+    while (grDevices::dev.cur() > 1) grDevices::dev.off()
+  }, add = TRUE)
+  tryCatch(draw(), error = function(e) log_msg("GSVA heatmap pdf failed: ", e$message))
+  grDevices::dev.off()
+  grDevices::png(paste0(outfile, ".png"), width = 900, height = max(600, min(1400, 22 * nrow(m) + 300)))
+  tryCatch(draw(), error = function(e) log_msg("GSVA heatmap png failed: ", e$message))
+  grDevices::dev.off()
+}
+
+plot_gsva_delta_bar <- function(score_mat, sample_info, title, outfile, highlight = NULL, max_n = 30) {
+  if (is.null(score_mat) || nrow(score_mat) == 0) return(invisible(NULL))
+  ntc <- character(0)
+  kd <- character(0)
+  if (!is.null(sample_info) && all(c("sample", "group") %in% names(sample_info))) {
+    ntc <- intersect(sample_info$sample[sample_info$group == "NTC"], colnames(score_mat))
+    kd <- intersect(
+      sample_info$sample[sample_info$group %in% c("TG_sh1", "TG_sh5")],
+      colnames(score_mat)
+    )
+  }
+  if (length(ntc) == 0 || length(kd) == 0) {
+    if (ncol(score_mat) < 2) return(invisible(NULL))
+    delta <- score_mat[, 1] - score_mat[, ncol(score_mat)]
+  } else {
+    delta <- rowMeans(score_mat[, kd, drop = FALSE]) - rowMeans(score_mat[, ntc, drop = FALSE])
+  }
+  df <- data.frame(
+    pathway = names(delta),
+    delta = as.numeric(delta),
+    highlight = names(delta) %in% highlight,
+    stringsAsFactors = FALSE
+  )
+  df <- df[is.finite(df$delta), , drop = FALSE]
+  if (nrow(df) == 0) return(invisible(NULL))
+  df <- df[order(abs(df$delta), decreasing = TRUE), , drop = FALSE]
+  df <- utils::head(df, max_n)
+  df$pathway <- factor(df$pathway, levels = rev(df$pathway))
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = delta, y = pathway, fill = highlight)) +
+    ggplot2::geom_col() +
+    ggplot2::geom_vline(xintercept = 0, linetype = 2, color = "grey40") +
+    ggplot2::scale_fill_manual(values = c("FALSE" = "#6BAED6", "TRUE" = "#E6550D"),
+                               labels = c("FALSE" = "all sets", "TRUE" = "overlaps subset")) +
+    ggplot2::labs(title = title, x = "GSVA score (KD mean - NTC mean)", y = NULL, fill = NULL) +
+    ggplot2::theme_bw(base_size = 11) +
+    ggplot2::theme(axis.text.y = ggplot2::element_text(size = 7))
+  save_gg(p, outfile, width = 10, height = max(6, 0.22 * nrow(df) + 2.5))
+}
+
+run_gsva_plots <- function(sub, heat_mat, sample_info, outdir, tag, label, nest = TRUE) {
+  gsva_dir <- if (isTRUE(nest)) file.path(outdir, "GSVA") else outdir
+  dir.create(gsva_dir, recursive = TRUE, showWarnings = FALSE)
+  pref <- paste0(tag, "_GSVA_")
+  writeLines(
+    c("This GSVA folder is gene-set variation analysis, NOT GSEA and NOT ORA.",
+      "GSEA files are in GSEA/ and start with GSEA_.",
+      "ORA files are in GO/ Pathway/ KEGG/ and start with ORA_."),
+    file.path(gsva_dir, paste0(tag, "_00_GSVA_is_not_GSEA.txt"))
+  )
+  if (!has_pkg("GSVA")) {
+    note_empty(file.path(gsva_dir, paste0(pref, "skipped")), "GSVA package not installed")
+    return(invisible(NULL))
+  }
+  scores <- compute_gsva_scores(heat_mat)
+  if (is.null(scores) || nrow(scores) == 0) {
+    note_empty(file.path(gsva_dir, paste0(pref, "empty")), "GSVA scores not available")
+    return(invisible(NULL))
+  }
+  utils::write.csv(
+    cbind(pathway = rownames(scores), as.data.frame(scores)),
+    file.path(gsva_dir, paste0(pref, "scores.csv")),
+    row.names = FALSE
+  )
+  plot_gsva_heatmap(
+    scores, sample_info,
+    paste(label, "| GSVA heatmap"),
+    file.path(gsva_dir, paste0(pref, "heatmap"))
+  )
+  highlight <- character(0)
+  if (!is.null(sub) && nrow(sub) > 0) {
+    t2g <- gsva_term2gene()
+    mp <- map_to_entrez(sub$gene)
+    if (!is.null(t2g) && nrow(mp) > 0) {
+      highlight <- unique(t2g$gs_name[t2g$entrez %in% mp$entrez])
+      hit <- intersect(highlight, rownames(scores))
+      if (length(hit) > 0) {
+        sub_scores <- scores[hit, , drop = FALSE]
+        utils::write.csv(
+          cbind(pathway = rownames(sub_scores), as.data.frame(sub_scores),
+                n_subset_genes = vapply(hit, function(p) {
+                  as.integer(sum(t2g$entrez[t2g$gs_name == p] %in% mp$entrez))
+                }, integer(1))),
+          file.path(gsva_dir, paste0(pref, "scores_overlap_subset.csv")),
+          row.names = FALSE
+        )
+        plot_gsva_heatmap(
+          sub_scores, sample_info,
+          paste(label, "| GSVA pathways overlapping subset"),
+          file.path(gsva_dir, paste0(pref, "heatmap_overlap_subset"))
+        )
+      }
+    }
+  }
+  plot_gsva_delta_bar(
+    scores, sample_info,
+    paste(label, "| GSVA score difference"),
+    file.path(gsva_dir, paste0(pref, "delta_barplot")),
+    highlight = highlight
+  )
+}
+
 emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de_for_volcano,
                                  heat_mat, sample_info, gsea_cache, fc_line = 1) {
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
@@ -1535,10 +1964,12 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de_for
            error = function(e) log_msg("ORA/plots failed: ", e$message))
   tryCatch(run_gsea_plots(sub, gsea_cache, outdir, tag, title),
            error = function(e) log_msg("GSEA/plots failed: ", e$message))
+  tryCatch(run_gsva_plots(sub, heat_mat, sample_info, outdir, tag, title, nest = TRUE),
+           error = function(e) log_msg("GSVA/plots failed: ", e$message))
 }
 
 # -----------------------------------------------------------------------------
-# 9. 对单个比较执行全部子集分析（4 个 FC x 7 个 topN，全部出图）
+# 9. 对单个比较执行全部子集分析（4 个 FC + 7 个 topN + AllDE，全部出图）
 # -----------------------------------------------------------------------------
 analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat, sample_info, have_pvalue, gsea_de = NULL) {
   if (is.null(gsea_de)) gsea_de <- de
@@ -1548,23 +1979,36 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
   tryCatch(writexl::write_xlsx(de, file.path(base, "DE_full.xlsx")),
            error = function(e) log_msg("DE_full xlsx failed: ", e$message))
 
-  # 先建好 FC / topN 目录，避免只看到 GSEA 文件夹
+  # 先建好 FC / topN / AllDE 目录，避免只看到 GSEA 文件夹
   fc_dirs <- file.path(base, "FoldChange", names(fc_cutoffs))
   top_dirs <- file.path(base, "TopRank", paste0("top", top_ns))
-  invisible(lapply(c(fc_dirs, top_dirs), dir.create, recursive = TRUE, showWarnings = FALSE))
+  allde_dir <- file.path(base, "AllDE")
+  subset_dirs <- c(fc_dirs, top_dirs, allde_dir)
+  invisible(lapply(subset_dirs, dir.create, recursive = TRUE, showWarnings = FALSE))
+  invisible(lapply(
+    unlist(lapply(subset_dirs, function(d) file.path(d, c("GO", "Pathway", "KEGG", "GSEA", "GSVA"))), use.names = FALSE),
+    dir.create, recursive = TRUE, showWarnings = FALSE
+  ))
   writeLines(
-    c("请打开下面两个文件夹，不要只看 GSEA：",
-      "  1_FoldChange_and_TopRank_are_here",
-      "  FoldChange/FC_1  FC_1.25  FC_1.5  FC_2",
-      "  TopRank/top50 ... top300",
-      "每个子文件夹里：火山图、热图、ORA_GO、ORA通路、ORA_KEGG、以及 GSEA。",
+    c("请打开下面这些文件夹，不要只看 GSEA：",
+      "  FoldChange/FC_1  FC_1.25  FC_1.5  FC_2  （p < 0.01 且上调 FC）",
+      "  TopRank/top50 ... top300  （p < 0.01 后上调排名）",
+      "  AllDE/  （p < 0.01 的全部上调 + 下调）",
+      "每个子文件夹里：火山图、热图、ORA_GO、ORA通路、ORA_KEGG、GSVA、以及 GSEA。",
       "细胞骨架运动 / 线粒体专项结果在 Focused_cytoskeleton_mito/（不是改全库排名）。",
-      "00_GSEA_all_genes_NOT_FC_or_topN 只是全基因 GSEA，不是分层图。"),
+      "00_GSEA_all_genes_NOT_FC_or_topN 只是全基因 GSEA，不是分层图。",
+      "00_GSVA_all_genes_NOT_FC_or_topN 只是全基因 GSVA，不是分层图。",
+      "显著性阈值：p < 0.01。1-vs-1 无法估 p 时不伪造，仍按 FC/排名分层。"),
     file.path(base, "00_READ_ME_先看这里.txt")
   )
 
   gsea_cache <- list()
-  log_msg("Subset plots first (volcano/heatmap/ORA), GSEA-all-genes later: ", comp_name)
+  log_msg("Subset plots first (volcano/heatmap/ORA/GSVA), GSEA-all-genes later: ", comp_name)
+  if (isTRUE(have_pvalue)) {
+    log_msg(comp_name, ": apply p < ", pvalue_cutoff, " before FC / topN / AllDE")
+  } else {
+    log_msg(comp_name, ": no p-values; skip p < ", pvalue_cutoff, " filter; FC / rank / AllDE only")
+  }
 
   for (nm in names(fc_cutoffs)) {
     fc <- unname(fc_cutoffs[[nm]])
@@ -1572,7 +2016,7 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
     if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
     tryCatch(
       emit_subset_analysis(
-        comp_name, sub, nm, paste0(comp_name, " | up FC >= ", fc),
+        comp_name, sub, nm, paste0(comp_name, " | p<0.01 up FC >= ", fc),
         file.path(base, "FoldChange", nm),
         full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = fc
       ),
@@ -1585,7 +2029,7 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
     sub <- select_by_topn(de, n, have_pvalue)
     tryCatch(
       emit_subset_analysis(
-        comp_name, sub, tag, paste0(comp_name, " | upregulated top ", n),
+        comp_name, sub, tag, paste0(comp_name, " | p<0.01 upregulated top ", n),
         file.path(base, "TopRank", tag),
         full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = 1
       ),
@@ -1594,11 +2038,29 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
   }
 
   tryCatch({
+    all_src <- gsea_de
+    all_have_p <- has_real_pvalue(all_src)
+    if (!all_have_p) all_have_p <- have_pvalue
+    sub_all <- select_all_up_down(all_src, all_have_p)
+    if (nrow(sub_all) > 0) {
+      sub_all <- sub_all[order(abs(sub_all$log2FC), decreasing = TRUE), , drop = FALSE]
+    }
+    log_msg(comp_name, " AllDE up+down: n = ", nrow(sub_all),
+            " (up=", sum(sub_all$log2FC > 0, na.rm = TRUE),
+            ", down=", sum(sub_all$log2FC < 0, na.rm = TRUE), ")")
+    emit_subset_analysis(
+      comp_name, sub_all, "AllDE_up_down",
+      paste0(comp_name, " | p<0.01 all up+down genes"),
+      allde_dir, full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = 1
+    )
+  }, error = function(e) log_msg("ERROR subset ", comp_name, " AllDE: ", e$message))
+
+  tryCatch({
     log_msg("Building full-list GSEA after subset plots: ", comp_name)
     gsea_cache <- build_gsea_cache(gsea_de)
     full_gsea_dir <- file.path(base, "00_GSEA_all_genes_NOT_FC_or_topN")
     dir.create(full_gsea_dir, recursive = TRUE, showWarnings = FALSE)
-    writeLines("全基因 GSEA，不是 FC/topN 分层结果。分层图在 FoldChange/ 和 TopRank/。",
+    writeLines("全基因 GSEA，不是 FC/topN/AllDE 分层结果。分层图在 FoldChange/、TopRank/ 和 AllDE/。",
                file.path(full_gsea_dir, "00_README.txt"))
     for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
       plot_gsea_object(gsea_cache[[nm]], file.path(full_gsea_dir, paste0("allGenes_GSEA_", nm)),
@@ -1607,6 +2069,19 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
     plot_fgsea_hallmark(gsea_cache$stats, full_gsea_dir,
                         paste("GSEA Hallmark |", comp_name, "| ALL genes"), prefix = "allGenes_")
   }, error = function(e) log_msg("full-list GSEA failed for ", comp_name, ": ", e$message))
+
+  tryCatch({
+    log_msg("Building full-matrix GSVA after GSEA: ", comp_name)
+    full_gsva_dir <- file.path(base, "00_GSVA_all_genes_NOT_FC_or_topN")
+    dir.create(full_gsva_dir, recursive = TRUE, showWarnings = FALSE)
+    writeLines("全基因 GSVA，不是 FC/topN/AllDE 分层结果。分层 GSVA 在 FoldChange/、TopRank/ 和 AllDE/ 的 GSVA/。",
+               file.path(full_gsva_dir, "00_README.txt"))
+    run_gsva_plots(
+      NULL, heat_mat, sample_info, full_gsva_dir, "allGenes",
+      paste("GSVA |", comp_name, "| ALL genes, NOT FC/topN"),
+      nest = FALSE
+    )
+  }, error = function(e) log_msg("full-list GSVA failed for ", comp_name, ": ", e$message))
 
   tryCatch({
     log_msg("Focused cytoskeleton / mitochondria GSEA: ", comp_name)
@@ -1626,18 +2101,19 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
 plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix) {
   if (is.null(de_a) || is.null(de_b)) return(invisible(NULL))
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
-  have_pvalue <- FALSE
+  have_p_a <- has_real_pvalue(de_a)
+  have_p_b <- has_real_pvalue(de_b)
   for (nm in names(fc_cutoffs)) {
     fc <- unname(fc_cutoffs[[nm]])
     lst <- list(
-      x = select_by_fc(de_a, fc, have_pvalue)$gene,
-      y = select_by_fc(de_b, fc, have_pvalue)$gene
+      x = select_by_fc(de_a, fc, have_p_a)$gene,
+      y = select_by_fc(de_b, fc, have_p_b)$gene
     )
     names(lst) <- c(label_a, label_b)
     p <- tryCatch({
       if (!has_pkg("ggvenn")) stop("ggvenn not installed")
       ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
-        ggplot2::labs(title = paste0(title_prefix, " | FC >= ", fc))
+        ggplot2::labs(title = paste0(title_prefix, " | p<0.01 FC >= ", fc))
     }, error = function(e) {
       log_msg("venn failed: ", e$message)
       NULL
@@ -1649,8 +2125,8 @@ plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix) {
   for (n in top_ns) {
     tag <- paste0("top", n)
     lst <- list(
-      x = select_by_topn(de_a, n, have_pvalue)$gene,
-      y = select_by_topn(de_b, n, have_pvalue)$gene
+      x = select_by_topn(de_a, n, have_p_a)$gene,
+      y = select_by_topn(de_b, n, have_p_b)$gene
     )
     names(lst) <- c(label_a, label_b)
     p <- tryCatch({
@@ -1665,12 +2141,29 @@ plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix) {
     dir.create(vdir, recursive = TRUE, showWarnings = FALSE)
     if (!is.null(p)) save_gg(p, file.path(vdir, paste0("venn_", tag)), width = 7, height = 6)
   }
+  lst_all <- list(
+    x = select_all_up_down(de_a, have_p_a)$gene,
+    y = select_all_up_down(de_b, have_p_b)$gene
+  )
+  names(lst_all) <- c(label_a, label_b)
+  p_all <- tryCatch({
+    if (!has_pkg("ggvenn")) stop("ggvenn not installed")
+    ggvenn::ggvenn(lst_all, fill_color = c("#F58518", "#54A24B")) +
+      ggplot2::labs(title = paste0(title_prefix, " | AllDE up+down"))
+  }, error = function(e) {
+    log_msg("venn AllDE failed: ", e$message)
+    NULL
+  })
+  vdir_all <- file.path(outdir, "AllDE")
+  dir.create(vdir_all, recursive = TRUE, showWarnings = FALSE)
+  if (!is.null(p_all)) save_gg(p_all, file.path(vdir_all, "venn_AllDE_up_down"), width = 7, height = 6)
 }
 
 # -----------------------------------------------------------------------------
 # 10. 主流程
 # -----------------------------------------------------------------------------
 log_msg("Project dir: ", project_dir)
+log_msg("Significance cutoff: p < ", pvalue_cutoff, " (raw p-value, not padj)")
 expr <- load_expression(project_dir)
 expr$sample_info <- add_ntc_ids(expr$sample_info)
 log_msg("Loaded from ", expr$source, " | genes=", nrow(expr$mat), " samples=", ncol(expr$mat))
@@ -1705,13 +2198,14 @@ sh1 <- find_sample(si, "TG_sh1")
 sh5 <- find_sample(si, "TG_sh5")
 ntc0 <- find_sample(si, "NTC", "NTC_rep0")
 ntc1 <- find_sample(si, "NTC", "NTC_rep1")
+gene_exp <- read_gene_exp_diff(project_dir)
 
 de_list <- list()
 # 设计1：四个 1-vs-1，各自单独作图，不用 NTC 均值
-de_list$TG_sh1_vs_NTC_rep0 <- pairwise_de(log_mat, sh1, ntc0, "TG_sh1_vs_NTC_rep0")
-de_list$TG_sh5_vs_NTC_rep0 <- pairwise_de(log_mat, sh5, ntc0, "TG_sh5_vs_NTC_rep0")
-de_list$TG_sh1_vs_NTC_rep1 <- pairwise_de(log_mat, sh1, ntc1, "TG_sh1_vs_NTC_rep1")
-de_list$TG_sh5_vs_NTC_rep1 <- pairwise_de(log_mat, sh5, ntc1, "TG_sh5_vs_NTC_rep1")
+de_list$TG_sh1_vs_NTC_rep0 <- pairwise_de(log_mat, sh1, ntc0, "TG_sh1_vs_NTC_rep0", gene_exp)
+de_list$TG_sh5_vs_NTC_rep0 <- pairwise_de(log_mat, sh5, ntc0, "TG_sh5_vs_NTC_rep0", gene_exp)
+de_list$TG_sh1_vs_NTC_rep1 <- pairwise_de(log_mat, sh1, ntc1, "TG_sh1_vs_NTC_rep1", gene_exp)
+de_list$TG_sh5_vs_NTC_rep1 <- pairwise_de(log_mat, sh5, ntc1, "TG_sh5_vs_NTC_rep1", gene_exp)
 # 设计2：两个 knockdown 等权平均 vs 两个 NTC 的组均值
 de_list$TGsh_mean_vs_NTC <- mean_kd_vs_ntc_de(log_mat, si)
 # 设计3 / 4：分别相对同一个 NTC 样品的共同上调
@@ -1731,7 +2225,7 @@ for (nm in names(de_list)) {
     volcano_df <- gsea_rank[[nm]]
     gsea_de <- gsea_rank[[nm]]
   }
-  have_p <- any(!is.na(de_list[[nm]]$padj))
+  have_p <- has_real_pvalue(de_list[[nm]])
   tryCatch(
     analyze_one_comparison(
       nm, de_list[[nm]], volcano_df, norm$heat_mat, si, have_p, gsea_de
