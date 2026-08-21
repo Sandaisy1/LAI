@@ -18,8 +18,6 @@ from __future__ import annotations
 import argparse
 import csv
 import math
-import re
-from collections import defaultdict
 from pathlib import Path
 
 # UniProt P02768 ALBU_HUMAN SV=2（人血清白蛋白前体，609 aa）
@@ -185,11 +183,22 @@ def read_tsv(path: Path) -> tuple[list[str], list[dict]]:
     return list(reader.fieldnames), rows
 
 
+_META_COL_SUFFIXES = (
+    "Sequence",
+    "Ids",
+    "Names",
+    "Genes",
+    "Description",
+    "Group",
+)
+_MS_FILE_EXTS = (".raw", ".mzml", ".dia", ".parquet", ".wiff2", ".wiff")
+
+
 def sample_columns(fieldnames: list[str], n_last: int = 2) -> list[str]:
     extras = [c for c in fieldnames if c not in META_COLS]
     numeric_like = []
     for col in extras:
-        if re.search(r"(Sequence|Ids|Names|Genes|Description|Group)$", col):
+        if any(col.endswith(suffix) for suffix in _META_COL_SUFFIXES):
             continue
         numeric_like.append(col)
     if len(numeric_like) >= n_last:
@@ -200,10 +209,13 @@ def sample_columns(fieldnames: list[str], n_last: int = 2) -> list[str]:
 
 
 def short_sample_name(col: str, index: int) -> str:
-    base = Path(str(col).replace("\\", "/")).name
-    base = re.sub(r"\.(raw|mzML|dia|parquet|wiff2?)$", "", base, flags=re.I)
-    base = base.strip() or f"supernatant_{index}"
-    return base
+    base = Path(str(col).replace(chr(92), "/")).name
+    lower = base.lower()
+    for ext in _MS_FILE_EXTS:
+        if lower.endswith(ext):
+            base = base[: -len(ext)]
+            break
+    return base.strip() or f"supernatant_{index}"
 
 
 def map_peptide(sequence: str, peptide: str) -> list[tuple[int, int]]:
