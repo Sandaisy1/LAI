@@ -1,6 +1,6 @@
-# TG BRCA 细胞 RNA-seq 分析
+# TG BRCA 细胞 RNA-seq 分析（肿瘤转移）
 
-针对 `NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5` 四个样品的 RNA-seq 分析。两个 NTC **不在 1-vs-1 比较里合并**。
+针对 `NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5` 四个样品。两个 NTC **不在 1-vs-1 比较里合并**。分析背景限定肿瘤转移。
 
 ## 数据位置
 
@@ -10,50 +10,71 @@
 - `genes.count_tracking`
 - `genes.fpkm_tracking`
 
+自定义转移基因列表：`metastasis_custom_genes.txt`（可改，不影响全库 p 值）。
+
 ## 运行
 
 ```r
 setwd("E:/R/TG_BRCA/TG")
-source("TG_RNAseq_pipeline.R")
+source("TG_RNAseq_pipeline.R")                 # 比较 1–4
+source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6，不改上面的脚本
 ```
 
-## 四种比较（各自单独出图）
+## 六组比较（各自单独出图）
 
-1. 四个 1-vs-1：`TG_sh1 vs NTC_rep0`、`TG_sh5 vs NTC_rep0`、`TG_sh1 vs NTC_rep1`、`TG_sh5 vs NTC_rep1`（标准化后直接算 FC，无 P 值）
-2. `(TG_sh1 + TG_sh5)/2` vs NTC 组均值（`NTC_rep0` 与 `NTC_rep1`）
+1. 四个 1-vs-1：`TG_sh1 vs NTC_rep0`、`TG_sh5 vs NTC_rep0`、`TG_sh1 vs NTC_rep1`、`TG_sh5 vs NTC_rep1`（无 p 值时写在 `noPvalue/`）
+2. `(TG_sh1 + TG_sh5)/2` vs NTC 组均值（两侧均有 2 个样品时用 limma 估计 p）
 3. 共同上调：相对 `NTC_rep0` 的 sh1 与 sh5 上调基因交集
 4. 共同上调：相对 `NTC_rep1` 的 sh1 与 sh5 上调基因交集
+5. `mean(TG_sh1, TG_sh5)` vs `NTC_rep0`（不要混入 NTC_rep1）
+6. `mean(TG_sh1, TG_sh5)` vs `NTC_rep1`（不要混入 NTC_rep0）
 
-每个比较再按 FC ≥ 1 / 1.25 / 1.5 / 2，以及上调 top 50–300，分别输出差异表、火山图、热图、GO、通路、KEGG、GSEA。
+## 五套分层（每组都跑）
+
+有 p 值时用 **p < 0.05** 和 **p < 0.01**（`pvalue`，不是 padj）。无法估计 p 时不要伪造，FC/topN 只出一套，目录 `noPvalue/`。
+
+1. `p < 0.05` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2
+2. `p < 0.05` 后上调 top 50 / 75 / 100 / 150 / 200 / 250 / 300
+3. `p < 0.01` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2
+4. `p < 0.01` 后同样 7 个 topN
+5. 全部上调 **和** 全部下调：`AllDE/all_up/`、`AllDE/all_down/`、`AllDE/all_up_and_down/`
+
+每个非空子集输出差异表、火山图、热图、GO、通路、KEGG、GSVA、GSEA。
 
 ## 结果目录
 
 ```
 results/
   TG_sh1_vs_NTC_rep0/
-  TG_sh5_vs_NTC_rep0/
-  TG_sh1_vs_NTC_rep1/
-  TG_sh5_vs_NTC_rep1/
+    noPvalue/FoldChange/FC_1.5/
+    noPvalue/TopRank/top100/
+    AllDE/all_up/
+    AllDE/all_down/
+    AllDE/all_up_and_down/
+    00_GSEA_all_genes_NOT_FC_or_topN/
+    00_GSVA_all_genes_NOT_FC_or_topN/
+    Focused_metastasis/
   TGsh_mean_vs_NTC/
-  common_up_vs_NTC_rep0/
-  common_up_vs_NTC_rep1/
+    p0.05/  p0.01/   # 2-vs-2 有 limma p 时
+    AllDE/
+  TGsh_mean_vs_NTC_rep0/
+  TGsh_mean_vs_NTC_rep1/
 ```
 
-同一档里有两套富集，不要只看 GSEA 文件夹：
+同一档里有三套富集，不要只看 GSEA 文件夹：
 
-- `GO/`、`Pathway/`、`KEGG/`：单独的过表达分析（ORA），文件名以 `ORA_` 开头
-- `GSEA/`：GSEA 分析，文件名以 `GSEA_` 开头
+- `GO/`、`Pathway/`、`KEGG/`：过表达分析（ORA），文件名以 `ORA_` 开头
+- `GSEA/`：GSEA，文件名以 `GSEA_` 开头
+- `GSVA/`：GSVA，文件名以 `GSVA_` 开头
 
-
-**注意：** 比较目录里的 `00_GSEA_all_genes_NOT_FC_or_topN` 是全部基因的 GSEA，**不是** FC/topN 分层图。分层图在：
+分层图示例：
 
 ```
-results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/FC_1.5_volcano.pdf
-results/TG_sh1_vs_NTC_rep0/TopRank/top100/top100_heatmap.pdf
-results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
+results/TGsh_mean_vs_NTC/p0.01/FoldChange/FC_1.5/p0.01_FC_1.5_volcano.pdf
+results/TG_sh1_vs_NTC_rep0/noPvalue/TopRank/top100/noPvalue_top100_heatmap.pdf
 ```
 
-文件名和图标题都会带上 `FC_1.5` 或 `top100`。重新运行前建议先删掉旧的 `results/`。
+重新运行前建议先删掉旧的 `results/`。
 
 ## 热图上的基因名（XLOC / 逗号）
 
@@ -64,36 +85,14 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 
 读入时会清洗复合名并优先用官方符号。没有符号的 novel locus 仍会显示为 `XLOC_`，这些行会留在差异分析里，但 GO/KEGG 通常映射不上。
 
-## 细胞骨架运动 / 线粒体通路怎么看
+## 肿瘤转移通路怎么看
 
-**不能、也不该**去改全库 GO/KEGG 的 p 值，把这两类通路人为抬到第一。全库排名由统计量和多重检验决定；这份数据的高 FC 基因如果主要是炎症/急性期（例如 SAA、CCL2），全库 GO 就会先出现那些条目。
+**不能、也不该**去改全库 GO/KEGG 的 p 值，把转移相关通路人为抬到第一。全库排名由统计量和多重检验决定。
 
-可以做的是专项检验（脚本已加）：
+专项检验：
 
-1. 每个比较目录下的 `Focused_cytoskeleton_mito/`：只用细胞骨架运动、细胞迁移、线粒体相关基因集做 GSEA，所以这些条目会排在**这个文件夹**的前面。同时有对应基因热图。
-2. 全库 GO/KEGG/GSEA 表旁边的 `*_FOCUS_cytoskeleton_mito.csv`：把匹配到的条目抽出来，**保留原始 p 值和 `genome_wide_rank`**。
-3. 每个 FC / topN 子文件夹里也有 `Focused_cytoskeleton_mito/`，是针对该基因子集的专项 ORA。
+1. 每个比较目录下的 `Focused_metastasis/`：只用 EMT、迁移、侵袭、ECM、血管生成和自定义转移基因集做 GSEA。
+2. 全库 GO/KEGG/GSEA 表旁边的 `*_FOCUS_metastasis.csv`：把匹配到的条目抽出来，**保留原始 p 值和 `genome_wide_rank`**。
+3. 每个 FC / topN / AllDE 子文件夹里也有 `Focused_metastasis/`，是针对该基因子集的专项 ORA。
 
-看专项结果请先看比较目录下的 `Focused_cytoskeleton_mito/`（全基因 GSEA），不要只看 topN 的 ORA。若专项分析仍不显著，说明这些通路在本数据里没有协同变化。
-
-## 额外两组（新脚本，不改原流程）
-
-`TG_RNAseq_TGsh_mean_vs_NTC_reps.R` 在原四种比较之外再做：
-
-1. `mean(TG_sh1, TG_sh5)` vs `NTC_rep0`
-2. `mean(TG_sh1, TG_sh5)` vs `NTC_rep1`
-
-同样按 FC ≥ 1 / 1.25 / 1.5 / 2 和上调 top 50–300 出差异表、火山图、热图、GO、通路、KEGG、GSEA。结果在：
-
-```
-results/TGsh_mean_vs_NTC_rep0/
-results/TGsh_mean_vs_NTC_rep1/
-```
-
-```r
-setwd("E:/R/TG_BRCA/TG")
-source("TG_RNAseq_pipeline.R")                 # 原四种比较，不变
-source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
-```
-
-也可以只跑这个新脚本（会自己读入并标准化数据）。
+看专项结果请先看比较目录下的 `Focused_metastasis/`（全基因 GSEA）。若专项分析仍不显著，说明这些通路在本数据里没有协同变化。

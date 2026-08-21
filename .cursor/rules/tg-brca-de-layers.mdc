@@ -1,0 +1,28 @@
+---
+description: TG BRCA 五套差异分层：p<0.05 / p<0.01 的 FC 与 topN，以及全部上下调
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# 五套差异分层（六组都要跑）
+
+先滤 **p 值**（`pvalue`，不要用 padj 冒充），再按倍数或排名分层。
+「p 值小于 0.05 / 0.01」按 **p < 0.05** 与 **p < 0.01** 实现。
+能估计 p 时（两侧均 ≥2 个样品用 limma，或 Cuffdiff `gene_exp.diff` 配对一致）先滤 p 再分层。
+1-vs-1 无法估计 p 时不要伪造：FC/topN 只跑一次，目录 `noPvalue/`，并写日志。
+共同上调：两个 1-vs-1 都过**同一套**阈值后取交集。
+
+六组都必须跑下面五套，阈值一个都不能少：
+
+1. `p < 0.05` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2 → `p0.05/FoldChange/FC_1.5/`
+2. `p < 0.05` 后按 FC 降序 top 50 / 75 / 100 / 150 / 200 / 250 / 300 → `p0.05/TopRank/top100/`
+3. `p < 0.01` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2 → `p0.01/FoldChange/`
+4. `p < 0.01` 后同样 7 个 topN → `p0.01/TopRank/`
+5. 全部上调 **和** 全部下调（不按 FC 档或 topN 再切，也不再用 p 过滤）→ `AllDE/all_up/`、`AllDE/all_down/`、`AllDE/all_up_and_down/`
+
+文件名和图标题必须带档位标签（`p0.05`、`FC_1.5`、`top100`、`all_down`）。
+
+```r
+# ❌ BAD: 只跑 p<0.01；跳过 FC>=1 或 top75；AllDE 只用上调
+# ✅ GOOD: 有 p 时 p0.05 与 p0.01 都出；无 p 时 noPvalue 只出一套；AllDE 含下调
+```

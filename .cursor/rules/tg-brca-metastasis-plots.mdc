@@ -1,0 +1,21 @@
+---
+description: TG BRCA 作图、ORA/GSEA/GSVA 目录与肿瘤转移专项基因
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# 作图与肿瘤转移专项
+
+每个非空子集必须出：差异基因表、火山图、热图、GO、通路富集、KEGG、**GSVA**、GSEA。
+
+- ORA 放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头（不要写进 GSEA/ 或 GSVA/）
+- GSEA 放 `GSEA/`，文件名以 `GSEA_` 开头；全基因 GSEA 只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
+- GSVA 放 `GSVA/`，文件名以 `GSVA_` 开头；全矩阵 GSVA 只能放 `00_GSVA_all_genes_NOT_FC_or_topN`；子集 GSVA 用该子集基因（及与转移基因的交集）对样品打分
+- 肿瘤转移假说放 `Focused_metastasis/`；全基因组表另出 `*_FOCUS_metastasis.csv`（保留原始 p 与 `genome_wide_rank`）
+- 不要为凸显假说去改全基因组 p 值或重排全库 GO/KEGG
+- 转移基因：`metastasis_custom_genes.txt` + EMT / 迁移 / 侵袭 / ECM / 血管生成；细胞运动可作为转移子类，不要再把细胞骨架/线粒体当成主假说目录
+
+```r
+# ❌ BAD: 只出 GSEA；把 ORA 写进 GSEA/；改全库 p 值让转移通路排第一
+# ✅ GOOD: 每组 × 五套分层都出齐表和图；专项在 Focused_metastasis/
+```
