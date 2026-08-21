@@ -314,25 +314,154 @@ sample_info <- data.frame(
 )
 
 # -----------------------------------------------------------------------------
-# 3. ID 映射与绘图
+# 3. ID 映射与绘图（全表只映射一次；bitr 未映射警告不再每个子集刷屏）
 # -----------------------------------------------------------------------------
-map_to_entrez <- function(symbols) {
-  symbols <- unique(symbols[!is.na(symbols) & nzchar(symbols)])
-  if (length(symbols) == 0) return(data.frame(gene = character(), entrez = character()))
-  m <- tryCatch(
-    clusterProfiler::bitr(symbols, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db),
-    error = function(e) data.frame(SYMBOL = character(), ENTREZID = character())
-  )
-  if (nrow(m) == 0) {
-    m <- tryCatch(
-      clusterProfiler::bitr(symbols, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db),
-      error = function(e) data.frame(ENSEMBL = character(), ENTREZID = character())
+bitr_quiet <- function(keys, fromType) {
+  keys <- unique(as.character(keys))
+  keys <- keys[!is.na(keys) & nzchar(keys)]
+  if (length(keys) == 0) return(NULL)
+  suppressWarnings(suppressMessages(
+    tryCatch(
+      clusterProfiler::bitr(keys, fromType = fromType, toType = "ENTREZID", OrgDb = org.Hs.eg.db),
+      error = function(e) NULL
     )
-    if (nrow(m) > 0) names(m)[1] <- "SYMBOL"
+  ))
+}
+
+append_map <- function(acc, src, query_col) {
+  if (is.null(src) || nrow(src) == 0) return(acc)
+  df <- data.frame(
+    gene = as.character(src[[query_col]]),
+    entrez = as.character(src$ENTREZID),
+    via = query_col,
+    stringsAsFactors = FALSE
+  )
+  df <- df[!is.na(df$gene) & nzchar(df$gene) & !is.na(df$entrez) & nzchar(df$entrez), , drop = FALSE]
+  if (nrow(df) == 0) return(acc)
+  rbind(acc, df)
+}
+
+build_gene_entrez_map <- function(symbols, extra_alias = NULL) {
+  symbols <- unique(as.character(symbols))
+  symbols <- symbols[!is.na(symbols) & nzchar(symbols)]
+  acc <- data.frame(gene = character(), entrez = character(), via = character(), stringsAsFactors = FALSE)
+
+  acc <- append_map(acc, bitr_quiet(symbols, "SYMBOL"), "SYMBOL")
+  mapped <- unique(acc$gene)
+  rest <- setdiff(symbols, mapped)
+
+  if (length(rest) > 0) {
+    acc <- append_map(acc, bitr_quiet(rest, "ALIAS"), "ALIAS")
+    mapped <- unique(acc$gene)
+    rest <- setdiff(symbols, mapped)
   }
-  if (nrow(m) == 0) return(data.frame(gene = character(), entrez = character()))
-  m <- m[!duplicated(m[[1]]), ]
-  data.frame(gene = m[[1]], entrez = as.character(m[[2]]), stringsAsFactors = FALSE)
+
+  ens <- rest[grepl("^ENS[GT]", rest, ignore.case = TRUE)]
+  if (length(ens) > 0) {
+    acc <- append_map(acc, bitr_quiet(ens, "ENSEMBL"), "ENSEMBL")
+    mapped <- unique(acc$gene)
+    rest <- setdiff(symbols, mapped)
+  }
+
+  if (length(rest) > 0) {
+    all_sym <- tryCatch(AnnotationDbi::keys(org.Hs.eg.db, keytype = "SYMBOL"), error = function(e) character())
+    if (length(all_sym) > 0) {
+      hit <- match(toupper(rest), toupper(all_sym))
+      ok <- !is.na(hit)
+      if (any(ok)) {
+        canon <- all_sym[hit[ok]]
+        m_case <- bitr_quiet(canon, "SYMBOL")
+        if (!is.null(m_case) && nrow(m_case) > 0) {
+          m_case$QUERY <- rest[ok][match(m_case$SYMBOL, canon)]
+          acc <- append_map(acc, m_case, "QUERY")
+        }
+        mapped <- unique(acc$gene)
+        rest <- setdiff(symbols, mapped)
+      }
+    }
+  }
+
+  extra_alias <- unique(as.character(extra_alias))
+  extra_alias <- extra_alias[!is.na(extra_alias) & nzchar(extra_alias)]
+  if (length(extra_alias) > 0) {
+    acc <- append_map(acc, bitr_quiet(extra_alias, "ALIAS"), "ALIAS")
+  }
+
+  acc <- acc[!duplicated(acc$gene), , drop = FALSE]
+  unmapped <- setdiff(symbols, acc$gene)
+  list(map = acc[, c("gene", "entrez")], unmapped = unmapped, via = acc)
+}
+
+idmap <- build_gene_entrez_map(de$gene, extra_alias = NULL)
+gene_entrez_map <- idmap$map
+still <- setdiff(unique(de$gene), gene_entrez_map$gene)
+if (length(still) > 0) {
+  raws <- as.character(de$gene_raw[match(still, de$gene)])
+  parts <- strsplit(raws, "[,;|/]+")
+  long <- data.frame(
+    gene = rep(still, lengths(parts)),
+    part = trimws(unlist(parts)),
+    stringsAsFactors = FALSE
+  )
+  long <- long[!is.na(long$part) & nzchar(long$part), , drop = FALSE]
+  m_sym <- bitr_quiet(unique(long$part), "SYMBOL")
+  m_alias <- bitr_quiet(unique(long$part), "ALIAS")
+  conv <- data.frame(part = character(), ENTREZID = character(), stringsAsFactors = FALSE)
+  if (!is.null(m_sym) && nrow(m_sym) > 0) {
+    conv <- rbind(conv, data.frame(part = as.character(m_sym$SYMBOL), ENTREZID = as.character(m_sym$ENTREZID)))
+  }
+  if (!is.null(m_alias) && nrow(m_alias) > 0) {
+    conv <- rbind(conv, data.frame(part = as.character(m_alias$ALIAS), ENTREZID = as.character(m_alias$ENTREZID)))
+  }
+  if (nrow(conv) > 0) {
+    long$entrez <- conv$ENTREZID[match(long$part, conv$part)]
+    long <- long[!is.na(long$entrez), , drop = FALSE]
+    long <- long[!duplicated(long$gene), , drop = FALSE]
+    gene_entrez_map <- rbind(
+      gene_entrez_map,
+      data.frame(gene = long$gene, entrez = as.character(long$entrez), stringsAsFactors = FALSE)
+    )
+    gene_entrez_map <- gene_entrez_map[!duplicated(gene_entrez_map$gene), , drop = FALSE]
+  }
+}
+n_input <- length(unique(de$gene))
+n_map <- nrow(gene_entrez_map)
+n_fail <- n_input - n_map
+pct_fail <- if (n_input > 0) 100 * n_fail / n_input else 0
+idmap$unmapped <- setdiff(unique(de$gene), gene_entrez_map$gene)
+log_msg(sprintf(
+  "Entrez 映射: %d / %d 成功 (%.1f%%)；未映射 %d (%.1f%%)。XLOC / lncRNA / 旧别名无法映射是正常的，GO/KEGG/GSEA 只用映射成功的基因。",
+  n_map, n_input, 100 - pct_fail, n_fail, pct_fail
+))
+utils::write.csv(
+  merge(de[, c("gene", "gene_raw", "test_id"), drop = FALSE], gene_entrez_map, by = "gene", all.x = TRUE),
+  file.path(log_dir, "ID_mapping_all_genes.csv"),
+  row.names = FALSE
+)
+if (n_fail > 0) {
+  utils::write.csv(
+    data.frame(gene = idmap$unmapped, stringsAsFactors = FALSE),
+    file.path(log_dir, "ID_unmapped_genes.csv"),
+    row.names = FALSE
+  )
+}
+writeLines(
+  c(
+    "clusterProfiler::bitr 的 “x% of input gene IDs are fail to map” 已改为全表只映射一次，不再每个子集重复警告。",
+    sprintf("mapped=%d  unmapped=%d  fail_rate=%.2f%%", n_map, n_fail, pct_fail),
+    "未映射名单: ID_unmapped_genes.csv",
+    "这些基因仍留在差异表/火山图/热图里，只是不进入 GO/KEGG/GSEA/GSVA 的 Entrez 通路。"
+  ),
+  file.path(log_dir, "ID_mapping_README.txt")
+)
+
+map_to_entrez <- function(symbols) {
+  symbols <- unique(as.character(symbols))
+  symbols <- symbols[!is.na(symbols) & nzchar(symbols)]
+  if (length(symbols) == 0) return(data.frame(gene = character(), entrez = character()))
+  hit <- gene_entrez_map[gene_entrez_map$gene %in% symbols, , drop = FALSE]
+  if (nrow(hit) == 0) return(data.frame(gene = character(), entrez = character()))
+  hit[!duplicated(hit$gene), , drop = FALSE]
 }
 
 ranked_entrez <- function(df) {
@@ -900,7 +1029,8 @@ writeLines(
     "  Pvalue/p_le_0.5                             （p<=0.5，上下调都保留）",
     "",
     "每个非空子文件夹里应有：差异表、火山图、热图、GO/、Pathway/、KEGG/、GSEA/、GSVA/。",
-    "00_GSEA_all_genes_NOT_FC_or_topN 是全表基因 GSEA，不是分层结果。"),
+    "00_GSEA_all_genes_NOT_FC_or_topN 是全表基因 GSEA，不是分层结果。",
+    "bitr 未映射警告已抑制：全表只映射一次，见 00_logs/ID_mapping_README.txt。"),
   file.path(base, "00_READ_ME_先看这里.txt")
 )
 
