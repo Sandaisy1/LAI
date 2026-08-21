@@ -5,9 +5,10 @@
 # 元数据列：Protein.Group, Protein.Ids, Protein.Names, Genes, Proteotypic,
 #           Stripped.Sequence, Modified.Sequence, Precursor.Charge, Precursor.Id
 # 其余列：样品强度；默认最后两列为细胞上清。
-# 用法：
+# 用法（必须在 Terminal / 命令提示符里运行，不要贴进 R Console）：
 #   python ZZX_ALB_cleavage.py
 #   python ZZX_ALB_cleavage.py --data-dir C:/Users/Lenovo/Desktop/ZZX
+# 若只用 RStudio：source("ZZX_ALB_cleavage.R")
 
 from __future__ import annotations
 

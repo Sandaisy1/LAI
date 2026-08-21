@@ -6,7 +6,7 @@ alwaysApply: false
 
 # ZZX 蛋白质组：ALB（A 蛋白）细胞剪切推断
 
-仅当任务是 DIA-NN 肽段/剪切/信号肽分析时遵循。RNA-seq 仍按 `tg-brca-rnaseq.mdc`。脚本：`ZZX_ALB_cleavage.py`。
+仅当任务是 DIA-NN 肽段/剪切/信号肽分析时遵循。RNA-seq 仍按 `tg-brca-rnaseq.mdc`。脚本：`ZZX_ALB_cleavage.py`。不要把 `.py` 丢进 R Console（`from`/`import` 会报 unexpected string/symbol）；R 里请 `source("ZZX_ALB_cleavage.R")`，或在 Terminal 跑 `python ZZX_ALB_cleavage.py`。
 
 ## 数据
 
