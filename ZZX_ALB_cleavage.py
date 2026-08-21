@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# ZZX DIA-NN：根据上清肽段丰度推断 ALB（P02768）的细胞剪切，不是胰酶酶切。
+# ZZX DIA-NN：ALDH1A1 分析请用 R 脚本 ZZX_ALB_cleavage.R（目标蛋白 P00352）。
+# 不要把本 Python 文件贴进 R Console。
 # 输入：report.pr_matrix（TSV；也接受 report.pr.matri）
 # 元数据列：Protein.Group, Protein.Ids, Protein.Names, Genes, Proteotypic,
 #           Stripped.Sequence, Modified.Sequence, Precursor.Charge, Precursor.Id

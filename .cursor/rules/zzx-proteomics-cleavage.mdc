@@ -1,53 +1,49 @@
 ---
-description: ZZX DIA-NN 蛋白质组：按上清肽段丰度推测 ALB 细胞剪切位点与信号肽
+description: ZZX DIA-NN 蛋白质组：按上清肽段丰度推测 ALDH1A1 细胞剪切
 globs: "{**/ZZX/**,**/ZZX_ALB_cleavage.R,**/ZZX_ALB_cleavage.py,**/proteomics/**,**/*peptid*,**/*cleav*,**/*diann*,**/report.*matrix*}"
 alwaysApply: false
 ---
 
-# ZZX 蛋白质组：ALB（A 蛋白）细胞剪切推断
+# ZZX 蛋白质组：ALDH1A1 细胞剪切推断
 
-仅当任务是 DIA-NN 肽段/剪切/信号肽分析时遵循。RNA-seq 仍按 `tg-brca-rnaseq.mdc`。主脚本是 R：`ZZX_ALB_cleavage.R`。在 R Console 运行 `source("ZZX_ALB_cleavage.R", encoding = "UTF-8")`。不要把 Python 的 `from`/`import` 贴进 R。
+仅当任务是 DIA-NN 肽段/剪切分析时遵循。RNA-seq 仍按 `tg-brca-rnaseq.mdc`。主脚本是 R：`ZZX_ALB_cleavage.R`。在 R Console 运行 `source("ZZX_ALB_cleavage.R", encoding = "UTF-8")`。不要把 Python 的 `from`/`import` 贴进 R。
 
 ## 数据
 
 - 目录：`C:/Users/Lenovo/Desktop/ZZX`（也接受 `C:/User/Lenovo/Desktop/ZZX`）；缺失则回退 `ZZX/`、仓库根
-- 只用肽段表：`report.pr_matrix`（也接受 `report.pr.matri`）；有 `report.parquet`/`report.tsv` 时优先用 `Protein.Ids` 做覆盖
+- 只用肽段表：`report.pr_matrix`（也接受 `report.pr.matri`）
 - `report.pg_matrix` 只确认蛋白身份，禁止用蛋白总丰度猜剪切
 - 列：`Protein.Group`、`Protein.Ids`、`Protein.Names`、`Genes`、`Proteotypic`、`Stripped.Sequence`、`Modified.Sequence`、`Precursor.Charge`、`Precursor.Id`；**最后两列是细胞上清强度**
-- 目标是 **ALB / P02768 / ALBU_HUMAN**，不是截图里的 SERPINA5。序列用 UniProt P02768 SV=2（609 aa），不要混 isoform
+- 目标是 **ALDH1A1 / P00352 / AL1A1_HUMAN**（可接受基因同义名 `ALDH1` 精确匹配）。不要匹配 ALDH1A2/ALDH1B1，也不要再用 ALB/P02768。序列用 UniProt P00352 SV=2（501 aa）
 
 ## 预处理
 
 1. 空值与 DIA-NN 的 0 分开：不要把 NA 填成 0 再平均
 2. 同一 `Stripped.Sequence` 先按电荷分别记录，作图时对上清两列求和
-3. 优先 `Proteotypic == 1`；共享肽段不得算成 ALB 独有
-4. 肽段落到 P02768，得到 1-based `start`/`end`
+3. 优先 `Proteotypic == 1`；共享肽段不得算成 ALDH1A1 独有
+4. 肽段落到 P00352，得到 1-based `start`/`end`
 
 ## 细胞剪切 vs 胰酶
 
-上清样品经过胰酶消化。K/R 切口**不是**细胞剪切。
+上清样品经过胰酶消化。K/R 切口**不是**细胞剪切。只有 **neo-N / neo-C** 才是细胞内蛋白酶候选。
 
-- 胰酶 N 端：蛋白 N 端，或上一残基为 K/R（其后为 P 则按所用规则）
-- 胰酶 C 端：肽段以 K/R 结尾，或到达蛋白 C 端
-- **neo-N / neo-C** 才是细胞内/分泌路径蛋白酶候选
+ALDH1A1 是**胞质酶**，UniProt **没有 SIGNAL / PROPEP**。唯一注释加工是切除起始 Met，成熟链 **2–501**。肽段从 S2 开始（上一残基为 M）才是 MetAP 的直接 neo-N 证据。不要套用白蛋白的 18|19 / 24|25。
 
-ALB 特例：成熟 N 端 D25 前面是 R24，胰酶消化后 `DAHK...` 看起来像全胰酶肽，不能当成 neo-N。
-
-缺覆盖 ≠ 剪切（过短、疏水、漏切、修饰、离子化失败）。无重复不伪造 p 值。
+缺覆盖 ≠ 剪切。无重复不伪造 p 值。
 
 ## 推断（先证据，再 UniProt）
 
-1. **信号肽 18|19**（`SAYS|RGVF`，ER 信号肽酶）：1–18 无肽段且 25 之后有覆盖则支持；neo-N@19 才是直接证据
-2. **Propeptide 24|25**（`VFRR|DAHK`，高尔基体 furin-like RXXR）：19–24 缺失 + 成熟链覆盖；不要把胰酶肽 DAHK 当成细胞 neo-N
-3. **内部剪切**：neo-N/neo-C 位点，写出 P4–P4′；丰度阶跃只作弱提示
-4. 两列都是上清，不要当成处理 vs 对照，除非文件名明确分组
+1. **起始 Met 1|2**（MetAP）：neo-N@2 或 neo-C@1 为直接证据；仅残基1无覆盖不够
+2. **内部剪切**：neo-N/neo-C 位点，写出 P4–P4′；丰度阶跃只作弱提示
+3. 两列都是上清，不要当成处理 vs 对照，除非文件名明确分组
+4. 上清出现胞质 ALDH1A1 可能来自裂解/泄漏/囊泡，不要据此发明信号肽
 
-## 输出（`ZZX/cleavage_ALB/` 或数据目录下 `cleavage_ALB/`）
+## 输出（数据目录下 `cleavage_ALDH1A1/`）
 
-`ALB_peptide_map.csv`、`ALB_candidate_cleavage_sites.csv`、`ALB_residue_abundance.csv`、`ALB_peptide_coverage.svg`、`ALB_processing_schematic.svg`、**`ALB_full_length_cleavage.svg`（全长前体逐步剪切：信号肽 18|19 → propeptide 24|25 → 成熟链分泌，有 neo 末端再画内部片段）**、`00_inference_log.txt`。不要写 ORA/GSEA。
+`ALDH1A1_peptide_map.csv`、`ALDH1A1_candidate_cleavage_sites.csv`、`ALDH1A1_residue_abundance.csv`、`ALDH1A1_peptide_coverage.svg`、`ALDH1A1_processing_schematic.svg`、**`ALDH1A1_full_length_cleavage.svg`（全长 1–501 → 切掉 M1 → 有 neo 末端再画内部片段）**、`00_inference_log.txt`。不要写 ORA/GSEA。
 
 ```r
-# ❌ BAD: 用 pg_matrix 蛋白丰度猜剪切；把 K/R 或 ALB 的 R24|D25 当细胞剪切
-# ❌ BAD: N 端没肽段就断定信号肽；把 SERPINA5 行当成 ALB
-# ✅ GOOD: 过滤 Genes==ALB / P02768 → 只把 neo-N/neo-C 当细胞剪切 → 对照 UniProt 18|19 与 24|25
+# ❌ BAD: 用 pg_matrix 蛋白丰度猜剪切；把 K/R 当细胞剪切；给 ALDH1A1 编造信号肽
+# ❌ BAD: 仍按 ALB/P02768 过滤；模糊匹配到 ALDH1A2
+# ✅ GOOD: 过滤 Genes==ALDH1A1 / P00352 → neo-N/neo-C → 对照 UniProt Chain 2-501（Met 切除）
 ```
