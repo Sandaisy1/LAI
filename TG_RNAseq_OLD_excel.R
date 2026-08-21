@@ -35,7 +35,11 @@ bioc_required <- c(
   "clusterProfiler", "org.Hs.eg.db", "enrichplot", "AnnotationDbi",
   "fgsea", "msigdbr", "GSVA"
 )
-bioc_optional <- c("ReactomePA", "pathview")
+bioc_optional <- c(
+  "ReactomePA", "pathview",
+  "GenomicRanges", "GenomicFeatures", "IRanges", "S4Vectors", "GenomeInfoDb",
+  "TxDb.Hsapiens.UCSC.hg38.knownGene", "TxDb.Hsapiens.UCSC.hg19.knownGene"
+)
 
 install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
   miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
@@ -298,19 +302,11 @@ if (is.na(s2) || !nzchar(s2)) s2 <- "TG_sh1"
 comp_name <- paste0(s2, "_vs_", s1)
 log_msg("比较: ", s2, " vs ", s1, "  (目录名 ", comp_name, ")")
 
-heat_mat <- cbind(de$value_1, de$value_2)
-colnames(heat_mat) <- c(s1, s2)
-rownames(heat_mat) <- de$gene
-heat_mat[is.na(heat_mat)] <- 0
-if (max(heat_mat, na.rm = TRUE) > 50) {
-  heat_log <- log2(heat_mat + 1)
-} else {
-  heat_log <- heat_mat
-}
-sample_info <- data.frame(
-  sample = c(s1, s2),
-  group = c("NTC", "TG_sh1"),
-  stringsAsFactors = FALSE
+n_xloc_gene <- sum(grepl("^(XLOC|TCONS|CUFF)_", de$gene, ignore.case = TRUE))
+log_msg(
+  "gene 列为 XLOC/TCONS/CUFF 的行: ", n_xloc_gene,
+  " / ", nrow(de),
+  "。这些是 Cufflinks 组装位点 ID，后面的数字是不同基因组区间，不是同一基因的不同转录本。"
 )
 
 # -----------------------------------------------------------------------------
@@ -424,33 +420,196 @@ if (length(still) > 0) {
     gene_entrez_map <- gene_entrez_map[!duplicated(gene_entrez_map$gene), , drop = FALSE]
   }
 }
+
+is_cuff_id <- function(x) {
+  grepl("^(XLOC|TCONS|CUFF)_", as.character(x), ignore.case = TRUE)
+}
+
+parse_locus_df <- function(locus) {
+  locus <- as.character(locus)
+  m <- stringr::str_match(locus, "(?i)^(chr)?([^:]+):([0-9]+)-([0-9]+)")
+  chr_raw <- m[, 3]
+  chr <- ifelse(is.na(chr_raw), NA_character_, paste0("chr", sub("(?i)^chr", "", chr_raw, perl = TRUE)))
+  data.frame(
+    chr = chr,
+    start = suppressWarnings(as.integer(m[, 4])),
+    end = suppressWarnings(as.integer(m[, 5])),
+    stringsAsFactors = FALSE
+  )
+}
+
+load_txdb_pkg <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) return(NULL)
+  getExportedValue(pkg, pkg)
+}
+
+overlap_entrez <- function(chr, start, end, txdb) {
+  n <- length(chr)
+  ans <- rep(NA_character_, n)
+  ok <- !is.na(chr) & !is.na(start) & !is.na(end) & end >= start
+  if (!any(ok) || is.null(txdb)) return(ans)
+  gr <- GenomicRanges::GRanges(
+    seqnames = chr[ok],
+    ranges = IRanges::IRanges(pmin(start[ok], end[ok]), pmax(start[ok], end[ok]))
+  )
+  g <- GenomicFeatures::genes(txdb)
+  if (has_pkg("GenomeInfoDb")) {
+    gr <- tryCatch(GenomeInfoDb::keepStandardChromosomes(gr, pruning.mode = "coarse"), error = function(e) gr)
+    g <- tryCatch(GenomeInfoDb::keepStandardChromosomes(g, pruning.mode = "coarse"), error = function(e) g)
+    suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(gr) <- GenomeInfoDb::seqlevelsStyle(g)[1], silent = TRUE))
+  }
+  ol <- GenomicRanges::findOverlaps(gr, g, ignore.strand = TRUE)
+  if (length(ol) == 0) return(ans)
+  qh <- S4Vectors::queryHits(ol)
+  sh <- S4Vectors::subjectHits(ol)
+  ov <- GenomicRanges::pintersect(gr[qh], g[sh], ignore.strand = TRUE)
+  w <- GenomicRanges::width(ov)
+  entrez <- as.character(GenomicRanges::mcols(g)$gene_id)
+  if (length(entrez) != length(g) || all(is.na(entrez) | !nzchar(entrez))) {
+    entrez <- as.character(names(g))
+  }
+  ord <- order(qh, -w)
+  keep <- !duplicated(qh[ord])
+  q_ok <- which(ok)
+  ans[q_ok[qh[ord][keep]]] <- entrez[sh[ord][keep]]
+  ans
+}
+
+entrez_to_symbol <- function(entrez) {
+  entrez <- as.character(entrez)
+  out <- rep(NA_character_, length(entrez))
+  ok <- !is.na(entrez) & nzchar(entrez)
+  if (!any(ok)) return(out)
+  sym <- tryCatch(
+    AnnotationDbi::mapIds(
+      org.Hs.eg.db, keys = unique(entrez[ok]), column = "SYMBOL",
+      keytype = "ENTREZID", multiVals = "first"
+    ),
+    error = function(e) NULL
+  )
+  if (is.null(sym)) return(out)
+  out[ok] <- unname(sym[entrez[ok]])
+  out
+}
+
+de$xloc_rescued <- FALSE
+de$map_via <- ifelse(de$gene %in% gene_entrez_map$gene, "SYMBOL/ALIAS", NA_character_)
+need_idx <- which(
+  (is_cuff_id(de$gene) | is_cuff_id(de$gene_raw) | is_cuff_id(de$test_id)) &
+    !(de$gene %in% gene_entrez_map$gene)
+)
+if (length(need_idx) == 0) {
+  need_idx <- which(!(de$gene %in% gene_entrez_map$gene) & !is.na(de$locus) & nzchar(de$locus))
+}
+
+can_overlap <- has_pkg("GenomicRanges") && has_pkg("GenomicFeatures") && has_pkg("IRanges")
+if (length(need_idx) > 0 && !can_overlap) {
+  log_msg("XLOC 有 ", length(need_idx), " 个未映射，但 GenomicRanges/TxDb 未安装，无法用 locus 补注释")
+}
+if (length(need_idx) > 0 && can_overlap) {
+  loc <- parse_locus_df(de$locus[need_idx])
+  tx38 <- load_txdb_pkg("TxDb.Hsapiens.UCSC.hg38.knownGene")
+  tx19 <- load_txdb_pkg("TxDb.Hsapiens.UCSC.hg19.knownGene")
+  rate38 <- if (is.null(tx38)) -1 else mean(!is.na(overlap_entrez(loc$chr, loc$start, loc$end, tx38)))
+  rate19 <- if (is.null(tx19)) -1 else mean(!is.na(overlap_entrez(loc$chr, loc$start, loc$end, tx19)))
+  if (rate38 < 0 && rate19 < 0) {
+    log_msg("未安装 TxDb hg38/hg19，XLOC 无法用坐标补基因名")
+  } else {
+    use_hg19 <- rate19 > rate38
+    txdb <- if (use_hg19) tx19 else tx38
+    build <- if (use_hg19) "hg19" else "hg38"
+    log_msg(sprintf(
+      "XLOC 用 locus 重叠已知基因：hg38 overlap=%.1f%%, hg19 overlap=%.1f%%，选用 %s",
+      100 * max(rate38, 0), 100 * max(rate19, 0), build
+    ))
+    hit_entrez <- overlap_entrez(loc$chr, loc$start, loc$end, txdb)
+    hit_sym <- entrez_to_symbol(hit_entrez)
+    ok <- !is.na(hit_entrez) & nzchar(hit_entrez)
+    n_rescue <- sum(ok)
+    log_msg("XLOC/未映射位点经 locus 补到 Entrez: ", n_rescue, " / ", length(need_idx))
+    if (n_rescue > 0) {
+      idx <- need_idx[ok]
+      de$xloc_rescued[idx] <- TRUE
+      de$map_via[idx] <- paste0("locus_", build)
+      new_sym <- hit_sym[ok]
+      new_ent <- as.character(hit_entrez[ok])
+      fallback <- is.na(new_sym) | !nzchar(new_sym)
+      new_sym[fallback] <- paste0("ENTREZ_", new_ent[fallback])
+      de$gene[idx] <- new_sym
+      add <- data.frame(gene = new_sym, entrez = new_ent, stringsAsFactors = FALSE)
+      gene_entrez_map <- rbind(gene_entrez_map, add)
+      gene_entrez_map <- gene_entrez_map[!duplicated(gene_entrez_map$gene), , drop = FALSE]
+      loc_report <- data.frame(
+        test_id = de$test_id[idx],
+        gene_raw = de$gene_raw[idx],
+        locus = de$locus[idx],
+        genome = build,
+        entrez = new_ent,
+        gene_symbol = new_sym,
+        stringsAsFactors = FALSE
+      )
+      utils::write.csv(loc_report, file.path(log_dir, "XLOC_rescued_by_locus.csv"), row.names = FALSE)
+    }
+  }
+}
+
+de <- de[order(de$pvalue, -abs(de$log2FC), na.last = TRUE), , drop = FALSE]
+de <- de[!duplicated(de$gene), , drop = FALSE]
+gene_entrez_map <- gene_entrez_map[gene_entrez_map$gene %in% de$gene, , drop = FALSE]
+log_msg("locus 补注释并按官方符号去重后基因数: ", nrow(de))
+
+heat_mat <- cbind(de$value_1, de$value_2)
+colnames(heat_mat) <- c(s1, s2)
+rownames(heat_mat) <- de$gene
+heat_mat[is.na(heat_mat)] <- 0
+if (max(heat_mat, na.rm = TRUE) > 50) {
+  heat_log <- log2(heat_mat + 1)
+} else {
+  heat_log <- heat_mat
+}
+sample_info <- data.frame(
+  sample = c(s1, s2),
+  group = c("NTC", "TG_sh1"),
+  stringsAsFactors = FALSE
+)
+
 n_input <- length(unique(de$gene))
-n_map <- nrow(gene_entrez_map)
+n_map <- sum(de$gene %in% gene_entrez_map$gene)
 n_fail <- n_input - n_map
+n_xloc_left <- sum(is_cuff_id(de$gene))
 pct_fail <- if (n_input > 0) 100 * n_fail / n_input else 0
 idmap$unmapped <- setdiff(unique(de$gene), gene_entrez_map$gene)
 log_msg(sprintf(
-  "Entrez 映射: %d / %d 成功 (%.1f%%)；未映射 %d (%.1f%%)。XLOC / lncRNA / 旧别名无法映射是正常的，GO/KEGG/GSEA 只用映射成功的基因。",
-  n_map, n_input, 100 - pct_fail, n_fail, pct_fail
+  "Entrez 映射: %d / %d 成功 (%.1f%%)；未映射 %d (%.1f%%)，其中仍为 XLOC 的 %d 个（基因组上对不上已知基因的新组装位点）。",
+  n_map, n_input, 100 - pct_fail, n_fail, pct_fail, n_xloc_left
 ))
 utils::write.csv(
-  merge(de[, c("gene", "gene_raw", "test_id"), drop = FALSE], gene_entrez_map, by = "gene", all.x = TRUE),
+  merge(
+    de[, c("gene", "gene_raw", "test_id", "locus", "xloc_rescued", "map_via"), drop = FALSE],
+    gene_entrez_map, by = "gene", all.x = TRUE
+  ),
   file.path(log_dir, "ID_mapping_all_genes.csv"),
   row.names = FALSE
 )
 if (n_fail > 0) {
-  utils::write.csv(
-    data.frame(gene = idmap$unmapped, stringsAsFactors = FALSE),
-    file.path(log_dir, "ID_unmapped_genes.csv"),
-    row.names = FALSE
-  )
+  um <- de[de$gene %in% idmap$unmapped, c("gene", "gene_raw", "test_id", "locus"), drop = FALSE]
+  utils::write.csv(um, file.path(log_dir, "ID_unmapped_genes.csv"), row.names = FALSE)
 }
 writeLines(
   c(
-    "clusterProfiler::bitr 的 “x% of input gene IDs are fail to map” 已改为全表只映射一次，不再每个子集重复警告。",
-    sprintf("mapped=%d  unmapped=%d  fail_rate=%.2f%%", n_map, n_fail, pct_fail),
+    "为什么 XLOC_000001、XLOC_000002 不能直接转成 Entrez：",
+    "  XLOC_ 是 Cufflinks 给每个组装出来的基因组区间编的流水号。",
+    "  后面的数字不同 = 染色体上不同的一段（locus 不同），不是同一个基因的别名。",
+    "  NCBI org.Hs.eg.db 里没有 XLOC 这种 ID，所以 bitr(SYMBOL→ENTREZID) 一定会失败。",
+    "",
+    "脚本做法：gene 列已是官方符号的，用 SYMBOL/ALIAS 转 Entrez；",
+    "仍是 XLOC 的，用 Excel 的 locus（如 chr1:11873-14409）去和 hg38/hg19 已知基因重叠。",
+    "重叠上的会改成官方符号并进入 GO/KEGG；对不上的是新位点，留在差异表/火山图/热图，不进通路。",
+    "",
+    sprintf("mapped=%d  unmapped=%d  still_XLOC=%d  fail_rate=%.2f%%", n_map, n_fail, n_xloc_left, pct_fail),
+    "全表映射: ID_mapping_all_genes.csv",
     "未映射名单: ID_unmapped_genes.csv",
-    "这些基因仍留在差异表/火山图/热图里，只是不进入 GO/KEGG/GSEA/GSVA 的 Entrez 通路。"
+    "坐标救回的 XLOC: XLOC_rescued_by_locus.csv（若有）"
   ),
   file.path(log_dir, "ID_mapping_README.txt")
 )

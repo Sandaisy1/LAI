@@ -27,6 +27,7 @@ alwaysApply: true
 | M | `q_value` | FDR |
 | N | `significant` | yes/no |
 
+- `test_id` 常见为 `XLOC_000001`：这是 Cufflinks 组装位点流水号，数字不同就是基因组上不同区间，不是同一基因。`gene` 已是官方符号时用它做富集；`gene` 仍是 XLOC 时用 `locus` 与 hg38/hg19 已知基因重叠补 Entrez，对不上的新位点留在差异表，不进 GO/KEGG
 - 只保留 `status == "OK"`，丢掉 `NOTEST`
 - `FC = 2^(log2(fold_change))`；上调 = `log2(fold_change) >= 0`
 - 排名按 `log2(fold_change)` **降序**（不要用 `q_value` 排序）
