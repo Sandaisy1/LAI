@@ -115,7 +115,10 @@ def parse_num(value) -> float | None:
 
 
 def tokens(value: str) -> list[str]:
-    return [p for p in re.split(r"[;|,/\s]+", str(value or "").strip()) if p]
+    text = str(value or "").strip()
+    for sep in (";", "|", ",", "/"):
+        text = text.replace(sep, " ")
+    return [part for part in text.split() if part]
 
 
 def is_alb_row(row: dict) -> bool:
@@ -123,12 +126,13 @@ def is_alb_row(row: dict) -> bool:
     ids = {i.split("-")[0].upper() for i in tokens(row.get("Protein.Ids", ""))}
     names = str(row.get("Protein.Names", "")).upper()
     group = str(row.get("Protein.Group", "")).upper()
-    return (
-        ALB_GENE in genes
-        or ALB_UNIPROT in ids
-        or ALB_UNIPROT in group
-        or ALB_NAME in names
-    )
+    if ALB_GENE in genes:
+        return True
+    if ALB_UNIPROT in ids:
+        return True
+    if ALB_UNIPROT in group:
+        return True
+    return ALB_NAME in names
 
 
 def find_report(data_dir: Path | None) -> Path:
@@ -336,7 +340,7 @@ def svg_escape(text: str) -> str:
         .replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
-        .replace('"', "&quot;")
+        .replace(chr(34), "&quot;")
     )
 
 
