@@ -370,7 +370,7 @@ write_full_length_svg <- function(path, protein, candidates, n_term_cov) {
     "<rect width='100%' height='100%' fill='#ffffff'/>",
     "<style>text{font-family:Microsoft YaHei,SimHei,Arial,Helvetica,sans-serif}</style>",
     '<text x="40" y="28" font-size="18" font-weight="700">Full-length ALDH1A1 cleavage  全长蛋白如何剪切</text>',
-    '<text x="40" y="50" font-size="12" fill="#555">P00352 cytosolic ALDH1A1 (1-501). No signal peptide. Cellular processing only (not trypsin).</text>'
+    '<text x="40" y="50" font-size="12" fill="#555">P00352 cytosolic ALDH1A1 (1-501). No signal peptide. Full-length peptide coverage does not rule out cleavage: both fragments can remain in the supernatant.</text>'
   )
   draw_domains <- function(y, keep_from, keep_to, ghost = FALSE) {
     domains <- list(
@@ -453,7 +453,7 @@ write_full_length_svg <- function(path, protein, candidates, n_term_cov) {
   if (nrow(internals) > 0L) {
     y3 <- y2 + step_gap
     cuts <- paste(sprintf("%s|%s", internals$after_residue, internals$before_residue), collapse = ", ")
-    lines <- c(lines, step_badge(3, y3, "Additional cellular cuts  内部剪切", paste0("neo-N / neo-C (not trypsin): ", cuts)), draw_domains(y3, 2, n))
+    lines <- c(lines, step_badge(3, y3, "Additional cellular cuts  内部剪切", paste0("neo-N / neo-C (not trypsin): ", cuts, ". Both sides can still be detected.")), draw_domains(y3, 2, n))
     for (i in seq_len(nrow(internals))) {
       after <- as.integer(internals$after_residue[i])
       lines <- c(lines, draw_scissors(after, y3, "#6c3483", paste0("cut ", after, "|", after + 1L), paste(internals$motif_P4_P4prime[i], internals$protease_hint[i])))
@@ -494,7 +494,7 @@ write_coverage_svg <- function(path, protein, pep, sample_names, profiles) {
     sprintf('<svg xmlns="http://www.w3.org/2000/svg" width="%s" height="%s">', width, height),
     "<style>text{font-family:Arial,Helvetica,sans-serif;font-size:11px}</style>",
     '<text x="50" y="24" font-size="16">ALDH1A1 residue abundance (cell supernatant) and peptide map</text>',
-    '<text x="50" y="42" fill="#555">grey=trypsin; orange=cellular neo-N; blue=cellular neo-C; red=both</text>',
+    '<text x="50" y="42" fill="#555">grey=trypsin; orange=cellular neo-N; blue=cellular neo-C; red=both. Peptides along the whole chain are expected if both cleavage products stay in the sample.</text>',
     sprintf('<rect x="%s" y="55" width="%s" height="%s" fill="#fafafa" stroke="#ccc"/>', x0, bar_w, track_h)
   )
   for (pair in list(c(1, 1, "#f4c7c3"), c(2, n, "#eaf6e8"))) {
@@ -901,6 +901,12 @@ zzx_alb_run <- function(data_dir = zzx_data_dir, n_last = zzx_n_last, outdir = N
   write_full_length_svg(file.path(outdir, "ALDH1A1_full_length_cleavage.svg"), protein, candidates, n_term_cov)
   write_coverage_svg(file.path(outdir, "ALDH1A1_peptide_coverage.svg"), protein, pep, sample_names, profiles)
 
+  logs <- zzx_log(logs, "")
+  logs <- zzx_log(logs, "======== 如何读覆盖图（全长有肽段 ≠ 没有剪切） ========")
+  logs <- zzx_log(logs, "DIA 测的是上清里所有多肽。细胞里把 ALDH1A1 从中间切开后，若 N 段和 C 段都还留在上清，胰酶消化后两段都会出肽段，映射回前体序列时看起来仍铺满 1-501。")
+  logs <- zzx_log(logs, "切掉起始 Met 只少 1 个残基，覆盖图几乎不变，这是正常的。")
+  logs <- zzx_log(logs, "只有当一侧片段被降解、滞留在细胞内或根本没进上清时，对应区域才会系统性缺失。单点空洞更常来自肽段过短/过长、疏水、漏切或离子化失败，不能单独当剪切位点。")
+  logs <- zzx_log(logs, "因此本分析以 neo-N/neo-C（非胰酶末端）为细胞剪切的直接证据；覆盖空洞只作弱提示。")
   logs <- zzx_log(logs, "")
   logs <- zzx_log(logs, "======== ALDH1A1 细胞剪切推断 ========")
   met_row <- candidates[candidates$type == "initiator_met", ][1, ]
