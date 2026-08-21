@@ -1,12 +1,12 @@
 ---
 description: ZZX DIA-NN 蛋白质组：按上清肽段丰度推测 ALB 细胞剪切位点与信号肽
-globs: "{**/ZZX/**,**/ZZX_ALB_cleavage.py,**/proteomics/**,**/*peptid*,**/*cleav*,**/*diann*,**/report.*matrix*}"
+globs: "{**/ZZX/**,**/ZZX_ALB_cleavage.R,**/ZZX_ALB_cleavage.py,**/proteomics/**,**/*peptid*,**/*cleav*,**/*diann*,**/report.*matrix*}"
 alwaysApply: false
 ---
 
 # ZZX 蛋白质组：ALB（A 蛋白）细胞剪切推断
 
-仅当任务是 DIA-NN 肽段/剪切/信号肽分析时遵循。RNA-seq 仍按 `tg-brca-rnaseq.mdc`。脚本：`ZZX_ALB_cleavage.py`。不要把 `.py` 丢进 R Console（`from`/`import` 会报 unexpected string/symbol）；R 里请 `source("ZZX_ALB_cleavage.R")`，或在 Terminal 跑 `python ZZX_ALB_cleavage.py`。
+仅当任务是 DIA-NN 肽段/剪切/信号肽分析时遵循。RNA-seq 仍按 `tg-brca-rnaseq.mdc`。主脚本是 R：`ZZX_ALB_cleavage.R`。在 R Console 运行 `source("ZZX_ALB_cleavage.R", encoding = "UTF-8")`。不要把 Python 的 `from`/`import` 贴进 R。
 
 ## 数据
 
@@ -46,7 +46,7 @@ ALB 特例：成熟 N 端 D25 前面是 R24，胰酶消化后 `DAHK...` 看起�
 
 `ALB_peptide_map.csv`、`ALB_candidate_cleavage_sites.csv`、`ALB_residue_abundance.csv`、`ALB_peptide_coverage.svg`、`ALB_processing_schematic.svg`、**`ALB_full_length_cleavage.svg`（全长前体逐步剪切：信号肽 18|19 → propeptide 24|25 → 成熟链分泌，有 neo 末端再画内部片段）**、`00_inference_log.txt`。不要写 ORA/GSEA。
 
-```python
+```r
 # ❌ BAD: 用 pg_matrix 蛋白丰度猜剪切；把 K/R 或 ALB 的 R24|D25 当细胞剪切
 # ❌ BAD: N 端没肽段就断定信号肽；把 SERPINA5 行当成 ALB
 # ✅ GOOD: 过滤 Genes==ALB / P02768 → 只把 neo-N/neo-C 当细胞剪切 → 对照 UniProt 18|19 与 24|25
