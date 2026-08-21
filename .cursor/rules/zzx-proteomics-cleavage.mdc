@@ -33,6 +33,18 @@ ALDH1A1 是**胞质酶**，UniProt **没有 SIGNAL / PROPEP**。唯一注释加�
 
 **全长都有肽段也不等于没有剪切。** 中间切开后，若两段产物都还在上清，胰酶消化仍会在原序列两端都给出肽段，覆盖图可以铺满 1–501。切掉起始 Met 只少 1 个残基，覆盖几乎不变。区域系统性缺失只在一侧片段离开上清（降解/滞留细胞）时出现；单点空洞优先考虑鉴定失败。细胞剪切的直接证据是 neo-N/neo-C，不是覆盖空洞。
 
+## 按肽段强度判断可能缺失的部位
+
+可以。用残基强度（覆盖该残基的肽段强度和）相对“有肽段残基的中位强度”来标弱覆盖，但必须先对照理论胰酶肽。
+
+1. 体外胰酶：K/R 后切开，KP/RP 不切；长度 6–35 aa 视为 DIA 可检出
+2. 残基 `relative = intensity / median(检测到的残基)`；无肽段或 `< 0.1×中位` 标为低
+3. 相邻低区合并（间隔 ≤ 8 aa）；跨度 < 12 aa、仅缺 Met1–2、或该段没有可检出理论肽 → `likely_technical`
+4. 有可检出理论肽但上清未打到或远低于中位 → `possible_missing_fragment`
+5. 仍有肽段、只是弱于中位 → `low_abundance_stretch`
+
+缺失部位 ≠ 剪切位点。更像一侧片段离开上清。不要为了凸显空洞去改全基因组/全蛋白 p 值（这里也没有 p）。
+
 ## 推断（先证据，再 UniProt）
 
 1. **起始 Met 1|2**（MetAP）：neo-N@2 或 neo-C@1 为直接证据；仅残基1无覆盖不够
@@ -42,10 +54,12 @@ ALDH1A1 是**胞质酶**，UniProt **没有 SIGNAL / PROPEP**。唯一注释加�
 
 ## 输出（数据目录下 `cleavage_ALDH1A1/`）
 
-`ALDH1A1_peptide_map.csv`、`ALDH1A1_candidate_cleavage_sites.csv`、`ALDH1A1_residue_abundance.csv`、`ALDH1A1_peptide_coverage.svg`、`ALDH1A1_processing_schematic.svg`、**`ALDH1A1_full_length_cleavage.svg`（全长 1–501 → 切掉 M1 → 有 neo 末端再画内部片段）**、`00_inference_log.txt`。不要写 ORA/GSEA。
+`ALDH1A1_peptide_map.csv`、`ALDH1A1_candidate_cleavage_sites.csv`、`ALDH1A1_residue_abundance.csv`（含 `relative_to_median`）、**`ALDH1A1_missing_regions.csv`（按强度判断的缺失/弱覆盖区段）**、`ALDH1A1_peptide_coverage.svg`（红底=可能缺失，黄底=弱信号，灰底=技术漏检）、`ALDH1A1_processing_schematic.svg`、**`ALDH1A1_full_length_cleavage.svg`（全长 1–501 → 切掉 M1 → 有 neo 末端再画内部片段）**、`00_inference_log.txt`。不要写 ORA/GSEA。
 
 ```r
 # ❌ BAD: 用 pg_matrix 蛋白丰度猜剪切；把 K/R 当细胞剪切；给 ALDH1A1 编造信号肽
 # ❌ BAD: 仍按 ALB/P02768 过滤；模糊匹配到 ALDH1A2
+# ❌ BAD: 把覆盖空洞直接当剪切位点；不对照理论胰酶肽就把低强度当缺失片段
 # ✅ GOOD: 过滤 Genes==ALDH1A1 / P00352 → neo-N/neo-C → 对照 UniProt Chain 2-501（Met 切除）
+# ✅ GOOD: 强度缺失先对照理论胰酶肽，possible_missing_fragment 与 likely_technical 分开写
 ```

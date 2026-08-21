@@ -5,6 +5,10 @@
 # 或先改数据目录：
 #   zzx_data_dir <- "C:/Users/Lenovo/Desktop/ZZX"
 #   source("ZZX_ALB_cleavage.R", encoding = "UTF-8")
+#
+# 全长肽段覆盖 ≠ 没有剪切。两段产物都在上清时，映射回前体仍可铺满 1–501。
+# 按强度判断缺失：只在“理论胰酶肽本可检出、但实测远低于蛋白中位”时标可能缺失。
+# 细胞剪切：只看非胰酶新 N/C 端。K/R 切口不是细胞剪切。缺失 ≠ 剪切位点。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1)
@@ -472,7 +476,7 @@ write_full_length_svg <- function(path, protein, candidates, n_term_cov) {
 }
 
 
-write_coverage_svg <- function(path, protein, pep, sample_names, profiles) {
+write_coverage_svg <- function(path, protein, pep, sample_names, profiles, gaps = NULL) {
   n <- nchar(protein)
   width <- 1000
   track_h <- 140
@@ -494,13 +498,37 @@ write_coverage_svg <- function(path, protein, pep, sample_names, profiles) {
     sprintf('<svg xmlns="http://www.w3.org/2000/svg" width="%s" height="%s">', width, height),
     "<style>text{font-family:Arial,Helvetica,sans-serif;font-size:11px}</style>",
     '<text x="50" y="24" font-size="16">ALDH1A1 residue abundance (cell supernatant) and peptide map</text>',
-    '<text x="50" y="42" fill="#555">grey=trypsin; orange=cellular neo-N; blue=cellular neo-C; red=both. Peptides along the whole chain are expected if both cleavage products stay in the sample.</text>',
+    '<text x="50" y="42" fill="#555">red band=possible missing (visible tryptic peptides absent/very weak); yellow=low abundance; grey=technical. Peptide bars: grey=trypsin; orange=neo-N; blue=neo-C; red=both.</text>',
     sprintf('<rect x="%s" y="55" width="%s" height="%s" fill="#fafafa" stroke="#ccc"/>', x0, bar_w, track_h)
   )
   for (pair in list(c(1, 1, "#f4c7c3"), c(2, n, "#eaf6e8"))) {
     xa <- x_at(as.integer(pair[[1]])) - bar_w / n / 2
     xb <- x_at(as.integer(pair[[2]])) + bar_w / n / 2
     lines <- c(lines, sprintf('<rect x="%.1f" y="55" width="%.1f" height="%s" fill="%s" opacity="0.45"/>', xa, xb - xa, track_h, pair[[3]]))
+  }
+  if (!is.null(gaps) && is.data.frame(gaps) && nrow(gaps) > 0L && "sample" %in% names(gaps)) {
+    ghere <- if (any(gaps$sample == "mean")) {
+      gaps[gaps$sample == "mean", , drop = FALSE]
+    } else {
+      gaps
+    }
+    fill_map <- c(
+      possible_missing_fragment = "#fecaca",
+      low_abundance_stretch = "#fde68a",
+      likely_technical = "#e5e7eb"
+    )
+    for (gi in seq_len(nrow(ghere))) {
+      fill <- fill_map[[as.character(ghere$class[gi])]]
+      if (is.null(fill) || !nzchar(fill)) {
+        fill <- "#fde68a"
+      }
+      xa <- x_at(as.integer(ghere$start[gi])) - bar_w / n / 2
+      xb <- x_at(as.integer(ghere$end[gi])) + bar_w / n / 2
+      lines <- c(lines, sprintf(
+        '<rect x="%.1f" y="55" width="%.1f" height="%s" fill="%s" opacity="0.55"/>',
+        xa, max(0.4, xb - xa), track_h, fill
+      ))
+    }
   }
   colors <- c("#1f77b4", "#d62728", "#2ca02c")
   series_names <- c(sample_names, "mean")
@@ -582,6 +610,7 @@ infer_uniprot <- function(profile, neo_n, neo_c, protein) {
       "UniProt 无信号肽/propeptide。注释加工是切除起始 Met，成熟链 2-", n, "。",
       "残基1 ", cov_label(met), "，残基2-80 ", cov_label(mat), "。",
       if (neo_ok) " 有 neo-N@2 或 neo-C@1，直接支持 Met 切除。" else " 无 neo 末端时，仅靠覆盖不能单独定论。",
+      " 全长有肽段是预期现象：Met 切除几乎不改变覆盖；内部切开后两段若都在上清，映射回前体仍可铺满全长。",
       " 上清中检出胞质 ALDH1A1 可能来自裂解、泄漏或囊泡，内部 neo 末端才是额外细胞剪切证据。"
     ),
     note_zh = "Chain 2-501；不要把 ALDH1A1 当成有信号肽的分泌蛋白",
@@ -666,6 +695,199 @@ abundance_steps <- function(profile, protein, window = 15L) {
   steps <- do.call(rbind, out)
   steps <- steps[order(-abs(steps$log2_step)), , drop = FALSE]
   head(steps, 15L)
+}
+
+# 理论胰酶肽：K/R 后切开，KP/RP 不切。6–35 aa 视为 DIA 可检出。
+theoretical_tryptic_peptides <- function(seq, min_len = 6L, max_len = 35L) {
+  n <- nchar(seq)
+  empty <- data.frame(
+    start = integer(), end = integer(), length = integer(),
+    peptide = character(), ms_visible = logical(), stringsAsFactors = FALSE
+  )
+  if (n < 1L) {
+    return(empty)
+  }
+  chars <- strsplit(seq, "", fixed = TRUE)[[1]]
+  cuts <- integer()
+  if (n >= 2L) {
+    for (i in seq_len(n - 1L)) {
+      if (chars[i] %in% c("K", "R") && !identical(chars[i + 1L], "P")) {
+        cuts <- c(cuts, i)
+      }
+    }
+  }
+  bounds <- unique(c(0L, cuts, n))
+  nseg <- length(bounds) - 1L
+  start <- bounds[seq_len(nseg)] + 1L
+  stop <- bounds[seq_len(nseg) + 1L]
+  plen <- as.integer(stop - start + 1L)
+  data.frame(
+    start = as.integer(start),
+    end = as.integer(stop),
+    length = plen,
+    peptide = substring(seq, start, stop),
+    ms_visible = plen >= min_len & plen <= max_len,
+    stringsAsFactors = FALSE
+  )
+}
+
+relative_from_profile <- function(x) {
+  pos <- x[!is.na(x) & x > 0]
+  med <- if (length(pos)) stats::median(pos) else NA_real_
+  rel <- if (is.finite(med) && med > 0) x / med else rep(NA_real_, length(x))
+  list(median = med, rel = as.numeric(rel))
+}
+
+merge_residue_runs <- function(mask, merge_gap = 8L) {
+  n <- length(mask)
+  mask[is.na(mask)] <- FALSE
+  empty <- data.frame(start = integer(), end = integer(), stringsAsFactors = FALSE)
+  if (!any(mask)) {
+    return(empty)
+  }
+  runs <- list()
+  i <- 1L
+  while (i <= n) {
+    if (!isTRUE(mask[i])) {
+      i <- i + 1L
+      next
+    }
+    j <- i
+    while (j <= n && isTRUE(mask[j])) {
+      j <- j + 1L
+    }
+    runs[[length(runs) + 1L]] <- c(i, j - 1L)
+    i <- j
+  }
+  merged <- list(runs[[1]])
+  if (length(runs) >= 2L) {
+    for (k in 2:length(runs)) {
+      prev <- merged[[length(merged)]]
+      cur <- runs[[k]]
+      if (cur[1] - prev[2] - 1L <= merge_gap) {
+        merged[[length(merged)]] <- c(prev[1], cur[2])
+      } else {
+        merged[[length(merged) + 1L]] <- cur
+      }
+    }
+  }
+  data.frame(
+    start = vapply(merged, function(v) as.integer(v[[1]]), integer(1)),
+    end = vapply(merged, function(v) as.integer(v[[2]]), integer(1)),
+    stringsAsFactors = FALSE
+  )
+}
+
+peptides_detected_in <- function(pep, sample_name) {
+  if (!nrow(pep)) {
+    return(pep[0, , drop = FALSE])
+  }
+  if (identical(sample_name, "mean")) {
+    keep <- !is.na(pep$abundance_mean) & pep$abundance_mean > 0
+  } else if (sample_name %in% names(pep)) {
+    keep <- !is.na(pep[[sample_name]]) & pep[[sample_name]] > 0
+  } else {
+    keep <- rep(TRUE, nrow(pep))
+  }
+  pep[keep, , drop = FALSE]
+}
+
+empty_missing_regions <- function() {
+  data.frame(
+    sample = character(),
+    start = integer(),
+    end = integer(),
+    length = integer(),
+    class = character(),
+    n_theoretical_visible_tryptic = integer(),
+    n_observed_peptides = integer(),
+    mean_relative_to_median = numeric(),
+    median_detected = numeric(),
+    note = character(),
+    stringsAsFactors = FALSE
+  )
+}
+
+classify_missing_span <- function(start, end, theo, pep_obs, rel, min_span) {
+  span_len <- end - start + 1L
+  t_here <- theo[theo$end >= start & theo$start <= end, , drop = FALSE]
+  vis <- if (nrow(t_here)) t_here[t_here$ms_visible, , drop = FALSE] else t_here
+  obs <- pep_obs[pep_obs$end >= start & pep_obs$start <= end, , drop = FALSE]
+  n_vis <- nrow(vis)
+  n_obs <- nrow(obs)
+  vals <- rel[start:end]
+  vals[is.na(vals)] <- 0
+  mean_rel <- mean(vals)
+  if (!is.finite(mean_rel)) {
+    mean_rel <- 0
+  }
+  cls <- "low_abundance_stretch"
+  if (start <= 2L && end <= 2L) {
+    cls <- "likely_technical"
+    note <- "N 端 Met / MetAP 区，DIA 常检不到，不作为缺失片段"
+  } else if (!n_vis) {
+    cls <- "likely_technical"
+    note <- "这段理论胰酶肽太短或太长，质谱本来就难检出"
+  } else if (!n_obs) {
+    cls <- "possible_missing_fragment"
+    note <- sprintf("有 %d 条可检出理论胰酶肽，上清完全未打到", n_vis)
+  } else if (mean_rel < 0.1) {
+    cls <- "possible_missing_fragment"
+    note <- sprintf("有可检出理论肽，但相对强度仅 %.3f（阈值 0.1×中位）", mean_rel)
+  } else {
+    note <- sprintf("肽段弱于中位（相对强度 %.3f），仍有检出，优先当覆盖不均", mean_rel)
+  }
+  if (span_len < min_span && identical(cls, "possible_missing_fragment")) {
+    cls <- "likely_technical"
+    note <- paste0(note, "；跨度 < ", min_span, " aa，更像漏检而不是整段缺失")
+  }
+  list(
+    class = cls,
+    n_theoretical_visible = n_vis,
+    n_observed_peptides = n_obs,
+    mean_relative = mean_rel,
+    note = note
+  )
+}
+
+# 用肽段强度标可能缺失的部位。空洞不是剪切位点：更像一侧片段离开上清，或鉴定失败。
+infer_missing_regions <- function(protein, pep, profiles, sample_names, low_cut = 0.1, min_span = 12L, merge_gap = 8L) {
+  theo <- theoretical_tryptic_peptides(protein)
+  rows <- list()
+  series <- unique(c(sample_names, "mean"))
+  series <- series[series %in% names(profiles)]
+  for (sn in series) {
+    prof <- profiles[[sn]]
+    rel_info <- relative_from_profile(prof)
+    if (!is.finite(rel_info$median) || rel_info$median <= 0) {
+      next
+    }
+    rel <- rel_info$rel
+    mask <- is.na(prof) | (!is.na(prof) & prof <= 0) | (!is.na(rel) & rel < low_cut)
+    runs <- merge_residue_runs(mask, merge_gap)
+    pep_obs <- peptides_detected_in(pep, sn)
+    for (ri in seq_len(nrow(runs))) {
+      info <- classify_missing_span(runs$start[ri], runs$end[ri], theo, pep_obs, rel, min_span)
+      rows[[length(rows) + 1L]] <- data.frame(
+        sample = sn,
+        start = runs$start[ri],
+        end = runs$end[ri],
+        length = runs$end[ri] - runs$start[ri] + 1L,
+        class = info$class,
+        n_theoretical_visible_tryptic = as.integer(info$n_theoretical_visible),
+        n_observed_peptides = as.integer(info$n_observed_peptides),
+        mean_relative_to_median = round(info$mean_relative, 4),
+        median_detected = rel_info$median,
+        note = info$note,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  out <- if (length(rows)) do.call(rbind, rows) else empty_missing_regions()
+  rownames(out) <- NULL
+  attr(out, "theoretical") <- theo
+  attr(out, "low_cut") <- low_cut
+  out
 }
 
 zzx_alb_run <- function(data_dir = zzx_data_dir, n_last = zzx_n_last, outdir = NULL) {
@@ -885,21 +1107,26 @@ zzx_alb_run <- function(data_dir = zzx_data_dir, n_last = zzx_n_last, outdir = N
   pep_out <- pep
   write_table(file.path(outdir, "ALDH1A1_peptide_map.csv"), pep_out)
   write_table(file.path(outdir, "ALDH1A1_candidate_cleavage_sites.csv"), candidates)
+  mean_rel <- relative_from_profile(profiles$mean)
   res_df <- data.frame(
     residue = seq_len(n),
     aa = strsplit(protein, "")[[1]],
     region = ifelse(seq_len(n) == 1L, "initiator_met", "chain"),
     n_peptides = counts,
     abundance_mean = profiles$mean,
+    median_detected_mean = mean_rel$median,
+    relative_to_median = mean_rel$rel,
     stringsAsFactors = FALSE
   )
   for (nm in sample_names) {
     res_df[[nm]] <- profiles[[nm]]
   }
   write_table(file.path(outdir, "ALDH1A1_residue_abundance.csv"), res_df)
+  gaps <- infer_missing_regions(protein, pep, profiles, sample_names)
+  write_table(file.path(outdir, "ALDH1A1_missing_regions.csv"), gaps)
   write_processing_svg(file.path(outdir, "ALDH1A1_processing_schematic.svg"), protein, candidates, n_term_cov)
   write_full_length_svg(file.path(outdir, "ALDH1A1_full_length_cleavage.svg"), protein, candidates, n_term_cov)
-  write_coverage_svg(file.path(outdir, "ALDH1A1_peptide_coverage.svg"), protein, pep, sample_names, profiles)
+  write_coverage_svg(file.path(outdir, "ALDH1A1_peptide_coverage.svg"), protein, pep, sample_names, profiles, gaps)
 
   logs <- zzx_log(logs, "")
   logs <- zzx_log(logs, "======== 如何读覆盖图（全长有肽段 ≠ 没有剪切） ========")
@@ -907,6 +1134,27 @@ zzx_alb_run <- function(data_dir = zzx_data_dir, n_last = zzx_n_last, outdir = N
   logs <- zzx_log(logs, "切掉起始 Met 只少 1 个残基，覆盖图几乎不变，这是正常的。")
   logs <- zzx_log(logs, "只有当一侧片段被降解、滞留在细胞内或根本没进上清时，对应区域才会系统性缺失。单点空洞更常来自肽段过短/过长、疏水、漏切或离子化失败，不能单独当剪切位点。")
   logs <- zzx_log(logs, "因此本分析以 neo-N/neo-C（非胰酶末端）为细胞剪切的直接证据；覆盖空洞只作弱提示。")
+  logs <- zzx_log(logs, "")
+  logs <- zzx_log(logs, "======== 按肽段强度判断可能缺失的部位 ========")
+  logs <- zzx_log(logs, "规则：残基强度 / 有肽段残基的中位强度 < 0.1，或完全无肽段；再对照理论胰酶肽（K/R 切开、KP/RP 不切，6–35 aa 视为可检出）。")
+  logs <- zzx_log(logs, "possible_missing_fragment：理论肽本可打到，但上清未打到或远低于中位 → 这段可能真的不在样品里。")
+  logs <- zzx_log(logs, "likely_technical：理论肽太短/太长，或只缺 Met1–2，或跨度 < 12 aa → 优先当鉴定失败。")
+  logs <- zzx_log(logs, "缺失部位 ≠ 剪切位点。更像一侧片段离开上清或降解。细胞剪切仍看 neo-N/neo-C。")
+  miss <- if (is.data.frame(gaps) && nrow(gaps)) gaps[gaps$class == "possible_missing_fragment", , drop = FALSE] else gaps[0, ]
+  if (is.data.frame(miss) && nrow(miss) > 0L) {
+    logs <- zzx_log(logs, sprintf("可能缺失片段 %s 段:", nrow(miss)))
+    for (i in seq_len(nrow(miss))) {
+      logs <- zzx_log(logs, sprintf(
+        "  [%s] %s-%s (%s aa) 相对中位 %.3f  理论可见肽 %s  实测肽 %s  %s",
+        miss$sample[i], miss$start[i], miss$end[i], miss$length[i],
+        miss$mean_relative_to_median[i], miss$n_theoretical_visible_tryptic[i],
+        miss$n_observed_peptides[i], miss$note[i]
+      ))
+    }
+  } else {
+    logs <- zzx_log(logs, "未标出 possible_missing_fragment。弱覆盖见 ALDH1A1_missing_regions.csv 中的 likely_technical / low_abundance_stretch。")
+  }
+  logs <- zzx_log(logs, "缺失区段表: ALDH1A1_missing_regions.csv（覆盖图红底=可能缺失，黄底=弱信号，灰底=技术漏检）")
   logs <- zzx_log(logs, "")
   logs <- zzx_log(logs, "======== ALDH1A1 细胞剪切推断 ========")
   met_row <- candidates[candidates$type == "initiator_met", ][1, ]
