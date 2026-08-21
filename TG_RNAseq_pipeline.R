@@ -1,19 +1,20 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# TG BRCA 细胞 RNA-seq 分析流程
-# 组别：NTC（对照）、TG_sh1、TG_sh5
-# 四种比较：
+# TG BRCA 细胞 RNA-seq 分析流程（肿瘤转移背景）
+# 组别：NTC_rep0、NTC_rep1、TG_sh1、TG_sh5（1-vs-1 不合并两个 NTC）
+# 四种比较（本脚本；第 5–6 组见 TG_RNAseq_TGsh_mean_vs_NTC_reps.R）：
 #   1) 单独 1-vs-1：TG_sh1 vs NTC_rep0，TG_sh5 vs NTC_rep0，
 #                  TG_sh1 vs NTC_rep1，TG_sh5 vs NTC_rep1（各自单独作图）
 #   2) (TG_sh1 + TG_sh5)/2 vs NTC组均值(NTC_rep0, NTC_rep1)
 #   3) 共同上调：TG_sh1 vs NTC_rep0 与 TG_sh5 vs NTC_rep0 的交集
 #   4) 共同上调：TG_sh1 vs NTC_rep1 与 TG_sh5 vs NTC_rep1 的交集
 # 预处理：过滤低表达 + 标准化消除技术偏差
-# 子集策略：
-#   A) 上调 FC >= 1 / 1.25 / 1.5 / 2
-#   B) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300
-# 每个比较 × 每个 FC 阈值 × 每个 topN 都必须出图：
-#   差异基因表/柱状图、火山图、热图、GO图、通路富集图、KEGG图、GSEA图
+# 五套分层（有 p 时 p<0.05 与 p<0.01 都跑；无 p 时目录 noPvalue/）：
+#   1–2) p<0.05 上调 FC >= 1/1.25/1.5/2 以及 top 50–300
+#   3–4) p<0.01 上调 FC >= 1/1.25/1.5/2 以及 top 50–300
+#   5) 全部上调 + 全部下调（AllDE/）
+# 每个非空子集出图：差异表、火山图、热图、GO、通路、KEGG、GSVA、GSEA
+# 专项：Focused_metastasis/（不改全库 p 值）
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -34,7 +35,7 @@ bioc_required <- c(
   "enrichplot", "DOSE", "AnnotationDbi", "fgsea", "msigdbr",
   "SummarizedExperiment"
 )
-bioc_optional <- c("ReactomePA", "pathview")
+bioc_optional <- c("ReactomePA", "pathview", "GSVA")
 
 install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
   miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
@@ -114,7 +115,8 @@ log_msg <- function(...) {
   cat(msg, "\n", file = log_file, append = TRUE)
 }
 
-padj_cutoff <- 0.05
+# 用户指定的是 p 值，不是 padj。有 p 时两套都跑；无 p 时用 noPvalue。
+p_cutoffs  <- c("p0.05" = 0.05, "p0.01" = 0.01)
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 
@@ -461,6 +463,33 @@ pairwise_de <- function(log_mat, treat_sample, ntc_sample, comp_name) {
   )
 }
 
+add_limma_p <- function(de, log_mat, treat_samples, ctrl_samples) {
+  treat_samples <- unique(treat_samples[!is.na(treat_samples)])
+  ctrl_samples <- unique(ctrl_samples[!is.na(ctrl_samples)])
+  if (length(treat_samples) < 2 || length(ctrl_samples) < 2) return(de)
+  cols <- c(ctrl_samples, treat_samples)
+  if (!all(cols %in% colnames(log_mat))) return(de)
+  grp <- factor(
+    c(rep("ctrl", length(ctrl_samples)), rep("treat", length(treat_samples))),
+    levels = c("ctrl", "treat")
+  )
+  fit <- tryCatch({
+    design <- stats::model.matrix(~ grp)
+    fit0 <- limma::lmFit(log_mat[, cols, drop = FALSE], design)
+    limma::eBayes(fit0)
+  }, error = function(e) {
+    log_msg("limma p-value failed: ", e$message)
+    NULL
+  })
+  if (is.null(fit)) return(de)
+  tt <- limma::topTable(fit, coef = 2, number = Inf, sort.by = "none")
+  idx <- match(de$gene, rownames(tt))
+  de$pvalue <- tt$P.Value[idx]
+  de$padj <- tt$adj.P.Val[idx]
+  log_msg("limma p-values attached for ", length(ctrl_samples), " vs ", length(treat_samples), " samples")
+  de
+}
+
 mean_kd_vs_ntc_de <- function(log_mat, sample_info) {
   ntc <- sample_info$sample[sample_info$group == "NTC"]
   sh1 <- find_sample(sample_info, "TG_sh1")
@@ -469,7 +498,7 @@ mean_kd_vs_ntc_de <- function(log_mat, sample_info) {
   log_msg("TGsh_mean_vs_NTC : mean(", sh1, ", ", sh5, ") vs mean(", paste(ntc, collapse = ", "), ")")
   ntc_mean <- rowMeans(log_mat[, ntc, drop = FALSE])
   sh_mean <- (log_mat[, sh1] + log_mat[, sh5]) / 2
-  data.frame(
+  de <- data.frame(
     gene = rownames(log_mat),
     log2FC = as.numeric(sh_mean - ntc_mean),
     AveExpr = as.numeric((sh_mean + ntc_mean) / 2),
@@ -477,6 +506,7 @@ mean_kd_vs_ntc_de <- function(log_mat, sample_info) {
     padj = NA_real_,
     stringsAsFactors = FALSE
   )
+  add_limma_p(de, log_mat, c(sh1, sh5), ntc)
 }
 
 build_common_up <- function(a, b) {
@@ -518,28 +548,54 @@ full_rank_two <- function(a, b) {
   both
 }
 
-passes_padj <- function(padj, have_pvalue) {
-  if (!have_pvalue) return(rep(TRUE, length(padj)))
-  !is.na(padj) & padj < padj_cutoff
+passes_p <- function(pvalue, have_pvalue, p_cutoff) {
+  if (!have_pvalue || is.null(p_cutoff) || length(p_cutoff) == 0 || is.na(p_cutoff[1])) {
+    return(rep(TRUE, length(pvalue)))
+  }
+  !is.na(pvalue) & pvalue < p_cutoff
 }
 
-select_by_fc <- function(de, fc, have_pvalue) {
-  keep <- !is.na(de$log2FC) & (2^de$log2FC >= fc) & passes_padj(de$padj, have_pvalue)
+select_by_fc <- function(de, fc, have_pvalue, p_cutoff = NA_real_) {
+  keep <- !is.na(de$log2FC) & (2^de$log2FC >= fc) & passes_p(de$pvalue, have_pvalue, p_cutoff)
   if ("log2FC_sh1" %in% names(de)) {
     keep <- keep & (2^de$log2FC_sh1 >= fc) & (2^de$log2FC_sh5 >= fc)
   }
   de[keep, , drop = FALSE]
 }
 
-select_by_topn <- function(de, n, have_pvalue) {
+select_by_topn <- function(de, n, have_pvalue, p_cutoff = NA_real_) {
   x <- de[!is.na(de$log2FC) & de$log2FC > 0, , drop = FALSE]
   if ("log2FC_sh1" %in% names(x)) {
     x <- x[x$log2FC_sh1 > 0 & x$log2FC_sh5 > 0, , drop = FALSE]
   }
-  sig <- x[passes_padj(x$padj, have_pvalue), , drop = FALSE]
+  sig <- x[passes_p(x$pvalue, have_pvalue, p_cutoff), , drop = FALSE]
   if (nrow(sig) == 0) sig <- x
   sig <- sig[order(sig$log2FC, decreasing = TRUE), , drop = FALSE]
   utils::head(sig, n)
+}
+
+select_all_up <- function(de) {
+  x <- de[!is.na(de$log2FC) & de$log2FC > 0, , drop = FALSE]
+  if ("log2FC_sh1" %in% names(x)) {
+    x <- x[x$log2FC_sh1 > 0 & x$log2FC_sh5 > 0, , drop = FALSE]
+  }
+  x[order(x$log2FC, decreasing = TRUE), , drop = FALSE]
+}
+
+select_all_down <- function(de) {
+  x <- de[!is.na(de$log2FC) & de$log2FC < 0, , drop = FALSE]
+  if ("log2FC_sh1" %in% names(x)) {
+    x <- x[x$log2FC_sh1 < 0 & x$log2FC_sh5 < 0, , drop = FALSE]
+  }
+  x[order(x$log2FC, decreasing = FALSE), , drop = FALSE]
+}
+
+select_all_de <- function(de) {
+  rbind(select_all_up(de), select_all_down(de))
+}
+
+p_layer_dirs <- function(have_pvalue) {
+  if (isTRUE(have_pvalue)) p_cutoffs else c("noPvalue" = NA_real_)
 }
 
 # -----------------------------------------------------------------------------
@@ -586,24 +642,32 @@ save_gg <- function(plot, path_stub, width = 8, height = 6) {
            error = function(e) log_msg("png ggsave failed: ", e$message))
 }
 
-plot_volcano <- function(de, highlight, title, outfile, fc_line = 1) {
+plot_volcano <- function(de, highlight, title, outfile, fc_line = 1, p_cutoff = 0.05,
+                         color_direction = FALSE) {
   df <- de
   has_p <- "pvalue" %in% names(df) && any(!is.na(df$pvalue))
   if (has_p) {
     df$y <- -log10(pmax(df$pvalue, 1e-300))
     ylab <- "-log10(p value)"
-    hline <- -log10(0.05)
+    hline <- if (!is.na(p_cutoff)) -log10(p_cutoff) else NULL
   } else {
     df$y <- df$AveExpr
     ylab <- "Average expression (1-vs-1, no p-value)"
     hline <- NULL
   }
-  df$set <- ifelse(df$gene %in% highlight, "selected", "other")
+  if (isTRUE(color_direction)) {
+    df$set <- ifelse(df$gene %in% highlight & df$log2FC > 0, "up",
+                     ifelse(df$gene %in% highlight & df$log2FC < 0, "down", "other"))
+    pal <- c(other = "grey70", up = "#D62828", down = "#1D4ED8")
+  } else {
+    df$set <- ifelse(df$gene %in% highlight, "selected", "other")
+    pal <- c(other = "grey70", selected = "#D62828")
+  }
   df$label <- ifelse(df$gene %in% utils::head(highlight, 15), df$gene, NA)
   lfc_line <- log2(fc_line)
   p <- ggplot2::ggplot(df, ggplot2::aes(x = log2FC, y = y, color = set)) +
     ggplot2::geom_point(alpha = 0.7, size = 1.4) +
-    ggplot2::scale_color_manual(values = c(other = "grey70", selected = "#D62828")) +
+    ggplot2::scale_color_manual(values = pal) +
     ggplot2::geom_vline(xintercept = c(-lfc_line, lfc_line), linetype = 2, color = "grey40") +
     ggrepel::geom_text_repel(ggplot2::aes(label = label), size = 3, max.overlaps = 30, na.rm = TRUE) +
     ggplot2::theme_bw(base_size = 12) +
@@ -832,31 +896,38 @@ msig_hallmark_map <- function() {
 }
 
 # -----------------------------------------------------------------------------
-# 8b. 细胞骨架运动 / 线粒体专项富集（不改全库 GO/KEGG 的 p 值）
+# 8b. 肿瘤转移专项富集（不改全库 GO/KEGG 的 p 值）
 # -----------------------------------------------------------------------------
 .focus_env <- new.env(parent = emptyenv())
 
 focus_keyword_patterns <- function() {
   list(
-    cytoskeleton_motility = paste(
-      "cytoskelet", "\\bactin\\b", "microtubul", "\\bmyosin\\b", "kinesin", "dynein",
-      "lamellipod", "filopod", "stress fiber", "focal adhesion",
-      "cell migration", "cell motility", "cell locomotion", "chemotaxis",
-      "actin filament", "actin cytoskeleton", "microfilament",
-      "rho gtpase", "\\bcdc42\\b", "pseudopod", "podosome", "invadopod",
-      "adherens junction", "tight junction", "gap junction",
-      "ameboid", "amoeboid", "cell leading edge", "cortical actin",
-      "regulation of actin", "myofibril", "sarcomere", "ruffle",
+    emt = paste(
+      "epithelial.to.mesenchymal", "epithelial-mesenchymal", "\\bemt\\b",
+      "mesenchymal transition", "cadherin", "\\bvimentin\\b",
       sep = "|"
     ),
-    mitochondria = paste(
-      "mitochondr", "oxidative phosphorylat", "respiratory chain",
-      "electron transport", "citric acid", "tca cycle", "krebs",
-      "mitophag", "oxphos", "respiratory electron", "atp synthase",
-      "mitochondrial translation", "cristae", "complex i",
-      "inner mitochondrial", "mitochondrial gene", "mitochondrial respir",
-      "fatty acid beta-oxidation", "proton-transporting atp",
-      "thermogenesis",
+    migration = paste(
+      "cell migration", "cell motility", "cell locomotion", "chemotaxis",
+      "lamellipod", "filopod", "invadopod", "pseudopod", "podosome",
+      "cell leading edge", "ameboid", "amoeboid",
+      "cytoskelet", "\\bactin\\b", "focal adhesion", "stress fiber",
+      "regulation of actin", "rho gtpase", "\\bcdc42\\b",
+      sep = "|"
+    ),
+    invasion = paste(
+      "invas", "extracellular matrix", "\\becm\\b", "matrix metallopeptidase",
+      "collagen", "integrin", "basement membrane", "proteolys",
+      sep = "|"
+    ),
+    angiogenesis = paste(
+      "angiogen", "vasculogen", "endothelial cell", "vegf", "hypoxia",
+      "blood vessel", "extravasat", "intravasat",
+      sep = "|"
+    ),
+    metastasis = paste(
+      "metastas", "metastatic", "tumor invasion", "cancer invasion",
+      "cell adhesion", "homing", "colonization",
       sep = "|"
     )
   )
@@ -864,14 +935,14 @@ focus_keyword_patterns <- function() {
 
 focus_kegg_ids <- function() {
   list(
-    cytoskeleton_motility = c(
-      "hsa04810", "hsa04510", "hsa04520", "hsa04530", "hsa04540",
-      "hsa04512", "hsa04670", "04810", "04510", "04520", "04530", "04540", "04512", "04670"
+    emt = c("hsa04350", "04350"),
+    migration = c(
+      "hsa04810", "hsa04510", "hsa04520", "hsa04530", "hsa04670",
+      "04810", "04510", "04520", "04530", "04670"
     ),
-    mitochondria = c(
-      "hsa00190", "hsa00020", "hsa04137", "hsa04714", "hsa00071", "hsa01212",
-      "00190", "00020", "04137", "04714", "00071", "01212"
-    )
+    invasion = c("hsa04512", "hsa05205", "04512", "05205"),
+    angiogenesis = c("hsa04370", "hsa04066", "04370", "04066"),
+    metastasis = c("hsa05200", "hsa04151", "05200", "04151", "hsa04310", "04310")
   )
 }
 
@@ -880,17 +951,22 @@ classify_focus_term <- function(id, desc) {
   desc <- as.character(desc)[1]
   if (is.na(id)) id <- ""
   if (is.na(desc)) desc <- ""
+  if (grepl("^META_CUSTOM", id)) return("metastasis")
   kid <- focus_kegg_ids()
-  if (id %in% kid$mitochondria || grepl("^MITO_", id)) return("mitochondria")
-  if (id %in% kid$cytoskeleton_motility || grepl("^CYTO_", id)) return("cytoskeleton_motility")
+  if (id %in% kid$emt || grepl("^META_EMT|^CYTO_HALLMARK_EMT|HALLMARK_EPITHELIAL", id)) return("emt")
+  if (id %in% kid$angiogenesis || grepl("ANGIOGEN|HYPOXIA|VEGF", id, ignore.case = TRUE)) return("angiogenesis")
+  if (id %in% kid$invasion || grepl("ECM|INVAS|MMP|PROTEOGLYCAN", id, ignore.case = TRUE)) return("invasion")
+  if (id %in% kid$migration || grepl("^META_MIG|^CYTO_|MOTILITY|MIGRATION|FOCAL_ADHESION|ACTIN", id, ignore.case = TRUE)) {
+    return("migration")
+  }
+  if (id %in% kid$metastasis || grepl("^META_|METASTAS", id, ignore.case = TRUE)) return("metastasis")
   txt <- tolower(paste(id, desc))
   pats <- focus_keyword_patterns()
-  is_mito <- grepl(pats$mitochondria, txt, perl = TRUE, ignore.case = TRUE)
-  is_cyto <- grepl(pats$cytoskeleton_motility, txt, perl = TRUE, ignore.case = TRUE)
-  if (is_cyto && is_mito) return("both")
-  if (is_mito) return("mitochondria")
-  if (is_cyto) return("cytoskeleton_motility")
-  NA_character_
+  hit <- names(pats)[vapply(pats, function(p) grepl(p, txt, perl = TRUE, ignore.case = TRUE), logical(1))]
+  if (length(hit) == 0) return(NA_character_)
+  if (length(hit) == 1) return(hit)
+  if ("metastasis" %in% hit) return("metastasis")
+  hit[1]
 }
 
 plot_focus_term_bar <- function(df, stub, title) {
@@ -929,13 +1005,13 @@ export_focus_terms <- function(x, stub, title) {
   }, character(1))
   hit <- df[!is.na(df$focus_class), , drop = FALSE]
   if (nrow(hit) == 0) {
-    note_empty(paste0(stub, "_FOCUS_cytoskeleton_mito"), "no cytoskeleton/mitochondria terms in this result")
+    note_empty(paste0(stub, "_FOCUS_metastasis"), "no metastasis-related terms in this result")
     return(invisible(NULL))
   }
-  utils::write.csv(hit, paste0(stub, "_FOCUS_cytoskeleton_mito.csv"), row.names = FALSE)
+  utils::write.csv(hit, paste0(stub, "_FOCUS_metastasis.csv"), row.names = FALSE)
   plot_focus_term_bar(
-    hit, paste0(stub, "_FOCUS_cytoskeleton_mito_barplot"),
-    paste(title, "| cytoskeleton / mitochondria terms (original p-values)")
+    hit, paste0(stub, "_FOCUS_metastasis_barplot"),
+    paste(title, "| metastasis terms (original p-values)")
   )
 }
 
@@ -978,69 +1054,96 @@ append_term2gene <- function(lst, name, entrez) {
   lst
 }
 
+load_metastasis_symbols <- function() {
+  script_dir <- tryCatch({
+    ofile <- NULL
+    for (i in sys.nframe():1) {
+      f <- sys.frame(i)$ofile
+      if (!is.null(f)) {
+        ofile <- f
+        break
+      }
+    }
+    if (!is.null(ofile)) dirname(normalizePath(ofile, mustWork = FALSE)) else getwd()
+  }, error = function(e) getwd())
+  candidates <- unique(c(
+    if (exists("project_dir", inherits = TRUE)) file.path(project_dir, "metastasis_custom_genes.txt") else NULL,
+    file.path(getwd(), "metastasis_custom_genes.txt"),
+    file.path(script_dir, "metastasis_custom_genes.txt"),
+    "metastasis_custom_genes.txt"
+  ))
+  candidates <- candidates[nzchar(candidates)]
+  path <- candidates[file.exists(candidates)][1]
+  if (is.na(path) || !nzchar(path)) {
+    log_msg("metastasis_custom_genes.txt not found; using built-in EMT/invasion seed list")
+    return(c(
+      "CDH1", "CDH2", "VIM", "SNAI1", "SNAI2", "TWIST1", "ZEB1", "ZEB2", "FN1",
+      "MMP2", "MMP9", "MMP14", "VEGFA", "CXCR4", "CXCL12", "TGFB1", "MET", "EGFR",
+      "ITGB1", "CD44", "S100A4", "MACC1", "LOX", "SERPINE1", "PLAUR"
+    ))
+  }
+  raw <- readLines(path, warn = FALSE)
+  raw <- trimws(raw)
+  raw <- raw[nzchar(raw) & !startsWith(raw, "#")]
+  unique(raw)
+}
+
+metastasis_custom_entrez <- function() {
+  if (exists("custom_entrez", envir = .focus_env, inherits = FALSE)) {
+    return(.focus_env$custom_entrez)
+  }
+  sym <- load_metastasis_symbols()
+  mp <- map_to_entrez(sym)
+  .focus_env$custom_entrez <- unique(as.character(mp$entrez))
+  log_msg("Custom metastasis genes: ", length(sym), " symbols, ", length(.focus_env$custom_entrez), " Entrez")
+  .focus_env$custom_entrez
+}
+
 get_focus_term2gene <- function() {
   if (exists("term2gene", envir = .focus_env, inherits = FALSE)) {
     return(.focus_env$term2gene)
   }
   rows <- list()
   go_sets <- c(
-    CYTO_GO_cytoskeleton = "GO:0005856",
-    CYTO_GO_actin_cytoskeleton = "GO:0015629",
-    CYTO_GO_cytoskeleton_organization = "GO:0007010",
-    CYTO_GO_actin_cytoskeleton_organization = "GO:0030036",
-    CYTO_GO_actin_filament_based_process = "GO:0030029",
-    CYTO_GO_actin_filament_organization = "GO:0007015",
-    CYTO_GO_regulation_of_actin_cytoskeleton = "GO:0032956",
-    CYTO_GO_microtubule_based_process = "GO:0007017",
-    CYTO_GO_microtubule = "GO:0005874",
-    CYTO_GO_cell_motility = "GO:0048870",
-    CYTO_GO_cell_migration = "GO:0016477",
-    CYTO_GO_regulation_of_cell_migration = "GO:0030334",
-    CYTO_GO_cell_leading_edge = "GO:0031252",
-    CYTO_GO_lamellipodium = "GO:0030027",
-    CYTO_GO_focal_adhesion = "GO:0005925",
-    CYTO_GO_stress_fiber = "GO:0001725",
-    CYTO_GO_actin_binding = "GO:0003779",
-    CYTO_GO_cytoskeletal_protein_binding = "GO:0008092",
-    CYTO_GO_adherens_junction = "GO:0005912",
-    MITO_GO_mitochondrion = "GO:0005739",
-    MITO_GO_mitochondrial_envelope = "GO:0005740",
-    MITO_GO_mitochondrial_inner_membrane = "GO:0005743",
-    MITO_GO_mitochondrial_matrix = "GO:0005759",
-    MITO_GO_mitochondrion_organization = "GO:0007005",
-    MITO_GO_oxidative_phosphorylation = "GO:0006119",
-    MITO_GO_electron_transport_chain = "GO:0022900",
-    MITO_GO_mito_ATP_synthesis_ETC = "GO:0042775",
-    MITO_GO_TCA_cycle = "GO:0006099",
-    MITO_GO_mitochondrial_translation = "GO:0032543",
-    MITO_GO_mitophagy = "GO:0000422",
-    MITO_GO_mitochondrial_transport = "GO:0006839",
-    MITO_GO_mitochondrial_respiratory_chain = "GO:0005746",
-    MITO_GO_respiratory_chain_complex_assembly = "GO:0033108",
-    MITO_GO_fatty_acid_beta_oxidation = "GO:0006635"
+    META_GO_cell_migration = "GO:0016477",
+    META_GO_positive_regulation_of_cell_migration = "GO:0030335",
+    META_GO_cell_motility = "GO:0048870",
+    META_GO_locomotion = "GO:0040011",
+    META_GO_EMT = "GO:0001837",
+    META_GO_cell_adhesion = "GO:0007155",
+    META_GO_cell_substrate_adhesion = "GO:0031589",
+    META_GO_focal_adhesion = "GO:0005925",
+    META_GO_extracellular_matrix = "GO:0031012",
+    META_GO_ECM_organization = "GO:0030198",
+    META_GO_angiogenesis = "GO:0001525",
+    META_GO_response_to_hypoxia = "GO:0001666",
+    META_GO_actin_cytoskeleton_organization = "GO:0030036",
+    META_GO_regulation_of_actin_cytoskeleton = "GO:0032956",
+    META_GO_cell_leading_edge = "GO:0031252",
+    META_GO_lamellipodium = "GO:0030027"
   )
-  log_msg("Building focused cytoskeleton / mitochondria gene sets from GO")
+  log_msg("Building focused tumor-metastasis gene sets from GO")
   for (nm in names(go_sets)) {
     rows <- append_term2gene(rows, nm, entrez_for_go(go_sets[[nm]]))
   }
   kegg_sets <- c(
-    CYTO_KEGG_regulation_of_actin_cytoskeleton = "04810",
-    CYTO_KEGG_focal_adhesion = "04510",
-    CYTO_KEGG_adherens_junction = "04520",
-    CYTO_KEGG_tight_junction = "04530",
-    CYTO_KEGG_gap_junction = "04540",
-    CYTO_KEGG_ECM_receptor_interaction = "04512",
-    CYTO_KEGG_leukocyte_transendothelial_migration = "04670",
-    MITO_KEGG_oxidative_phosphorylation = "00190",
-    MITO_KEGG_citrate_cycle_TCA = "00020",
-    MITO_KEGG_mitophagy = "04137",
-    MITO_KEGG_thermogenesis = "04714",
-    MITO_KEGG_fatty_acid_degradation = "00071"
+    META_KEGG_pathways_in_cancer = "05200",
+    META_KEGG_focal_adhesion = "04510",
+    META_KEGG_ECM_receptor_interaction = "04512",
+    META_KEGG_adherens_junction = "04520",
+    META_KEGG_regulation_of_actin_cytoskeleton = "04810",
+    META_KEGG_leukocyte_transendothelial_migration = "04670",
+    META_KEGG_TGF_beta = "04350",
+    META_KEGG_VEGF = "04370",
+    META_KEGG_Wnt = "04310",
+    META_KEGG_PI3K_Akt = "04151",
+    META_KEGG_proteoglycans_in_cancer = "05205",
+    META_KEGG_HIF1 = "04066"
   )
   for (nm in names(kegg_sets)) {
     rows <- append_term2gene(rows, nm, entrez_for_kegg_path(kegg_sets[[nm]]))
   }
-  if (!any(grepl("^CYTO_KEGG_|^MITO_KEGG_", vapply(rows, function(x) x$gs_name[1], character(1))))) {
+  if (!any(grepl("^META_KEGG_", vapply(rows, function(x) x$gs_name[1], character(1))))) {
     msig_kegg <- tryCatch({
       tryCatch(
         msigdbr::msigdbr(species = "Homo sapiens", collection = "C2", subcollection = "CP:KEGG"),
@@ -1052,16 +1155,16 @@ get_focus_term2gene <- function() {
     if (!is.null(msig_kegg) && nrow(msig_kegg) > 0) {
       gcol <- intersect(c("ncbi_gene", "entrez_gene"), names(msig_kegg))[1]
       kegg_name_map <- c(
-        KEGG_REGULATION_OF_ACTIN_CYTOSKELETON = "CYTO_KEGG_regulation_of_actin_cytoskeleton",
-        KEGG_FOCAL_ADHESION = "CYTO_KEGG_focal_adhesion",
-        KEGG_ADHERENS_JUNCTION = "CYTO_KEGG_adherens_junction",
-        KEGG_TIGHT_JUNCTION = "CYTO_KEGG_tight_junction",
-        KEGG_GAP_JUNCTION = "CYTO_KEGG_gap_junction",
-        KEGG_ECM_RECEPTOR_INTERACTION = "CYTO_KEGG_ECM_receptor_interaction",
-        KEGG_LEUKOCYTE_TRANSENDOTHELIAL_MIGRATION = "CYTO_KEGG_leukocyte_transendothelial_migration",
-        KEGG_OXIDATIVE_PHOSPHORYLATION = "MITO_KEGG_oxidative_phosphorylation",
-        KEGG_CITRATE_CYCLE_TCA_CYCLE = "MITO_KEGG_citrate_cycle_TCA",
-        KEGG_FATTY_ACID_DEGRADATION = "MITO_KEGG_fatty_acid_degradation"
+        KEGG_PATHWAYS_IN_CANCER = "META_KEGG_pathways_in_cancer",
+        KEGG_FOCAL_ADHESION = "META_KEGG_focal_adhesion",
+        KEGG_ECM_RECEPTOR_INTERACTION = "META_KEGG_ECM_receptor_interaction",
+        KEGG_ADHERENS_JUNCTION = "META_KEGG_adherens_junction",
+        KEGG_REGULATION_OF_ACTIN_CYTOSKELETON = "META_KEGG_regulation_of_actin_cytoskeleton",
+        KEGG_LEUKOCYTE_TRANSENDOTHELIAL_MIGRATION = "META_KEGG_leukocyte_transendothelial_migration",
+        KEGG_TGF_BETA_SIGNALING_PATHWAY = "META_KEGG_TGF_beta",
+        KEGG_VEGF_SIGNALING_PATHWAY = "META_KEGG_VEGF",
+        KEGG_WNT_SIGNALING_PATHWAY = "META_KEGG_Wnt",
+        KEGG_PI3K_AKT_SIGNALING_PATHWAY = "META_KEGG_PI3K_Akt"
       )
       for (old in names(kegg_name_map)) {
         hit <- grepl(paste0("^", old, "$"), msig_kegg$gs_name)
@@ -1073,20 +1176,28 @@ get_focus_term2gene <- function() {
   hm <- tryCatch(msig_hallmark_map(), error = function(e) NULL)
   if (!is.null(hm) && nrow(hm) > 0) {
     hall_map <- c(
-      HALLMARK_OXIDATIVE_PHOSPHORYLATION = "MITO_HALLMARK_OXIDATIVE_PHOSPHORYLATION",
-      HALLMARK_FATTY_ACID_METABOLISM = "MITO_HALLMARK_FATTY_ACID_METABOLISM",
-      HALLMARK_REACTIVE_OXYGEN_SPECIES_PATHWAY = "MITO_HALLMARK_REACTIVE_OXYGEN_SPECIES",
-      HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION = "CYTO_HALLMARK_EMT",
-      HALLMARK_APICAL_JUNCTION = "CYTO_HALLMARK_APICAL_JUNCTION",
-      HALLMARK_MYOGENESIS = "CYTO_HALLMARK_MYOGENESIS"
+      HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION = "META_HALLMARK_EMT",
+      HALLMARK_ANGIOGENESIS = "META_HALLMARK_ANGIOGENESIS",
+      HALLMARK_APICAL_JUNCTION = "META_HALLMARK_APICAL_JUNCTION",
+      HALLMARK_HYPOXIA = "META_HALLMARK_HYPOXIA",
+      HALLMARK_TGF_BETA_SIGNALING = "META_HALLMARK_TGF_BETA",
+      HALLMARK_TNFA_SIGNALING_VIA_NFKB = "META_HALLMARK_TNFA",
+      HALLMARK_IL6_JAK_STAT3_SIGNALING = "META_HALLMARK_IL6_STAT3",
+      HALLMARK_WNT_BETA_CATENIN_SIGNALING = "META_HALLMARK_WNT",
+      HALLMARK_NOTCH_SIGNALING = "META_HALLMARK_NOTCH",
+      HALLMARK_KRAS_SIGNALING_UP = "META_HALLMARK_KRAS_UP"
     )
     gcol <- names(hm)[2]
     for (old in names(hall_map)) {
       rows <- append_term2gene(rows, hall_map[[old]], hm[[gcol]][hm[[1]] == old])
     }
   }
+  custom_entrez <- metastasis_custom_entrez()
+  if (length(custom_entrez) >= 8) {
+    rows <- append_term2gene(rows, "META_CUSTOM_tumor_metastasis_genes", custom_entrez)
+  }
   if (length(rows) == 0) {
-    log_msg("WARNING: focused cytoskeleton/mito gene sets are empty")
+    log_msg("WARNING: focused metastasis gene sets are empty")
     .focus_env$term2gene <- data.frame(gs_name = character(), entrez = character())
     return(.focus_env$term2gene)
   }
@@ -1123,7 +1234,7 @@ plot_focus_gene_heatmap <- function(de, t2g, prefix, heat_mat, sample_info, outf
 run_focused_ora <- function(entrez, de_sub, outdir, label, tag, fc_sym) {
   t2g <- get_focus_term2gene()
   if (is.null(t2g) || nrow(t2g) < 8) return(invisible(NULL))
-  fdir <- file.path(outdir, "Focused_cytoskeleton_mito")
+  fdir <- file.path(outdir, "Focused_metastasis")
   dir.create(fdir, recursive = TRUE, showWarnings = FALSE)
   pref <- paste0(tag, "_")
   obj <- enrich_or_relax(
@@ -1135,7 +1246,7 @@ run_focused_ora <- function(entrez, de_sub, outdir, label, tag, fc_sym) {
       entrez, TERM2GENE = t2g, minGSSize = 5, maxGSSize = 2500,
       pvalueCutoff = 1, qvalueCutoff = 1
     ),
-    "focused ORA cytoskeleton/mito"
+    "focused ORA metastasis"
   )
   if (!is.null(obj) && nrow(as.data.frame(obj)) > 0) {
     obj <- tryCatch(
@@ -1144,8 +1255,8 @@ run_focused_ora <- function(entrez, de_sub, outdir, label, tag, fc_sym) {
     )
   }
   plot_ora_object(
-    obj, file.path(fdir, paste0(pref, "ORA_focused_cytoskeleton_mito")),
-    title_maybe_relaxed(obj, paste(label, "| ORA focused cytoskeleton / mitochondria")),
+    obj, file.path(fdir, paste0(pref, "ORA_focused_metastasis")),
+    title_maybe_relaxed(obj, paste(label, "| ORA focused tumor metastasis")),
     fold_change = fc_sym, also_export_focus = FALSE
   )
 }
@@ -1156,14 +1267,14 @@ run_focused_gsea <- function(stats, de, heat_mat, sample_info, outdir, label) {
   writeLines(
     c("这不是改全库 GO/KEGG 的 p 值或排名。",
       "全基因组 GO/KEGG/GSEA 仍按原统计量排序。",
-      "本文件夹只检验细胞骨架运动、细胞迁移、线粒体相关基因集，",
+      "本文件夹只检验肿瘤转移相关基因集（EMT、迁移、侵袭、ECM、血管生成、自定义转移基因），",
       "所以这些条目会排在这里的结果前面。",
-      "全库结果旁边的 *_FOCUS_cytoskeleton_mito.csv 保留原始 p 值和 genome_wide_rank。",
+      "全库结果旁边的 *_FOCUS_metastasis.csv 保留原始 p 值和 genome_wide_rank。",
       "若专项 GSEA 仍不显著，说明这些通路在本数据里没有协同变化，不能人为抬到全库第一。"),
     file.path(outdir, "00_README.txt")
   )
   if (is.null(t2g) || nrow(t2g) < 8 || length(stats) < 10) {
-    note_empty(file.path(outdir, "GSEA_focused_cytoskeleton_mito"), "too few genes or empty gene sets")
+    note_empty(file.path(outdir, "GSEA_focused_metastasis"), "too few genes or empty gene sets")
     return(invisible(NULL))
   }
   obj <- enrich_or_relax(
@@ -1175,7 +1286,7 @@ run_focused_gsea <- function(stats, de, heat_mat, sample_info, outdir, label) {
       geneList = stats, TERM2GENE = t2g, minGSSize = 5, maxGSSize = 2500,
       pvalueCutoff = 1, eps = 0, verbose = FALSE
     ),
-    "focused GSEA cytoskeleton/mito"
+    "focused GSEA metastasis"
   )
   if (!is.null(obj) && nrow(as.data.frame(obj)) > 0) {
     obj <- tryCatch(
@@ -1184,35 +1295,29 @@ run_focused_gsea <- function(stats, de, heat_mat, sample_info, outdir, label) {
     )
   }
   plot_gsea_object(
-    obj, file.path(outdir, "GSEA_focused_cytoskeleton_mito"),
-    paste(label, "| GSEA focused cytoskeleton / mitochondria"),
+    obj, file.path(outdir, "GSEA_focused_metastasis"),
+    paste(label, "| GSEA focused tumor metastasis"),
     also_export_focus = FALSE
   )
   if (!is.null(obj) && nrow(as.data.frame(obj)) > 0) {
     df <- as.data.frame(obj)
     df$focus_class <- vapply(seq_len(nrow(df)), function(i) {
-      classify_focus_term(df$ID[i], df$Description[i])
+      classify_focus_term(df$ID[i], if ("Description" %in% names(df)) df$Description[i] else df$ID[i])
     }, character(1))
-    cyto <- df[df$focus_class %in% c("cytoskeleton_motility", "both"), , drop = FALSE]
-    mito <- df[df$focus_class %in% c("mitochondria", "both"), , drop = FALSE]
-    if (nrow(cyto) > 0) {
-      plot_focus_term_bar(cyto, file.path(outdir, "GSEA_cytoskeleton_motility_barplot"),
-                          paste(label, "| cytoskeleton / motility (focused GSEA)"))
-    }
-    if (nrow(mito) > 0) {
-      plot_focus_term_bar(mito, file.path(outdir, "GSEA_mitochondria_barplot"),
-                          paste(label, "| mitochondria (focused GSEA)"))
+    for (cls in c("emt", "migration", "invasion", "angiogenesis", "metastasis")) {
+      sub <- df[df$focus_class == cls, , drop = FALSE]
+      if (nrow(sub) > 0) {
+        plot_focus_term_bar(
+          sub, file.path(outdir, paste0("GSEA_", cls, "_barplot")),
+          paste(label, "|", cls, "(focused GSEA)")
+        )
+      }
     }
   }
   plot_focus_gene_heatmap(
-    de, t2g, "CYTO_", heat_mat, sample_info,
-    file.path(outdir, "heatmap_cytoskeleton_motility_genes"),
-    paste(label, "| cytoskeleton / motility genes")
-  )
-  plot_focus_gene_heatmap(
-    de, t2g, "MITO_", heat_mat, sample_info,
-    file.path(outdir, "heatmap_mitochondria_genes"),
-    paste(label, "| mitochondria genes")
+    de, t2g, "META_", heat_mat, sample_info,
+    file.path(outdir, "heatmap_metastasis_genes"),
+    paste(label, "| tumor metastasis genes")
   )
 }
 
@@ -1442,8 +1547,9 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag) {
     error = function(e) log_msg("focused ORA failed: ", e$message)
   )
   writeLines(
-    c("This GO/Pathway/KEGG folder is ORA (over-representation), NOT GSEA.",
-      "GSEA files are in the sibling folder named GSEA/ and start with GSEA_."),
+    c("This GO/Pathway/KEGG folder is ORA (over-representation), NOT GSEA and NOT GSVA.",
+      "GSEA files are in the sibling folder named GSEA/ and start with GSEA_.",
+      "GSVA files are in the sibling folder named GSVA/ and start with GSVA_."),
     file.path(outdir, paste0(pref, "00_ORA_is_not_GSEA.txt"))
   )
 }
@@ -1500,14 +1606,185 @@ run_gsea_plots <- function(sub, gsea_cache, outdir, tag, label) {
   }
 }
 
+run_gsva_matrix <- function(expr_mat, gsets) {
+  if (!has_pkg("GSVA")) return(NULL)
+  gsets <- gsets[vapply(gsets, function(x) length(intersect(x, rownames(expr_mat))) >= 5, logical(1))]
+  if (length(gsets) == 0) return(NULL)
+  tryCatch({
+    if ("gsvaParam" %in% getNamespaceExports("GSVA")) {
+      param <- GSVA::gsvaParam(as.matrix(expr_mat), gsets, kcdf = "Gaussian")
+      GSVA::gsva(param, verbose = FALSE)
+    } else {
+      GSVA::gsva(as.matrix(expr_mat), gsets, method = "gsva", kcdf = "Gaussian", verbose = FALSE)
+    }
+  }, error = function(e) {
+    tryCatch(
+      GSVA::gsva(as.matrix(expr_mat), gsets, method = "gsva", kcdf = "Gaussian", verbose = FALSE),
+      error = function(e2) {
+        log_msg("GSVA failed: ", e$message, " / ", e2$message)
+        NULL
+      }
+    )
+  })
+}
+
+gsva_genesets_hallmark_and_meta <- function() {
+  sets <- list()
+  hm <- tryCatch(msig_hallmark_map(), error = function(e) NULL)
+  if (!is.null(hm) && nrow(hm) > 0) {
+    gcol <- names(hm)[2]
+    mp <- tryCatch(
+      AnnotationDbi::mapIds(org.Hs.eg.db, keys = as.character(hm[[gcol]]),
+                            column = "SYMBOL", keytype = "ENTREZID", multiVals = "first"),
+      error = function(e) NULL
+    )
+    if (!is.null(mp)) {
+      hm$symbol <- unname(mp[as.character(hm[[gcol]])])
+      for (nm in unique(hm[[1]])) {
+        sym <- unique(hm$symbol[hm[[1]] == nm])
+        sym <- sym[!is.na(sym)]
+        if (length(sym) >= 5) sets[[nm]] <- sym
+      }
+    }
+  }
+  custom <- load_metastasis_symbols()
+  if (length(custom) >= 5) sets$META_CUSTOM_tumor_metastasis_genes <- custom
+  sets
+}
+
+plot_gsva_heatmap <- function(scores, sample_info, title, outfile) {
+  if (is.null(scores) || nrow(scores) < 1) return(invisible(NULL))
+  ann <- data.frame(Group = sample_info$group, row.names = sample_info$sample)
+  ann <- ann[intersect(colnames(scores), rownames(ann)), , drop = FALSE]
+  scores <- scores[, rownames(ann), drop = FALSE]
+  pal <- c(NTC = "#4C78A8", TG_sh1 = "#F58518", TG_sh5 = "#54A24B")
+  pdf_file <- paste0(outfile, ".pdf")
+  png_file <- paste0(outfile, ".png")
+  dir.create(dirname(outfile), recursive = TRUE, showWarnings = FALSE)
+  draw <- function() {
+    pheatmap::pheatmap(
+      scores, scale = "row", annotation_col = ann,
+      annotation_colors = list(Group = pal[names(pal) %in% unique(ann$Group)]),
+      main = title, fontsize_row = 7,
+      color = colorRampPalette(rev(RColorBrewer::brewer.pal(9, "RdBu")))(100)
+    )
+  }
+  tryCatch({
+    grDevices::pdf(pdf_file, width = 8, height = max(5, min(14, 0.28 * nrow(scores) + 3)))
+    draw()
+    grDevices::dev.off()
+  }, error = function(e) {
+    while (grDevices::dev.cur() > 1) grDevices::dev.off()
+    log_msg("GSVA heatmap pdf failed: ", e$message)
+  })
+  tryCatch({
+    grDevices::png(png_file, width = 8, height = max(5, min(14, 0.28 * nrow(scores) + 3)),
+                   units = "in", res = 300)
+    draw()
+    grDevices::dev.off()
+  }, error = function(e) {
+    while (grDevices::dev.cur() > 1) grDevices::dev.off()
+    log_msg("GSVA heatmap png failed: ", e$message)
+  })
+}
+
+run_full_gsva <- function(heat_mat, sample_info, outdir, label) {
+  dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  writeLines(
+    c("全样品表达矩阵上的 GSVA，不是 FC/topN 分层结果。",
+      "子集 GSVA 在各 p0.05/p0.01/AllDE 子文件夹的 GSVA/ 里。"),
+    file.path(outdir, "00_README.txt")
+  )
+  if (!has_pkg("GSVA")) {
+    note_empty(file.path(outdir, "GSVA_all_genes"), "GSVA package not installed")
+    return(invisible(NULL))
+  }
+  sets <- gsva_genesets_hallmark_and_meta()
+  scores <- run_gsva_matrix(heat_mat, sets)
+  if (is.null(scores)) {
+    note_empty(file.path(outdir, "GSVA_all_genes"), "GSVA returned no scores")
+    return(invisible(NULL))
+  }
+  utils::write.csv(
+    cbind(gene_set = rownames(scores), as.data.frame(scores)),
+    file.path(outdir, "allGenes_GSVA_scores.csv"),
+    row.names = FALSE
+  )
+  plot_gsva_heatmap(scores, sample_info, paste(label, "| GSVA all genes"),
+                    file.path(outdir, "allGenes_GSVA_heatmap"))
+  meta_rows <- grepl("EMT|ANGIOGEN|HYPOXIA|TGF_BETA|APICAL|WNT|NOTCH|KRAS|META_CUSTOM|IL6|TNFA",
+                     rownames(scores), ignore.case = TRUE)
+  if (any(meta_rows)) {
+    plot_gsva_heatmap(
+      scores[meta_rows, , drop = FALSE], sample_info,
+      paste(label, "| GSVA metastasis-related sets"),
+      file.path(outdir, "allGenes_GSVA_metastasis_sets_heatmap")
+    )
+  }
+}
+
+run_subset_gsva <- function(heat_mat, sample_info, genes, outdir, label, tag) {
+  gsva_dir <- file.path(outdir, "GSVA")
+  dir.create(gsva_dir, recursive = TRUE, showWarnings = FALSE)
+  pref <- paste0(tag, "_")
+  writeLines(
+    c("This GSVA folder is subset scoring, NOT ORA and NOT GSEA.",
+      "Full-matrix GSVA is in 00_GSVA_all_genes_NOT_FC_or_topN."),
+    file.path(gsva_dir, paste0(pref, "00_GSVA_is_not_GSEA.txt"))
+  )
+  if (!has_pkg("GSVA")) {
+    note_empty(file.path(gsva_dir, paste0(pref, "GSVA")), "GSVA package not installed")
+    return(invisible(NULL))
+  }
+  selected <- intersect(genes, rownames(heat_mat))
+  meta <- intersect(load_metastasis_symbols(), rownames(heat_mat))
+  overlap <- intersect(selected, meta)
+  gsets <- list()
+  if (length(selected) >= 5) gsets[[paste0(tag, "_selected")]] <- selected
+  if (length(overlap) >= 5) gsets[[paste0(tag, "_metastasis_overlap")]] <- overlap
+  hall <- gsva_genesets_hallmark_and_meta()
+  hall <- hall[grepl("EMT|ANGIOGEN|HYPOXIA|TGF_BETA|APICAL|WNT|NOTCH|META_CUSTOM", names(hall), ignore.case = TRUE)]
+  gsets <- c(gsets, hall)
+  scores <- run_gsva_matrix(heat_mat, gsets)
+  if (is.null(scores)) {
+    note_empty(file.path(gsva_dir, paste0(pref, "GSVA")), "too few genes for GSVA")
+    return(invisible(NULL))
+  }
+  utils::write.csv(
+    cbind(gene_set = rownames(scores), as.data.frame(scores)),
+    file.path(gsva_dir, paste0(pref, "GSVA_scores.csv")),
+    row.names = FALSE
+  )
+  plot_gsva_heatmap(
+    scores, sample_info, paste(label, "| GSVA"),
+    file.path(gsva_dir, paste0(pref, "GSVA_heatmap"))
+  )
+  if (length(overlap) >= 2) {
+    plot_heatmap(
+      heat_mat, sample_info, overlap,
+      paste(label, "| metastasis genes in subset"),
+      file.path(gsva_dir, paste0(pref, "GSVA_metastasis_gene_heatmap"))
+    )
+  }
+  ov_df <- data.frame(
+    gene_set = names(gsets),
+    n_in_set = vapply(gsets, length, integer(1)),
+    n_overlap_selected = vapply(gsets, function(x) length(intersect(x, selected)), integer(1)),
+    stringsAsFactors = FALSE
+  )
+  utils::write.csv(ov_df, file.path(gsva_dir, paste0(pref, "GSVA_geneset_overlap.csv")), row.names = FALSE)
+}
+
 emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de_for_volcano,
-                                 heat_mat, sample_info, gsea_cache, fc_line = 1) {
+                                 heat_mat, sample_info, gsea_cache, fc_line = 1,
+                                 p_cutoff = NA_real_, color_direction = FALSE) {
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   writeLines(
     c(paste("comparison:", comp_name),
       paste("subset:", tag),
       paste("title:", title),
-      paste("n_genes:", nrow(sub))),
+      paste("n_genes:", nrow(sub)),
+      paste("p_cutoff:", p_cutoff)),
     file.path(outdir, paste0("00_", tag, "_THIS_FOLDER.txt"))
   )
   utils::write.csv(sub, file.path(outdir, paste0(tag, "_DE_selected_genes.csv")), row.names = FALSE)
@@ -1520,8 +1797,11 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de_for
   }
   tryCatch(plot_de_bar(sub, paste0(title, " | DE genes"), file.path(outdir, paste0(tag, "_DE_log2FC_barplot"))),
            error = function(e) log_msg("DE barplot failed: ", e$message))
-  tryCatch(plot_volcano(full_de_for_volcano, sub$gene, title, file.path(outdir, paste0(tag, "_volcano")), fc_line = fc_line),
-           error = function(e) log_msg("volcano failed: ", e$message))
+  tryCatch(plot_volcano(
+    full_de_for_volcano, sub$gene, title, file.path(outdir, paste0(tag, "_volcano")),
+    fc_line = fc_line, p_cutoff = ifelse(is.na(p_cutoff), 0.05, p_cutoff),
+    color_direction = color_direction
+  ), error = function(e) log_msg("volcano failed: ", e$message))
   if ("log2FC_sh1" %in% names(full_de_for_volcano)) {
     tryCatch(plot_scatter_common(full_de_for_volcano, sub$gene, title, file.path(outdir, paste0(tag, "_scatter_sh1_sh5"))),
              error = function(e) log_msg("scatter failed: ", e$message))
@@ -1535,10 +1815,12 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de_for
            error = function(e) log_msg("ORA/plots failed: ", e$message))
   tryCatch(run_gsea_plots(sub, gsea_cache, outdir, tag, title),
            error = function(e) log_msg("GSEA/plots failed: ", e$message))
+  tryCatch(run_subset_gsva(heat_mat, sample_info, sub$gene, outdir, title, tag),
+           error = function(e) log_msg("GSVA/plots failed: ", e$message))
 }
 
 # -----------------------------------------------------------------------------
-# 9. 对单个比较执行全部子集分析（4 个 FC x 7 个 topN，全部出图）
+# 9. 对单个比较执行全部子集分析（p 两档 × FC/topN + AllDE）
 # -----------------------------------------------------------------------------
 analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat, sample_info, have_pvalue, gsea_de = NULL) {
   if (is.null(gsea_de)) gsea_de <- de
@@ -1548,57 +1830,112 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
   tryCatch(writexl::write_xlsx(de, file.path(base, "DE_full.xlsx")),
            error = function(e) log_msg("DE_full xlsx failed: ", e$message))
 
-  # 先建好 FC / topN 目录，避免只看到 GSEA 文件夹
-  fc_dirs <- file.path(base, "FoldChange", names(fc_cutoffs))
-  top_dirs <- file.path(base, "TopRank", paste0("top", top_ns))
-  invisible(lapply(c(fc_dirs, top_dirs), dir.create, recursive = TRUE, showWarnings = FALSE))
+  layers <- p_layer_dirs(have_pvalue)
+  for (p_tag in names(layers)) {
+    fc_dirs <- file.path(base, p_tag, "FoldChange", names(fc_cutoffs))
+    top_dirs <- file.path(base, p_tag, "TopRank", paste0("top", top_ns))
+    invisible(lapply(c(fc_dirs, top_dirs), dir.create, recursive = TRUE, showWarnings = FALSE))
+  }
+  invisible(lapply(
+    file.path(base, "AllDE", c("all_up", "all_down", "all_up_and_down")),
+    dir.create, recursive = TRUE, showWarnings = FALSE
+  ))
   writeLines(
-    c("请打开下面两个文件夹，不要只看 GSEA：",
-      "  1_FoldChange_and_TopRank_are_here",
-      "  FoldChange/FC_1  FC_1.25  FC_1.5  FC_2",
-      "  TopRank/top50 ... top300",
-      "每个子文件夹里：火山图、热图、ORA_GO、ORA通路、ORA_KEGG、以及 GSEA。",
-      "细胞骨架运动 / 线粒体专项结果在 Focused_cytoskeleton_mito/（不是改全库排名）。",
-      "00_GSEA_all_genes_NOT_FC_or_topN 只是全基因 GSEA，不是分层图。"),
+    c("请打开下面文件夹，不要只看 GSEA：",
+      "  p0.05/ 与 p0.01/（有 p 值时）；或 noPvalue/（1-vs-1 无法估计 p，不要伪造）",
+      "    FoldChange/FC_1  FC_1.25  FC_1.5  FC_2",
+      "    TopRank/top50 ... top300",
+      "  AllDE/all_up  all_down  all_up_and_down",
+      "每个子文件夹里：火山图、热图、ORA_GO、ORA通路、ORA_KEGG、GSVA、以及 GSEA。",
+      "肿瘤转移专项结果在 Focused_metastasis/（不是改全库排名）。",
+      "00_GSEA_all_genes_NOT_FC_or_topN 只是全基因 GSEA。",
+      "00_GSVA_all_genes_NOT_FC_or_topN 只是全矩阵 GSVA。"),
     file.path(base, "00_READ_ME_先看这里.txt")
   )
+  if (!have_pvalue) {
+    writeLines(
+      c("This comparison has no p-values (1-vs-1 or 2-vs-1).",
+        "p-filter was skipped; FC/topN results are under noPvalue/.",
+        "Do not invent p-values."),
+      file.path(base, "00_NO_PVALUE.txt")
+    )
+    log_msg(comp_name, ": no p-value; FC/topN written once under noPvalue/")
+  }
 
   gsea_cache <- list()
-  log_msg("Subset plots first (volcano/heatmap/ORA), GSEA-all-genes later: ", comp_name)
+  log_msg("Subset plots first (volcano/heatmap/ORA/GSVA), GSEA-all-genes later: ", comp_name)
 
-  for (nm in names(fc_cutoffs)) {
-    fc <- unname(fc_cutoffs[[nm]])
-    sub <- select_by_fc(de, fc, have_pvalue)
-    if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
-    tryCatch(
-      emit_subset_analysis(
-        comp_name, sub, nm, paste0(comp_name, " | up FC >= ", fc),
-        file.path(base, "FoldChange", nm),
-        full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = fc
-      ),
-      error = function(e) log_msg("ERROR subset ", comp_name, " ", nm, ": ", e$message)
-    )
+  for (p_tag in names(layers)) {
+    pcut <- unname(layers[[p_tag]])
+    p_lab <- if (is.na(pcut)) "no p-value filter" else paste0("p < ", pcut)
+    for (nm in names(fc_cutoffs)) {
+      fc <- unname(fc_cutoffs[[nm]])
+      sub <- select_by_fc(de, fc, have_pvalue, pcut)
+      if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
+      tryCatch(
+        emit_subset_analysis(
+          comp_name, sub, paste0(p_tag, "_", nm),
+          paste0(comp_name, " | ", p_lab, " | up FC >= ", fc),
+          file.path(base, p_tag, "FoldChange", nm),
+          full_de_for_volcano, heat_mat, sample_info, gsea_cache,
+          fc_line = fc, p_cutoff = pcut
+        ),
+        error = function(e) log_msg("ERROR subset ", comp_name, " ", p_tag, " ", nm, ": ", e$message)
+      )
+    }
+    for (n in top_ns) {
+      tag <- paste0("top", n)
+      sub <- select_by_topn(de, n, have_pvalue, pcut)
+      tryCatch(
+        emit_subset_analysis(
+          comp_name, sub, paste0(p_tag, "_", tag),
+          paste0(comp_name, " | ", p_lab, " | upregulated top ", n),
+          file.path(base, p_tag, "TopRank", tag),
+          full_de_for_volcano, heat_mat, sample_info, gsea_cache,
+          fc_line = 1, p_cutoff = pcut
+        ),
+        error = function(e) log_msg("ERROR subset ", comp_name, " ", p_tag, " ", tag, ": ", e$message)
+      )
+    }
   }
 
-  for (n in top_ns) {
-    tag <- paste0("top", n)
-    sub <- select_by_topn(de, n, have_pvalue)
-    tryCatch(
-      emit_subset_analysis(
-        comp_name, sub, tag, paste0(comp_name, " | upregulated top ", n),
-        file.path(base, "TopRank", tag),
-        full_de_for_volcano, heat_mat, sample_info, gsea_cache, fc_line = 1
-      ),
-      error = function(e) log_msg("ERROR subset ", comp_name, " ", tag, ": ", e$message)
-    )
-  }
+  all_up <- select_all_up(de)
+  all_down <- select_all_down(de)
+  all_both <- select_all_de(de)
+  tryCatch(
+    emit_subset_analysis(
+      comp_name, all_up, "all_up", paste0(comp_name, " | all upregulated"),
+      file.path(base, "AllDE", "all_up"),
+      full_de_for_volcano, heat_mat, sample_info, gsea_cache,
+      fc_line = 1, color_direction = TRUE
+    ),
+    error = function(e) log_msg("ERROR AllDE all_up ", comp_name, ": ", e$message)
+  )
+  tryCatch(
+    emit_subset_analysis(
+      comp_name, all_down, "all_down", paste0(comp_name, " | all downregulated"),
+      file.path(base, "AllDE", "all_down"),
+      full_de_for_volcano, heat_mat, sample_info, gsea_cache,
+      fc_line = 1, color_direction = TRUE
+    ),
+    error = function(e) log_msg("ERROR AllDE all_down ", comp_name, ": ", e$message)
+  )
+  tryCatch(
+    emit_subset_analysis(
+      comp_name, all_both, "all_up_and_down", paste0(comp_name, " | all up and down"),
+      file.path(base, "AllDE", "all_up_and_down"),
+      full_de_for_volcano, heat_mat, sample_info, gsea_cache,
+      fc_line = 1, color_direction = TRUE
+    ),
+    error = function(e) log_msg("ERROR AllDE all_up_and_down ", comp_name, ": ", e$message)
+  )
 
   tryCatch({
     log_msg("Building full-list GSEA after subset plots: ", comp_name)
     gsea_cache <- build_gsea_cache(gsea_de)
     full_gsea_dir <- file.path(base, "00_GSEA_all_genes_NOT_FC_or_topN")
     dir.create(full_gsea_dir, recursive = TRUE, showWarnings = FALSE)
-    writeLines("全基因 GSEA，不是 FC/topN 分层结果。分层图在 FoldChange/ 和 TopRank/。",
+    writeLines("全基因 GSEA，不是 FC/topN 分层结果。分层图在 p0.05/、p0.01/（或 noPvalue/）和 AllDE/。",
                file.path(full_gsea_dir, "00_README.txt"))
     for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
       plot_gsea_object(gsea_cache[[nm]], file.path(full_gsea_dir, paste0("allGenes_GSEA_", nm)),
@@ -1609,7 +1946,16 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
   }, error = function(e) log_msg("full-list GSEA failed for ", comp_name, ": ", e$message))
 
   tryCatch({
-    log_msg("Focused cytoskeleton / mitochondria GSEA: ", comp_name)
+    log_msg("Full-matrix GSVA: ", comp_name)
+    run_full_gsva(
+      heat_mat, sample_info,
+      file.path(base, "00_GSVA_all_genes_NOT_FC_or_topN"),
+      paste(comp_name, "| ALL genes")
+    )
+  }, error = function(e) log_msg("full-matrix GSVA failed for ", comp_name, ": ", e$message))
+
+  tryCatch({
+    log_msg("Focused tumor-metastasis GSEA: ", comp_name)
     focus_stats <- if (exists("gsea_cache", inherits = FALSE) && !is.null(gsea_cache$stats)) {
       gsea_cache$stats
     } else {
@@ -1617,53 +1963,57 @@ analyze_one_comparison <- function(comp_name, de, full_de_for_volcano, heat_mat,
     }
     run_focused_gsea(
       focus_stats, gsea_de, heat_mat, sample_info,
-      file.path(base, "Focused_cytoskeleton_mito"),
+      file.path(base, "Focused_metastasis"),
       paste(comp_name, "| all genes")
     )
   }, error = function(e) log_msg("focused GSEA failed for ", comp_name, ": ", e$message))
 }
 
-plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix) {
+plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix, have_pvalue = FALSE) {
   if (is.null(de_a) || is.null(de_b)) return(invisible(NULL))
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
-  have_pvalue <- FALSE
-  for (nm in names(fc_cutoffs)) {
-    fc <- unname(fc_cutoffs[[nm]])
-    lst <- list(
-      x = select_by_fc(de_a, fc, have_pvalue)$gene,
-      y = select_by_fc(de_b, fc, have_pvalue)$gene
-    )
-    names(lst) <- c(label_a, label_b)
-    p <- tryCatch({
-      if (!has_pkg("ggvenn")) stop("ggvenn not installed")
-      ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
-        ggplot2::labs(title = paste0(title_prefix, " | FC >= ", fc))
-    }, error = function(e) {
-      log_msg("venn failed: ", e$message)
-      NULL
-    })
-    vdir <- file.path(outdir, "FoldChange", nm)
-    dir.create(vdir, recursive = TRUE, showWarnings = FALSE)
-    if (!is.null(p)) save_gg(p, file.path(vdir, paste0("venn_", nm)), width = 7, height = 6)
-  }
-  for (n in top_ns) {
-    tag <- paste0("top", n)
-    lst <- list(
-      x = select_by_topn(de_a, n, have_pvalue)$gene,
-      y = select_by_topn(de_b, n, have_pvalue)$gene
-    )
-    names(lst) <- c(label_a, label_b)
-    p <- tryCatch({
-      if (!has_pkg("ggvenn")) stop("ggvenn not installed")
-      ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
-        ggplot2::labs(title = paste0(title_prefix, " | ", tag))
-    }, error = function(e) {
-      log_msg("venn failed: ", e$message)
-      NULL
-    })
-    vdir <- file.path(outdir, "TopRank", tag)
-    dir.create(vdir, recursive = TRUE, showWarnings = FALSE)
-    if (!is.null(p)) save_gg(p, file.path(vdir, paste0("venn_", tag)), width = 7, height = 6)
+  layers <- p_layer_dirs(have_pvalue)
+  for (p_tag in names(layers)) {
+    pcut <- unname(layers[[p_tag]])
+    p_lab <- if (is.na(pcut)) "no p-value filter" else paste0("p < ", pcut)
+    for (nm in names(fc_cutoffs)) {
+      fc <- unname(fc_cutoffs[[nm]])
+      lst <- list(
+        x = select_by_fc(de_a, fc, have_pvalue, pcut)$gene,
+        y = select_by_fc(de_b, fc, have_pvalue, pcut)$gene
+      )
+      names(lst) <- c(label_a, label_b)
+      p <- tryCatch({
+        if (!has_pkg("ggvenn")) stop("ggvenn not installed")
+        ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
+          ggplot2::labs(title = paste0(title_prefix, " | ", p_lab, " | FC >= ", fc))
+      }, error = function(e) {
+        log_msg("venn failed: ", e$message)
+        NULL
+      })
+      vdir <- file.path(outdir, p_tag, "FoldChange", nm)
+      dir.create(vdir, recursive = TRUE, showWarnings = FALSE)
+      if (!is.null(p)) save_gg(p, file.path(vdir, paste0("venn_", p_tag, "_", nm)), width = 7, height = 6)
+    }
+    for (n in top_ns) {
+      tag <- paste0("top", n)
+      lst <- list(
+        x = select_by_topn(de_a, n, have_pvalue, pcut)$gene,
+        y = select_by_topn(de_b, n, have_pvalue, pcut)$gene
+      )
+      names(lst) <- c(label_a, label_b)
+      p <- tryCatch({
+        if (!has_pkg("ggvenn")) stop("ggvenn not installed")
+        ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
+          ggplot2::labs(title = paste0(title_prefix, " | ", p_lab, " | ", tag))
+      }, error = function(e) {
+        log_msg("venn failed: ", e$message)
+        NULL
+      })
+      vdir <- file.path(outdir, p_tag, "TopRank", tag)
+      dir.create(vdir, recursive = TRUE, showWarnings = FALSE)
+      if (!is.null(p)) save_gg(p, file.path(vdir, paste0("venn_", p_tag, "_", tag)), width = 7, height = 6)
+    }
   }
 }
 
@@ -1731,7 +2081,7 @@ for (nm in names(de_list)) {
     volcano_df <- gsea_rank[[nm]]
     gsea_de <- gsea_rank[[nm]]
   }
-  have_p <- any(!is.na(de_list[[nm]]$padj))
+  have_p <- any(!is.na(de_list[[nm]]$pvalue))
   tryCatch(
     analyze_one_comparison(
       nm, de_list[[nm]], volcano_df, norm$heat_mat, si, have_p, gsea_de

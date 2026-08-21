@@ -1,12 +1,13 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# 额外两组比较（不修改 TG_RNAseq_pipeline.R）
+# 额外两组比较（不修改 TG_RNAseq_pipeline.R 的 1–4 组）
 #   1) mean(TG_sh1, TG_sh5) vs NTC_rep0
 #   2) mean(TG_sh1, TG_sh5) vs NTC_rep1
-# 每个比较都走原流程的 FC / topN 网格：
-#   火山图、热图、GO、通路、KEGG、GSEA
+# 每个比较走原流程的五套分层（p<0.05 / p<0.01 的 FC 与 topN，以及 AllDE）：
+#   火山图、热图、GO、通路、KEGG、GSVA、GSEA
 #   FoldChange: 上调 >= 1 / 1.25 / 1.5 / 2
 #   TopRank: 上调前 50 / 75 / 100 / 150 / 200 / 250 / 300
+# 这两组是 2-vs-1，无法估计 p，结果写在 noPvalue/。
 #
 # 用法：
 #   setwd("E:/R/TG_BRCA/TG")
@@ -110,7 +111,7 @@ if (length(extra_list) == 0) {
 }
 
 for (nm in names(extra_list)) {
-  have_p <- any(!is.na(extra_list[[nm]]$padj))
+  have_p <- any(!is.na(extra_list[[nm]]$pvalue))
   tryCatch(
     analyze_one_comparison(
       nm, extra_list[[nm]], extra_list[[nm]],
