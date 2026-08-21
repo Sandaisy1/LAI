@@ -1,0 +1,51 @@
+---
+description: ZZX DIA-NN 蛋白质组：按肽段丰度推测 A 蛋白剪切位点与信号肽
+globs: "{**/ZZX/**,**/proteomics/**,**/*peptid*,**/*cleav*,**/*diann*,**/report.*matrix*}"
+alwaysApply: false
+---
+
+# ZZX 蛋白质组：A 蛋白剪切方式推断
+
+仅当任务是 DIA-NN 肽段/剪切/信号肽分析时遵循本规则。RNA-seq 仍按 `tg-brca-rnaseq.mdc`；不要把 Cuffdiff、FC/topN、GO/KEGG 套到本分析。
+
+## 数据
+
+- 目录：`C:/Users/Lenovo/Desktop/ZZX`（也接受 `C:/User/Lenovo/Desktop/ZZX`）；缺失则回退仓库 `ZZX/`，再回退仓库根
+- 剪切推断只用肽段/前体表：首选 `report.pr_matrix`（TSV）；若有 `report.parquet` / `report.tsv` 则优先用其 `Protein.Ids` 做覆盖（蛋白组 `Protein.Group` 不适合算单蛋白覆盖）
+- `report.pg_matrix` 只用来确认蛋白组身份，**禁止**用蛋白水平丰度推断剪切位点
+- 列名按 DIA-NN：`Protein.Group`、`Protein.Ids`、`Protein.Names`、`Genes`、`Proteotypic`、`Stripped.Sequence`、`Modified.Sequence`、`Precursor.Id`；其余列为样品强度
+- 目标蛋白「A」：用基因名 / UniProt / 蛋白名过滤；`pg_matrix` 若只有一个蛋白组可用它，多个则列出候选取消猜测。序列从 UniProt FASTA 取，与 `Protein.Ids` 一致，不要混 isoform
+
+## 预处理
+
+1. 空值与 DIA-NN 的 0 分开：0 是定量估计，NA 是未检出；不要填 0 再算均值
+2. 同一 `Stripped.Sequence` 多个电荷/修饰先分别记录，作图可按肽段求和或取最大
+3. 优先 `Proteotypic == 1`；共享肽段不得独断归属某一 isoform
+4. 把肽段落到蛋白序列，得到 `start`/`end`（1-based）
+
+## 区分胰酶与生物学剪切
+
+样品制备胰酶切口**不是**剪切位点。按末端分类：
+
+- 胰酶 N 端：蛋白 N 端，或上一残基为 K/R（且其后不是 P，按所用酶切规则）
+- 胰酶 C 端：肽段以 K/R 结尾，或到达蛋白 C 端
+- **neo-N / neo-C**（半胰酶或非胰酶）：才是剪切候选
+
+缺一段覆盖 ≠ 剪切：肽段过短/过长、疏水、漏切、修饰、离子化失败都会造成空洞。
+
+## 推断（先证据，再注释）
+
+1. **信号肽**：N 端 1..N（约 15–40）无肽段，且第一条稳定肽段从预测切割位点开始；有 neo-N 落在 SignalP / UniProt `SIGNAL` 位点则加强；仅 N 端空洞不够
+2. **Propeptide / 成熟链**：对照 UniProt `PROPEP`/`CHAIN`；内部 neo 末端 + 切割两侧丰度阶跃
+3. **内部剪切**：覆盖/丰度在同一残基两侧突然断开，或一对互补 neo-N 与 neo-C；报告位点两侧 P4–P4′ 序列
+4. 只分析上调或差异时，必须先有样品分组；无重复不要伪造 p 值，按丰度/覆盖描述并写日志
+
+## 每个目标蛋白必须输出
+
+肽段定位表、残基丰度/覆盖轨迹图、候选剪切表（位点、类型 signal/propeptide/internal、证据：neo 末端 / 丰度阶跃 / UniProt）、序列示意图。结果放 `ZZX/cleavage_A/`（或目标蛋白 ID 子目录）。不要把 ORA/GSEA 写进本流程。
+
+```r
+# ❌ BAD: 用 pg_matrix 蛋白丰度猜剪切；把 K/R 胰酶位点当生物学剪切
+# ❌ BAD: N 端没肽段就断定信号肽；把 isoform 共享肽段算成 A 独有覆盖
+# ✅ GOOD: pr_matrix 定位肽段 → 只把 neo-N/neo-C 当候选 → 对照 SignalP/UniProt
+```
