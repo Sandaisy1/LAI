@@ -42,7 +42,7 @@ alwaysApply: true
 2. **上调排名**：top 50 / 75 / 100 / 150 / 200 / 250 / 300 / **4000**（不足 N 则全取并写日志）
 3. **p ≤ 0.5（不区分上调下调）**：`p_value <= 0.5` 的 OK 行全部进入 ORA / 通路 / KEGG / GSVA，不要再筛成只上调
 
-目录：`FoldChange/FC_1.5/`、`TopRank/top4000/`、`Pvalue/p_le_0.5/`。文件名和图标题必须带档位标签。
+目录：`FoldChange/FC_1.5/`、`TopRank/top4000/`、`Pvalue/p_le_0.5/`。一开始就把三个文件夹建好。运行顺序：先 TopRank，再 FoldChange（从 FC_2 到 FC_1），最后 p≤0.5。只看到 FoldChange 表示倍数档还在跑，不是没做另外两套。文件名和图标题必须带档位标签。
 
 ## 每个非空子集必须出的图
 

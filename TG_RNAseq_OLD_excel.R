@@ -1182,10 +1182,13 @@ writeLines(
     paste("输入文件:", excel_path),
     "只保留 status==OK，直接用表中 log2(fold_change) 和 p_value。",
     "",
-    "三套思路在下面三个文件夹：",
-    "  FoldChange/FC_1  FC_1.25  FC_1.5  FC_2     （只上调）",
-    "  TopRank/top50 ... top300, top4000           （只上调）",
-    "  Pvalue/p_le_0.5                             （p<=0.5，上下调都保留）",
+    "三套思路都会做，不是只做倍数。脚本按顺序跑，文件夹会陆续出现：",
+    "  1) TopRank/top50 ... top300, top4000   （上调排名，先跑，较快）",
+    "  2) FoldChange/FC_2  FC_1.5  FC_1.25  FC_1  （上调倍数；FC_1 基因最多、最慢）",
+    "  3) Pvalue/p_le_0.5                     （p<=0.5，上下调都保留）",
+    "",
+    "如果现在只能看到 FoldChange，多半是还在跑 FC 各档的 GO/KEGG/GSEA/GSVA，",
+    "请看 00_PROGRESS.txt，不要中途关掉 R。",
     "",
     "每个非空子文件夹里应有：差异表、火山图、热图、GO/、Pathway/、KEGG/、GSEA/、GSVA/。",
     "00_GSEA_all_genes_NOT_FC_or_topN 是全表基因 GSEA，不是分层结果。",
@@ -1193,39 +1196,95 @@ writeLines(
   file.path(base, "00_READ_ME_先看这里.txt")
 )
 
-for (nm in names(fc_cutoffs)) {
-  fc <- unname(fc_cutoffs[[nm]])
-  vdir <- file.path(base, "FoldChange", nm)
-  dir.create(vdir, recursive = TRUE, showWarnings = FALSE)
-  sub <- select_by_fc(de, fc)
-  emit_subset(sub, nm, paste(comp_name, "|", nm, "| up FC >=", fc), vdir, fc_line = fc)
+fc_dirs <- file.path(base, "FoldChange", names(fc_cutoffs))
+top_dirs <- file.path(base, "TopRank", paste0("top", top_ns))
+p_dir <- file.path(base, "Pvalue", "p_le_0.5")
+invisible(lapply(c(fc_dirs, top_dirs, p_dir), dir.create, recursive = TRUE, showWarnings = FALSE))
+placeholder <- function(d, label) {
+  f <- file.path(d, "00_WAITING_脚本还没跑到这一档.txt")
+  if (!file.exists(file.path(d, paste0("00_", label, "_THIS_FOLDER.txt")))) {
+    writeLines(
+      c("这个文件夹一开始就会建好，避免只看到 FoldChange。",
+        "脚本按 TopRank → FoldChange → Pvalue 的顺序往里面写图。",
+        "请看上一级的 00_PROGRESS.txt。"),
+      f
+    )
+  }
+}
+for (nm in names(fc_cutoffs)) placeholder(file.path(base, "FoldChange", nm), nm)
+for (n in top_ns) placeholder(file.path(base, "TopRank", paste0("top", n)), paste0("top", n))
+placeholder(p_dir, "p_le_0.5")
+
+progress_file <- file.path(base, "00_PROGRESS.txt")
+write_progress <- function(...) {
+  writeLines(
+    c(paste("更新时间:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
+      paste(..., collapse = ""),
+      "",
+      "计划顺序：TopRank（8 档）→ FoldChange（4 档，从 FC_2 到 FC_1）→ Pvalue/p_le_0.5 → 全基因 GSEA/GSVA",
+      "只看到 FoldChange 不等于没做排名和 p 值，通常是倍数分析还没跑完。"),
+    progress_file
+  )
 }
 
+jobs <- list()
 for (n in top_ns) {
   tag <- paste0("top", n)
-  vdir <- file.path(base, "TopRank", tag)
-  dir.create(vdir, recursive = TRUE, showWarnings = FALSE)
-  sub <- select_by_topn(de, n)
-  emit_subset(sub, tag, paste(comp_name, "| upregulated", tag), vdir, fc_line = 1)
+  jobs[[length(jobs) + 1]] <- list(
+    kind = "TopRank", tag = tag,
+    dir = file.path(base, "TopRank", tag),
+    fc_line = 1,
+    title = paste(comp_name, "| upregulated", tag),
+    sub = select_by_topn(de, n)
+  )
 }
-
-pdir <- file.path(base, "Pvalue", "p_le_0.5")
-dir.create(pdir, recursive = TRUE, showWarnings = FALSE)
-sub_p <- select_by_p(de, p_cutoff_all)
-emit_subset(
-  sub_p, "p_le_0.5",
-  paste(comp_name, "| p_value <= 0.5 (up and down)"),
-  pdir, fc_line = 1
+for (nm in rev(names(fc_cutoffs))) {
+  fc <- unname(fc_cutoffs[[nm]])
+  jobs[[length(jobs) + 1]] <- list(
+    kind = "FoldChange", tag = nm,
+    dir = file.path(base, "FoldChange", nm),
+    fc_line = fc,
+    title = paste(comp_name, "|", nm, "| up FC >=", fc),
+    sub = select_by_fc(de, fc)
+  )
+}
+jobs[[length(jobs) + 1]] <- list(
+  kind = "Pvalue", tag = "p_le_0.5",
+  dir = p_dir, fc_line = 1,
+  title = paste(comp_name, "| p_value <= 0.5 (up and down)"),
+  sub = select_by_p(de, p_cutoff_all)
 )
+
+n_jobs <- length(jobs)
+write_progress("已建好 TopRank / FoldChange / Pvalue 三个文件夹，开始跑第 1 / ", n_jobs, " 档")
+for (i in seq_len(n_jobs)) {
+  job <- jobs[[i]]
+  write_progress(
+    "正在做 ", i, " / ", n_jobs, " : ", job$kind, " / ", job$tag,
+    " (n=", nrow(job$sub), ")"
+  )
+  wait_f <- file.path(job$dir, "00_WAITING_脚本还没跑到这一档.txt")
+  if (file.exists(wait_f)) unlink(wait_f)
+  tryCatch(
+    emit_subset(job$sub, job$tag, job$title, job$dir, fc_line = job$fc_line),
+    error = function(e) {
+      while (grDevices::dev.cur() > 1) grDevices::dev.off()
+      log_msg("ERROR subset ", job$kind, " ", job$tag, ": ", e$message)
+      writeLines(paste("failed:", e$message), file.path(job$dir, paste0(job$tag, "_FAILED.txt")))
+    }
+  )
+}
 
 full_gsea_dir <- file.path(base, "00_GSEA_all_genes_NOT_FC_or_topN")
 dir.create(full_gsea_dir, recursive = TRUE, showWarnings = FALSE)
 writeLines("全表基因 GSEA / GSVA，不是 FC/topN 分层结果。",
            file.path(full_gsea_dir, "00_README.txt"))
+write_progress("分层已写完，正在做全表基因 GSEA/GSVA")
 tryCatch(run_gsea_plots(de, full_gsea_dir, "allGenes", paste(comp_name, "| all genes")),
          error = function(e) log_msg("full GSEA failed: ", e$message))
 tryCatch(run_gsva_plots(heat_log, de$gene, full_gsea_dir, "allGenes", paste(comp_name, "| all genes")),
          error = function(e) log_msg("full GSVA failed: ", e$message))
 
+write_progress("全部完成。请打开 TopRank、FoldChange、Pvalue 三个文件夹。")
 log_msg("完成。请打开: ", base)
-log_msg("先看 00_READ_ME_先看这里.txt")
+log_msg("先看 00_READ_ME_先看这里.txt 和 00_PROGRESS.txt")
