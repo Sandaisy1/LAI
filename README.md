@@ -23,7 +23,7 @@ source("TG_RNAseq_OLD_excel.R")
 
 1. 上调 FC ≥ 1 / 1.25 / 1.5 / 2
 2. 上调 top 50 / 75 / 100 / 150 / 200 / 250 / 300 / 4000
-3. `p_value <= 0.5`（上调下调都保留）
+3. `p_value < 0.01` 与 `p_value < 0.05` 两档（上调下调都保留，表里用 `mark_p_lt_0.01` / `mark_p_lt_0.05` / `direction` 标记）
 
 每个非空子集输出差异表、火山图、热图、GO、通路、KEGG、GSEA、GSVA。
 

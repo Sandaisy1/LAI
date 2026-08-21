@@ -1,5 +1,5 @@
 ---
-description: OLD盘 Excel 表三思路差异分析（FC / topN / p≤0.5 + GSVA）
+description: OLD盘 Excel 表三思路差异分析（FC / topN / p<0.01 与 p<0.05 + GSVA）
 globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
@@ -31,7 +31,7 @@ alwaysApply: true
 - 只保留 `status == "OK"`，丢掉 `NOTEST`
 - `FC = 2^(log2(fold_change))`；上调 = `log2(fold_change) >= 0`
 - 排名按 `log2(fold_change)` **降序**（不要用 `q_value` 排序）
-- 第三套思路用 `p_value <= 0.5`（不是 0.05，也不是 0.01）
+- 思路3用 **`p_value < 0.01` 和 `p_value < 0.05` 两档**（严格小于；不区分上调下调）。全表加标记列 `mark_p_lt_0.01`、`mark_p_lt_0.05`、`direction`
 - 物种：人 `org.Hs.eg.db`
 - 热图 / GSVA 表达矩阵只有两列：`NTC = value_1`，`TG_sh1 = value_2`
 - 目录缺失则回退仓库根 `OLD盘/`；结果写在该目录，比较名 `TG_sh1_vs_NTC`
@@ -40,9 +40,9 @@ alwaysApply: true
 
 1. **FoldChange（只上调）**：FC ≥ 1 / 1.25 / 1.5 / 2 → `log2(fold_change)` ≥ 0 / `log2(1.25)` / `log2(1.5)` / 1
 2. **上调排名**：top 50 / 75 / 100 / 150 / 200 / 250 / 300 / **4000**（不足 N 则全取并写日志）
-3. **p ≤ 0.5（不区分上调下调）**：`p_value <= 0.5` 的 OK 行全部进入 ORA / 通路 / KEGG / GSVA，不要再筛成只上调
+3. **p 值（不区分上调下调）**：分别做 `p < 0.01` 与 `p < 0.05`；两档都把上下调全部纳入 ORA / 通路 / KEGG / GSEA / GSVA
 
-目录：`FoldChange/FC_1.5/`、`TopRank/top4000/`、`Pvalue/p_le_0.5/`。一开始就把三个文件夹建好。运行顺序：先 TopRank，再 FoldChange（从 FC_2 到 FC_1），最后 p≤0.5。只看到 FoldChange 表示倍数档还在跑，不是没做另外两套。文件名和图标题必须带档位标签。
+目录：`FoldChange/FC_1.5/`、`TopRank/top4000/`、`Pvalue/p_lt_0.01/`、`Pvalue/p_lt_0.05/`。一开始就把文件夹建好。运行顺序：先 TopRank，再 FoldChange（从 FC_2 到 FC_1），最后两档 p。文件名、图标题、`subset_tag` 必须带档位标签。
 
 ## 每个非空子集必须出的图
 
@@ -51,10 +51,10 @@ alwaysApply: true
 - ORA 放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头
 - GSEA 放 `GSEA/`，文件名以 `GSEA_` 开头；全表基因 GSEA 只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
 - GSVA 放 `GSVA/`，文件名以 `GSVA_` 开头；输入是 NTC / TG_sh1 两列表达，不是基因名单
-- 火山图：全表点 + 高亮当前子集；p≤0.5 档上下调都要标
+- 火山图：全表点 + 高亮当前子集；p 值档上下调都要标（红=上调，蓝=下调），横线标对应 p 阈值
 
 ```r
-# ❌ BAD: 当 count 矩阵重跑 DESeq2；不用 Excel 里现成的 log2(fold_change) / p_value
-# ❌ BAD: 丢掉 top4000 或 GSVA；p<=0.5 还只留上调；用 NOTEST 行
-# ✅ GOOD: readxl 读 Excel；4 个 FC + 8 个 topN + 1 个 p<=0.5，每档表和图（含 GSVA）出齐
+# ❌ BAD: 当 count 矩阵重跑 DESeq2；思路3只用 p<=0.5 或只留上调
+# ❌ BAD: 丢掉 top4000 或 GSVA；p<0.01 与 p<0.05 混在一个文件夹
+# ✅ GOOD: readxl 读 Excel；4 个 FC + 8 个 topN + 2 个 p 档，每档表和图（含 GSVA）出齐并带标签
 ```

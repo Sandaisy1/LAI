@@ -15,7 +15,7 @@
 #   test_id, gene_id, gene, locus, sample_1, sample_2, status,
 #   value_1, value_2, log2(fold_change), test_stat, p_value, q_value, significant
 # sample_1=NTC，sample_2=TG_sh1。只保留 status==OK。
-# 直接用表里的 log2(fold_change) 和 p_value，不重跑 DESeq2。
+# 三套思路：上调 FC；上调 topN；p<0.01 与 p<0.05（不区分上下调，表和图都做标记）
 #
 # 结果：
 #   E:/R/TG_BRCA/TG/OLD盘/results_TG_sh1_vs_NTC/
@@ -124,7 +124,7 @@ log_msg("结果目录: ", result_dir)
 
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns <- c(50, 75, 100, 150, 200, 250, 300, 4000)
-p_cutoff_all <- 0.5
+p_cutoffs <- c("p_lt_0.01" = 0.01, "p_lt_0.05" = 0.05)
 
 # -----------------------------------------------------------------------------
 # 2. 读 Excel（截图表头）
@@ -662,7 +662,7 @@ note_empty <- function(stub, msg) {
   writeLines(msg, paste0(stub, "_EMPTY.txt"))
 }
 
-plot_volcano <- function(full_de, highlight, title, outfile, fc_line = 1, p_line = 0.5) {
+plot_volcano <- function(full_de, highlight, title, outfile, fc_line = 1, p_line = 0.05) {
   df <- full_de
   df$y <- -log10(pmax(df$pvalue, 1e-300))
   df$set <- "other"
@@ -676,12 +676,25 @@ plot_volcano <- function(full_de, highlight, title, outfile, fc_line = 1, p_line
   pal <- c(other = "grey70", up_in_subset = "#D62828", down_in_subset = "#1D4ED8")
   p <- ggplot2::ggplot(df, ggplot2::aes(x = log2FC, y = y, color = set)) +
     ggplot2::geom_point(alpha = 0.7, size = 1.3) +
-    ggplot2::scale_color_manual(values = pal, drop = FALSE) +
+    ggplot2::scale_color_manual(
+      values = pal, drop = FALSE,
+      labels = c(other = "other", up_in_subset = "up in subset", down_in_subset = "down in subset")
+    ) +
     ggplot2::geom_vline(xintercept = c(-lfc_line, lfc_line), linetype = 2, color = "grey40") +
     ggplot2::geom_hline(yintercept = -log10(p_line), linetype = 2, color = "grey40") +
     ggrepel::geom_text_repel(ggplot2::aes(label = label), size = 3, max.overlaps = 30, na.rm = TRUE) +
     ggplot2::theme_bw(base_size = 12) +
-    ggplot2::labs(title = title, x = "log2 Fold Change (Excel)", y = "-log10(p_value)", color = NULL)
+    ggplot2::labs(
+      title = title,
+      subtitle = paste0(
+        "highlight up n=", length(up), ", down n=", length(down),
+        " | dashed p=", p_line, " | FC line=", fc_line
+      ),
+      x = "log2 Fold Change (Excel)", y = "-log10(p_value)", color = NULL
+    )
+  if (isTRUE(abs(p_line - 0.05) < 1e-12)) {
+    p <- p + ggplot2::geom_hline(yintercept = -log10(0.01), linetype = 3, color = "grey55")
+  }
   save_gg(p, outfile)
 }
 
@@ -1123,17 +1136,24 @@ select_by_topn <- function(df, n) {
 }
 
 select_by_p <- function(df, pcut) {
-  df[!is.na(df$pvalue) & df$pvalue <= pcut, , drop = FALSE]
+  df[!is.na(df$pvalue) & df$pvalue < pcut, , drop = FALSE]
 }
 
-emit_subset <- function(sub, tag, title, outdir, fc_line = 1) {
+emit_subset <- function(sub, tag, title, outdir, fc_line = 1, p_line = 0.05) {
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  n_up <- sum(!is.na(sub$log2FC) & sub$log2FC >= 0)
+  n_down <- sum(!is.na(sub$log2FC) & sub$log2FC < 0)
+  sub$subset_tag <- tag
+  sub$mark_this_subset <- TRUE
   writeLines(
     c(paste("comparison:", comp_name),
       paste("subset:", tag),
       paste("title:", title),
       paste("n_genes:", nrow(sub)),
-      paste("excel:", excel_path)),
+      paste("n_up:", n_up),
+      paste("n_down:", n_down),
+      paste("excel:", excel_path),
+      "思路3（Pvalue）不区分上调下调：上下调都进入本档分析，表里用 direction / mark_p_lt_* 标记。"),
     file.path(outdir, paste0("00_", tag, "_THIS_FOLDER.txt"))
   )
   utils::write.csv(sub, file.path(outdir, paste0(tag, "_DE_selected_genes.csv")), row.names = FALSE)
@@ -1146,7 +1166,7 @@ emit_subset <- function(sub, tag, title, outdir, fc_line = 1) {
   }
   tryCatch(plot_de_bar(sub, paste(title, "| DE genes"), file.path(outdir, paste0(tag, "_DE_log2FC_barplot"))),
            error = function(e) log_msg("DE barplot failed: ", e$message))
-  tryCatch(plot_volcano(de, sub$gene, title, file.path(outdir, paste0(tag, "_volcano")), fc_line = fc_line),
+  tryCatch(plot_volcano(de, sub$gene, title, file.path(outdir, paste0(tag, "_volcano")), fc_line = fc_line, p_line = p_line),
            error = function(e) log_msg("volcano failed: ", e$message))
   tryCatch(plot_heatmap(
     heat_log, sample_info, sub$gene, title,
@@ -1169,8 +1189,23 @@ emit_subset <- function(sub, tag, title, outdir, fc_line = 1) {
 }
 
 # -----------------------------------------------------------------------------
-# 6. 主流程：4 个 FC + 8 个 topN + p<=0.5
+# 6. 主流程：4 个 FC + 8 个 topN + p<0.01 / p<0.05（思路3，不区分上下调）
 # -----------------------------------------------------------------------------
+de$mark_p_lt_0.01 <- !is.na(de$pvalue) & de$pvalue < 0.01
+de$mark_p_lt_0.05 <- !is.na(de$pvalue) & de$pvalue < 0.05
+de$direction <- ifelse(
+  is.na(de$log2FC), NA_character_,
+  ifelse(de$log2FC > 0, "up", ifelse(de$log2FC < 0, "down", "zero"))
+)
+log_msg(
+  "思路3标记: p<0.01 n=", sum(de$mark_p_lt_0.01),
+  " (up=", sum(de$mark_p_lt_0.01 & de$direction == "up"),
+  ", down=", sum(de$mark_p_lt_0.01 & de$direction == "down"), "); ",
+  "p<0.05 n=", sum(de$mark_p_lt_0.05),
+  " (up=", sum(de$mark_p_lt_0.05 & de$direction == "up"),
+  ", down=", sum(de$mark_p_lt_0.05 & de$direction == "down"), ")"
+)
+
 base <- file.path(result_dir, comp_name)
 dir.create(base, recursive = TRUE, showWarnings = FALSE)
 utils::write.csv(de, file.path(base, "DE_full_from_excel.csv"), row.names = FALSE)
@@ -1185,7 +1220,7 @@ writeLines(
     "三套思路都会做，不是只做倍数。脚本按顺序跑，文件夹会陆续出现：",
     "  1) TopRank/top50 ... top300, top4000   （上调排名，先跑，较快）",
     "  2) FoldChange/FC_2  FC_1.5  FC_1.25  FC_1  （上调倍数；FC_1 基因最多、最慢）",
-    "  3) Pvalue/p_le_0.5                     （p<=0.5，上下调都保留）",
+    "  3) Pvalue/p_lt_0.01  与  Pvalue/p_lt_0.05  （p<0.01、p<0.05，上下调都保留并做标记）",
     "",
     "如果现在只能看到 FoldChange，多半是还在跑 FC 各档的 GO/KEGG/GSEA/GSVA，",
     "请看 00_PROGRESS.txt，不要中途关掉 R。",
@@ -1198,8 +1233,8 @@ writeLines(
 
 fc_dirs <- file.path(base, "FoldChange", names(fc_cutoffs))
 top_dirs <- file.path(base, "TopRank", paste0("top", top_ns))
-p_dir <- file.path(base, "Pvalue", "p_le_0.5")
-invisible(lapply(c(fc_dirs, top_dirs, p_dir), dir.create, recursive = TRUE, showWarnings = FALSE))
+p_dirs <- file.path(base, "Pvalue", names(p_cutoffs))
+invisible(lapply(c(fc_dirs, top_dirs, p_dirs), dir.create, recursive = TRUE, showWarnings = FALSE))
 placeholder <- function(d, label) {
   f <- file.path(d, "00_WAITING_脚本还没跑到这一档.txt")
   if (!file.exists(file.path(d, paste0("00_", label, "_THIS_FOLDER.txt")))) {
@@ -1213,7 +1248,7 @@ placeholder <- function(d, label) {
 }
 for (nm in names(fc_cutoffs)) placeholder(file.path(base, "FoldChange", nm), nm)
 for (n in top_ns) placeholder(file.path(base, "TopRank", paste0("top", n)), paste0("top", n))
-placeholder(p_dir, "p_le_0.5")
+for (nm in names(p_cutoffs)) placeholder(file.path(base, "Pvalue", nm), nm)
 
 progress_file <- file.path(base, "00_PROGRESS.txt")
 write_progress <- function(...) {
@@ -1221,7 +1256,7 @@ write_progress <- function(...) {
     c(paste("更新时间:", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
       paste(..., collapse = ""),
       "",
-      "计划顺序：TopRank（8 档）→ FoldChange（4 档，从 FC_2 到 FC_1）→ Pvalue/p_le_0.5 → 全基因 GSEA/GSVA",
+      "计划顺序：TopRank（8 档）→ FoldChange（4 档，从 FC_2 到 FC_1）→ Pvalue/p_lt_0.01 与 p_lt_0.05 → 全基因 GSEA/GSVA",
       "只看到 FoldChange 不等于没做排名和 p 值，通常是倍数分析还没跑完。"),
     progress_file
   )
@@ -1233,7 +1268,7 @@ for (n in top_ns) {
   jobs[[length(jobs) + 1]] <- list(
     kind = "TopRank", tag = tag,
     dir = file.path(base, "TopRank", tag),
-    fc_line = 1,
+    fc_line = 1, p_line = 0.05,
     title = paste(comp_name, "| upregulated", tag),
     sub = select_by_topn(de, n)
   )
@@ -1243,17 +1278,21 @@ for (nm in rev(names(fc_cutoffs))) {
   jobs[[length(jobs) + 1]] <- list(
     kind = "FoldChange", tag = nm,
     dir = file.path(base, "FoldChange", nm),
-    fc_line = fc,
+    fc_line = fc, p_line = 0.05,
     title = paste(comp_name, "|", nm, "| up FC >=", fc),
     sub = select_by_fc(de, fc)
   )
 }
-jobs[[length(jobs) + 1]] <- list(
-  kind = "Pvalue", tag = "p_le_0.5",
-  dir = p_dir, fc_line = 1,
-  title = paste(comp_name, "| p_value <= 0.5 (up and down)"),
-  sub = select_by_p(de, p_cutoff_all)
-)
+for (nm in names(p_cutoffs)) {
+  pc <- unname(p_cutoffs[[nm]])
+  jobs[[length(jobs) + 1]] <- list(
+    kind = "Pvalue", tag = nm,
+    dir = file.path(base, "Pvalue", nm),
+    fc_line = 1, p_line = pc,
+    title = paste(comp_name, "|", nm, "| p_value <", pc, "(up and down, marked)"),
+    sub = select_by_p(de, pc)
+  )
+}
 
 n_jobs <- length(jobs)
 write_progress("已建好 TopRank / FoldChange / Pvalue 三个文件夹，开始跑第 1 / ", n_jobs, " 档")
@@ -1266,7 +1305,7 @@ for (i in seq_len(n_jobs)) {
   wait_f <- file.path(job$dir, "00_WAITING_脚本还没跑到这一档.txt")
   if (file.exists(wait_f)) unlink(wait_f)
   tryCatch(
-    emit_subset(job$sub, job$tag, job$title, job$dir, fc_line = job$fc_line),
+    emit_subset(job$sub, job$tag, job$title, job$dir, fc_line = job$fc_line, p_line = job$p_line),
     error = function(e) {
       while (grDevices::dev.cur() > 1) grDevices::dev.off()
       log_msg("ERROR subset ", job$kind, " ", job$tag, ": ", e$message)
