@@ -2,14 +2,16 @@
 
 ## OLD盘 Excel 分析（NTC vs TG_sh1）——脚本在这里
 
-分析脚本：**`TG_RNAseq_OLD_excel.R`**（仓库根目录，和本 README 同一层）。
+分析脚本：**`OLD盘/TG_RNAseq_OLD_excel.R`**（和 Excel 放在同一文件夹）。
 
 把截图那份 Excel 放到 `E:/R/TG_BRCA/TG/OLD盘/`，然后在 R 里运行：
 
 ```r
-setwd("E:/R/TG_BRCA/TG")
+setwd("E:/R/TG_BRCA/TG/OLD盘")
 source("TG_RNAseq_OLD_excel.R")
 ```
+
+仓库根目录的 `TG_RNAseq_OLD_excel.R` 只是跳转，真正代码在 `OLD盘/TG_RNAseq_OLD_excel.R`。
 
 如果脚本还在 Git 仓库目录、Excel 在 OLD盘，也可以：
 
