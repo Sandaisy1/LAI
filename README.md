@@ -125,3 +125,22 @@ E:/R/Protein/results/
 ```
 
 每条 motif 目录里都有命中表、PWM、对齐位点和 chemistry 配色的 bits logo（Y 轴 0–4）。只保留 **p < 0.01** 的 motif；不足 3 条会如实少报，不会改 p 值凑数。
+
+### 区域导出与突变方案（新脚本，不改原流程）
+
+在原分析跑完后：
+
+```r
+source("TG_protein_motif_regions_mutations.R")
+# 可改焦点蛋白：
+# Sys.setenv(TG_MOTIF_FOCUS_GENES = "RPL9,RBP4,ITGAV,ITGA2")
+```
+
+输出在 `E:\R\Protein\results\regions_mutations\`：
+
+- `protein_motif_regions.xlsx`：每个蛋白每个 motif 的起止、侧翼序列、区域图示字符串
+- `protein_motif_mutation_plans.xlsx`：焦点蛋白（默认 RPL9 / RBP4 / ITGAV / ITGA2）按 motif 的单点与核心三联突变
+- `figures/per_protein/`：每个蛋白一条区域轨道图
+- `figures/focus_mutations/`：焦点蛋白的突变标注图
+
+突变规则：优先改 PWM 信息量最高的 3 个位点（P1）。C→S，K/R→E，D/E→K，其余优先 Ala scan。未命中某 motif 的蛋白会写明无需针对该 motif 突变。

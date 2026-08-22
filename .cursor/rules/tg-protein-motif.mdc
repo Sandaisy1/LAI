@@ -28,8 +28,17 @@ alwaysApply: true
 
 命中表（基因、UniProt、起止、匹配序列、LLR、p/E）、PWM、对齐 FASTA、**ggseqlogo**（Y 轴 bits 0–4，X 轴 1..w，`col_scheme = "chemistry"`）。文件名与标题带 `motif1`…`motif5` 和 p/E。
 
+## 区域导出与突变方案（新脚本，不改原流程）
+
+`TG_protein_motif_regions_mutations.R` 只读 `E:/R/Protein/results/` 的 hits / PWM / FASTA。不要为加这两项去改 `TG_protein_motif_pipeline.R`。
+
+1. 每个蛋白的 motif 起止、侧翼、区域图 + Excel（`results/regions_mutations/`）
+2. 突变方案：默认焦点 `RPL9` / `RBP4` / `ITGAV` / `ITGA2`（`TG_MOTIF_FOCUS_GENES` 可改）；按 PWM 高 IC 位做 C→S、电荷翻转或 Ala scan，每 motif 给出 P1 核心三联
+
 ```r
 # ❌ BAD: 46 条蛋白强制 MSA 只出一张 logo；或编造 p
 # ❌ BAD: 把火山图 / GSEA / FC 分层套到 motif
+# ❌ BAD: 为导出区域 / 突变方案去改 TG_protein_motif_pipeline.R
 # ✅ GOOD: 3–5 条 motif 各自目录；每条有 hits + bits logo + 真实 p/E
+# ✅ GOOD: 区域图 / 突变 Excel 放新脚本，读已有 results/
 ```
