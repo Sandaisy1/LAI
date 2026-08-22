@@ -97,3 +97,50 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## 蛋白共同序列（motif / 序列 logo）
+
+对指定人源蛋白做 de novo 共同短序列（约 3–5 条），用序列重排的零分布做单侧 z 检验得到 p / E-value（不同 motif 的 p 应不同），并用 bits 序列 logo 出图。**不要**把上面的 RNA-seq 六组比较或 FC/topN 套过来。
+
+数据与结果默认在 `E:\R\Protein`（可用 `TG_PROTEIN_DIR` 覆盖）。基因列表在 `TG_protein_motif_genes.txt`（可改，优先读该目录，否则读当前工作目录）。序列从 UniProt Swiss-Prot 拉取（每基因一条 reviewed canonical）。若外网失败，可把 FASTA 放到 `E:\R\Protein\TG_protein_motif_sequences.fasta`（头行用基因名）。宽度扫描 **6–21 aa**（每个整数都扫）。各宽度候选按**全局得分**（位点平均 IC）排序，去冗余后取前五（`motif_global_ranking.csv`）。
+
+```r
+source("TG_protein_motif_pipeline.R")
+# 自检（植入已知 motif，不访问 UniProt）：
+# Sys.setenv(TG_MOTIF_SELFTEST = "1"); source("TG_protein_motif_pipeline.R")
+```
+
+结果在 `E:\R\Protein\results\`：
+
+```
+E:/R/Protein/results/
+  00_sequences.fasta
+  00_sequence_fetch_log.csv
+  motif_significance_summary.csv
+  motif_all_hits.csv
+  motif_all_seqlogos.pdf
+  motif1/motif1_seqlogo.pdf
+  motif1/motif1_hits.csv
+  ...
+```
+
+每条 motif 目录里都有命中表、PWM、对齐位点和 chemistry 配色的 bits logo（Y 轴 0–4）。只保留 **p < 0.01** 的 motif；不足 3 条会如实少报，不会改 p 值凑数。
+
+### 区域导出与突变方案（新脚本，不改原流程）
+
+在原分析跑完后：
+
+```r
+source("TG_protein_motif_regions_mutations.R")
+# 可改焦点蛋白：
+# Sys.setenv(TG_MOTIF_FOCUS_GENES = "RPL9,RBP4,ITGAV,ITGA2")
+```
+
+输出在 `E:\R\Protein\results\regions_mutations\`：
+
+- `protein_motif_regions.xlsx`：每个蛋白每个 motif 的起止、侧翼序列、区域图示字符串
+- `protein_motif_mutation_plans.xlsx`：焦点蛋白（默认 RPL9 / RBP4 / ITGAV / ITGA2）按 motif 的单点与核心三联突变
+- `figures/per_protein/`：每个蛋白一条区域轨道图
+- `figures/focus_mutations/`：焦点蛋白的突变标注图
+
+突变规则：优先改 PWM 信息量最高的 3 个位点（P1）。C→S，K/R→E，D/E→K，其余优先 Ala scan。未命中某 motif 的蛋白会写明无需针对该 motif 突变。
