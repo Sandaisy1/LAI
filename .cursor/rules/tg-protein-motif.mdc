@@ -1,0 +1,34 @@
+---
+description: TG BRCA 蛋白共同序列 motif 发现、显著性与序列 logo
+globs: "**/*motif*.{R,r}"
+alwaysApply: true
+---
+
+# TG BRCA：蛋白共同序列（motif）
+
+对给定人源蛋白找 **3–5 条** 共同短序列，必须有真实显著性，并用 bits 序列 logo 出图。不要套用 RNA-seq 的六组比较 / FC / topN。
+
+## 数据
+
+- 脚本：`TG_protein_motif_pipeline.R`；基因表：`TG_protein_motif_genes.txt`
+- 目录：`E:/R/TG_BRCA/TG`（缺失则回退仓库根）；结果：`results/protein_motifs/`
+- 物种：人；序列来自 UniProt Swiss-Prot **reviewed + canonical**（每基因一条）
+- 不要用 Cuffdiff / FPKM 当蛋白序列；拉不到序列的基因记入日志，不要丢弃整次分析
+
+## 分析
+
+1. 先拉序列，再 de novo（ZOOPS：每条蛋白 0 或 1 个位点）；禁止把不同家族硬 MSA 成一张图当“共同序列”
+2. 宽度扫描约 8–21 aa；目标报告 **3–5** 条非冗余 motif
+3. 显著性：序列随机重排得到 empirical **p** 与 **E-value**；能估计时先滤 **p < 0.01**，再按 E / 信息量排序
+4. 不能估计 p 时不要伪造；仍出 logo 并在日志写明
+5. 只保留过阈值的 motif；不足 3 条就如实少报，不要凑数
+
+## 每条非空 motif 必须出
+
+命中表（基因、UniProt、起止、匹配序列、LLR、p/E）、PWM、对齐 FASTA、**ggseqlogo**（Y 轴 bits 0–4，X 轴 1..w，`col_scheme = "chemistry"`）。文件名与标题带 `motif1`…`motif5` 和 p/E。
+
+```r
+# ❌ BAD: 46 条蛋白强制 MSA 只出一张 logo；或编造 p
+# ❌ BAD: 把火山图 / GSEA / FC 分层套到 motif
+# ✅ GOOD: 3–5 条 motif 各自目录；每条有 hits + bits logo + 真实 p/E
+```
