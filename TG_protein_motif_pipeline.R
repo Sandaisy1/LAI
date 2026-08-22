@@ -7,7 +7,7 @@
 #   - 每条 motif 单独出 hits 表 + bits 序列 logo（ggseqlogo chemistry）
 #
 # 用法：
-#   setwd("E:/R/TG_BRCA/TG")
+#   # 数据与结果默认在 E:\R\Protein
 #   source("TG_protein_motif_pipeline.R")
 # =============================================================================
 
@@ -48,29 +48,43 @@ for (p in c(cran_required, cran_optional)) {
 # -----------------------------------------------------------------------------
 # 1. 路径与参数
 # -----------------------------------------------------------------------------
-resolve_project_dir <- function() {
-  env_dir <- Sys.getenv("TG_RNASEQ_DIR", unset = "")
-  candidates <- c(
-    env_dir,
-    "E:/R/TG_BRCA/TG",
-    "E:\\R\\TG_BRCA\\TG",
-    getwd()
-  )
-  candidates <- unique(candidates[nzchar(candidates)])
-  for (d in candidates) {
-    if (dir.exists(d) && (
-      file.exists(file.path(d, "TG_protein_motif_pipeline.R")) ||
-      file.exists(file.path(d, "TG_protein_motif_genes.txt")) ||
-      file.exists(file.path(d, "TG_RNAseq_pipeline.R"))
-    )) {
+protein_data_candidates <- function() {
+  env_dir <- Sys.getenv("TG_PROTEIN_DIR", unset = "")
+  out <- c(env_dir, "E:/R/Protein", "E:\\R\\Protein")
+  unique(out[nzchar(out)])
+}
+
+resolve_protein_dir <- function() {
+  for (d in protein_data_candidates()) {
+    if (dir.exists(d)) {
       return(normalizePath(d, winslash = "/", mustWork = FALSE))
     }
   }
-  normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+  for (d in c("E:/R/Protein", "E:\\R\\Protein")) {
+    if (dir.exists(dirname(d)) || dir.exists("E:/") || dir.exists("E:\\")) {
+      dir.create(d, recursive = TRUE, showWarnings = FALSE)
+      if (dir.exists(d)) {
+        return(normalizePath(d, winslash = "/", mustWork = FALSE))
+      }
+    }
+  }
+  fallback <- normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+  message("未找到 E:/R/Protein，回退到: ", fallback)
+  fallback
 }
 
-project_dir <- resolve_project_dir()
-result_dir  <- file.path(project_dir, "results", "protein_motifs")
+find_gene_list_path <- function(protein_dir) {
+  candidates <- c(
+    file.path(protein_dir, "TG_protein_motif_genes.txt"),
+    file.path(getwd(), "TG_protein_motif_genes.txt")
+  )
+  hit <- candidates[file.exists(candidates)]
+  if (length(hit) > 0) return(hit[[1]])
+  file.path(protein_dir, "TG_protein_motif_genes.txt")
+}
+
+protein_dir <- resolve_protein_dir()
+result_dir  <- file.path(protein_dir, "results")
 log_dir     <- file.path(result_dir, "00_logs")
 dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -237,7 +251,7 @@ fetch_one_uniprot <- function(symbol) {
 }
 
 fetch_uniprot_sequences <- function(symbols) {
-  fasta_override <- file.path(project_dir, "TG_protein_motif_sequences.fasta")
+  fasta_override <- file.path(protein_dir, "TG_protein_motif_sequences.fasta")
   rows <- vector("list", length(symbols))
   for (i in seq_along(symbols)) {
     sym <- symbols[i]
@@ -619,9 +633,10 @@ mask_sites <- function(int_list, starts, width) {
 # 8. 主流程
 # -----------------------------------------------------------------------------
 run_protein_motif_pipeline <- function() {
-  gene_file <- file.path(project_dir, "TG_protein_motif_genes.txt")
+  gene_file <- find_gene_list_path(protein_dir)
   genes <- read_gene_list(gene_file)
-  log_msg("Project dir: ", project_dir)
+  log_msg("Protein data dir: ", protein_dir)
+  log_msg("Gene list: ", gene_file)
   log_msg("Genes: ", length(genes), " -> ", paste(genes, collapse = ", "))
 
   fetch_tbl <- fetch_uniprot_sequences(genes)

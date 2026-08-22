@@ -8,7 +8,7 @@ alwaysApply: true
 
 写或改本仓库 **RNA-seq** 分析时必须按本规则。输入是 Cuffdiff，不是 Excel。
 
-**例外：** 蛋白共同序列 / motif / 序列 logo 走 `tg-protein-motif.mdc` 与 `TG_protein_motif_pipeline.R`，不要套用六组比较、FC/topN 或 Cuffdiff。
+**例外：** 蛋白共同序列 / motif / 序列 logo 走 `tg-protein-motif.mdc` 与 `TG_protein_motif_pipeline.R`，数据在 `E:/R/Protein`，不要套用六组比较、FC/topN 或 Cuffdiff。
 
 ## 数据
 

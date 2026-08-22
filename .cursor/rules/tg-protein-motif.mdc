@@ -11,7 +11,8 @@ alwaysApply: true
 ## 数据
 
 - 脚本：`TG_protein_motif_pipeline.R`；基因表：`TG_protein_motif_genes.txt`
-- 目录：`E:/R/TG_BRCA/TG`（缺失则回退仓库根）；结果：`results/protein_motifs/`
+- 数据与结果目录：`E:/R/Protein`（可用环境变量 `TG_PROTEIN_DIR` 覆盖；该目录不存在则创建，仍失败再回退当前工作目录）
+- 本地序列覆盖：`E:/R/Protein/TG_protein_motif_sequences.fasta`；结果：`E:/R/Protein/results/`
 - 物种：人；序列来自 UniProt Swiss-Prot **reviewed + canonical**（每基因一条）
 - 不要用 Cuffdiff / FPKM 当蛋白序列；拉不到序列的基因记入日志，不要丢弃整次分析
 
