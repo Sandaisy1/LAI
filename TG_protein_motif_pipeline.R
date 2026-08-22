@@ -3,7 +3,7 @@
 # TG BRCA：指定人源蛋白的共同序列（de novo motif）
 #   - UniProt Swiss-Prot reviewed canonical 序列（每基因一条）
 #   - ZOOPS EM；全部宽度入池后按全局得分（位点平均 IC）取前五
-#   - 显著性：序列重排 empirical p 与 E-value（不伪造 p）
+#   - 显著性：重排零分布的单侧 z 检验 p（不同 motif 的 p 应不同；不用 (1+n_ge)/(1+N) 当展示 p）
 #   - 每条 motif 单独出 hits 表 + bits 序列 logo（ggseqlogo chemistry）
 #
 # 用法：
@@ -106,7 +106,7 @@ p_cutoff          <- 0.01
 n_em_iter         <- 25L
 n_random_starts   <- 4L
 n_kmer_seeds      <- 3L
-# 经验 p = (1 + n_ge) / (1 + n_shuffle)，要能出现 p < 0.01，重排次数必须 >= 100
+# 重排次数用于估计零分布均值/标准差；p 用连续 z 检验，不再用计数下限把所有显著 motif 卡成同一个 p
 n_shuffle         <- 200L
 min_sites         <- 4L
 uniprot_pause_sec <- 0.2
@@ -528,7 +528,7 @@ discover_one_motif <- function(seq_df, int_list, width, bg) {
 }
 
 # -----------------------------------------------------------------------------
-# 6. 显著性：对序列做组成保留重排，不伪造 p
+# 6. 显著性：组成保留重排得到零分布，再用单侧 z 给出连续 p（避免全是 1/(N+1)）
 # -----------------------------------------------------------------------------
 shuffle_seq <- function(seq) {
   paste(sample(strsplit(seq, "")[[1]]), collapse = "")
@@ -551,20 +551,40 @@ motif_score_on_seqs <- function(int_list, lod) {
 
 empirical_significance <- function(seq_df, motif, bg, n_shuffle) {
   obs <- motif_score_on_seqs(lapply(seq_df$sequence, seq_to_int), motif$lod)
+  obs_llr <- unname(obs[["llr"]])
   null_llr <- numeric(n_shuffle)
   for (b in seq_len(n_shuffle)) {
     shuf <- vapply(seq_df$sequence, shuffle_seq, character(1))
     shuf_int <- lapply(unname(shuf), seq_to_int)
     null_llr[b] <- motif_score_on_seqs(shuf_int, motif$lod)[["llr"]]
   }
-  n_ge <- sum(null_llr >= obs[["llr"]])
-  p <- (1 + n_ge) / (1 + n_shuffle)
+  n_ge <- sum(null_llr >= obs_llr)
+  floor_p <- (1 + n_ge) / (1 + n_shuffle)
+  mu <- mean(null_llr)
+  sdv <- stats::sd(null_llr)
+  if (!is.finite(sdv) || sdv < 1e-12) {
+    z <- NA_real_
+    log10_p <- log10(floor_p)
+    p_z <- floor_p
+  } else {
+    z <- (obs_llr - mu) / sdv
+    logp <- stats::pnorm(z, lower.tail = FALSE, log.p = TRUE)
+    log10_p <- as.numeric(logp / log(10))
+    p_z <- exp(logp)
+    if (!is.finite(p_z) || p_z <= 0) {
+      p_z <- 10^pmax(log10_p, -300)
+    }
+  }
   list(
-    observed_llr = unname(obs[["llr"]]),
+    observed_llr = obs_llr,
     n_hits = unname(obs[["n_hit"]]),
-    empirical_p = p,
-    null_mean = mean(null_llr),
-    null_sd = stats::sd(null_llr)
+    empirical_p = p_z,
+    shuffle_floor_p = floor_p,
+    z_score = z,
+    log10_p = log10_p,
+    n_ge = n_ge,
+    null_mean = mu,
+    null_sd = sdv
   )
 }
 
@@ -738,14 +758,20 @@ run_protein_motif_pipeline <- function() {
     )
     sig <- empirical_significance(ok, pick, bg, n_shuffle)
     pick$empirical_p <- sig$empirical_p
+    pick$shuffle_floor_p <- sig$shuffle_floor_p
+    pick$z_score <- sig$z_score
+    pick$log10_p <- sig$log10_p
     pick$e_value <- min(1, sig$empirical_p * n_tests)
     pick$observed_llr <- sig$observed_llr
     pick$null_mean <- sig$null_mean
+    pick$null_sd <- sig$null_sd
     pick$significant <- is.finite(pick$empirical_p) && pick$empirical_p < p_cutoff
     log_msg(
       "  consensus=", pick$consensus,
       " sites=", nrow(pick$hits),
+      " z=", round(pick$z_score, 2),
       " p=", signif(pick$empirical_p, 3),
+      " floor_p=", signif(pick$shuffle_floor_p, 3),
       " E=", signif(pick$e_value, 3),
       " sig=", pick$significant
     )
@@ -821,7 +847,10 @@ run_protein_motif_pipeline <- function() {
       coverage = nrow(hits) / nrow(ok),
       total_ic_bits = m$ic,
       observed_llr = m$observed_llr,
+      z_score = m$z_score,
+      log10_p = m$log10_p,
       empirical_p = m$empirical_p,
+      shuffle_floor_p = m$shuffle_floor_p,
       e_value = m$e_value,
       significant_p_lt_0.01 = isTRUE(m$significant),
       stringsAsFactors = FALSE
