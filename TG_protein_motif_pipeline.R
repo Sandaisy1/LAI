@@ -18,9 +18,10 @@ Sys.setenv(LANGUAGE = "en")
 # 0. 依赖
 # -----------------------------------------------------------------------------
 cran_required <- c(
-  "httr", "jsonlite", "dplyr", "tidyr", "tibble", "stringr",
+  "dplyr", "tidyr", "tibble", "stringr",
   "ggplot2", "ggseqlogo", "writexl"
 )
+cran_optional <- c("httr", "jsonlite")
 
 install_if_missing <- function(pkgs, required = TRUE) {
   miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
@@ -37,8 +38,11 @@ install_if_missing <- function(pkgs, required = TRUE) {
 }
 
 install_if_missing(cran_required, required = TRUE)
-for (p in cran_required) {
-  suppressPackageStartupMessages(library(p, character.only = TRUE))
+install_if_missing(cran_optional, required = FALSE)
+for (p in c(cran_required, cran_optional)) {
+  if (requireNamespace(p, quietly = TRUE)) {
+    suppressPackageStartupMessages(library(p, character.only = TRUE))
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -88,7 +92,8 @@ p_cutoff          <- 0.01
 n_em_iter         <- 25L
 n_random_starts   <- 4L
 n_kmer_seeds      <- 3L
-n_shuffle         <- 60L
+# 经验 p = (1 + n_ge) / (1 + n_shuffle)，要能出现 p < 0.01，重排次数必须 >= 100
+n_shuffle         <- 200L
 min_sites         <- 4L
 uniprot_pause_sec <- 0.2
 
@@ -144,30 +149,29 @@ int_to_seq <- function(idx) {
 # 3. UniProt Swiss-Prot（reviewed, 每基因一条 canonical）
 # -----------------------------------------------------------------------------
 uniprot_search <- function(query, fields = "accession,gene_primary,protein_name,length,sequence,reviewed") {
-  url <- "https://rest.uniprot.org/uniprotkb/search"
-  resp <- tryCatch(
-    httr::GET(
-      url,
-      query = list(
-        query = query,
-        fields = fields,
-        format = "tsv",
-        size = 50
-      ),
-      httr::timeout(60)
-    ),
-    error = function(e) e
+  url <- paste0(
+    "https://rest.uniprot.org/uniprotkb/search?",
+    "query=", utils::URLencode(query, reserved = TRUE),
+    "&fields=", utils::URLencode(fields, reserved = TRUE),
+    "&format=tsv&size=50"
   )
-  if (inherits(resp, "error")) return(list(ok = FALSE, error = resp$message, table = NULL))
-  code <- httr::status_code(resp)
-  if (code == 429) {
-    Sys.sleep(2)
-    return(uniprot_search(query, fields))
-  }
-  if (code >= 400) {
-    return(list(ok = FALSE, error = paste("HTTP", code), table = NULL))
-  }
-  txt <- httr::content(resp, as = "text", encoding = "UTF-8")
+  txt <- tryCatch({
+    if (requireNamespace("httr", quietly = TRUE)) {
+      resp <- httr::GET(url, httr::timeout(60))
+      code <- httr::status_code(resp)
+      if (code == 429) {
+        Sys.sleep(2)
+        return(uniprot_search(query, fields))
+      }
+      if (code >= 400) stop("HTTP ", code)
+      httr::content(resp, as = "text", encoding = "UTF-8")
+    } else {
+      con <- url(url, open = "rb")
+      on.exit(close(con), add = TRUE)
+      rawToChar(readBin(con, what = "raw", n = 2e6))
+    }
+  }, error = function(e) e)
+  if (inherits(txt, "error")) return(list(ok = FALSE, error = txt$message, table = NULL))
   if (!nzchar(trimws(txt))) return(list(ok = TRUE, error = NULL, table = NULL))
   tab <- tryCatch(
     utils::read.delim(text = txt, sep = "\t", header = TRUE, stringsAsFactors = FALSE, quote = ""),
@@ -815,4 +819,40 @@ cowplot_or_patchwork <- function(plots) {
   plots[[1]]
 }
 
-run_protein_motif_pipeline()
+run_motif_selftest <- function() {
+  set.seed(35)
+  planted <- "CADCQEGGGC"
+  flank <- function() paste(sample(AA20, 40, replace = TRUE), collapse = "")
+  seqs <- vapply(seq_len(12), function(i) paste0(flank(), planted, flank()), character(1))
+  seq_df <- data.frame(
+    gene = paste0("G", seq_len(12)),
+    uniprot = paste0("P", seq_len(12)),
+    sequence = seqs,
+    stringsAsFactors = FALSE
+  )
+  int_list <- lapply(seq_df$sequence, seq_to_int)
+  bg <- background_freq(int_list)
+  fit <- discover_one_motif(seq_df, int_list, 10L, bg)
+  if (is.null(fit)) stop("selftest: planted motif not recovered")
+  sig <- empirical_significance(seq_df, fit, bg, 30L)
+  recovered <- grepl("C", fit$consensus) && grepl("G", fit$consensus)
+  log_msg(
+    "SELFTEST consensus=", fit$consensus,
+    " sites=", nrow(fit$hits),
+    " p=", signif(sig$empirical_p, 3),
+    " recovered_CG=", recovered
+  )
+  if (!recovered) stop("selftest: consensus lost planted C/G")
+  if (nrow(fit$hits) < 8) stop("selftest: too few planted sites")
+  if (!(is.finite(sig$empirical_p) && sig$empirical_p < 0.05)) {
+    stop("selftest: planted motif not significant")
+  }
+  log_msg("SELFTEST passed")
+  invisible(TRUE)
+}
+
+if (identical(Sys.getenv("TG_MOTIF_SELFTEST"), "1")) {
+  run_motif_selftest()
+} else {
+  run_protein_motif_pipeline()
+}

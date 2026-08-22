@@ -107,6 +107,8 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```r
 setwd("E:/R/TG_BRCA/TG")
 source("TG_protein_motif_pipeline.R")
+# 自检（植入已知 motif，不访问 UniProt）：
+# Sys.setenv(TG_MOTIF_SELFTEST = "1"); source("TG_protein_motif_pipeline.R")
 ```
 
 结果在 `results/protein_motifs/`：
