@@ -844,7 +844,7 @@ run_protein_motif_pipeline <- function() {
       m <- keep[[i]]
       plot_seqlogo(
         m$hits$site_sequence,
-        sprintf("motif%d  %s  p=%.3g", i, m$consensus, m$empirical_p)
+        sprintf("motif%d  rank%d  score=%.3f  p=%.3g", i, m$global_rank, m$global_score, m$empirical_p)
       )
     })
     combo <- tryCatch(
