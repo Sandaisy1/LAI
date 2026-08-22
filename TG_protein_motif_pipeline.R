@@ -99,7 +99,7 @@ AA20 <- strsplit("ACDEFGHIKLMNPQRSTVWY", "")[[1]]
 aa_index <- setNames(seq_along(AA20), AA20)
 
 # 宽度、motif 条数、显著性（与 Cursor 规则一致）
-motif_widths      <- c(8L, 10L, 12L, 15L, 21L)
+motif_widths      <- 6L:21L
 n_motifs_target   <- 5L
 n_motifs_min      <- 3L
 p_cutoff          <- 0.01
