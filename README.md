@@ -102,7 +102,7 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 对指定人源蛋白做 de novo 共同短序列（约 3–5 条），用序列重排估计 p / E-value，并用 bits 序列 logo 出图。**不要**把上面的 RNA-seq 六组比较或 FC/topN 套过来。
 
-数据与结果默认在 `E:\R\Protein`（可用 `TG_PROTEIN_DIR` 覆盖）。基因列表在 `TG_protein_motif_genes.txt`（可改，优先读该目录，否则读当前工作目录）。序列从 UniProt Swiss-Prot 拉取（每基因一条 reviewed canonical）。若外网失败，可把 FASTA 放到 `E:\R\Protein\TG_protein_motif_sequences.fasta`（头行用基因名）。
+数据与结果默认在 `E:\R\Protein`（可用 `TG_PROTEIN_DIR` 覆盖）。基因列表在 `TG_protein_motif_genes.txt`（可改，优先读该目录，否则读当前工作目录）。序列从 UniProt Swiss-Prot 拉取（每基因一条 reviewed canonical）。若外网失败，可把 FASTA 放到 `E:\R\Protein\TG_protein_motif_sequences.fasta`（头行用基因名）。宽度扫描 **6–21 aa**（每个整数都扫）。
 
 ```r
 source("TG_protein_motif_pipeline.R")
