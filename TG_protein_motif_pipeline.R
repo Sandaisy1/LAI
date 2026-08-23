@@ -746,113 +746,6 @@ plot_seqlogo <- function(site_seqs, title) {
     )
 }
 
-format_pvalue_label <- function(p) {
-  if (!is.finite(p)) return("p = NA")
-  if (p < 0.0001) return("p < 0.0001")
-  if (p < 0.001) return(sprintf("p = %.4f", p))
-  if (p < 0.01) return(sprintf("p = %.3f", p))
-  sprintf("p = %.2f", p)
-}
-
-protein_best_llr <- function(hits) {
-  if (is.null(hits) || !nrow(hits)) {
-    return(data.frame(gene = character(), llr = numeric(), stringsAsFactors = FALSE))
-  }
-  agg <- stats::aggregate(llr_score ~ gene, data = hits, FUN = max)
-  names(agg)[names(agg) == "llr_score"] <- "llr"
-  agg
-}
-
-# 样式对齐常见论文柱状图：Mtf-1 / Mtf-2，均值 ± SEM，括号标 p
-plot_motif_compare_bars <- function(keep) {
-  if (length(keep) < 2) return(NULL)
-  a <- protein_best_llr(keep[[1]]$hits)
-  b <- protein_best_llr(keep[[2]]$hits)
-  names(a)[names(a) == "llr"] <- "llr1"
-  names(b)[names(b) == "llr"] <- "llr2"
-  paired <- merge(a, b, by = "gene")
-  if (nrow(paired) < 3) {
-    x1 <- a$llr1
-    x2 <- b$llr2
-    pval <- tryCatch(stats::wilcox.test(x1, x2)$p.value, error = function(e) NA_real_)
-  } else {
-    x1 <- paired$llr1
-    x2 <- paired$llr2
-    pval <- tryCatch(
-      stats::wilcox.test(x1, x2, paired = TRUE)$p.value,
-      error = function(e) NA_real_
-    )
-  }
-  sem <- function(x) {
-    x <- x[is.finite(x)]
-    if (length(x) < 2) return(0)
-    stats::sd(x) / sqrt(length(x))
-  }
-  bar_df <- data.frame(
-    motif = factor(c("Mtf-1", "Mtf-2"), levels = c("Mtf-1", "Mtf-2")),
-    mean_llr = c(mean(x1, na.rm = TRUE), mean(x2, na.rm = TRUE)),
-    sem_llr = c(sem(x1), sem(x2)),
-    stringsAsFactors = FALSE
-  )
-  y_top <- max(bar_df$mean_llr + bar_df$sem_llr, na.rm = TRUE)
-  if (!is.finite(y_top) || y_top <= 0) y_top <- 1
-  gap <- y_top * 0.08
-  bracket_y <- y_top + gap
-  text_y <- bracket_y + gap * 0.7
-  y_lim <- text_y + gap
-  p_lab <- format_pvalue_label(pval)
-  pal <- c("Mtf-1" = "#2E75B6", "Mtf-2" = "#C00000")
-  ggplot2::ggplot(bar_df, ggplot2::aes(x = motif, y = mean_llr, fill = motif)) +
-    ggplot2::geom_col(width = 0.55, color = NA) +
-    ggplot2::geom_errorbar(
-      ggplot2::aes(ymin = mean_llr - sem_llr, ymax = mean_llr + sem_llr),
-      width = 0.15, linewidth = 0.5
-    ) +
-    ggplot2::annotate("segment", x = 1, xend = 2, y = bracket_y, yend = bracket_y, linewidth = 0.4) +
-    ggplot2::annotate("segment", x = 1, xend = 1, y = bracket_y - gap * 0.25, yend = bracket_y, linewidth = 0.4) +
-    ggplot2::annotate("segment", x = 2, xend = 2, y = bracket_y - gap * 0.25, yend = bracket_y, linewidth = 0.4) +
-    ggplot2::annotate("text", x = 1.5, y = text_y, label = p_lab, size = 4.2) +
-    ggplot2::scale_fill_manual(values = pal, guide = "none") +
-    ggplot2::scale_y_continuous(expand = c(0, 0), limits = c(0, y_lim)) +
-    ggplot2::labs(x = NULL, y = "LLR / protein") +
-    ggplot2::theme_classic(base_size = 13, base_family = "sans") +
-    ggplot2::theme(
-      axis.text = ggplot2::element_text(color = "black", size = 12),
-      axis.title.y = ggplot2::element_text(face = "bold", size = 12),
-      axis.line = ggplot2::element_line(linewidth = 0.5),
-      axis.ticks = ggplot2::element_line(linewidth = 0.5)
-    )
-}
-
-write_motif_compare_bars <- function(keep, out_dir) {
-  if (length(keep) < 2) {
-    log_msg("Skip Mtf-1 vs Mtf-2 bar plot: need at least two reported motifs")
-    return(invisible(NULL))
-  }
-  a <- protein_best_llr(keep[[1]]$hits)
-  b <- protein_best_llr(keep[[2]]$hits)
-  names(a)[names(a) == "llr"] <- "mtf1_llr"
-  names(b)[names(b) == "llr"] <- "mtf2_llr"
-  tab <- merge(a, b, by = "gene", all = TRUE)
-  utils::write.csv(tab, file.path(out_dir, "motif_mtf1_vs_mtf2_llr.csv"), row.names = FALSE)
-  fig <- tryCatch(plot_motif_compare_bars(keep), error = function(e) {
-    log_msg("bar plot failed: ", e$message)
-    NULL
-  })
-  if (is.null(fig)) return(invisible(NULL))
-  stub <- file.path(out_dir, "motif_mtf1_vs_mtf2_bars")
-  tryCatch(
-    ggplot2::ggsave(paste0(stub, ".pdf"), fig, width = 3.4, height = 4.2),
-    error = function(e) log_msg("bar pdf failed: ", e$message)
-  )
-  tryCatch(
-    ggplot2::ggsave(paste0(stub, ".png"), fig, width = 3.4, height = 4.2, dpi = 300),
-    error = function(e) log_msg("bar png failed: ", e$message)
-  )
-  log_msg("Wrote Mtf-1 vs Mtf-2 bar plot -> ", stub)
-  invisible(fig)
-}
-
 write_pwm_csv <- function(pwm, path, position_ic = NULL) {
   tab <- as.data.frame(t(pwm))
   names(tab) <- AA20
@@ -1284,8 +1177,6 @@ run_protein_motif_pipeline <- function() {
     }
   }
 
-  write_motif_compare_bars(keep, result_dir)
-
   # 总览 logo（只含显著或实际写出的 motif）
   if (length(keep) > 1 && requireNamespace("ggseqlogo", quietly = TRUE)) {
     logo_list <- lapply(seq_along(keep), function(i) {
@@ -1432,18 +1323,6 @@ run_motif_selftest <- function() {
   if (max(n_per_gene) < 2) stop("selftest: expected multiple sites in a protein")
   if (!(is.finite(sig$empirical_p) && sig$empirical_p < 0.05)) {
     stop("selftest: planted motif not significant")
-  }
-  set.seed(11)
-  fake_keep <- list(
-    list(hits = data.frame(gene = paste0("G", 1:20), llr_score = rnorm(20, 12, 1), stringsAsFactors = FALSE)),
-    list(hits = data.frame(gene = paste0("G", 1:20), llr_score = rnorm(20, 7, 1), stringsAsFactors = FALSE))
-  )
-  bar_dir <- file.path(tempdir(), paste0("motif_bars_", as.integer(Sys.time())))
-  dir.create(bar_dir, recursive = TRUE, showWarnings = FALSE)
-  write_motif_compare_bars(fake_keep, bar_dir)
-  if (!file.exists(file.path(bar_dir, "motif_mtf1_vs_mtf2_bars.png")) &&
-      !file.exists(file.path(bar_dir, "motif_mtf1_vs_mtf2_bars.pdf"))) {
-    stop("selftest: Mtf-1 vs Mtf-2 bar plot was not written")
   }
   log_msg("SELFTEST passed")
   invisible(TRUE)

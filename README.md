@@ -119,14 +119,12 @@ E:/R/Protein/results/
   motif_significance_summary.csv
   motif_all_hits.csv
   motif_all_seqlogos.pdf
-  motif_mtf1_vs_mtf2_bars.pdf
-  motif_mtf1_vs_mtf2_llr.csv
   motif1/motif1_seqlogo.pdf
   motif1/motif1_hits.csv
   ...
 ```
 
-每条 motif 目录里都有命中表、PWM、对齐位点和 chemistry 配色的 bits logo（Y 轴 0–4）。只保留 **p < 0.01** 的 motif；不足 3 条会如实少报，不会改 p 值凑数。若至少写出两条 motif，还会出 `motif_mtf1_vs_mtf2_bars.pdf`：Mtf-1 / Mtf-2 每蛋白最佳 LLR 的柱状图（均值 ± SEM，括号上标配对 Wilcoxon p）。
+每条 motif 目录里都有命中表、PWM、对齐位点和 chemistry 配色的 bits logo（Y 轴 0–4）。只保留 **p < 0.01** 的 motif；不足 3 条会如实少报，不会改 p 值凑数。
 
 ### 区域导出与突变方案（新脚本，不改原流程）
 

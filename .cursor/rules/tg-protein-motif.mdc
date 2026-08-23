@@ -26,7 +26,7 @@ alwaysApply: true
 
 ## 每条非空 motif 必须出
 
-命中表（基因、UniProt、起止、匹配序列、LLR、p/E）、PWM、对齐 FASTA、**ggseqlogo**（Y 轴 bits 0–4，X 轴 1..w，`col_scheme = "chemistry"`）。文件名与标题带 `motif1`…`motif5` 和 p/E。总览再出 **Mtf-1 vs Mtf-2** 柱状图（每蛋白最佳 LLR 的均值 ± SEM，配对 Wilcoxon p）。
+命中表（基因、UniProt、起止、匹配序列、LLR、p/E）、PWM、对齐 FASTA、**ggseqlogo**（Y 轴 bits 0–4，X 轴 1..w，`col_scheme = "chemistry"`）。文件名与标题带 `motif1`…`motif5` 和 p/E。
 
 ## 区域导出与突变方案（新脚本，不改原流程）
 
