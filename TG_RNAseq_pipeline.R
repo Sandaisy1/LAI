@@ -894,25 +894,27 @@ plot_ora_bubble <- function(ora, title, outfile, n_show = bubble_top_n) {
   df$label <- factor(df$label, levels = rev(unique(as.character(df$label))))
   df$p_adjust <- df$p.adjust
   df$p_adjust[!is.finite(df$p_adjust)] <- 1
+  df$p_adjust <- pmax(df$p_adjust, 1e-300)
   p <- ggplot2::ggplot(
     df,
-    ggplot2::aes(x = GeneRatio_num, y = label, size = Count, color = p_adjust)
+    ggplot2::aes(x = GeneRatio_num, y = label, size = Count, fill = p_adjust)
   ) +
-    ggplot2::geom_point() +
+    ggplot2::geom_point(shape = 21, color = "grey30", stroke = 0.4) +
     ggplot2::theme_bw(base_size = 12) +
     ggplot2::theme(axis.text.y = ggplot2::element_text(size = 9)) +
     ggplot2::labs(
       title = title,
       x = "GeneRatio",
       y = NULL,
-      color = "p.adjust",
+      fill = "p.adjust",
       size = "Count"
     )
   rng <- range(df$p_adjust[df$p_adjust > 0], na.rm = TRUE)
+  diverging <- c("blue", "white", "red")
   if (is.finite(rng[1]) && rng[1] > 0 && rng[2] / rng[1] >= 10) {
-    p <- p + ggplot2::scale_color_gradient(low = "red", high = "blue", trans = "log10")
+    p <- p + ggplot2::scale_fill_gradientn(colours = diverging, trans = "log10")
   } else {
-    p <- p + ggplot2::scale_color_gradient(low = "red", high = "blue")
+    p <- p + ggplot2::scale_fill_gradientn(colours = diverging)
   }
   h <- max(5.5, min(10, 0.38 * nrow(df) + 3))
   save_gg(p, outfile, width = 10, height = h)

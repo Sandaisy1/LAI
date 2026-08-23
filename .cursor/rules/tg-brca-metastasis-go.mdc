@@ -1,5 +1,5 @@
 ---
-description: 列出 GO 的气泡图必须用全基因组 enrichGO 的 GeneRatio/p.adjust/Count，只画前15且第一名在上
+description: 列出 GO 的气泡图用全基因组 enrichGO 统计，前15条且 y 轴 GeneRatio 最大在上
 globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
@@ -18,6 +18,6 @@ alwaysApply: true
 这样 `mitochondrion organization` 的 p.adjust 与正常 GO BP 图一致，而不是只在 ~70 条自选通路上重算后虚高。
 
 ```r
-# ❌ BAD: phyper + p.adjust(listed_only)；按 GeneRatio 排序且全部通路都画
-# ✅ GOOD: ego <- enrichGO(...); hit <- ego[ID %in% listed]; head(hit[order(p.adjust)], 15)
+# ❌ BAD: y 轴按 p.adjust 写成 1–15，GeneRatio 最大的通路却在中间
+# ✅ GOOD: top15 <- head(hit[order(p.adjust)], 15); y = reorder(term, GeneRatio)  # 最大在上
 ```
