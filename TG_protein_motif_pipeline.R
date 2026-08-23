@@ -3,9 +3,9 @@
 # TG BRCA：指定人源蛋白的共同序列（de novo motif）
 #   - UniProt Swiss-Prot reviewed canonical 序列（每基因一条）
 #   - 每条蛋白对每条 motif 至少 1 个位点；个别蛋白可有多个不重叠位点
-#   - 每个宽度先搜 8 条；先算每个氨基酸位点 IC，再对宽度取均值（宽度只作归一化）
-#   - 写出的 motif1–5 是 p<0.01 后的前五；ranking 表带 p 和 reported_motif，与分析同一套 mean_ic
-#   - 显著性：重排零分布的单侧 z 检验 p（不同 motif 的 p 应不同；不用 (1+n_ge)/(1+N) 当展示 p）
+#   - 对齐 MEME Suite Classic：各宽度 EM → 位点 IC 的 E-value 选最佳 → 擦除后再搜下一条
+#   - 侧翼低 IC 列按 MEME 思路裁掉；学 PWM 用 OOPS，扫描时允许 ANR 式额外位点
+#   - 写出的 motif1–5 仍先过重排 p<0.01；ranking 带 MEME E-value 与 reported_motif
 #   - 每条 motif 单独出 hits 表 + bits 序列 logo（ggseqlogo chemistry）
 #
 # 用法：
@@ -100,15 +100,20 @@ log_msg <- function(...) {
 AA20 <- strsplit("ACDEFGHIKLMNPQRSTVWY", "")[[1]]
 aa_index <- setNames(seq_along(AA20), AA20)
 
-# 宽度、motif 条数、显著性（与 Cursor 规则一致）
+# 宽度、motif 条数、显著性（MEME Suite Classic + 本仓库规则）
+# https://meme-suite.org/meme/doc/meme.html
 motif_widths      <- 6L:21L
-n_per_width       <- 8L
+n_meme_rounds     <- 8L
+n_per_width       <- n_meme_rounds
 n_motifs_target   <- 5L
 n_motifs_min      <- 3L
 p_cutoff          <- 0.01
 n_em_iter         <- 25L
 n_random_starts   <- 4L
-n_kmer_seeds      <- 3L
+n_kmer_seeds      <- 5L
+min_motif_width   <- 6L
+flank_ic_cut      <- 0.05
+dirichlet_b       <- 0.8
 # 重排次数用于估计零分布均值/标准差；p 用连续 z 检验，不再用计数下限把所有显著 motif 卡成同一个 p
 n_shuffle         <- 200L
 min_sites         <- 4L
@@ -319,8 +324,8 @@ background_freq <- function(int_list) {
   as.numeric(cnt / sum(cnt))
 }
 
-pwm_from_counts <- function(counts, bg, pseudo = 1) {
-  # counts: 20 x w
+pwm_from_counts <- function(counts, bg, pseudo = dirichlet_b) {
+  # MEME 风格 Dirichlet：伪计数按背景频率分配，不是对各氨基酸 +1
   den <- colSums(counts) + pseudo
   sweep(counts + (pseudo * bg), 2, den, "/")
 }
@@ -356,6 +361,41 @@ position_information_content <- function(pwm, bg) {
 
 information_content <- function(pwm, bg) {
   sum(position_information_content(pwm, bg))
+}
+
+# MEME Classic：各列 IC 的 p（Wilks / χ²，df = 19），再连乘得到 motif p，乘搜索空间得 E
+meme_column_pvalue <- function(ic_bits, n_sites) {
+  if (!is.finite(ic_bits) || !is.finite(n_sites) || n_sites < 2 || ic_bits <= 0) return(1)
+  stat <- 2 * n_sites * ic_bits * log(2)
+  p <- stats::pchisq(stat, df = 19, lower.tail = FALSE)
+  min(1, max(p, 1e-300))
+}
+
+meme_motif_pvalue <- function(position_ic, n_sites) {
+  ps <- vapply(as.numeric(position_ic), function(ic) meme_column_pvalue(ic, n_sites), numeric(1))
+  exp(sum(log(pmin(pmax(ps, 1e-300), 1))))
+}
+
+meme_evalue <- function(position_ic, n_sites, n_possible) {
+  ev <- meme_motif_pvalue(position_ic, n_sites) * max(as.numeric(n_possible), 1)
+  if (!is.finite(ev)) return(1)
+  ev
+}
+
+count_meme_search_space <- function(seq_df, widths = motif_widths) {
+  slen <- nchar(seq_df$sequence)
+  sum(vapply(as.integer(widths), function(w) sum(pmax(0, slen - w + 1)), numeric(1)))
+}
+
+# MEME 裁宽度：去掉两端几乎无信息的列，至少保留 min_motif_width
+trim_pwm_flanks <- function(pwm, bg, min_w = min_motif_width, ic_cut = flank_ic_cut) {
+  pos_ic <- position_information_content(pwm, bg)
+  w <- length(pos_ic)
+  lo <- 1L
+  hi <- w
+  while ((hi - lo + 1L) > min_w && pos_ic[lo] < ic_cut) lo <- lo + 1L
+  while ((hi - lo + 1L) > min_w && pos_ic[hi] < ic_cut) hi <- hi - 1L
+  list(lo = lo, hi = hi, pwm = pwm[, lo:hi, drop = FALSE], position_ic = pos_ic[lo:hi])
 }
 
 consensus_from_pwm <- function(pwm, min_p = 0.4) {
@@ -568,22 +608,26 @@ discover_one_motif <- function(seq_df, int_list, width, bg) {
     if (is.null(best) || fit$llr > best$llr) best <- fit
   }
   if (is.null(best)) return(NULL)
-  lod <- best$lod
+  tr <- trim_pwm_flanks(best$pwm, bg)
+  pwm <- tr$pwm
+  width <- ncol(pwm)
+  lod <- log_odds_from_pwm(pwm, bg)
   hits <- collect_multi_sites(seq_df, int_list, lod, width)
   if (is.null(hits) || length(setdiff(seq_df$gene, hits$gene)) > 0) return(NULL)
   hits <- hits[order(-hits$llr_score, hits$gene, hits$start), , drop = FALSE]
-  pos_ic <- position_information_content(best$pwm, bg)
+  pos_ic <- position_information_content(pwm, bg)
   list(
     width = width,
-    pwm = best$pwm,
+    pwm = pwm,
     lod = lod,
     starts = best$starts,
     llr = sum(hits$llr_score),
     position_ic = pos_ic,
     ic = sum(pos_ic),
-    consensus = consensus_from_pwm(best$pwm),
+    consensus = consensus_from_pwm(pwm),
     hits = hits,
-    lambda = best$lambda
+    lambda = best$lambda,
+    trimmed = (tr$lo > 1L || tr$hi < ncol(best$pwm))
   )
 }
 
@@ -755,9 +799,24 @@ attach_conservation <- function(m, bg = NULL) {
   m$ic <- sum(m$position_ic)
   m$width <- length(m$position_ic)
   m$mean_ic <- mean(m$position_ic)
-  m$global_score <- m$mean_ic
   m$n_conserved_aa <- sum(m$position_ic >= 0.5)
   m$position_ic_txt <- paste(sprintf("%.3f", m$position_ic), collapse = "|")
+  m
+}
+
+attach_meme_stats <- function(m, bg = NULL, n_possible = 1) {
+  m <- attach_conservation(m, bg)
+  n_sites <- if (!is.null(m$hits) && is.data.frame(m$hits) && nrow(m$hits) > 0) {
+    nrow(m$hits)
+  } else if (!is.null(m$n_sites) && is.finite(m$n_sites)) {
+    as.integer(m$n_sites)
+  } else {
+    2L
+  }
+  m$meme_pvalue <- meme_motif_pvalue(m$position_ic, n_sites)
+  m$meme_evalue <- meme_evalue(m$position_ic, n_sites, n_possible)
+  # 全局得分：MEME E-value 的 -log10（越大越好）；宽度通过 E-value 被校正
+  m$global_score <- -log10(max(m$meme_evalue, 1e-300))
   m
 }
 
@@ -765,23 +824,23 @@ motif_mean_ic <- function(m) {
   attach_conservation(m)$mean_ic
 }
 
-motif_global_score <- function(m) {
-  attach_conservation(m)$global_score
+motif_global_score <- function(m, n_possible = 1) {
+  attach_meme_stats(m, n_possible = n_possible)$global_score
 }
 
 motifs_redundant_pwm <- function(a, b, cor_cutoff = 0.85) {
   pwm_correlation(a, b) > cor_cutoff
 }
 
-# 每个宽度独立搜 n_per_width 条（遮盖已找到位点后再找下一条），再合并
-collect_motif_pool <- function(seq_df, int_list, bg) {
+# MEME 式：每轮扫全部宽度，按 Classic E-value 取最佳并擦除位点，再搜下一条
+collect_motif_pool <- function(seq_df, int_list, bg, n_possible) {
   pool <- list()
-  for (w in motif_widths) {
-    log_msg("Width ", w, ": search ", n_per_width, " candidates")
-    work_int <- int_list
-    width_fits <- list()
-    for (rnd in seq_len(n_per_width)) {
-      log_msg("  width=", w, "  candidate ", rnd, "/", n_per_width)
+  work_int <- int_list
+  for (rnd in seq_len(n_meme_rounds)) {
+    log_msg("MEME round ", rnd, "/", n_meme_rounds, " (all widths, pick lowest E-value, erase)")
+    round_fits <- list()
+    for (w in motif_widths) {
+      log_msg("  width=", w)
       fit <- tryCatch(
         discover_one_motif(seq_df, work_int, w, bg),
         error = function(e) {
@@ -789,37 +848,36 @@ collect_motif_pool <- function(seq_df, int_list, bg) {
           NULL
         }
       )
-      if (is.null(fit)) break
-      fit <- attach_conservation(fit, bg)
+      if (is.null(fit)) next
+      fit <- attach_meme_stats(fit, bg, n_possible)
       fit$pool_round <- rnd
-      width_fits[[length(width_fits) + 1]] <- fit
-      work_int <- mask_hits(work_int, fit$hits)
+      round_fits[[length(round_fits) + 1]] <- fit
     }
-    if (length(width_fits) == 0) next
-    ord <- order(
-      -vapply(width_fits, function(m) m$global_score, numeric(1)),
-      -vapply(width_fits, function(m) m$ic, numeric(1))
+    if (length(round_fits) == 0) break
+    ev <- vapply(round_fits, function(m) m$meme_evalue, numeric(1))
+    best <- round_fits[[which.min(ev)]]
+    log_msg(
+      "  pick width=", best$width,
+      " E=", signif(best$meme_evalue, 3),
+      " meanIC=", round(best$mean_ic, 3),
+      " ", best$consensus
     )
-    width_fits <- width_fits[ord]
-    for (i in seq_along(width_fits)) width_fits[[i]]$width_rank <- i
-    log_msg("  width=", w, " kept ", length(width_fits),
-            "  best aaIC=", round(width_fits[[1]]$mean_ic, 3),
-            "  conserved_aa=", width_fits[[1]]$n_conserved_aa)
-    pool <- c(pool, width_fits)
+    pool <- c(pool, round_fits)
+    work_int <- mask_hits(work_int, best$hits)
   }
   pool
 }
 
-# 所有宽度合并后按归一化保守性降序；PWM 过近只留更保守的那条（不按宽度限额）
-rank_motifs_global <- function(cands, cor_cutoff = 0.85, bg = NULL) {
+# 按 MEME E-value 升序（更显著在前）；PWM 过近只留 E 更小的那条
+rank_motifs_global <- function(cands, cor_cutoff = 0.85, bg = NULL, n_possible = 1) {
   if (length(cands) == 0) return(list())
   for (i in seq_along(cands)) {
-    cands[[i]] <- attach_conservation(cands[[i]], bg)
+    cands[[i]] <- attach_meme_stats(cands[[i]], bg, n_possible)
     if (is.null(cands[[i]]$width_rank)) cands[[i]]$width_rank <- NA_integer_
   }
   ord <- order(
-    -vapply(cands, function(m) m$global_score, numeric(1)),
-    -vapply(cands, function(m) m$ic, numeric(1)),
+    vapply(cands, function(m) m$meme_evalue, numeric(1)),
+    -vapply(cands, function(m) m$mean_ic, numeric(1)),
     -vapply(cands, function(m) nrow(m$hits), integer(1))
   )
   ranked <- list()
@@ -836,7 +894,13 @@ rank_motifs_global <- function(cands, cor_cutoff = 0.85, bg = NULL) {
     if (any(dup)) next
     ranked[[length(ranked) + 1]] <- m
   }
-  for (i in seq_along(ranked)) ranked[[i]]$global_rank <- i
+  wcount <- integer()
+  for (i in seq_along(ranked)) {
+    ranked[[i]]$global_rank <- i
+    w <- as.character(ranked[[i]]$width)
+    wcount[w] <- if (is.na(wcount[w])) 1L else wcount[w] + 1L
+    ranked[[i]]$width_rank <- as.integer(wcount[w])
+  }
   ranked
 }
 
@@ -869,6 +933,8 @@ motif_ranking_table <- function(ranked) {
       width = integer(),
       width_rank = integer(),
       global_score = numeric(),
+      meme_evalue = numeric(),
+      meme_pvalue = numeric(),
       mean_ic = numeric(),
       n_conserved_aa = integer(),
       position_ic = character(),
@@ -886,6 +952,8 @@ motif_ranking_table <- function(ranked) {
     width = vapply(ranked, function(m) motif_field_int(m, "width"), integer(1)),
     width_rank = vapply(ranked, function(m) motif_field_int(m, "width_rank"), integer(1)),
     global_score = vapply(ranked, function(m) motif_field_num(m, "global_score"), numeric(1)),
+    meme_evalue = vapply(ranked, function(m) motif_field_num(m, "meme_evalue"), numeric(1)),
+    meme_pvalue = vapply(ranked, function(m) motif_field_num(m, "meme_pvalue"), numeric(1)),
     mean_ic = vapply(ranked, function(m) motif_field_num(m, "mean_ic"), numeric(1)),
     n_conserved_aa = vapply(ranked, function(m) motif_field_int(m, "n_conserved_aa"), integer(1)),
     position_ic = vapply(ranked, function(m) motif_field_chr(m, "position_ic_txt"), character(1)),
@@ -926,9 +994,11 @@ run_protein_motif_pipeline <- function() {
   int_list <- lapply(ok$sequence, seq_to_int)
   names(int_list) <- ok$gene
   bg <- background_freq(int_list)
-  n_tests <- length(motif_widths) * n_per_width
-  pool <- collect_motif_pool(ok, int_list, bg)
-  ranked <- rank_motifs_global(pool, bg = bg)
+  n_possible <- count_meme_search_space(ok)
+  n_tests <- length(motif_widths) * n_meme_rounds
+  log_msg("MEME search space (windows x widths): ", format(n_possible, scientific = FALSE))
+  pool <- collect_motif_pool(ok, int_list, bg, n_possible)
+  ranked <- rank_motifs_global(pool, bg = bg, n_possible = n_possible)
   if (length(ranked) == 0) {
     log_msg("未发现 motif。请检查序列是否拉到，或放宽宽度。")
     return(invisible(NULL))
@@ -945,6 +1015,7 @@ run_protein_motif_pipeline <- function() {
       "Score-rank ", pick$global_rank,
       " width=", pick$width,
       " width_rank=", pick$width_rank,
+      " MEME_E=", signif(pick$meme_evalue, 3),
       " aaIC=", round(pick$mean_ic, 3),
       " posIC=", pick$position_ic_txt,
       " IC=", round(pick$ic, 2)
@@ -1056,6 +1127,8 @@ run_protein_motif_pipeline <- function() {
       global_score = m$global_score,
       width = m$width,
       width_rank = m$width_rank,
+      meme_evalue = m$meme_evalue,
+      meme_pvalue = m$meme_pvalue,
       mean_ic = m$mean_ic,
       n_conserved_aa = m$n_conserved_aa,
       position_ic = m$position_ic_txt,
@@ -1154,47 +1227,47 @@ cowplot_or_patchwork <- function(plots) {
 run_ranking_selftest <- function() {
   pos <- c(2, 1.5, 1, 0.5, 0.5, 0.5)
   by_aa <- attach_conservation(list(position_ic = pos, width = 6L, ic = sum(pos)))
-  if (abs(by_aa$global_score - mean(pos)) > 1e-12) {
-    stop("selftest: score must be mean of per-amino-acid IC")
+  if (abs(by_aa$mean_ic - mean(pos)) > 1e-12) {
+    stop("selftest: mean_ic must be the mean of per-amino-acid IC")
   }
   if (by_aa$n_conserved_aa != 6L) {
     stop("selftest: conserved amino-acid count is wrong")
   }
-  tie6 <- motif_global_score(list(position_ic = rep(2, 6), ic = 12, width = 6L))
-  tie21 <- motif_global_score(list(position_ic = rep(2, 21), ic = 42, width = 21L))
-  if (abs(tie6 - 2) > 1e-8 || abs(tie21 - 2) > 1e-8) {
-    stop("selftest: score must be width-normalized IC (bits/site)")
+  hits40 <- data.frame(x = seq_len(40))
+  strong6 <- attach_meme_stats(list(position_ic = rep(2, 6), hits = hits40), n_possible = 1000)
+  weak6 <- attach_meme_stats(list(position_ic = rep(0.2, 6), hits = hits40), n_possible = 1000)
+  if (strong6$meme_evalue >= weak6$meme_evalue) {
+    stop("selftest: higher per-site IC must have a smaller MEME E-value")
   }
-  if (abs(tie6 - tie21) > 1e-8) {
-    stop("selftest: same per-site conservation must tie after width correction")
+  strong21 <- attach_meme_stats(list(position_ic = rep(2, 21), hits = hits40), n_possible = 1000)
+  if (strong21$meme_evalue >= weak6$meme_evalue) {
+    stop("selftest: a longer, highly conserved motif must beat a weak short motif")
   }
-  weak6 <- motif_global_score(list(ic = 6, width = 6L))
-  strong21 <- motif_global_score(list(ic = 42, width = 21L))
-  if (strong21 <= weak6) {
-    stop("selftest: higher conservation must outrank a shorter, weaker motif")
-  }
+  bg <- rep(0.05, 20)
   make_pwm <- function(w, peak_row) {
     m <- matrix(0.02, nrow = 20, ncol = as.integer(w))
     m[as.integer(peak_row), ] <- 0.62
     sweep(m, 2, colSums(m), "/")
   }
+  flank <- matrix(0.05, nrow = 20, ncol = 1)
+  wide <- cbind(flank, make_pwm(6, 1), flank)
+  tr <- trim_pwm_flanks(wide, bg, min_w = 6L, ic_cut = 0.05)
+  if (ncol(tr$pwm) != 6L) {
+    stop("selftest: uninformative flanks should be trimmed, got width ", ncol(tr$pwm))
+  }
   fake <- list(
-    list(ic = 12, width = 6L, pwm = make_pwm(6, 1), hits = data.frame(x = 1),
-         consensus = "A", width_rank = 1L),
-    list(ic = 11.4, width = 6L, pwm = make_pwm(6, 2), hits = data.frame(x = 1),
-         consensus = "B", width_rank = 2L),
-    list(ic = 42, width = 21L, pwm = make_pwm(21, 3), hits = data.frame(x = 1),
-         consensus = "C", width_rank = 1L),
-    list(ic = 10, width = 12L, pwm = make_pwm(12, 4), hits = data.frame(x = 1),
-         consensus = "D", width_rank = 1L)
+    list(ic = 12, width = 6L, pwm = make_pwm(6, 1), hits = hits40, consensus = "A"),
+    list(ic = 11.4, width = 6L, pwm = make_pwm(6, 2), hits = hits40, consensus = "B"),
+    list(ic = 42, width = 21L, pwm = make_pwm(21, 3), hits = hits40, consensus = "C"),
+    list(ic = 10, width = 12L, pwm = make_pwm(12, 4), hits = hits40, consensus = "D")
   )
-  ranked <- rank_motifs_global(fake, cor_cutoff = 0.99)
+  ranked <- rank_motifs_global(fake, cor_cutoff = 0.99, n_possible = 1000)
   widths <- vapply(ranked, function(m) as.integer(m$width), integer(1))
   if (sum(widths == 6L) < 2) {
     stop("selftest: must keep multiple motifs of the same width")
   }
   if (as.integer(ranked[[1]]$width) != 21L) {
-    stop("selftest: highest conservation (tie-break total IC) should rank first")
+    stop("selftest: MEME E-value should rank the most conserved long motif first")
   }
   ranked[[1]]$significant <- TRUE
   ranked[[1]]$empirical_p <- 1e-4
@@ -1209,7 +1282,7 @@ run_ranking_selftest <- function() {
     stop("selftest: ranking mean_ic must match the motif object")
   }
   log_msg(
-    "RANKING SELFTEST passed  score=", round(tie6, 3),
+    "RANKING SELFTEST passed  MEME_E_strong6=", signif(strong6$meme_evalue, 3),
     "  n=", length(ranked), "  top_width=", ranked[[1]]$width
   )
   invisible(TRUE)

@@ -19,7 +19,7 @@ alwaysApply: true
 ## 分析
 
 1. 先拉序列，再 de novo：每条蛋白对每条 motif **至少 1 个位点**（禁止 0 次）；**允许个别蛋白有多个不重叠位点**（额外位点 LLR ≥ max(0, 0.5×该蛋白最佳位点)）。禁止把不同家族硬 MSA 成一张图当“共同序列”。某宽度下只要有蛋白短于该宽度，整档丢弃
-2. 宽度扫描 **6–21 aa**（每个整数都扫）。**每个宽度先独立搜选 8 条**（5–10 范围内；该宽度内遮盖已找到位点后再找下一条），再把所有宽度的候选放在一起。打分分两层：先算 **每个氨基酸位点的 IC**，再对宽度取均值，把宽度归一化掉（宽度本身被弱化，不用总 IC，也不用 √宽度折中）。**全局得分 = mean(position_ic)**。不要按宽度限额或短/中/长交错入选。PWM 相关 > 0.85 只去掉同一图案的重复，留下更保守的那条。然后按该得分降序；能估计 p 时先滤 **p < 0.01**，再取前五写成 motif1–5。`motif_global_ranking.csv` 必须带 `empirical_p`、`reported_motif`、`position_ic`；同一 `global_rank` 的 `mean_ic` 与 summary / 控制台必须相同（得分高但 p≥0.01 的行留在 ranking 里，不要写进 motif1–5）
+2. 按 [MEME Suite Classic](https://meme-suite.org/meme/doc/meme.html) 找共同 motif：宽度 **6–21 aa** 每个整数都扫（相当于 `-allw`）。学 PWM 用 **OOPS**（每条蛋白 1 个位点）；扫描时允许 **ANR** 式不重叠额外位点。每轮对所有宽度做 EM，用 **各位点 IC 的 χ² p 连乘 × 搜索空间** 得到 MEME E-value，取 E 最小的一条，擦除其位点后再搜下一条（共 8 轮）。两端 IC < 0.05 的列裁掉（至少留 6）。**全局得分 = −log10(MEME E-value)**，不用总 IC，也不按宽度限额交错。PWM 相关 > 0.85 只留 E 更小的那条。写出前仍用重排 z 检验滤 **p < 0.01**，再取前五。`motif_global_ranking.csv` 必须带 `meme_evalue`、`empirical_p`、`reported_motif`、`position_ic`；同一 `global_rank` 的 `mean_ic` 与 summary 必须相同
 3. 显著性：组成保留重排得到零分布，**p 用单侧 z 检验**（真实 LLR 相对重排均值/标准差）；禁止再用 (1+n_ge)/(1+N) 当展示 p（那会让所有过阈 motif 都变成同一个下限）。`shuffle_floor_p` 只作对照，不作筛选
 4. 不能估计 p 时不要伪造；仍出 logo 并在日志写明
 5. 只保留过阈值的 motif；不足 3 条就如实少报，不要凑数。不要按“逐轮发现顺序”当排名
