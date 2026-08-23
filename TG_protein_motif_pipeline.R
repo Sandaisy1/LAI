@@ -2,7 +2,7 @@
 # =============================================================================
 # TG BRCA：指定人源蛋白的共同序列（de novo motif）
 #   - UniProt Swiss-Prot reviewed canonical 序列（每基因一条）
-#   - ZOOPS EM；全部宽度入池后按全局得分（位点平均 IC）取前五
+#   - OOPS EM：每条蛋白对每条 motif 至少（且默认正好）1 个位点；按全局得分取前五
 #   - 显著性：重排零分布的单侧 z 检验 p（不同 motif 的 p 应不同；不用 (1+n_ge)/(1+N) 当展示 p）
 #   - 每条 motif 单独出 hits 表 + bits 序列 logo（ggseqlogo chemistry）
 #
@@ -351,8 +351,24 @@ consensus_from_pwm <- function(pwm, min_p = 0.4) {
 }
 
 # -----------------------------------------------------------------------------
-# 5. ZOOPS EM（每条序列 0 或 1 个位点）
+# 5. OOPS EM（每条够长的蛋白必须有且仅有 1 个位点）
 # -----------------------------------------------------------------------------
+fill_oops_starts <- function(int_list, starts, width) {
+  out <- as.integer(starts)
+  if (length(out) != length(int_list)) out <- integer(length(int_list))
+  for (i in seq_along(int_list)) {
+    nwin <- length(int_list[[i]]) - width + 1
+    if (nwin < 1) {
+      out[i] <- 0L
+      next
+    }
+    if (is.na(out[i]) || out[i] < 1L || out[i] > nwin) {
+      out[i] <- as.integer(sample.int(nwin, 1))
+    }
+  }
+  out
+}
+
 best_window_starts <- function(int_list, width) {
   # 用最常见 8-mer（或 width）做种子位置
   k <- min(8L, width)
@@ -388,6 +404,9 @@ best_window_starts <- function(int_list, width) {
           break
         }
       }
+      if (pos[i] < 1L && length(s) >= width) {
+        pos[i] <- as.integer(sample.int(length(s) - width + 1, 1))
+      }
     }
     seeds[[length(seeds) + 1]] <- pos
   }
@@ -421,48 +440,33 @@ counts_from_sites <- function(int_list, starts, width) {
 
 em_from_start <- function(int_list, starts, width, bg, n_iter) {
   n <- length(int_list)
-  lambda <- max(0.5, mean(starts > 0))
+  starts <- fill_oops_starts(int_list, starts, width)
+  if (sum(starts > 0) < n) return(NULL)
   best_llr <- -Inf
   best <- NULL
   prev_starts <- starts
   for (iter in seq_len(n_iter)) {
     counts <- counts_from_sites(int_list, starts, width)
     n_sites <- sum(starts > 0)
-    if (n_sites < 2) break
+    if (n_sites < n) return(NULL)
     pwm <- pwm_from_counts(counts, bg)
     lod <- log_odds_from_pwm(pwm, bg)
     new_starts <- integer(n)
-    post_has <- numeric(n)
     total_llr <- 0
     for (i in seq_len(n)) {
       sc <- score_windows(int_list[[i]], lod)
-      if (length(sc) == 0) {
-        new_starts[i] <- 0L
-        next
-      }
-      # ZOOPS：位点先验 lambda/m，无位点 1-lambda
-      m <- length(sc)
-      log_site <- log(pmax(lambda, 1e-6) / m) + sc
-      log_none <- log(pmax(1 - lambda, 1e-6))
-      mx <- max(c(log_site, log_none))
-      w_site <- exp(log_site - mx)
-      w_none <- exp(log_none - mx)
-      denom <- sum(w_site) + w_none
-      z <- w_site / denom
-      post_has[i] <- sum(z)
-      j <- which.max(z)
-      none_post <- w_none / denom
-      new_starts[i] <- if (z[j] >= none_post && sc[j] > 0) as.integer(j) else 0L
-      if (new_starts[i] > 0) total_llr <- total_llr + sc[j]
+      if (length(sc) == 0) return(NULL)
+      j <- which.max(sc)
+      new_starts[i] <- as.integer(j)
+      total_llr <- total_llr + sc[j]
     }
     if (total_llr > best_llr) {
       best_llr <- total_llr
-      best <- list(starts = new_starts, pwm = pwm, lod = lod, llr = total_llr, lambda = lambda)
+      best <- list(starts = new_starts, pwm = pwm, lod = lod, llr = total_llr, lambda = 1)
     }
     if (iter > 3 && identical(prev_starts, new_starts)) break
     prev_starts <- new_starts
     starts <- new_starts
-    lambda <- max(0.05, min(0.95, mean(post_has)))
   }
   best
 }
@@ -491,6 +495,11 @@ extract_sites <- function(seq_df, starts, width) {
 }
 
 discover_one_motif <- function(seq_df, int_list, width, bg) {
+  too_short <- vapply(int_list, function(s) length(s) < width, logical(1))
+  if (any(too_short)) {
+    log_msg("  skip width=", width, ": ", sum(too_short), " protein(s) shorter than motif")
+    return(NULL)
+  }
   starts_list <- c(
     best_window_starts(int_list, width),
     random_starts(int_list, width, n_random_starts)
@@ -504,7 +513,8 @@ discover_one_motif <- function(seq_df, int_list, width, bg) {
   }
   if (is.null(best)) return(NULL)
   hits <- extract_sites(seq_df, best$starts, width)
-  if (is.null(hits) || nrow(hits) < min_sites) return(NULL)
+  if (is.null(hits) || nrow(hits) < nrow(seq_df)) return(NULL)
+  if (length(setdiff(seq_df$gene, hits$gene)) > 0) return(NULL)
   lod <- best$lod
   llr <- numeric(nrow(hits))
   for (i in seq_len(nrow(hits))) {
@@ -541,10 +551,8 @@ motif_score_on_seqs <- function(int_list, lod) {
     sc <- score_windows(s, lod)
     if (length(sc) == 0) next
     mx <- max(sc)
-    if (mx > 0) {
-      total <- total + mx
-      n_hit <- n_hit + 1
-    }
+    total <- total + mx
+    n_hit <- n_hit + 1
   }
   c(llr = total, n_hit = n_hit)
 }
