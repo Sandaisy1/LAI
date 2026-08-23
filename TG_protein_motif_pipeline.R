@@ -3,7 +3,7 @@
 # TG BRCA：指定人源蛋白的共同序列（de novo motif）
 #   - UniProt Swiss-Prot reviewed canonical 序列（每基因一条）
 #   - 每条蛋白对每条 motif 至少 1 个位点；个别蛋白可有多个不重叠位点
-#   - 每个宽度先搜 8 条；合并后按宽度归一化保守性（总 IC / 宽度）排序
+#   - 每个宽度先搜 8 条；先算每个氨基酸位点 IC，再对宽度取均值（宽度只作归一化）
 #   - 写出的 motif1–5 是 p<0.01 后的前五；ranking 表带 p 和 reported_motif，与分析同一套 mean_ic
 #   - 显著性：重排零分布的单侧 z 检验 p（不同 motif 的 p 应不同；不用 (1+n_ge)/(1+N) 当展示 p）
 #   - 每条 motif 单独出 hits 表 + bits 序列 logo（ggseqlogo chemistry）
@@ -345,8 +345,17 @@ score_windows <- function(seq_int, log_odds) {
   scores
 }
 
+# 每个氨基酸位点的保守性（bits）；宽度上的总 IC 是这些位点之和
+position_information_content <- function(pwm, bg) {
+  bg <- as.numeric(bg)
+  vapply(seq_len(ncol(pwm)), function(j) {
+    p <- pwm[, j]
+    sum(p * log2((p + 1e-12) / (bg + 1e-12)))
+  }, numeric(1))
+}
+
 information_content <- function(pwm, bg) {
-  sum(pwm * log2((pwm + 1e-12) / (bg + 1e-12)))
+  sum(position_information_content(pwm, bg))
 }
 
 consensus_from_pwm <- function(pwm, min_p = 0.4) {
@@ -563,13 +572,15 @@ discover_one_motif <- function(seq_df, int_list, width, bg) {
   hits <- collect_multi_sites(seq_df, int_list, lod, width)
   if (is.null(hits) || length(setdiff(seq_df$gene, hits$gene)) > 0) return(NULL)
   hits <- hits[order(-hits$llr_score, hits$gene, hits$start), , drop = FALSE]
+  pos_ic <- position_information_content(best$pwm, bg)
   list(
     width = width,
     pwm = best$pwm,
     lod = lod,
     starts = best$starts,
     llr = sum(hits$llr_score),
-    ic = information_content(best$pwm, bg),
+    position_ic = pos_ic,
+    ic = sum(pos_ic),
     consensus = consensus_from_pwm(best$pwm),
     hits = hits,
     lambda = best$lambda
@@ -691,11 +702,16 @@ plot_seqlogo <- function(site_seqs, title) {
     )
 }
 
-write_pwm_csv <- function(pwm, path) {
+write_pwm_csv <- function(pwm, path, position_ic = NULL) {
   tab <- as.data.frame(t(pwm))
   names(tab) <- AA20
   tab$position <- seq_len(nrow(tab))
-  tab <- tab[, c("position", AA20)]
+  cols <- c("position", AA20)
+  if (!is.null(position_ic) && length(position_ic) == nrow(tab)) {
+    tab$ic_bits <- as.numeric(position_ic)
+    cols <- c("position", "ic_bits", AA20)
+  }
+  tab <- tab[, cols]
   utils::write.csv(tab, path, row.names = FALSE)
 }
 
@@ -723,13 +739,34 @@ mask_hits <- function(int_list, hits) {
   out
 }
 
-# 宽度归一化保守性：总 IC / 宽度（bits/位点）。宽度本身不加分、不扣分。
+# 两层保守性：
+#   1) 每个氨基酸位点的 IC（position_ic）
+#   2) 对该宽度取均值，把宽度归一化掉（宽度本身被弱化，不参与加分）
+attach_conservation <- function(m, bg = NULL) {
+  if (!is.null(m$pwm) && !is.null(bg)) {
+    m$position_ic <- position_information_content(m$pwm, bg)
+  }
+  if (is.null(m$position_ic) || length(m$position_ic) == 0) {
+    w <- max(as.integer(m$width), 1L)
+    ic <- if (is.null(m$ic) || !is.finite(m$ic)) 0 else as.numeric(m$ic)
+    m$position_ic <- rep(ic / w, w)
+  }
+  m$position_ic <- as.numeric(m$position_ic)
+  m$ic <- sum(m$position_ic)
+  m$width <- length(m$position_ic)
+  m$mean_ic <- mean(m$position_ic)
+  m$global_score <- m$mean_ic
+  m$n_conserved_aa <- sum(m$position_ic >= 0.5)
+  m$position_ic_txt <- paste(sprintf("%.3f", m$position_ic), collapse = "|")
+  m
+}
+
 motif_mean_ic <- function(m) {
-  as.numeric(m$ic) / max(as.integer(m$width), 1L)
+  attach_conservation(m)$mean_ic
 }
 
 motif_global_score <- function(m) {
-  motif_mean_ic(m)
+  attach_conservation(m)$global_score
 }
 
 motifs_redundant_pwm <- function(a, b, cor_cutoff = 0.85) {
@@ -753,8 +790,7 @@ collect_motif_pool <- function(seq_df, int_list, bg) {
         }
       )
       if (is.null(fit)) break
-      fit$mean_ic <- motif_mean_ic(fit)
-      fit$global_score <- motif_global_score(fit)
+      fit <- attach_conservation(fit, bg)
       fit$pool_round <- rnd
       width_fits[[length(width_fits) + 1]] <- fit
       work_int <- mask_hits(work_int, fit$hits)
@@ -767,18 +803,18 @@ collect_motif_pool <- function(seq_df, int_list, bg) {
     width_fits <- width_fits[ord]
     for (i in seq_along(width_fits)) width_fits[[i]]$width_rank <- i
     log_msg("  width=", w, " kept ", length(width_fits),
-            "  best meanIC=", round(width_fits[[1]]$mean_ic, 3))
+            "  best aaIC=", round(width_fits[[1]]$mean_ic, 3),
+            "  conserved_aa=", width_fits[[1]]$n_conserved_aa)
     pool <- c(pool, width_fits)
   }
   pool
 }
 
 # 所有宽度合并后按归一化保守性降序；PWM 过近只留更保守的那条（不按宽度限额）
-rank_motifs_global <- function(cands, cor_cutoff = 0.85) {
+rank_motifs_global <- function(cands, cor_cutoff = 0.85, bg = NULL) {
   if (length(cands) == 0) return(list())
   for (i in seq_along(cands)) {
-    cands[[i]]$mean_ic <- motif_mean_ic(cands[[i]])
-    cands[[i]]$global_score <- motif_global_score(cands[[i]])
+    cands[[i]] <- attach_conservation(cands[[i]], bg)
     if (is.null(cands[[i]]$width_rank)) cands[[i]]$width_rank <- NA_integer_
   }
   ord <- order(
@@ -834,6 +870,8 @@ motif_ranking_table <- function(ranked) {
       width_rank = integer(),
       global_score = numeric(),
       mean_ic = numeric(),
+      n_conserved_aa = integer(),
+      position_ic = character(),
       total_ic_bits = numeric(),
       n_sites = integer(),
       consensus = character(),
@@ -849,6 +887,8 @@ motif_ranking_table <- function(ranked) {
     width_rank = vapply(ranked, function(m) motif_field_int(m, "width_rank"), integer(1)),
     global_score = vapply(ranked, function(m) motif_field_num(m, "global_score"), numeric(1)),
     mean_ic = vapply(ranked, function(m) motif_field_num(m, "mean_ic"), numeric(1)),
+    n_conserved_aa = vapply(ranked, function(m) motif_field_int(m, "n_conserved_aa"), integer(1)),
+    position_ic = vapply(ranked, function(m) motif_field_chr(m, "position_ic_txt"), character(1)),
     total_ic_bits = vapply(ranked, function(m) motif_field_num(m, "ic"), numeric(1)),
     n_sites = vapply(ranked, function(m) as.integer(nrow(m$hits)), integer(1)),
     consensus = vapply(ranked, function(m) motif_field_chr(m, "consensus"), character(1)),
@@ -888,7 +928,7 @@ run_protein_motif_pipeline <- function() {
   bg <- background_freq(int_list)
   n_tests <- length(motif_widths) * n_per_width
   pool <- collect_motif_pool(ok, int_list, bg)
-  ranked <- rank_motifs_global(pool)
+  ranked <- rank_motifs_global(pool, bg = bg)
   if (length(ranked) == 0) {
     log_msg("未发现 motif。请检查序列是否拉到，或放宽宽度。")
     return(invisible(NULL))
@@ -905,7 +945,8 @@ run_protein_motif_pipeline <- function() {
       "Score-rank ", pick$global_rank,
       " width=", pick$width,
       " width_rank=", pick$width_rank,
-      " meanIC=", round(pick$mean_ic, 3),
+      " aaIC=", round(pick$mean_ic, 3),
+      " posIC=", pick$position_ic_txt,
       " IC=", round(pick$ic, 2)
     )
     sig <- empirical_significance(ok, pick, bg, n_shuffle)
@@ -987,7 +1028,7 @@ run_protein_motif_pipeline <- function() {
     hits$motif_e_value <- m$e_value
     hits$genome_set_n <- nrow(ok)
     utils::write.csv(hits, file.path(out_d, paste0(tag, "_hits.csv")), row.names = FALSE)
-    write_pwm_csv(m$pwm, file.path(out_d, paste0(tag, "_pwm.csv")))
+    write_pwm_csv(m$pwm, file.path(out_d, paste0(tag, "_pwm.csv")), m$position_ic)
 
     site_fa <- hits$site_sequence
     names(site_fa) <- paste0(hits$gene, "/", hits$uniprot, "/", hits$start, "-", hits$end)
@@ -1016,6 +1057,8 @@ run_protein_motif_pipeline <- function() {
       width = m$width,
       width_rank = m$width_rank,
       mean_ic = m$mean_ic,
+      n_conserved_aa = m$n_conserved_aa,
+      position_ic = m$position_ic_txt,
       consensus = m$consensus,
       n_sites = nrow(hits),
       n_sequences = nrow(ok),
@@ -1109,8 +1152,16 @@ cowplot_or_patchwork <- function(plots) {
 }
 
 run_ranking_selftest <- function() {
-  tie6 <- motif_global_score(list(ic = 12, width = 6L))
-  tie21 <- motif_global_score(list(ic = 42, width = 21L))
+  pos <- c(2, 1.5, 1, 0.5, 0.5, 0.5)
+  by_aa <- attach_conservation(list(position_ic = pos, width = 6L, ic = sum(pos)))
+  if (abs(by_aa$global_score - mean(pos)) > 1e-12) {
+    stop("selftest: score must be mean of per-amino-acid IC")
+  }
+  if (by_aa$n_conserved_aa != 5L) {
+    stop("selftest: conserved amino-acid count is wrong")
+  }
+  tie6 <- motif_global_score(list(position_ic = rep(2, 6), ic = 12, width = 6L))
+  tie21 <- motif_global_score(list(position_ic = rep(2, 21), ic = 42, width = 21L))
   if (abs(tie6 - 2) > 1e-8 || abs(tie21 - 2) > 1e-8) {
     stop("selftest: score must be width-normalized IC (bits/site)")
   }

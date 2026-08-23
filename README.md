@@ -102,7 +102,7 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 对指定人源蛋白做 de novo 共同短序列（约 3–5 条），用序列重排的零分布做单侧 z 检验得到 p / E-value（不同 motif 的 p 应不同），并用 bits 序列 logo 出图。**不要**把上面的 RNA-seq 六组比较或 FC/topN 套过来。
 
-数据与结果默认在 `E:\R\Protein`（可用 `TG_PROTEIN_DIR` 覆盖）。基因列表在 `TG_protein_motif_genes.txt`（可改，优先读该目录，否则读当前工作目录）。序列从 UniProt Swiss-Prot 拉取（每基因一条 reviewed canonical）。若外网失败，可把 FASTA 放到 `E:\R\Protein\TG_protein_motif_sequences.fasta`（头行用基因名）。宽度扫描 **6–21 aa**（每个整数都扫）。每个宽度先独立搜 8 条候选，再合并；全局得分是 **宽度归一化保守性（总 IC / 宽度）**。`motif_global_ranking.csv` 列出全部候选及 p；`reported_motif` 标出实际写出的 motif1–5（先过 p < 0.01，再按得分取前五）。同一 `global_rank` 的 `mean_ic` 与分析表相同。得分高但 p 不显著的行只会留在 ranking 里。不按宽度限额，也不做短/中/长交错。每条 motif 在每条蛋白上 **至少出现 1 次**，个别蛋白可有多个不重叠位点（额外位点需达到该蛋白最佳位点 50% 的 LLR，且优于背景）。
+数据与结果默认在 `E:\R\Protein`（可用 `TG_PROTEIN_DIR` 覆盖）。基因列表在 `TG_protein_motif_genes.txt`（可改，优先读该目录，否则读当前工作目录）。序列从 UniProt Swiss-Prot 拉取（每基因一条 reviewed canonical）。若外网失败，可把 FASTA 放到 `E:\R\Protein\TG_protein_motif_sequences.fasta`（头行用基因名）。宽度扫描 **6–21 aa**（每个整数都扫）。每个宽度先独立搜 8 条候选，再合并。打分先算 **每个氨基酸位点的 IC**，再对宽度取均值（宽度只作归一化，本身被弱化）。全局得分是 `mean(position_ic)`。`motif_global_ranking.csv` 列出全部候选、各位点 IC、p；`reported_motif` 标出实际写出的 motif1–5（先过 p < 0.01，再按得分取前五）。同一 `global_rank` 的 `mean_ic` 与分析表相同。PWM 表带 `ic_bits` 列。不按宽度限额，也不做短/中/长交错。每条 motif 在每条蛋白上 **至少出现 1 次**，个别蛋白可有多个不重叠位点（额外位点需达到该蛋白最佳位点 50% 的 LLR，且优于背景）。
 
 ```r
 source("TG_protein_motif_pipeline.R")
