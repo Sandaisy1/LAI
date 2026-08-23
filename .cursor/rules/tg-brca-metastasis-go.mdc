@@ -1,0 +1,32 @@
+---
+description: 用 metastasis_custom_genes.txt 中的 GO 通路对六组 RNA-seq 做自定义富集与气泡图
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# TG BRCA：转移相关自定义 GO 富集
+
+写或改本仓库 R 分析时，通路富集必须读取项目目录中的 `metastasis_custom_genes.txt`（GO 通路名称 + GO 号），不能只用默认全库 GO 冒充该分析。
+
+## 输入
+
+- 路径：`E:/R/TG_BRCA/TG/metastasis_custom_genes.txt`（与 Cuffdiff 同目录；缺失则回退仓库根）
+- 每行是一条关注通路：名称与 `GO:#######`（或 `GO_#######`）成对出现；忽略空行与 `#` 注释
+- 用所列 GO ID 建基因集（`org.Hs.eg.db` / GO.db），不要把该文件当成基因符号列表
+
+## 何时跑
+
+对**六组比较**的每一个非空子集都要跑：`p0.05`/`p0.01` 的 4 个 FC 档、7 个 topN，以及 `AllDE`（含上调与下调）。不要只对某一个 p 或某一个比较做一次。
+
+## 输出
+
+- 目录：各子集下的 `CustomGO/`（或 `Metastasis_GO/`），不要写进 `GSEA/`
+- 文件名以 `ORA_` 开头，并带比较名、p 档、FC/topN/AllDE 标签
+- 必须出：富集表 + **气泡图**（dotplot；点大小=基因数，颜色=p）
+- 全基因组 GO/KEGG 表可另出 `*_FOCUS_metastasis_GO.csv`，**保留原始 p 与 `genome_wide_rank`**，不要为凸显这些通路去改全库 p 值
+
+```r
+# ❌ BAD: 忽略 metastasis_custom_genes.txt，只跑 clusterProfiler 默认 GO
+# ❌ BAD: 把自定义 GO 气泡图写进 GSEA/，或改全库 p 值让这些通路排第一
+# ✅ GOOD: 解析 GO ID → 每组每子集 CustomGO/ORA_*_dotplot.pdf + 表
+```

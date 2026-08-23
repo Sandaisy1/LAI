@@ -1,10 +1,10 @@
 ---
-description: TG BRCA RNA-seq 显著性与变化倍数分析（六组比较 + FC/topN 分层）
+description: TG BRCA RNA-seq：六组比较 + p0.05/p0.01 的 FC/topN 分层 + 全部上下调
 globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
 
-# TG BRCA RNA-seq：显著性与变化倍数分析
+# TG BRCA RNA-seq：显著性与分层分析
 
 写或改本仓库 R 分析时必须按本规则。输入是 Cuffdiff，不是 Excel。
 
@@ -13,8 +13,7 @@ alwaysApply: true
 - 目录：`E:/R/TG_BRCA/TG`（脚本与结果同目录；缺失则回退仓库根）
 - 首选 `genes.read_group_tracking`，否则 `genes.count_tracking` / `genes.fpkm_tracking`；样本映射用 `read_groups.info`
 - 四个样品独立保留：`NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5`
-- 物种：人 `org.Hs.eg.db`
-- `gene_short_name` 可能是复合名（`SAA2,SAA2-SAA4,SAA4`）或 `XLOC_######`：清洗为一个官方符号；无符号的 XLOC 留在差异分析，GO/KEGG 可不映射
+- 物种：人 `org.Hs.eg.db`；`gene_short_name` 复合名或 `XLOC_######` 清洗为一个官方符号；无符号 XLOC 留在差异分析
 
 ## 预处理（四个样品一起做一次，再做六组比较）
 
@@ -37,25 +36,28 @@ alwaysApply: true
 
 ## 显著性（先 p，再倍数或排名）
 
-「p 值大于 0.01」按 **p < 0.01** 实现（保留显著基因）。能估计 p 时（重复或 Cuffdiff `gene_exp.diff`）先滤 p，再分层；1-vs-1 无法估计 p 时不要伪造，仍按 FC/排名分层并写日志。共同上调：两个 1-vs-1 都过同一套阈值后取交集。只分析上调。
+「p 值小于 0.05 / 0.01」按 **p < 0.05**、**p < 0.01** 实现（用 `pvalue`，不要用 padj 顶替）。能估计 p 时先滤 p，再分层；1-vs-1 无法估计 p 时不要伪造，仍按 FC/排名分层并写日志。共同上调：两个 1-vs-1 都过同一套阈值后取交集。
 
-## 两套分层（六组都要跑，阈值一个都不能少）
+## 五套分层（六组都要跑，阈值一个都不能少）
 
-1. FoldChange：`p < 0.01` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2
-2. 上调排名：`p < 0.01` 后按 FC 降序取 top 50 / 75 / 100 / 150 / 200 / 250 / 300
+目录带 p 档：`p0.05/FoldChange/FC_1.5/`、`p0.01/TopRank/top100/`、`AllDE/`。文件名和图标题必须带 `p0.05`/`p0.01` 与档位标签。
 
-目录：`FoldChange/FC_1.5/`、`TopRank/top100/`。文件名和图标题必须带档位标签。
+1. FoldChange：`p < 0.05` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2
+2. 上调排名：`p < 0.05` 后按 FC 降序取 top 50 / 75 / 100 / 150 / 200 / 250 / 300
+3. FoldChange：`p < 0.01` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2
+4. 上调排名：`p < 0.01` 后按 FC 降序取 top 50 / 75 / 100 / 150 / 200 / 250 / 300
+5. AllDE：不按 FC/topN 再切；同时分析上调（log2FC>0）与下调（log2FC<0）。能估计 p 时用 `p < 0.05`；无法估计 p 时用全部非零 FC
 
 ## 每个非空子集必须出的图
 
-差异基因表、火山图、热图、GO、通路富集、KEGG、GSEA。
+差异基因表、火山图、热图、气泡图（ORA GO/通路/KEGG）。另做 GSEA 与自定义转移相关 GO（见 `tg-brca-metastasis-go` 规则）。
 
-- ORA 放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头（不要写进 GSEA/）
+- ORA 气泡图放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头（不要写进 GSEA/）
 - GSEA 放 `GSEA/`，文件名以 `GSEA_` 开头；全基因 GSEA 只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
-- 细胞骨架/线粒体假说放 `Focused_cytoskeleton_mito/`；全基因组表另出 `*_FOCUS_cytoskeleton_mito.csv`（保留原始 p 与 `genome_wide_rank`），不要为凸显假说去改全基因组 p 值
+- 细胞骨架/线粒体假说放 `Focused_cytoskeleton_mito/`；全基因组表另出 `*_FOCUS_cytoskeleton_mito.csv`（保留原始 p 与 `genome_wide_rank`）
 
 ```r
-# ❌ BAD: 把两个 NTC 并成一组再做 sh1 vs NTC；跳过 FC>=1 或 top75
-# ❌ BAD: 只出 GSEA，或把 ORA 图写进 GSEA/
-# ✅ GOOD: 六组各自目录；每组 × (4 个 FC + 7 个 topN) 都出齐表和图
+# ❌ BAD: 只跑 p<0.01；跳过 p<0.05、AllDE 或 top75；把两个 NTC 并成一组再做 sh1 vs NTC
+# ❌ BAD: 只出 GSEA，或把 ORA 气泡图写进 GSEA/
+# ✅ GOOD: 六组各自目录；每组 × (p0.05+p0.01)×(4 个 FC + 7 个 topN) + AllDE 都出齐表和图
 ```
