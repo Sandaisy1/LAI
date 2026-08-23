@@ -11,7 +11,7 @@
 # 比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–6 而改本文件主流程。
 #
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
-# 不在自选通路上重新校正 p。只画排名前 15，第一名在上。
+# 不在自选通路上重新校正 p。只画 p.adjust 前 15；y 轴按 GeneRatio 从大到小，最大在最上面。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -882,12 +882,16 @@ plot_ora_bubble <- function(ora, title, outfile, n_show = bubble_top_n) {
   if (!"GeneRatio_num" %in% names(df)) {
     df$GeneRatio_num <- if (is.numeric(df$GeneRatio)) df$GeneRatio else parse_gene_ratio(df$GeneRatio)
   }
-  df <- df[order(df$p.adjust, df$pvalue, -df$Count), , drop = FALSE]
-  df$listed_rank <- seq_len(nrow(df))
+  df <- df[is.finite(df$GeneRatio_num), , drop = FALSE]
+  if (nrow(df) == 0) {
+    writeLines("no finite GeneRatio for listed GO", paste0(outfile, "_EMPTY.txt"))
+    return(invisible(NULL))
+  }
+  df <- df[order(-df$GeneRatio_num, df$p.adjust, df$pvalue), , drop = FALSE]
   df <- utils::head(df, n_show)
   gid <- if ("go_id" %in% names(df)) df$go_id else df$ID
-  df$label <- paste0(df$listed_rank, ". ", df$Description, " (", gid, ")")
-  df$label <- factor(df$label, levels = rev(as.character(df$label)))
+  df$label <- paste0(df$Description, " (", gid, ")")
+  df$label <- factor(df$label, levels = rev(unique(as.character(df$label))))
   df$p_adjust <- df$p.adjust
   df$p_adjust[!is.finite(df$p_adjust)] <- 1
   p <- ggplot2::ggplot(
@@ -1060,7 +1064,7 @@ run_five_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "本比较只分析 metastasis_custom_genes.txt 列出的 GO 通路表达。",
       "分层结果在 p0.05/ 、p0.01/ 、AllDE/ 。",
       "每个非空子集：差异表、火山图、热图。",
-      "先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio/p.adjust/Count 画气泡图（前15，第一名在上）。",
+      "先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio/p.adjust/Count 画气泡图（前15；GeneRatio 最大在最上面）。",
       paste("p-value estimated:", have_p)
     ),
     file.path(base, "00_READ_ME.txt")
