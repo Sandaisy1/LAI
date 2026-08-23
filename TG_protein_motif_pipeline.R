@@ -3,7 +3,7 @@
 # TG BRCA：指定人源蛋白的共同序列（de novo motif）
 #   - UniProt Swiss-Prot reviewed canonical 序列（每基因一条）
 #   - 每条蛋白对每条 motif 至少 1 个位点；个别蛋白可有多个不重叠位点
-#   - 排名：总 IC / sqrt(宽度)；同一宽度最多 1 条；短/中/长区间各尽量留 1 条后再补齐前五
+#   - 每个宽度先搜 8 条；合并后按宽度归一化保守性（总 IC / 宽度）取前五
 #   - 显著性：重排零分布的单侧 z 检验 p（不同 motif 的 p 应不同；不用 (1+n_ge)/(1+N) 当展示 p）
 #   - 每条 motif 单独出 hits 表 + bits 序列 logo（ggseqlogo chemistry）
 #
@@ -101,6 +101,7 @@ aa_index <- setNames(seq_along(AA20), AA20)
 
 # 宽度、motif 条数、显著性（与 Cursor 规则一致）
 motif_widths      <- 6L:21L
+n_per_width       <- 8L
 n_motifs_target   <- 5L
 n_motifs_min      <- 3L
 p_cutoff          <- 0.01
@@ -721,112 +722,63 @@ mask_hits <- function(int_list, hits) {
   out
 }
 
-# 位点平均 IC，只作表里对照，不拿来排名（/宽度会把 6-mer 推到绝对第一）
+# 宽度归一化保守性：总 IC / 宽度（bits/位点）。宽度本身不加分、不扣分。
 motif_mean_ic <- function(m) {
   as.numeric(m$ic) / max(as.integer(m$width), 1L)
 }
 
-# 全局得分：总 IC / sqrt(宽度)
-# 不除宽度会偏爱 21-mer；除以宽度会偏爱 6-mer；sqrt 是折中
 motif_global_score <- function(m) {
-  as.numeric(m$ic) / sqrt(max(as.integer(m$width), 1L))
+  motif_mean_ic(m)
 }
 
-# 长度区间：入选前五时每个非空区间先各留 1 条，避免全是最短档
-motif_width_bin <- function(w) {
-  w <- as.integer(w)[[1]]
-  if (w <= 9L) return("6-9")
-  if (w <= 13L) return("10-13")
-  if (w <= 17L) return("14-17")
-  "18-21"
-}
-
-# 短核与长模体 PWM 相关高是常见的，不能因此丢掉长的
 motifs_redundant_pwm <- function(a, b, cor_cutoff = 0.85) {
-  wa <- ncol(a)
-  wb <- ncol(b)
-  if (min(wa, wb) / max(wa, wb) < 0.7) return(FALSE)
   pwm_correlation(a, b) > cor_cutoff
 }
 
-keep_one_motif_per_width <- function(ranked) {
-  seen <- integer(0)
-  out <- list()
-  for (m in ranked) {
-    w <- as.integer(m$width)[[1]]
-    if (w %in% seen) next
-    seen <- c(seen, w)
-    out[[length(out) + 1]] <- m
-  }
-  out
-}
-
-# 已按得分降序的候选：每个长度区间先各取 1 条，再按得分补齐
-select_diverse_motifs <- function(cands, n_keep = Inf) {
-  if (length(cands) == 0) return(list())
-  bins_order <- c("6-9", "10-13", "14-17", "18-21")
-  bins <- vapply(cands, function(m) as.character(m$width_bin), character(1))
-  picked <- list()
-  used <- logical(length(cands))
-  for (b in bins_order) {
-    idx <- which(bins == b & !used)
-    if (length(idx) == 0) next
-    i <- idx[[1]]
-    picked[[length(picked) + 1]] <- cands[[i]]
-    used[i] <- TRUE
-    if (length(picked) >= n_keep) break
-  }
-  if (length(picked) < n_keep) {
-    for (i in seq_along(cands)) {
-      if (used[i]) next
-      picked[[length(picked) + 1]] <- cands[[i]]
-      used[i] <- TRUE
-      if (length(picked) >= n_keep) break
-    }
-  }
-  for (i in seq_along(picked)) picked[[i]]$global_rank <- i
-  picked
-}
-
+# 每个宽度独立搜 n_per_width 条（遮盖已找到位点后再找下一条），再合并
 collect_motif_pool <- function(seq_df, int_list, bg) {
   pool <- list()
-  work_int <- int_list
-  for (rnd in seq_len(n_motifs_target)) {
-    log_msg("Pool round ", rnd, " / ", n_motifs_target, " (all widths, then mask best)")
-    round_fits <- list()
-    for (w in motif_widths) {
-      log_msg("  width=", w)
+  for (w in motif_widths) {
+    log_msg("Width ", w, ": search ", n_per_width, " candidates")
+    work_int <- int_list
+    width_fits <- list()
+    for (rnd in seq_len(n_per_width)) {
+      log_msg("  width=", w, "  candidate ", rnd, "/", n_per_width)
       fit <- tryCatch(
         discover_one_motif(seq_df, work_int, w, bg),
         error = function(e) {
-          log_msg("  EM failed width=", w, ": ", e$message)
+          log_msg("  EM failed width=", w, " round=", rnd, ": ", e$message)
           NULL
         }
       )
-      if (is.null(fit)) next
+      if (is.null(fit)) break
       fit$mean_ic <- motif_mean_ic(fit)
       fit$global_score <- motif_global_score(fit)
-      fit$width_bin <- motif_width_bin(fit$width)
       fit$pool_round <- rnd
-      round_fits[[length(round_fits) + 1]] <- fit
-      pool[[length(pool) + 1]] <- fit
+      width_fits[[length(width_fits) + 1]] <- fit
+      work_int <- mask_hits(work_int, fit$hits)
     }
-    if (length(round_fits) == 0) break
-    scores <- vapply(round_fits, function(x) x$global_score, numeric(1))
-    best <- round_fits[[which.max(scores)]]
-    work_int <- mask_hits(work_int, best$hits)
+    if (length(width_fits) == 0) next
+    ord <- order(
+      -vapply(width_fits, function(m) m$global_score, numeric(1)),
+      -vapply(width_fits, function(m) m$ic, numeric(1))
+    )
+    width_fits <- width_fits[ord]
+    for (i in seq_along(width_fits)) width_fits[[i]]$width_rank <- i
+    log_msg("  width=", w, " kept ", length(width_fits),
+            "  best meanIC=", round(width_fits[[1]]$mean_ic, 3))
+    pool <- c(pool, width_fits)
   }
   pool
 }
 
-# 先按全局得分降序，去掉近长度且 PWM 高度相似的重复，同一宽度只留 1 条，
-# 再按长度区间交错，避免前五全是 6-mer
+# 所有宽度合并后按归一化保守性降序；PWM 过近只留更保守的那条（不按宽度限额）
 rank_motifs_global <- function(cands, cor_cutoff = 0.85) {
   if (length(cands) == 0) return(list())
   for (i in seq_along(cands)) {
     cands[[i]]$mean_ic <- motif_mean_ic(cands[[i]])
     cands[[i]]$global_score <- motif_global_score(cands[[i]])
-    cands[[i]]$width_bin <- motif_width_bin(cands[[i]]$width)
+    if (is.null(cands[[i]]$width_rank)) cands[[i]]$width_rank <- NA_integer_
   }
   ord <- order(
     -vapply(cands, function(m) m$global_score, numeric(1)),
@@ -847,8 +799,8 @@ rank_motifs_global <- function(cands, cor_cutoff = 0.85) {
     if (any(dup)) next
     ranked[[length(ranked) + 1]] <- m
   }
-  ranked <- keep_one_motif_per_width(ranked)
-  select_diverse_motifs(ranked)
+  for (i in seq_along(ranked)) ranked[[i]]$global_rank <- i
+  ranked
 }
 
 # -----------------------------------------------------------------------------
@@ -881,7 +833,7 @@ run_protein_motif_pipeline <- function() {
   int_list <- lapply(ok$sequence, seq_to_int)
   names(int_list) <- ok$gene
   bg <- background_freq(int_list)
-  n_tests <- length(motif_widths) * n_motifs_target
+  n_tests <- length(motif_widths) * n_per_width
   pool <- collect_motif_pool(ok, int_list, bg)
   ranked <- rank_motifs_global(pool)
   if (length(ranked) == 0) {
@@ -899,8 +851,7 @@ run_protein_motif_pipeline <- function() {
     log_msg(
       "Score-rank ", pick$global_rank,
       " width=", pick$width,
-      " bin=", pick$width_bin,
-      " score=", round(pick$global_score, 3),
+      " width_rank=", pick$width_rank,
       " meanIC=", round(pick$mean_ic, 3),
       " IC=", round(pick$ic, 2)
     )
@@ -929,7 +880,7 @@ run_protein_motif_pipeline <- function() {
   rank_tbl <- data.frame(
     global_rank = vapply(ranked, function(m) as.integer(m$global_rank), integer(1)),
     width = vapply(ranked, function(m) as.integer(m$width), integer(1)),
-    width_bin = vapply(ranked, function(m) as.character(m$width_bin), character(1)),
+    width_rank = vapply(ranked, function(m) as.integer(m$width_rank), integer(1)),
     global_score = vapply(ranked, function(m) as.numeric(m$global_score), numeric(1)),
     mean_ic = vapply(ranked, function(m) as.numeric(m$mean_ic), numeric(1)),
     total_ic_bits = vapply(ranked, function(m) as.numeric(m$ic), numeric(1)),
@@ -971,8 +922,8 @@ run_protein_motif_pipeline <- function() {
     write_fasta(site_fa, file.path(out_d, paste0(tag, "_aligned_sites.fasta")))
 
     title <- sprintf(
-      "%s  rank%d  w=%d  %s  score=%.3f  %s  n=%d/%d  IC=%.2f  p=%.3g  E=%.3g",
-      tag, m$global_rank, m$width, m$width_bin, m$global_score, m$consensus,
+      "%s  rank%d  w=%d  meanIC=%.3f  %s  n=%d/%d  IC=%.2f  p=%.3g  E=%.3g",
+      tag, m$global_rank, m$width, m$global_score, m$consensus,
       nrow(hits), nrow(ok), m$ic, m$empirical_p, m$e_value
     )
     logo <- tryCatch(
@@ -991,7 +942,7 @@ run_protein_motif_pipeline <- function() {
       global_rank = m$global_rank,
       global_score = m$global_score,
       width = m$width,
-      width_bin = m$width_bin,
+      width_rank = m$width_rank,
       mean_ic = m$mean_ic,
       consensus = m$consensus,
       n_sites = nrow(hits),
@@ -1068,41 +1019,46 @@ cowplot_or_patchwork <- function(plots) {
 }
 
 run_ranking_selftest <- function() {
-  s6 <- motif_global_score(list(ic = 12, width = 6L))
-  s21 <- motif_global_score(list(ic = 21, width = 21L))
-  mean6 <- motif_mean_ic(list(ic = 12, width = 6L))
-  mean21 <- motif_mean_ic(list(ic = 21, width = 21L))
-  if (abs(mean6 / mean21 - 2) > 1e-8) stop("selftest: mean IC ratio should be 2")
-  if (s6 / s21 >= mean6 / mean21 - 0.1) {
-    stop("selftest: IC/sqrt(w) should be less biased toward width 6 than mean IC")
+  tie6 <- motif_global_score(list(ic = 12, width = 6L))
+  tie21 <- motif_global_score(list(ic = 42, width = 21L))
+  if (abs(tie6 - 2) > 1e-8 || abs(tie21 - 2) > 1e-8) {
+    stop("selftest: score must be width-normalized IC (bits/site)")
+  }
+  if (abs(tie6 - tie21) > 1e-8) {
+    stop("selftest: same per-site conservation must tie after width correction")
+  }
+  weak6 <- motif_global_score(list(ic = 6, width = 6L))
+  strong21 <- motif_global_score(list(ic = 42, width = 21L))
+  if (strong21 <= weak6) {
+    stop("selftest: higher conservation must outrank a shorter, weaker motif")
   }
   make_pwm <- function(w, peak_row) {
     m <- matrix(0.02, nrow = 20, ncol = as.integer(w))
     m[as.integer(peak_row), ] <- 0.62
     sweep(m, 2, colSums(m), "/")
   }
-  pwm6 <- make_pwm(6, 1)
-  pwm21 <- make_pwm(21, 1)
-  if (isTRUE(motifs_redundant_pwm(pwm6, pwm21))) {
-    stop("selftest: width 6 vs 21 must not be collapsed as PWM duplicates")
-  }
   fake <- list(
-    list(ic = 12, width = 6L, pwm = make_pwm(6, 1), hits = data.frame(x = 1), consensus = "AAAAAA"),
-    list(ic = 11.5, width = 6L, pwm = make_pwm(6, 2), hits = data.frame(x = 1), consensus = "BBBBBB"),
-    list(ic = 10, width = 7L, pwm = make_pwm(7, 3), hits = data.frame(x = 1), consensus = "CCCCCCC"),
-    list(ic = 14, width = 12L, pwm = make_pwm(12, 4), hits = data.frame(x = 1), consensus = "MID"),
-    list(ic = 16, width = 16L, pwm = make_pwm(16, 5), hits = data.frame(x = 1), consensus = "LONG16"),
-    list(ic = 18, width = 20L, pwm = make_pwm(20, 6), hits = data.frame(x = 1), consensus = "LONG20")
+    list(ic = 12, width = 6L, pwm = make_pwm(6, 1), hits = data.frame(x = 1),
+         consensus = "A", width_rank = 1L),
+    list(ic = 11.4, width = 6L, pwm = make_pwm(6, 2), hits = data.frame(x = 1),
+         consensus = "B", width_rank = 2L),
+    list(ic = 42, width = 21L, pwm = make_pwm(21, 3), hits = data.frame(x = 1),
+         consensus = "C", width_rank = 1L),
+    list(ic = 10, width = 12L, pwm = make_pwm(12, 4), hits = data.frame(x = 1),
+         consensus = "D", width_rank = 1L)
   )
   ranked <- rank_motifs_global(fake, cor_cutoff = 0.99)
   widths <- vapply(ranked, function(m) as.integer(m$width), integer(1))
-  if (any(duplicated(widths))) stop("selftest: more than one motif kept for the same width")
-  top5 <- vapply(head(ranked, 5), function(m) as.character(m$width_bin), character(1))
-  if (length(unique(top5)) < 3) {
-    stop("selftest: top motifs should span multiple width bins, got ", paste(top5, collapse = ","))
+  if (sum(widths == 6L) < 2) {
+    stop("selftest: must keep multiple motifs of the same width")
   }
-  log_msg("RANKING SELFTEST passed  score6/score21=", round(s6 / s21, 3),
-          "  top_bins=", paste(unique(top5), collapse = ","))
+  if (as.integer(ranked[[1]]$width) != 21L) {
+    stop("selftest: highest conservation (tie-break total IC) should rank first")
+  }
+  log_msg(
+    "RANKING SELFTEST passed  score=", round(tie6, 3),
+    "  n=", length(ranked), "  top_width=", ranked[[1]]$width
+  )
   invisible(TRUE)
 }
 
