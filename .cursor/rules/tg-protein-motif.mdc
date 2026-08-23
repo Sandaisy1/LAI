@@ -33,7 +33,7 @@ alwaysApply: true
 `TG_protein_motif_regions_mutations.R` 只读 `E:/R/Protein/results/` 的 hits / PWM / FASTA。不要为加这两项去改 `TG_protein_motif_pipeline.R`。
 
 1. 每个蛋白的 motif 起止、侧翼、区域图 + Excel（`results/regions_mutations/`）
-2. 突变方案：默认焦点 `RPL9` / `RBP4` / `ITGAV` / `ITGA2`（`TG_MOTIF_FOCUS_GENES` 可改）；按 PWM 高 IC 位做 C→S、电荷翻转或 Ala scan，每 motif 给出 P1 核心三联
+2. 突变方案：默认焦点 `RPL9` / `RBP4` / `ITGAV` / `ITGA2`（`TG_MOTIF_FOCUS_GENES` 可改）；按 PWM 高 IC 位做 C→S、电荷翻转或 Ala scan。**同一 motif 在该蛋白上的每一处命中都单独出 P1 三联和条带图**，不要只取第一处
 
 ```r
 # ❌ BAD: 46 条蛋白强制 MSA 只出一张 logo；或编造 p

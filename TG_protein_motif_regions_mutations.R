@@ -3,6 +3,7 @@
 # 蛋白 motif 区域导出 + 突变方案（不修改 TG_protein_motif_pipeline.R）
 #   1) 每个蛋白的 motif 起止区域：Excel + 轨道图
 #   2) 针对 motif 的氨基酸突变方案（默认焦点：RPL9 / RBP4 / ITGAV / ITGA2）
+#      同一 motif 在该蛋白上的每一处命中都单独设计，不只第一处
 #
 # 只读已有结果：E:/R/Protein/results/ 下的 hits、PWM、FASTA
 #
@@ -320,46 +321,76 @@ build_mutation_table <- function(regions, pwm_list, seqs, hits) {
   dplyr::bind_rows(out)
 }
 
+core_mutations_for_site <- function(mut_tbl, gene, motif_id, start, end) {
+  core <- mut_tbl[
+    mut_tbl$gene == gene &
+      mut_tbl$motif_id == motif_id &
+      mut_tbl$motif_start == start &
+      mut_tbl$motif_end == end &
+      mut_tbl$priority == "P1_core",
+    , drop = FALSE
+  ]
+  if (nrow(core) == 0) return(core)
+  core[order(core$ic_rank), , drop = FALSE]
+}
+
 build_combo_table <- function(mut_tbl, regions, all_motifs) {
   genes <- unique(c(regions$gene, mut_tbl$gene))
-  grid <- expand.grid(gene = unique(genes), motif_id = all_motifs, stringsAsFactors = FALSE)
-  rows <- vector("list", nrow(grid))
-  for (i in seq_len(nrow(grid))) {
-    g <- grid$gene[i]
-    mid <- grid$motif_id[i]
-    hit <- regions[regions$gene == g & regions$motif_id == mid, , drop = FALSE]
-    if (nrow(hit) == 0) {
-      rows[[i]] <- data.frame(
-        gene = g,
-        motif_id = mid,
-        has_motif = FALSE,
-        combo_short = NA_character_,
-        combo_hgvs = NA_character_,
-        n_mutations = 0L,
-        target_residues = NA_character_,
-        plan = paste0(g, " 未命中 ", mid, "，无需针对该 motif 突变"),
-        stringsAsFactors = FALSE
-      )
-      next
+  rows <- list()
+  for (g in unique(genes)) {
+    for (mid in all_motifs) {
+      hit <- regions[regions$gene == g & regions$motif_id == mid, , drop = FALSE]
+      if (nrow(hit) == 0) {
+        rows[[length(rows) + 1]] <- data.frame(
+          gene = g,
+          motif_id = mid,
+          occurrence = NA_integer_,
+          n_occurrences = 0L,
+          motif_start = NA_integer_,
+          motif_end = NA_integer_,
+          site_sequence = NA_character_,
+          occurrence_id = NA_character_,
+          has_motif = FALSE,
+          combo_short = NA_character_,
+          combo_hgvs = NA_character_,
+          n_mutations = 0L,
+          target_residues = NA_character_,
+          plan = paste0(g, " 未命中 ", mid, "，无需针对该 motif 突变"),
+          stringsAsFactors = FALSE
+        )
+        next
+      }
+      hit <- hit[order(hit$motif_start, hit$motif_end), , drop = FALSE]
+      n_occ <- nrow(hit)
+      for (h in seq_len(n_occ)) {
+        st <- hit$motif_start[h]
+        en <- hit$motif_end[h]
+        core <- core_mutations_for_site(mut_tbl, g, mid, st, en)
+        combo <- paste(core$short_mut, collapse = "/")
+        hgvs <- paste(core$hgvs_p, collapse = "; ")
+        occ_id <- paste0(mid, "_", st, "-", en)
+        rows[[length(rows) + 1]] <- data.frame(
+          gene = g,
+          motif_id = mid,
+          occurrence = h,
+          n_occurrences = n_occ,
+          motif_start = st,
+          motif_end = en,
+          site_sequence = hit$site_sequence[h],
+          occurrence_id = occ_id,
+          has_motif = TRUE,
+          combo_short = combo,
+          combo_hgvs = hgvs,
+          n_mutations = nrow(core),
+          target_residues = paste(paste0(core$wt_aa, core$protein_aa_pos), collapse = ", "),
+          plan = sprintf(
+            "%s / %s 第%d/%d处（%d-%d，%s）：同时突变核心高IC位点 %s。建议先做单点（P1），再做三联组合。每一处命中都单独做，不要只改第一处。",
+            g, mid, h, n_occ, st, en, hit$site_sequence[h], combo
+          ),
+          stringsAsFactors = FALSE
+        )
+      }
     }
-    core <- mut_tbl[mut_tbl$gene == g & mut_tbl$motif_id == mid & mut_tbl$priority == "P1_core", , drop = FALSE]
-    core <- core[order(core$ic_rank), , drop = FALSE]
-    combo <- paste(core$short_mut, collapse = "/")
-    hgvs <- paste(core$hgvs_p, collapse = "; ")
-    rows[[i]] <- data.frame(
-      gene = g,
-      motif_id = mid,
-      has_motif = TRUE,
-      combo_short = combo,
-      combo_hgvs = hgvs,
-      n_mutations = nrow(core),
-      target_residues = paste(paste0(core$wt_aa, core$protein_aa_pos), collapse = ", "),
-      plan = sprintf(
-        "%s / %s：在 %d-%d（%s）上同时突变核心高IC位点 %s。建议先做单点（P1），再做三联组合。",
-        g, mid, hit$motif_start[1], hit$motif_end[1], hit$site_sequence[1], combo
-      ),
-      stringsAsFactors = FALSE
-    )
   }
   dplyr::bind_rows(rows)
 }
@@ -471,10 +502,15 @@ plot_mutation_focus <- function(gene, regions, mut_tbl, seqs, hits) {
   }
 
   strips <- list()
-  for (mid in unique(sub_r$motif_id)) {
-    hit <- sub_r[sub_r$motif_id == mid, ][1, ]
+  if (nrow(sub_r) > 0) {
+    sub_r <- sub_r[order(sub_r$motif_id, sub_r$motif_start, sub_r$motif_end), , drop = FALSE]
+  }
+  for (i in seq_len(nrow(sub_r))) {
+    hit <- sub_r[i, ]
+    mid <- hit$motif_id
+    occ_id <- paste0(mid, "_", hit$motif_start, "-", hit$motif_end)
     aa <- strsplit(as.character(hit$site_sequence), "")[[1]]
-    mm <- sub_m[sub_m$motif_id == mid, , drop = FALSE]
+    mm <- core_mutations_for_site(sub_m, gene, mid, hit$motif_start, hit$motif_end)
     df <- data.frame(
       motif_pos = seq_along(aa),
       aa = aa,
@@ -484,12 +520,19 @@ plot_mutation_focus <- function(gene, regions, mut_tbl, seqs, hits) {
     df$mut <- mm$suggested_aa[match(df$motif_pos, mm$motif_pos)]
     df$label <- ifelse(!is.na(df$mut), paste0(df$aa, "\n", df$protein_pos, "\n->\n", df$mut), df$aa)
     df$is_core <- !is.na(df$mut)
-    strips[[mid]] <- ggplot2::ggplot(df, ggplot2::aes(x = motif_pos, y = 1, fill = is_core, label = label)) +
+    same <- which(sub_r$motif_id == mid)
+    n_same <- length(same)
+    occ_n <- match(i, same)
+    strips[[occ_id]] <- ggplot2::ggplot(df, ggplot2::aes(x = motif_pos, y = 1, fill = is_core, label = label)) +
       ggplot2::geom_tile(width = 0.92, height = 0.9, color = "white") +
       ggplot2::geom_text(size = 2.1, lineheight = 0.85) +
       ggplot2::scale_fill_manual(values = c("TRUE" = "#F4A582", "FALSE" = "#FDDBC7"), guide = "none") +
       ggplot2::scale_x_continuous(breaks = df$motif_pos) +
-      ggplot2::labs(title = paste0(gene, "  ", mid, "  ", hit$motif_start, "-", hit$motif_end), x = "motif position", y = NULL) +
+      ggplot2::labs(
+        title = paste0(gene, "  ", mid, "  ", hit$motif_start, "-", hit$motif_end,
+                       "  (", occ_n, "/", n_same, ")"),
+        x = "motif position", y = NULL
+      ) +
       ggplot2::theme_minimal(base_size = 10) +
       ggplot2::theme(axis.text.y = ggplot2::element_blank(), panel.grid = ggplot2::element_blank())
   }
@@ -565,8 +608,13 @@ run_regions_mutations <- function() {
   }
 
   if (nrow(combo_focus) > 0) {
-    cat("\n===== 焦点蛋白突变方案（每 motif 核心三联）=====\n")
-    print(combo_focus[, c("gene", "motif_id", "has_motif", "combo_short", "plan"), drop = FALSE])
+    cat("\n===== 焦点蛋白突变方案（同一 motif 的每一处命中都单独做）=====\n")
+    show_cols <- intersect(
+      c("gene", "motif_id", "occurrence", "n_occurrences", "motif_start", "motif_end",
+        "has_motif", "combo_short", "plan"),
+      names(combo_focus)
+    )
+    print(combo_focus[, show_cols, drop = FALSE])
   }
   log_msg("Done -> ", out_dir)
   invisible(list(regions = regions, mutations = mut_tbl, combo = combo_all, focus = focus))
@@ -579,7 +627,7 @@ run_regions_selftest <- function() {
   tmp <- file.path(tempdir(), paste0("motif_regions_selftest_", as.integer(Sys.time())))
   dir.create(file.path(tmp, "results", "motif1"), recursive = TRUE, showWarnings = FALSE)
   seqs <- c(
-    RPL9 = paste0(paste(rep("A", 20), collapse = ""), "CADCQEGGGC", paste(rep("A", 20), collapse = "")),
+    RPL9 = paste0(paste(rep("A", 20), collapse = ""), "CADCQEGGGC", paste(rep("A", 20), collapse = ""), "CADCQEGGGC", paste(rep("A", 10), collapse = "")),
     RBP4 = paste0(paste(rep("S", 15), collapse = ""), "CADCQEGGGC", paste(rep("S", 30), collapse = "")),
     ITGAV = paste0(paste(rep("G", 40), collapse = ""), "CADCQEGGGC", paste(rep("G", 10), collapse = "")),
     ITGA2 = paste0(paste(rep("V", 8), collapse = ""), "CADCQEGGGC", paste(rep("V", 12), collapse = ""))
@@ -591,10 +639,10 @@ run_regions_selftest <- function() {
   }
   close(fa)
   hits <- data.frame(
-    gene = names(seqs),
-    uniprot = paste0("P", seq_along(seqs)),
-    start = c(21, 16, 41, 9),
-    end = c(30, 25, 50, 18),
+    gene = c("RPL9", "RPL9", "RBP4", "ITGAV", "ITGA2"),
+    uniprot = c("P1", "P1", "P2", "P3", "P4"),
+    start = c(21, 51, 16, 41, 9),
+    end = c(30, 60, 25, 50, 18),
     site_sequence = "CADCQEGGGC",
     llr_score = 10,
     motif_id = "motif1",
@@ -642,6 +690,18 @@ run_regions_selftest <- function() {
   rpl9 <- res$mutations[res$mutations$gene == "RPL9" & res$mutations$priority == "P1_core", ]
   if (nrow(rpl9) < 1) stop("selftest: RPL9 has no P1 mutations")
   if (!any(rpl9$wt_aa == "C" & rpl9$suggested_aa == "S")) stop("selftest: expected C->S")
+  rpl9_sites <- unique(paste(rpl9$motif_start, rpl9$motif_end, sep = "-"))
+  if (length(rpl9_sites) < 2) {
+    stop("selftest: RPL9 motif1 must have mutations at every occurrence, got ", paste(rpl9_sites, collapse = ","))
+  }
+  rpl9_combo <- res$combo[res$combo$gene == "RPL9" & res$combo$motif_id == "motif1" & isTRUE(res$combo$has_motif), ]
+  if (nrow(rpl9_combo) < 2) {
+    stop("selftest: combo table must have one row per motif1 site on RPL9")
+  }
+  strip_files <- list.files(focus_dir, pattern = "^RPL9_motif1_.*_mutation_strip")
+  if (length(strip_files) < 2) {
+    stop("selftest: expected a mutation strip for each RPL9 motif1 site")
+  }
   log_msg("REGIONS SELFTEST passed")
   invisible(TRUE)
 }

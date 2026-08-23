@@ -139,7 +139,7 @@ source("TG_protein_motif_regions_mutations.R")
 输出在 `E:\R\Protein\results\regions_mutations\`：
 
 - `protein_motif_regions.xlsx`：每个蛋白每个 motif 的起止、侧翼序列、区域图示字符串
-- `protein_motif_mutation_plans.xlsx`：焦点蛋白（默认 RPL9 / RBP4 / ITGAV / ITGA2）按 motif 的单点与核心三联突变
+- `protein_motif_mutation_plans.xlsx`：焦点蛋白（默认 RPL9 / RBP4 / ITGAV / ITGA2）按 motif **每一处命中** 的单点与核心三联突变（例如 RPL9 上 3 处 motif1 就有 3 套方案）
 - `figures/per_protein/`：每个蛋白一条区域轨道图
 - `figures/focus_mutations/`：焦点蛋白的突变标注图
 
