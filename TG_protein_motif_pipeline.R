@@ -3,7 +3,8 @@
 # TG BRCA：指定人源蛋白的共同序列（de novo motif）
 #   - UniProt Swiss-Prot reviewed canonical 序列（每基因一条）
 #   - 每条蛋白对每条 motif 至少 1 个位点；个别蛋白可有多个不重叠位点
-#   - 每个宽度先搜 8 条；合并后按宽度归一化保守性（总 IC / 宽度）取前五
+#   - 每个宽度先搜 8 条；合并后按宽度归一化保守性（总 IC / 宽度）排序
+#   - 写出的 motif1–5 是 p<0.01 后的前五；ranking 表带 p 和 reported_motif，与分析同一套 mean_ic
 #   - 显著性：重排零分布的单侧 z 检验 p（不同 motif 的 p 应不同；不用 (1+n_ge)/(1+N) 当展示 p）
 #   - 每条 motif 单独出 hits 表 + bits 序列 logo（ggseqlogo chemistry）
 #
@@ -803,6 +804,58 @@ rank_motifs_global <- function(cands, cor_cutoff = 0.85) {
   ranked
 }
 
+motif_field_num <- function(m, name) {
+  x <- m[[name]]
+  if (is.null(x) || length(x) == 0) return(NA_real_)
+  as.numeric(x)[[1]]
+}
+
+motif_field_int <- function(m, name) {
+  x <- m[[name]]
+  if (is.null(x) || length(x) == 0 || all(is.na(x))) return(NA_integer_)
+  as.integer(x)[[1]]
+}
+
+motif_field_chr <- function(m, name) {
+  x <- m[[name]]
+  if (is.null(x) || length(x) == 0 || all(is.na(x))) return(NA_character_)
+  as.character(x)[[1]]
+}
+
+# ranking 与 summary 共用：同一 global_rank 的 mean_ic 必须相同
+motif_ranking_table <- function(ranked) {
+  if (length(ranked) == 0) {
+    return(data.frame(
+      global_rank = integer(),
+      reported_motif = character(),
+      significant_p_lt_0.01 = logical(),
+      empirical_p = numeric(),
+      width = integer(),
+      width_rank = integer(),
+      global_score = numeric(),
+      mean_ic = numeric(),
+      total_ic_bits = numeric(),
+      n_sites = integer(),
+      consensus = character(),
+      stringsAsFactors = FALSE
+    ))
+  }
+  data.frame(
+    global_rank = vapply(ranked, function(m) motif_field_int(m, "global_rank"), integer(1)),
+    reported_motif = vapply(ranked, function(m) motif_field_chr(m, "reported_motif"), character(1)),
+    significant_p_lt_0.01 = vapply(ranked, function(m) isTRUE(m$significant), logical(1)),
+    empirical_p = vapply(ranked, function(m) motif_field_num(m, "empirical_p"), numeric(1)),
+    width = vapply(ranked, function(m) motif_field_int(m, "width"), integer(1)),
+    width_rank = vapply(ranked, function(m) motif_field_int(m, "width_rank"), integer(1)),
+    global_score = vapply(ranked, function(m) motif_field_num(m, "global_score"), numeric(1)),
+    mean_ic = vapply(ranked, function(m) motif_field_num(m, "mean_ic"), numeric(1)),
+    total_ic_bits = vapply(ranked, function(m) motif_field_num(m, "ic"), numeric(1)),
+    n_sites = vapply(ranked, function(m) as.integer(nrow(m$hits)), integer(1)),
+    consensus = vapply(ranked, function(m) motif_field_chr(m, "consensus"), character(1)),
+    stringsAsFactors = FALSE
+  )
+}
+
 # -----------------------------------------------------------------------------
 # 8. 主流程
 # -----------------------------------------------------------------------------
@@ -874,21 +927,9 @@ run_protein_motif_pipeline <- function() {
       " E=", signif(pick$e_value, 3),
       " sig=", pick$significant
     )
+    ranked[[i]] <- pick
     found[[length(found) + 1]] <- pick
   }
-
-  rank_tbl <- data.frame(
-    global_rank = vapply(ranked, function(m) as.integer(m$global_rank), integer(1)),
-    width = vapply(ranked, function(m) as.integer(m$width), integer(1)),
-    width_rank = vapply(ranked, function(m) as.integer(m$width_rank), integer(1)),
-    global_score = vapply(ranked, function(m) as.numeric(m$global_score), numeric(1)),
-    mean_ic = vapply(ranked, function(m) as.numeric(m$mean_ic), numeric(1)),
-    total_ic_bits = vapply(ranked, function(m) as.numeric(m$ic), numeric(1)),
-    n_sites = vapply(ranked, function(m) as.integer(nrow(m$hits)), integer(1)),
-    consensus = vapply(ranked, function(m) as.character(m$consensus), character(1)),
-    stringsAsFactors = FALSE
-  )
-  utils::write.csv(rank_tbl, file.path(result_dir, "motif_global_ranking.csv"), row.names = FALSE)
 
   keep <- found[vapply(found, function(m) isTRUE(m$significant), logical(1))]
   if (length(keep) == 0) {
@@ -899,6 +940,37 @@ run_protein_motif_pipeline <- function() {
   } else if (length(keep) > n_motifs_target) {
     keep <- keep[seq_len(n_motifs_target)]
   }
+
+  skipped <- found[!vapply(found, function(m) {
+    any(vapply(keep, function(k) identical(k$global_rank, m$global_rank), logical(1)))
+  }, logical(1))]
+  if (length(skipped) > 0) {
+    log_msg(
+      "Score ranks skipped (p >= ", p_cutoff, " or not reported): ",
+      paste(vapply(skipped, function(m) as.integer(m$global_rank), integer(1)), collapse = ",")
+    )
+  }
+  if (length(keep) > 0) {
+    log_msg(
+      "Reported motif1.. are score ranks: ",
+      paste(vapply(keep, function(m) as.integer(m$global_rank), integer(1)), collapse = ","),
+      "  (mean_ic in ranking and summary is the same row)"
+    )
+  }
+
+  for (j in seq_along(keep)) {
+    tag <- paste0("motif", j)
+    keep[[j]]$reported_motif <- tag
+    gr <- as.integer(keep[[j]]$global_rank)
+    for (i in seq_along(ranked)) {
+      if (identical(as.integer(ranked[[i]]$global_rank), gr)) {
+        ranked[[i]]$reported_motif <- tag
+      }
+    }
+  }
+
+  rank_tbl <- motif_ranking_table(ranked)
+  utils::write.csv(rank_tbl, file.path(result_dir, "motif_global_ranking.csv"), row.names = FALSE)
 
   summary_rows <- list()
   all_hits <- list()
@@ -967,9 +1039,27 @@ run_protein_motif_pipeline <- function() {
   utils::write.csv(summary_tbl, file.path(result_dir, "motif_significance_summary.csv"), row.names = FALSE)
   utils::write.csv(hits_tbl, file.path(result_dir, "motif_all_hits.csv"), row.names = FALSE)
   writexl::write_xlsx(
-    list(summary = summary_tbl, hits = hits_tbl, fetch = fetch_tbl[, setdiff(names(fetch_tbl), "sequence")]),
+    list(
+      summary = summary_tbl,
+      ranking = rank_tbl,
+      hits = hits_tbl,
+      fetch = fetch_tbl[, setdiff(names(fetch_tbl), "sequence")]
+    ),
     file.path(result_dir, "motif_significance_summary.xlsx")
   )
+
+  if (nrow(summary_tbl) > 0) {
+    for (i in seq_len(nrow(summary_tbl))) {
+      hit <- rank_tbl$global_rank == summary_tbl$global_rank[[i]]
+      if (!any(hit)) {
+        stop("ranking table missing global_rank ", summary_tbl$global_rank[[i]])
+      }
+      if (abs(rank_tbl$mean_ic[hit][[1]] - summary_tbl$mean_ic[[i]]) > 1e-12) {
+        stop("mean_ic mismatch between ranking and summary at global_rank ",
+             summary_tbl$global_rank[[i]])
+      }
+    }
+  }
 
   # 总览 logo（只含显著或实际写出的 motif）
   if (length(keep) > 1 && requireNamespace("ggseqlogo", quietly = TRUE)) {
@@ -1054,6 +1144,18 @@ run_ranking_selftest <- function() {
   }
   if (as.integer(ranked[[1]]$width) != 21L) {
     stop("selftest: highest conservation (tie-break total IC) should rank first")
+  }
+  ranked[[1]]$significant <- TRUE
+  ranked[[1]]$empirical_p <- 1e-4
+  ranked[[1]]$reported_motif <- "motif1"
+  ranked[[2]]$significant <- FALSE
+  ranked[[2]]$empirical_p <- 0.2
+  rank_tbl <- motif_ranking_table(ranked)
+  if (isTRUE(rank_tbl$reported_motif[[1]] != "motif1")) {
+    stop("selftest: ranking must mark the reported motif")
+  }
+  if (abs(rank_tbl$mean_ic[[1]] - ranked[[1]]$mean_ic) > 1e-12) {
+    stop("selftest: ranking mean_ic must match the motif object")
   }
   log_msg(
     "RANKING SELFTEST passed  score=", round(tie6, 3),
