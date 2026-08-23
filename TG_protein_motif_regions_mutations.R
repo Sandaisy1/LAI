@@ -694,7 +694,7 @@ run_regions_selftest <- function() {
   if (length(rpl9_sites) < 2) {
     stop("selftest: RPL9 motif1 must have mutations at every occurrence, got ", paste(rpl9_sites, collapse = ","))
   }
-  rpl9_combo <- res$combo[res$combo$gene == "RPL9" & res$combo$motif_id == "motif1" & isTRUE(res$combo$has_motif), ]
+  rpl9_combo <- res$combo[res$combo$gene == "RPL9" & res$combo$motif_id == "motif1" & res$combo$has_motif, ]
   if (nrow(rpl9_combo) < 2) {
     stop("selftest: combo table must have one row per motif1 site on RPL9")
   }
