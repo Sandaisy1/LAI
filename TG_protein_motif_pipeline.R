@@ -943,7 +943,7 @@ run_motif_selftest <- function() {
     " recovered_CG=", recovered
   )
   if (!recovered) stop("selftest: consensus lost planted C/G")
-  if (nrow(fit$hits) < 8) stop("selftest: too few planted sites")
+  if (nrow(fit$hits) != nrow(seq_df)) stop("selftest: OOPS requires one site in every protein")
   if (!(is.finite(sig$empirical_p) && sig$empirical_p < 0.05)) {
     stop("selftest: planted motif not significant")
   }
