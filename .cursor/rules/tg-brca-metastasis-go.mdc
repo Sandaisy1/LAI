@@ -1,33 +1,23 @@
 ---
-description: 用 metastasis_custom_genes.txt 的 GO 通路分析 RNA-seq 表达（基因热图、通路分数、ORA 气泡图）
+description: 列出 GO 的气泡图必须用全基因组 enrichGO 的 GeneRatio/p.adjust/Count，只画前15且第一名在上
 globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
 
-# 列出的 GO 通路：看表达，不是全库富集
+# 列出的 GO 通路：全库统计 + 通路表达
 
-`metastasis_custom_genes.txt` 是 **GO 通路名称 + GO 号**，不是基因符号列表。用 `org.Hs.eg.db` 的 `GOALL` 把每条 GO 映射成基因，再在 RNA-seq 里看这些通路的表达。
+`metastasis_custom_genes.txt` 是 **GO 通路名称 + GO 号**。通路表达（基因热图、ssGSEA/mean z）按每条 GO 单独做。气泡图**不要**只在自选通路上做超几何再 BH。
 
-## 输入
+## 气泡图（每个非空子集）
 
-- `E:/R/TG_BRCA/TG/metastasis_custom_genes.txt`
-- 每行一条通路，含 `GO:#######` 或 `GO_#######`；空行与 `#` 忽略
-- 解析不到任何 GO 号就停止，不要退回成“按基因符号做 GSVA”
+1. 对该子集基因跑标准 `clusterProfiler::enrichGO`（BP/MF/CC；BH 在全库条目上校正；默认 minGSSize=10、maxGSSize=500）
+2. 用全库结果里的 **GeneRatio、p.adjust、Count** 抽出列出的 GO ID；**禁止**对抽出的子集重新 `p.adjust`
+3. 按 p.adjust 升序排名，**只画前 15**；排名第 1（p.adjust 最小）放在气泡图**最上面**
+4. 全库表写 `GO/*_ORA_GO_BP.csv` 等；抽出表与气泡图写 `CustomGO/`，文件名以 `ORA_` 开头
 
-## 必须输出
-
-对六组比较的每个非空子集（p0.05/p0.01 的 FC 与 topN，以及 AllDE）：
-
-- `CustomGO/` 下 ORA 表 + **气泡图**（x=GeneRatio，size=Count，color=p.adjust；点出全部列出的 GO，不要只留显著通路）
-- 子集基因中落在列出 GO 里的热图
-
-另外（比较级 / 全样品）：
-
-- `00_PathwayExpression/`：每条 GO 单独的基因热图 + 通路分数热图（ssGSEA 或 mean z）
-- 各比较的 listed GO mean log2FC 柱状图
+这样 `mitochondrion organization` 的 p.adjust 与正常 GO BP 图一致，而不是只在 ~70 条自选通路上重算后虚高。
 
 ```r
-# ❌ BAD: 把所有 GO 基因 union 成一个 metastasis 基因集再打一个分数
-# ❌ BAD: clusterProfiler::enrichGO 全库 BP 冒充“列出的通路”
-# ✅ GOOD: for (go in go_ids) score_i <- ssgsea_or_mean_z(expr, genes_of(go))
+# ❌ BAD: phyper + p.adjust(listed_only)；按 GeneRatio 排序且全部通路都画
+# ✅ GOOD: ego <- enrichGO(...); hit <- ego[ID %in% listed]; head(hit[order(p.adjust)], 15)
 ```

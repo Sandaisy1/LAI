@@ -10,7 +10,8 @@
 #   4) 相对 NTC_rep1 的共同上调（sh1 与 sh5 交集）
 # 比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–6 而改本文件主流程。
 #
-# 不做全基因组 GO/KEGG/GSEA。气泡图、热图、通路分数只针对列出的 GO。
+# 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
+# 不在自选通路上重新校正 p。只画排名前 15，第一名在上。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -105,6 +106,7 @@ log_msg <- function(...) {
 p_cutoffs <- c("p0.05" = 0.05, "p0.01" = 0.01)
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
+bubble_top_n <- 15
 
 # -----------------------------------------------------------------------------
 # 2. 样本名与基因名
@@ -775,53 +777,124 @@ plot_pca <- function(heat_mat, sample_info, outfile) {
   save_gg(p, outfile)
 }
 
-hyper_p <- function(k, n_list, n_set, n_univ) {
-  if (n_list < 1 || n_set < 1 || n_univ < 1) return(NA_real_)
-  stats::phyper(k - 1, n_set, n_univ - n_set, n_list, lower.tail = FALSE)
+map_to_entrez <- function(symbols) {
+  symbols <- unique(as.character(symbols))
+  symbols <- symbols[!is.na(symbols) & nzchar(symbols)]
+  empty <- data.frame(gene = character(), entrez = character(), stringsAsFactors = FALSE)
+  if (length(symbols) == 0) return(empty)
+  m <- tryCatch(
+    clusterProfiler::bitr(
+      symbols, fromType = "SYMBOL", toType = "ENTREZID",
+      OrgDb = org.Hs.eg.db::org.Hs.eg.db
+    ),
+    error = function(e) NULL
+  )
+  if (is.null(m) || nrow(m) == 0) return(empty)
+  m <- m[!duplicated(m$SYMBOL), , drop = FALSE]
+  data.frame(gene = m$SYMBOL, entrez = as.character(m$ENTREZID), stringsAsFactors = FALSE)
 }
 
-custom_go_ora <- function(selected_genes, go_tab, go_sets, universe) {
-  selected <- unique(intersect(selected_genes, universe))
-  n_univ <- length(universe)
-  n_list <- length(selected)
-  rows <- lapply(seq_len(nrow(go_tab)), function(i) {
-    id <- go_tab$go_id[i]
-    gset <- intersect(go_sets[[id]], universe)
-    hit <- intersect(selected, gset)
-    k <- length(hit)
-    n_set <- length(gset)
-    data.frame(
-      go_id = id,
-      Description = go_tab$name[i],
-      Count = k,
-      setSize = n_set,
-      geneListSize = n_list,
-      universeSize = n_univ,
-      GeneRatio = if (n_list > 0) k / n_list else 0,
-      BgRatio = if (n_univ > 0) n_set / n_univ else 0,
-      pvalue = hyper_p(k, n_list, n_set, n_univ),
-      hit_genes = paste(hit, collapse = "/"),
-      stringsAsFactors = FALSE
+parse_gene_ratio <- function(x) {
+  vapply(as.character(x), function(s) {
+    p <- strsplit(s, "/", fixed = TRUE)[[1]]
+    if (length(p) < 2) return(suppressWarnings(as.numeric(s)))
+    as.numeric(p[1]) / as.numeric(p[2])
+  }, numeric(1), USE.NAMES = FALSE)
+}
+
+ora_df_from_enrich <- function(ego, ont) {
+  if (is.null(ego)) return(NULL)
+  df <- as.data.frame(ego)
+  if (nrow(df) == 0) return(NULL)
+  df$ONTOLOGY <- ont
+  df$genome_wide_rank <- seq_len(nrow(df))
+  df$GeneRatio_num <- parse_gene_ratio(df$GeneRatio)
+  df
+}
+
+# 与原先正常 GO 分析相同：clusterProfiler::enrichGO，不限制 universe，
+# BH 在全库 GO 条目上校正。pvalueCutoff=1 只为留下自选通路，不改 p.adjust。
+run_genome_enrichGO <- function(genes, go_dir, tag) {
+  dir.create(go_dir, recursive = TRUE, showWarnings = FALSE)
+  entrez <- unique(map_to_entrez(genes)$entrez)
+  if (length(entrez) < 3) {
+    writeLines(
+      paste("mapped_entrez", length(entrez)),
+      file.path(go_dir, paste0(tag, "_ORA_skipped.txt"))
     )
-  })
-  df <- do.call(rbind, rows)
-  df$p.adjust <- p.adjust(df$pvalue, method = "BH")
-  df[order(df$pvalue, -df$Count), , drop = FALSE]
+    return(NULL)
+  }
+  pieces <- list()
+  for (ont in c("BP", "MF", "CC")) {
+    ego <- tryCatch(
+      clusterProfiler::enrichGO(
+        gene = entrez,
+        OrgDb = org.Hs.eg.db::org.Hs.eg.db,
+        keyType = "ENTREZID",
+        ont = ont,
+        pAdjustMethod = "BH",
+        pvalueCutoff = 1,
+        qvalueCutoff = 1,
+        minGSSize = 10,
+        maxGSSize = 500,
+        readable = TRUE
+      ),
+      error = function(e) {
+        log_msg("enrichGO ", ont, " failed: ", e$message)
+        NULL
+      }
+    )
+    df <- ora_df_from_enrich(ego, ont)
+    if (!is.null(df)) {
+      write_table(df, file.path(go_dir, paste0(tag, "_ORA_GO_", ont)))
+      pieces[[ont]] <- df
+    }
+  }
+  if (length(pieces) == 0) return(NULL)
+  dplyr::bind_rows(pieces)
 }
 
-plot_ora_bubble <- function(ora, title, outfile) {
+extract_listed_go_ora <- function(genome_ora, go_tab, n_show = bubble_top_n) {
+  missing <- go_tab$go_id
+  empty <- list(all_listed = NULL, top = NULL, missing = missing)
+  if (is.null(genome_ora) || nrow(genome_ora) == 0) return(empty)
+  id_col <- if ("ID" %in% names(genome_ora)) "ID" else "go_id"
+  hit <- genome_ora[genome_ora[[id_col]] %in% go_tab$go_id, , drop = FALSE]
+  if (nrow(hit) == 0) return(empty)
+  hit <- hit[order(hit$p.adjust, hit$pvalue, -hit$Count), , drop = FALSE]
+  hit <- hit[!duplicated(hit[[id_col]]), , drop = FALSE]
+  hit$go_id <- hit[[id_col]]
+  if (!"GeneRatio_num" %in% names(hit)) hit$GeneRatio_num <- parse_gene_ratio(hit$GeneRatio)
+  hit$listed_rank <- seq_len(nrow(hit))
+  list(
+    all_listed = hit,
+    top = utils::head(hit, n_show),
+    missing = setdiff(go_tab$go_id, hit$go_id)
+  )
+}
+
+plot_ora_bubble <- function(ora, title, outfile, n_show = bubble_top_n) {
   df <- ora
   if (is.null(df) || nrow(df) == 0) {
-    writeLines("no custom GO terms", paste0(outfile, "_EMPTY.txt"))
+    writeLines("no listed GO terms in genome-wide enrichGO", paste0(outfile, "_EMPTY.txt"))
     return(invisible(NULL))
   }
-  df$label <- paste0(df$Description, " (", df$go_id, ")")
+  if (!"GeneRatio_num" %in% names(df)) {
+    df$GeneRatio_num <- if (is.numeric(df$GeneRatio)) df$GeneRatio else parse_gene_ratio(df$GeneRatio)
+  }
+  df <- df[order(df$p.adjust, df$pvalue, -df$Count), , drop = FALSE]
+  df$listed_rank <- seq_len(nrow(df))
+  df <- utils::head(df, n_show)
+  gid <- if ("go_id" %in% names(df)) df$go_id else df$ID
+  df$label <- paste0(df$listed_rank, ". ", df$Description, " (", gid, ")")
+  df$label <- factor(df$label, levels = rev(as.character(df$label)))
   df$p_adjust <- df$p.adjust
   df$p_adjust[!is.finite(df$p_adjust)] <- 1
-  df$label <- factor(df$label, levels = rev(df$label[order(df$GeneRatio, df$Count)]))
-  p <- ggplot2::ggplot(df, ggplot2::aes(x = GeneRatio, y = label, size = Count, color = p_adjust)) +
+  p <- ggplot2::ggplot(
+    df,
+    ggplot2::aes(x = GeneRatio_num, y = label, size = Count, color = p_adjust)
+  ) +
     ggplot2::geom_point() +
-    ggplot2::scale_color_gradient(low = "red", high = "blue") +
     ggplot2::theme_bw(base_size = 12) +
     ggplot2::theme(axis.text.y = ggplot2::element_text(size = 9)) +
     ggplot2::labs(
@@ -831,7 +904,13 @@ plot_ora_bubble <- function(ora, title, outfile) {
       color = "p.adjust",
       size = "Count"
     )
-  h <- max(5, min(16, 0.35 * nrow(df) + 3))
+  rng <- range(df$p_adjust[df$p_adjust > 0], na.rm = TRUE)
+  if (is.finite(rng[1]) && rng[1] > 0 && rng[2] / rng[1] >= 10) {
+    p <- p + ggplot2::scale_color_gradient(low = "red", high = "blue", trans = "log10")
+  } else {
+    p <- p + ggplot2::scale_color_gradient(low = "red", high = "blue")
+  }
+  h <- max(5.5, min(10, 0.38 * nrow(df) + 3))
   save_gg(p, outfile, width = 10, height = h)
 }
 
@@ -935,15 +1014,36 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
     error = function(e) log_msg("pathway heatmap failed: ", e$message)
   )
   cg_dir <- file.path(outdir, "CustomGO")
+  go_dir <- file.path(outdir, "GO")
   dir.create(cg_dir, recursive = TRUE, showWarnings = FALSE)
-  univ <- unique(full_de$gene)
-  ora <- custom_go_ora(sub$gene, go_tab, go_sets, univ)
-  write_table(ora, file.path(cg_dir, paste0(tag, "_ORA_CustomGO")))
+  genome_ora <- tryCatch(
+    run_genome_enrichGO(sub$gene, go_dir, tag),
+    error = function(e) {
+      log_msg("genome enrichGO failed: ", e$message)
+      NULL
+    }
+  )
+  extracted <- extract_listed_go_ora(genome_ora, go_tab, n_show = bubble_top_n)
+  if (!is.null(extracted$all_listed)) {
+    write_table(extracted$all_listed, file.path(cg_dir, paste0(tag, "_ORA_CustomGO")))
+  }
+  if (length(extracted$missing) > 0) {
+    writeLines(
+      c(
+        "下列自选 GO 未出现在全基因组 enrichGO 结果中（可能超出 minGSSize/maxGSSize，或该子集没有注释到）。",
+        "气泡图使用全库 GeneRatio / p.adjust / Count，未重新计算这些缺失项。",
+        extracted$missing
+      ),
+      file.path(cg_dir, paste0(tag, "_listed_GO_not_in_genome_ORA.txt"))
+    )
+  }
   tryCatch(
     plot_ora_bubble(
-      ora,
-      paste0(title, " | ORA listed GO (not genome-wide, not GSEA)"),
-      file.path(cg_dir, paste0(tag, "_ORA_CustomGO_dotplot"))
+      extracted$top,
+      paste0(title, " | ORA listed GO top ", bubble_top_n,
+             " (GeneRatio/p.adjust/Count from genome-wide GO)"),
+      file.path(cg_dir, paste0(tag, "_ORA_CustomGO_dotplot")),
+      n_show = bubble_top_n
     ),
     error = function(e) log_msg("bubble failed: ", e$message)
   )
@@ -959,7 +1059,8 @@ run_five_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
     c(
       "本比较只分析 metastasis_custom_genes.txt 列出的 GO 通路表达。",
       "分层结果在 p0.05/ 、p0.01/ 、AllDE/ 。",
-      "每个非空子集：差异表、火山图、热图、CustomGO 气泡图。",
+      "每个非空子集：差异表、火山图、热图。",
+      "先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio/p.adjust/Count 画气泡图（前15，第一名在上）。",
       paste("p-value estimated:", have_p)
     ),
     file.path(base, "00_READ_ME.txt")

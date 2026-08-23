@@ -2,7 +2,7 @@
 
 四个样品：`NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5`。两个 NTC **不在 1-vs-1 比较里合并**。
 
-本流程**不做**全基因组 GO/KEGG/GSEA。通路分析只使用 `metastasis_custom_genes.txt` 里的 GO 名称和 GO 号，把每条 GO 映射成基因后看 RNA-seq 表达。
+本流程对列出的 GO 做通路表达（热图/分数），气泡图的统计量来自全基因组 enrichGO 再抽取，不在自选通路上重算 p。
 
 ## 数据
 
@@ -43,7 +43,9 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
 
 无法估 p 时仍按 FC/排名分层，写 `NO_PVALUE.txt`，不伪造 p。
 
-每个非空子集：差异基因表、火山图、热图、列出 GO 的 ORA **气泡图**（`CustomGO/`，文件名 `ORA_`）。
+每个非空子集：差异基因表、火山图、热图。气泡图**先做全基因组 `enrichGO`**，再抽出 `metastasis_custom_genes.txt` 中通路的 GeneRatio、p.adjust、Count（不在自选通路上重新校正 p）。只画 **p.adjust 排名前 15**，第一名在最上面。
+
+全库 GO 表在各子集的 `GO/`（`*_ORA_GO_BP.csv` 等）；抽出的通路在 `CustomGO/`。
 
 ## 通路表达（不改全库 p 值）
 

@@ -7,7 +7,7 @@ alwaysApply: true
 # TG BRCA RNA-seq：按列出的 GO 通路分析表达
 
 写或改本仓库 R 分析时必须按本规则。输入是 Cuffdiff，不是 Excel。
-**不要**再跑全基因组 GO/KEGG/GSEA 或细胞骨架/线粒体专项来代替本分析。
+不要用自选通路上的单独超几何检验替代全库 GO 的 p.adjust。
 
 ## 数据
 
@@ -43,13 +43,13 @@ alwaysApply: true
 3–4. `p<0.01` 同样两套
 5. AllDE：上调+下调（能估 p 时 `p<0.05`）
 
-每个非空子集：差异表、火山图、热图、**列出 GO 的 ORA 气泡图**（`CustomGO/`，`ORA_` 前缀）。目录：`p0.05/FoldChange/FC_1.5/`、`p0.01/TopRank/top100/`、`AllDE/`。
+每个非空子集：差异表、火山图、热图。气泡图：先 `enrichGO` 全库（BP/MF/CC，BH 全库校正），再抽出列出 GO 的 GeneRatio / p.adjust / Count，**不要**在自选通路上重新 `p.adjust`。只画 p.adjust 排名前 15，第一名在最上面。全库表在 `GO/`（`ORA_` 前缀），抽出结果在 `CustomGO/`。
 
 ## 通路表达
 
 每条列出的 GO 单独打分（ssGSEA 或 mean z），不要把所有 GO 并成一个基因集。结果在 `00_PathwayExpression/`。不要为凸显通路去改全基因组 p 值。
 
 ```r
-# ❌ BAD: enrichGO 全库 BP；忽略 metastasis_custom_genes.txt；把两个 NTC 并成一组
-# ✅ GOOD: 解析 GO ID → 每组 × (p0.05+p0.01)×(4 FC + 7 topN) + AllDE 出表/火山图/热图/气泡图
+# ❌ BAD: 只在自选 GO 上做超几何并重新 BH，导致 mitochondrion organization 的 p.adjust 虚高
+# ✅ GOOD: enrichGO 全库 → 抽出列出 GO 的 GeneRatio/p.adjust/Count → 前15气泡图（第一名在上）
 ```
