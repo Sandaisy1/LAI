@@ -1157,7 +1157,7 @@ run_ranking_selftest <- function() {
   if (abs(by_aa$global_score - mean(pos)) > 1e-12) {
     stop("selftest: score must be mean of per-amino-acid IC")
   }
-  if (by_aa$n_conserved_aa != 5L) {
+  if (by_aa$n_conserved_aa != 6L) {
     stop("selftest: conserved amino-acid count is wrong")
   }
   tie6 <- motif_global_score(list(position_ic = rep(2, 6), ic = 12, width = 6L))
