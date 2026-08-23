@@ -2,7 +2,7 @@
 # =============================================================================
 # TG BRCA：指定人源蛋白的共同序列（de novo motif）
 #   - UniProt Swiss-Prot reviewed canonical 序列（每基因一条）
-#   - OOPS EM：每条蛋白对每条 motif 至少（且默认正好）1 个位点；按全局得分取前五
+#   - 每条蛋白对每条 motif 至少 1 个位点；个别蛋白可有多个不重叠位点；按全局得分取前五
 #   - 显著性：重排零分布的单侧 z 检验 p（不同 motif 的 p 应不同；不用 (1+n_ge)/(1+N) 当展示 p）
 #   - 每条 motif 单独出 hits 表 + bits 序列 logo（ggseqlogo chemistry）
 #
@@ -109,6 +109,9 @@ n_kmer_seeds      <- 3L
 # 重排次数用于估计零分布均值/标准差；p 用连续 z 检验，不再用计数下限把所有显著 motif 卡成同一个 p
 n_shuffle         <- 200L
 min_sites         <- 4L
+extra_site_rel    <- 0.5
+extra_site_min_llr <- 0
+max_sites_per_seq <- 30L
 uniprot_pause_sec <- 0.2
 
 default_genes <- c(
@@ -351,7 +354,7 @@ consensus_from_pwm <- function(pwm, min_p = 0.4) {
 }
 
 # -----------------------------------------------------------------------------
-# 5. OOPS EM（每条够长的蛋白必须有且仅有 1 个位点）
+# 5. EM 用每蛋白 1 个最佳窗口学 PWM；扫描时每蛋白至少 1 个位点，并允许额外不重叠位点
 # -----------------------------------------------------------------------------
 fill_oops_starts <- function(int_list, starts, width) {
   out <- as.integer(starts)
@@ -494,6 +497,47 @@ extract_sites <- function(seq_df, starts, width) {
   dplyr::bind_rows(out[seq_len(k)])
 }
 
+# 每条蛋白先保留最佳窗口，再收下不重叠且接近最佳分的额外位点
+collect_multi_sites <- function(seq_df, int_list, lod, width) {
+  rows <- list()
+  for (i in seq_len(nrow(seq_df))) {
+    sc <- score_windows(int_list[[i]], lod)
+    if (length(sc) == 0) next
+    best_j <- which.max(sc)
+    best_sc <- sc[best_j]
+    thr <- if (best_sc > extra_site_min_llr) {
+      max(extra_site_min_llr, extra_site_rel * best_sc)
+    } else {
+      best_sc
+    }
+    cand <- which(sc >= thr - 1e-12)
+    if (!best_j %in% cand) cand <- c(best_j, cand)
+    ord <- cand[order(-sc[cand])]
+    occupied <- rep(FALSE, length(sc) + width)
+    taken <- 0L
+    s <- seq_df$sequence[i]
+    for (j in ord) {
+      if (taken >= max_sites_per_seq) break
+      if (j + width - 1 > nchar(s)) next
+      rng <- j:(j + width - 1)
+      if (any(occupied[rng])) next
+      occupied[rng] <- TRUE
+      taken <- taken + 1L
+      rows[[length(rows) + 1]] <- data.frame(
+        gene = seq_df$gene[i],
+        uniprot = seq_df$uniprot[i],
+        start = as.integer(j),
+        end = as.integer(j + width - 1),
+        site_sequence = substring(s, j, j + width - 1),
+        llr_score = sc[j],
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  if (length(rows) == 0) return(NULL)
+  dplyr::bind_rows(rows)
+}
+
 discover_one_motif <- function(seq_df, int_list, width, bg) {
   too_short <- vapply(int_list, function(s) length(s) < width, logical(1))
   if (any(too_short)) {
@@ -512,18 +556,10 @@ discover_one_motif <- function(seq_df, int_list, width, bg) {
     if (is.null(best) || fit$llr > best$llr) best <- fit
   }
   if (is.null(best)) return(NULL)
-  hits <- extract_sites(seq_df, best$starts, width)
-  if (is.null(hits) || nrow(hits) < nrow(seq_df)) return(NULL)
-  if (length(setdiff(seq_df$gene, hits$gene)) > 0) return(NULL)
   lod <- best$lod
-  llr <- numeric(nrow(hits))
-  for (i in seq_len(nrow(hits))) {
-    gi <- match(hits$gene[i], seq_df$gene)
-    sc <- score_windows(int_list[[gi]], lod)
-    llr[i] <- sc[hits$start[i]]
-  }
-  hits$llr_score <- llr
-  hits <- hits[order(-hits$llr_score), , drop = FALSE]
+  hits <- collect_multi_sites(seq_df, int_list, lod, width)
+  if (is.null(hits) || length(setdiff(seq_df$gene, hits$gene)) > 0) return(NULL)
+  hits <- hits[order(-hits$llr_score, hits$gene, hits$start), , drop = FALSE]
   list(
     width = width,
     pwm = best$pwm,
@@ -547,12 +583,26 @@ shuffle_seq <- function(seq) {
 motif_score_on_seqs <- function(int_list, lod) {
   total <- 0
   n_hit <- 0
+  w <- ncol(lod)
   for (s in int_list) {
     sc <- score_windows(s, lod)
     if (length(sc) == 0) next
-    mx <- max(sc)
-    total <- total + mx
-    n_hit <- n_hit + 1
+    best_sc <- max(sc)
+    thr <- if (best_sc > extra_site_min_llr) {
+      max(extra_site_min_llr, extra_site_rel * best_sc)
+    } else {
+      best_sc
+    }
+    cand <- which(sc >= thr - 1e-12)
+    ord <- cand[order(-sc[cand])]
+    occupied <- rep(FALSE, length(sc) + w)
+    for (j in ord) {
+      rng <- j:(j + w - 1)
+      if (any(occupied[rng])) next
+      occupied[rng] <- TRUE
+      total <- total + sc[j]
+      n_hit <- n_hit + 1
+    }
   }
   c(llr = total, n_hit = n_hit)
 }
@@ -657,6 +707,19 @@ mask_sites <- function(int_list, starts, width) {
   out
 }
 
+mask_hits <- function(int_list, hits) {
+  out <- lapply(int_list, identity)
+  gnames <- names(out)
+  for (r in seq_len(nrow(hits))) {
+    gi <- if (!is.null(gnames) && length(gnames)) match(hits$gene[r], gnames) else NA_integer_
+    if (is.na(gi)) next
+    st <- as.integer(hits$start[r])
+    en <- min(length(out[[gi]]), as.integer(hits$end[r]))
+    if (!is.na(st) && st >= 1 && en >= st) out[[gi]][st:en] <- NA_integer_
+  }
+  out
+}
+
 # 全局得分：位点平均信息量（bits/aa），不同宽度放在同一尺度上排名
 motif_global_score <- function(m) {
   as.numeric(m$ic) / max(as.integer(m$width), 1L)
@@ -686,7 +749,7 @@ collect_motif_pool <- function(seq_df, int_list, bg) {
     if (length(round_fits) == 0) break
     scores <- vapply(round_fits, function(x) x$global_score, numeric(1))
     best <- round_fits[[which.max(scores)]]
-    work_int <- mask_sites(work_int, best$starts, best$width)
+    work_int <- mask_hits(work_int, best$hits)
   }
   pool
 }
@@ -924,6 +987,8 @@ run_motif_selftest <- function() {
   planted <- "CADCQEGGGC"
   flank <- function() paste(sample(AA20, 40, replace = TRUE), collapse = "")
   seqs <- vapply(seq_len(12), function(i) paste0(flank(), planted, flank()), character(1))
+  seqs[1] <- paste0(flank(), planted, flank(), planted, flank())
+  seqs[2] <- paste0(flank(), planted, "GGGG", planted, flank())
   seq_df <- data.frame(
     gene = paste0("G", seq_len(12)),
     uniprot = paste0("P", seq_len(12)),
@@ -936,14 +1001,19 @@ run_motif_selftest <- function() {
   if (is.null(fit)) stop("selftest: planted motif not recovered")
   sig <- empirical_significance(seq_df, fit, bg, 30L)
   recovered <- grepl("C", fit$consensus) && grepl("G", fit$consensus)
+  n_per_gene <- table(fit$hits$gene)
   log_msg(
     "SELFTEST consensus=", fit$consensus,
     " sites=", nrow(fit$hits),
+    " max_per_gene=", max(n_per_gene),
     " p=", signif(sig$empirical_p, 3),
     " recovered_CG=", recovered
   )
   if (!recovered) stop("selftest: consensus lost planted C/G")
-  if (nrow(fit$hits) != nrow(seq_df)) stop("selftest: OOPS requires one site in every protein")
+  if (length(setdiff(seq_df$gene, fit$hits$gene)) > 0) {
+    stop("selftest: every protein must have at least one site")
+  }
+  if (max(n_per_gene) < 2) stop("selftest: expected multiple sites in a protein")
   if (!(is.finite(sig$empirical_p) && sig$empirical_p < 0.05)) {
     stop("selftest: planted motif not significant")
   }
