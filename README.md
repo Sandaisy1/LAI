@@ -32,14 +32,25 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
 5. `mean(TG_sh1, TG_sh5)` vs `NTC_rep0`（不要混入 NTC_rep1）
 6. `mean(TG_sh1, TG_sh5)` vs `NTC_rep1`（不要混入 NTC_rep0）
 
-## 两套分层（每组都跑）
+## 两套分层（每组比较都跑，每档单独出图）
 
-用 **p 值**（不是 padj），一律 **p < 0.05**：
+1. **FoldChange** 四组：上调 FC ≥ 1 / 1.25 / 1.5 / 2  
+2. **上调排名** 七组：top 50 / 75 / 100 / 150 / 200 / 250 / 300  
 
-1. 上调 FC ≥ 1 / 1.25 / 1.5 / 2
-2. 上调 top 50 / 75 / 100 / 150 / 200 / 250 / 300
+能估 p 时先用 **p < 0.05**（`pvalue`，不用 padj）再分层；1-vs-1 无法估 p 时不伪造，只按 FC/排名，并写 `NO_PVALUE.txt`。不再跑 p<0.01，也不再单独出 AllDE/UpDE/DownDE。
 
-不再跑 p<0.01，也不再单独出 AllDE/UpDE/DownDE。无法估 p 时仍按 FC/排名分层，写 `NO_PVALUE.txt`，不伪造 p。
+目录：
+
+```
+results/<比较>/FoldChange/FC_1/
+results/<比较>/FoldChange/FC_1.25/
+results/<比较>/FoldChange/FC_1.5/
+results/<比较>/FoldChange/FC_2/
+results/<比较>/TopRank/top50/
+...
+results/<比较>/TopRank/top300/
+results/<比较>/00_analysis_tracks.csv
+```
 
 每个非空子集：差异基因表、火山图、热图。`GO/` 里有全库 BP/CC/MF 表、气泡图，以及 BP/CC/MF 合在一张上的柱状图（红=生物过程、蓝=细胞组成、绿=分子功能；每个 ontology 取前 10/15/20）。柱状图出两套横轴：**-lgP**（按显著性排序）和 **Count**（该通路命中的差异基因数，按 Count 排序）。`CustomGO/` 对 `metastasis_custom_genes.txt` 中的列出通路用同一套柱状图：先出 **全部** p.adjust < 0.2 的列出通路，再出每个 ontology 的 top 10/15/20。气泡图**先做全基因组 `enrichGO`**（`minGSSize=1`，很细的通路也会测；`maxGSSize=500`），再抽出列出通路的 GeneRatio、p.adjust、Count（不在自选通路上重新校正 p）。最终气泡图只保留 **p.adjust < 0.2**，再按 **GeneRatio 从大到小**取前 15 与前 20。柱状图同样只保留 p.adjust < 0.2。全库完整表仍写出，不改 p.adjust。
 
@@ -64,11 +75,12 @@ results/TG_sh1_vs_NTC_rep0/CustomGO/TG_sh1_vs_NTC_rep0_pathway_mean_log2FC.pdf
 results/TG_sh1_vs_NTC_rep0/CustomGO/TG_sh1_vs_NTC_rep0_pathway_mean_log2FC_up_top10.pdf
 results/TG_sh1_vs_NTC_rep0/CustomGO/TG_sh1_vs_NTC_rep0_pathway_mean_log2FC_up_top15.pdf
 results/TG_sh1_vs_NTC_rep0/CustomGO/TG_sh1_vs_NTC_rep0_pathway_mean_log2FC_up_top20.pdf
-results/TG_sh1_vs_NTC_rep0/p0.05/FoldChange/FC_1/GO/p0.05_FC_1_ORA_GO_BP_CC_MF_barplot_top15.pdf
-results/TG_sh1_vs_NTC_rep0/p0.05/FoldChange/FC_1/GO/p0.05_FC_1_ORA_GO_BP_CC_MF_barplot_count_top15.pdf
-results/TG_sh1_vs_NTC_rep0/p0.05/FoldChange/FC_1/CustomGO/p0.05_FC_1_ORA_CustomGO_BP_CC_MF_barplot.pdf
-results/TG_sh1_vs_NTC_rep0/p0.05/FoldChange/FC_1/CustomGO/p0.05_FC_1_ORA_CustomGO_BP_CC_MF_barplot_count.pdf
-results/TG_sh1_vs_NTC_rep0/p0.05/FoldChange/FC_1/CustomGO/p0.05_FC_1_ORA_CustomGO_BP_CC_MF_barplot_top15.pdf
+results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1/GO/FC_1_ORA_GO_BP_CC_MF_barplot_top15.pdf
+results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1/GO/FC_1_ORA_GO_BP_CC_MF_barplot_count_top15.pdf
+results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1/CustomGO/FC_1_ORA_CustomGO_BP_CC_MF_barplot.pdf
+results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1/CustomGO/FC_1_ORA_CustomGO_BP_CC_MF_barplot_count.pdf
+results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1/CustomGO/FC_1_ORA_CustomGO_BP_CC_MF_barplot_top15.pdf
+results/TG_sh1_vs_NTC_rep0/TopRank/top100/GO/top100_ORA_GO_BP_CC_MF_barplot_top15.pdf
 results/TG_sh1_vs_NTC_rep0/PathwayScore/TG_sh1_vs_NTC_rep0_ssgsea_dotplot_up_top15.pdf
 results/TG_sh1_vs_NTC_rep0/PathwayScore/TG_sh1_vs_NTC_rep0_mean_z_dotplot_up_top15.pdf
 results/00_PathwayExpression/pathway_score_heatmap_ssgsea.pdf

@@ -10,6 +10,10 @@
 #   4) 相对 NTC_rep1 的共同上调（sh1 与 sh5 交集）
 # 比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–6 而改本文件主流程。
 #
+# 两套分层（每组比较都跑，各自独立出表出图）：
+#   1) FoldChange 上调 FC ≥ 1 / 1.25 / 1.5 / 2（四组）
+#   2) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300（七组）
+# 能估 p 时先 p<0.05 再分层；不能估 p 时不伪造，只按 FC/排名。
 # 读 Cuffdiff 各样品 FPKM（已按长度和深度标准化），过滤低表达后只做 log2(x+1)，不再做 DESeq2。
 # 总 CustomGO 柱状图：上调+下调全部，以及上调通路 mean log2FC 前 10/15/20。
 # 每个比较另出 ssGSEA 与 mean z 气泡图（分数差；1-vs-1 不伪造 p）。
@@ -1877,11 +1881,14 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
   dir.create(base, recursive = TRUE, showWarnings = FALSE)
   write_table(de, file.path(base, "DE_full"))
   have_p <- has_real_pvalue(de)
+  pcut <- unname(p_cutoffs[["p0.05"]])
+  p_bit <- if (have_p) paste0("；能估 p 时先 p<", pcut) else "；本比较无法估 p，未伪造 p，只按 FC/排名"
   writeLines(
     c(
-      "本比较只跑两种分层（均要求 p<0.05，无法估 p 时不伪造 p，仍按 FC/排名）：",
-      "  1) FoldChange 上调 FC >= 1 / 1.25 / 1.5 / 2",
-      "  2) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300",
+      "本比较按两套思路分层，每档单独出表、单独作图：",
+      "  1) FoldChange：上调 FC ≥ 1 / 1.25 / 1.5 / 2（四组，目录 FoldChange/FC_*）",
+      "  2) 上调排名：top 50 / 75 / 100 / 150 / 200 / 250 / 300（七组，目录 TopRank/top*）",
+      paste0("  ", p_bit),
       "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图与柱状图。",
       "CustomGO/：列出通路气泡图，以及 BP/CC/MF 柱状图（-lgP 与 Count；全部列出通路 + top10/15/20）。",
       "最终气泡图只保留 p.adjust<0.2，再按 GeneRatio 取前15和前20。",
@@ -1895,21 +1902,31 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
   )
   if (!have_p) {
     writeLines(
-      "1-vs-1 或 2-vs-1 无法估计 p，未伪造 p 值。p0.05 目录里是 FC/topN 分层（未用 p 过滤）。",
+      "1-vs-1 或 2-vs-1 无法估计 p，未伪造 p 值。FoldChange/ 与 TopRank/ 只按倍数和上调排名分层。",
       file.path(base, "NO_PVALUE.txt")
     )
   }
 
-  p_tag <- "p0.05"
-  pcut <- unname(p_cutoffs[[p_tag]])
+  track_rows <- list()
   for (nm in names(fc_cutoffs)) {
     fc <- unname(fc_cutoffs[[nm]])
     sub <- select_by_fc(de, fc, pcut, have_p)
     if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
+    log_msg(comp_name, " FoldChange ", nm, ": n = ", nrow(sub),
+            " (up FC >= ", fc, if (have_p) paste0(", p<", pcut) else "", ")")
+    track_rows[[length(track_rows) + 1L]] <- data.frame(
+      track = "FoldChange",
+      subset = nm,
+      rule = paste0("up FC >= ", fc),
+      n_genes = nrow(sub),
+      p_filtered = have_p,
+      stringsAsFactors = FALSE
+    )
     emit_subset_analysis(
-      comp_name, sub, paste0(p_tag, "_", nm),
-      paste0(comp_name, " | ", p_tag, " | up FC >= ", fc),
-      file.path(base, p_tag, "FoldChange", nm),
+      comp_name, sub, nm,
+      paste0(comp_name, " | 上调 FoldChange ≥ ", fc,
+             if (have_p) paste0(" (p<", pcut, ")") else ""),
+      file.path(base, "FoldChange", nm),
       full_de, heat_mat, sample_info, go_tab, go_sets, pathway_genes,
       fc_line = fc, p_line = pcut
     )
@@ -1917,14 +1934,26 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
   for (n in top_ns) {
     tag <- paste0("top", n)
     sub <- select_by_topn(de, n, pcut, have_p)
+    log_msg(comp_name, " TopRank ", tag, ": n = ", nrow(sub),
+            if (have_p) paste0(" (p<", pcut, ")") else "")
+    track_rows[[length(track_rows) + 1L]] <- data.frame(
+      track = "TopRank",
+      subset = tag,
+      rule = paste0("upregulated top ", n),
+      n_genes = nrow(sub),
+      p_filtered = have_p,
+      stringsAsFactors = FALSE
+    )
     emit_subset_analysis(
-      comp_name, sub, paste0(p_tag, "_", tag),
-      paste0(comp_name, " | ", p_tag, " | upregulated top ", n),
-      file.path(base, p_tag, "TopRank", tag),
+      comp_name, sub, tag,
+      paste0(comp_name, " | 上调排名 top ", n,
+             if (have_p) paste0(" (p<", pcut, ")") else ""),
+      file.path(base, "TopRank", tag),
       full_de, heat_mat, sample_info, go_tab, go_sets, pathway_genes,
       fc_line = 1, p_line = pcut
     )
   }
+  write_table(do.call(rbind, track_rows), file.path(base, "00_analysis_tracks"))
 
   tryCatch(
     plot_pathway_mean_fc(
@@ -1989,7 +2018,7 @@ write_pathway_expression <- function(log_mat, heat_mat, sample_info, go_tab, go_
 }
 
 plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix,
-                         p_cutoff, p_tag, have_pvalue) {
+                         p_cutoff, have_pvalue) {
   if (is.null(de_a) || is.null(de_b) || !has_pkg("ggvenn")) return(invisible(NULL))
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   for (nm in names(fc_cutoffs)) {
@@ -2001,12 +2030,12 @@ plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix,
     names(lst) <- c(label_a, label_b)
     p <- tryCatch(
       ggvenn::ggvenn(lst, fill_color = c("#F58518", "#54A24B")) +
-        ggplot2::labs(title = paste0(title_prefix, " | ", p_tag, " | FC >= ", fc)),
+        ggplot2::labs(title = paste0(title_prefix, " | 上调 FoldChange ≥ ", fc)),
       error = function(e) NULL
     )
-    vdir <- file.path(outdir, p_tag, "FoldChange", nm)
+    vdir <- file.path(outdir, "FoldChange", nm)
     dir.create(vdir, recursive = TRUE, showWarnings = FALSE)
-    if (!is.null(p)) save_gg(p, file.path(vdir, paste0("venn_", p_tag, "_", nm)), width = 7, height = 6)
+    if (!is.null(p)) save_gg(p, file.path(vdir, paste0("venn_", nm)), width = 7, height = 6)
   }
 }
 
@@ -2090,20 +2119,19 @@ run_comparisons_1_to_4 <- function() {
     )
   }
 
-  for (p_tag in names(p_cutoffs)) {
-    tryCatch(plot_venn_up(
-      de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0,
-      file.path(result_dir, "common_up_vs_NTC_rep0"),
-      "TG_sh1_vs_NTC_rep0", "TG_sh5_vs_NTC_rep0", "Common up vs NTC_rep0",
-      unname(p_cutoffs[[p_tag]]), p_tag, has_real_pvalue(de_list$TG_sh1_vs_NTC_rep0)
-    ), error = function(e) log_msg("venn NTC_rep0 error: ", e$message))
-    tryCatch(plot_venn_up(
-      de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1,
-      file.path(result_dir, "common_up_vs_NTC_rep1"),
-      "TG_sh1_vs_NTC_rep1", "TG_sh5_vs_NTC_rep1", "Common up vs NTC_rep1",
-      unname(p_cutoffs[[p_tag]]), p_tag, has_real_pvalue(de_list$TG_sh1_vs_NTC_rep1)
-    ), error = function(e) log_msg("venn NTC_rep1 error: ", e$message))
-  }
+  pcut <- unname(p_cutoffs[["p0.05"]])
+  tryCatch(plot_venn_up(
+    de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0,
+    file.path(result_dir, "common_up_vs_NTC_rep0"),
+    "TG_sh1_vs_NTC_rep0", "TG_sh5_vs_NTC_rep0", "Common up vs NTC_rep0",
+    pcut, has_real_pvalue(de_list$TG_sh1_vs_NTC_rep0)
+  ), error = function(e) log_msg("venn NTC_rep0 error: ", e$message))
+  tryCatch(plot_venn_up(
+    de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1,
+    file.path(result_dir, "common_up_vs_NTC_rep1"),
+    "TG_sh1_vs_NTC_rep1", "TG_sh5_vs_NTC_rep1", "Common up vs NTC_rep1",
+    pcut, has_real_pvalue(de_list$TG_sh1_vs_NTC_rep1)
+  ), error = function(e) log_msg("venn NTC_rep1 error: ", e$message))
 
   base::writeLines(capture.output(sessionInfo()), file.path(log_dir, "sessionInfo.txt"))
   log_msg("Comparisons 1-4 done. Results in: ", result_dir)
