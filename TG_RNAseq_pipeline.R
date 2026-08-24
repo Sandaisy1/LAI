@@ -13,6 +13,7 @@
 # 分层只两种（均 p<0.05）：上调 FC>=1/1.25/1.5/2，以及上调 top 50–300。
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
 # 不在自选通路上重新校正 p。最终气泡图：p.adjust < 0.2，再按 GeneRatio 取前 15 与前 20。
+# 外观（气泡大小、坐标字体）改 TG_bubble_plot_style.R，再 source("TG_RNAseq_bubble_restyle.R")。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -696,6 +697,26 @@ pathway_score_matrix <- function(log_mat, go_sets) {
 # -----------------------------------------------------------------------------
 # 7. 绘图
 # -----------------------------------------------------------------------------
+load_bubble_restyle_functions <- function() {
+  if (exists("draw_ora_bubble_gg", mode = "function") &&
+      exists("export_ora_bubble_plotdata", mode = "function")) {
+    return(invisible(TRUE))
+  }
+  candidates <- c(
+    file.path(project_dir, "TG_RNAseq_bubble_restyle.R"),
+    file.path(getwd(), "TG_RNAseq_bubble_restyle.R")
+  )
+  src <- candidates[file.exists(candidates)]
+  if (length(src) == 0) {
+    stop("找不到 TG_RNAseq_bubble_restyle.R，请与 TG_RNAseq_pipeline.R 放在同一目录")
+  }
+  options(tg.bubble.skip_run = TRUE)
+  sys.source(src[[1]], envir = .GlobalEnv, keep.source = TRUE)
+  options(tg.bubble.skip_run = FALSE)
+  invisible(TRUE)
+}
+load_bubble_restyle_functions()
+
 save_gg <- function(plot, path_stub, width = 8, height = 6) {
   dir.create(dirname(path_stub), recursive = TRUE, showWarnings = FALSE)
   tryCatch(ggplot2::ggsave(paste0(path_stub, ".pdf"), plot, width = width, height = height),
@@ -842,7 +863,8 @@ run_genome_enrichGO <- function(genes, go_dir, tag) {
       "全库 GO 气泡图在本文件夹，不要只看 xlsx：",
       "  *_ORA_GO_BP_dotplot_top15.pdf / top20.pdf",
       "  *_ORA_GO_CC_dotplot_top15.pdf / top20.pdf",
-      "  *_ORA_GO_MF_dotplot_top15.pdf / top20.pdf"
+      "  *_ORA_GO_MF_dotplot_top15.pdf / top20.pdf",
+      "作图数据：同名 *_plotdata.csv / .xlsx。改气泡大小和字体见 TG_bubble_plot_style.R。"
     ),
     file.path(go_dir, "00_READ_ME_气泡图在这里.txt")
   )
@@ -916,62 +938,23 @@ extract_listed_go_ora <- function(genome_ora, go_tab) {
 }
 
 plot_ora_bubble <- function(ora, title, outfile, n_show) {
-  df <- ora
-  if (is.null(df) || nrow(df) == 0) {
+  load_bubble_restyle_functions()
+  if (is.null(ora) || nrow(ora) == 0) {
     writeLines("no GO terms to plot", paste0(outfile, "_EMPTY.txt"))
     return(invisible(NULL))
   }
-  if (!"GeneRatio_num" %in% names(df)) {
-    df$GeneRatio_num <- if (is.numeric(df$GeneRatio)) df$GeneRatio else parse_gene_ratio(df$GeneRatio)
-  }
-  df <- df[is.finite(df$GeneRatio_num), , drop = FALSE]
-  df <- df[is.finite(df$p.adjust) & df$p.adjust < padj_plot_cutoff, , drop = FALSE]
-  if (nrow(df) == 0) {
+  df <- prepare_ora_bubble_df(ora, n_show, padj_plot_cutoff)
+  if (is.null(df)) {
     writeLines(
       paste0("no GO terms with p.adjust < ", padj_plot_cutoff),
       paste0(outfile, "_EMPTY.txt")
     )
     return(invisible(NULL))
   }
-  df <- df[order(-df$GeneRatio_num, df$p.adjust, df$pvalue), , drop = FALSE]
-  df <- utils::head(df, n_show)
-  gid <- if ("go_id" %in% names(df)) df$go_id else df$ID
-  df$label <- paste0(df$Description, " (", gid, ")")
-  df$label <- factor(df$label, levels = rev(unique(as.character(df$label))))
-  df$p_adjust <- df$p.adjust
-  df$p_adjust[!is.finite(df$p_adjust)] <- 1
-  df$p_adjust <- pmax(df$p_adjust, 1e-300)
-  p <- ggplot2::ggplot(
-    df,
-    ggplot2::aes(x = GeneRatio_num, y = label, size = Count, fill = p_adjust)
-  ) +
-    ggplot2::geom_point(shape = 21, color = "grey30", stroke = 0.5) +
-    ggplot2::scale_size_continuous(range = c(6, 18)) +
-    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0.08, 0.16))) +
-    ggplot2::scale_y_discrete(expand = ggplot2::expansion(add = 0.55)) +
-    ggplot2::theme_bw(base_size = 12) +
-    ggplot2::theme(
-      axis.text.y = ggplot2::element_text(size = 10),
-      plot.margin = ggplot2::margin(6, 10, 6, 6),
-      legend.margin = ggplot2::margin(0, 0, 0, 0),
-      panel.grid.minor = ggplot2::element_blank()
-    ) +
-    ggplot2::labs(
-      title = title,
-      x = "GeneRatio",
-      y = NULL,
-      fill = "p.adjust",
-      size = "Count"
-    )
-  rng <- range(df$p_adjust[df$p_adjust > 0], na.rm = TRUE)
-  diverging <- c("blue", "white", "red")
-  if (is.finite(rng[1]) && rng[1] > 0 && rng[2] / rng[1] >= 10) {
-    p <- p + ggplot2::scale_fill_gradientn(colours = diverging, trans = "log10")
-  } else {
-    p <- p + ggplot2::scale_fill_gradientn(colours = diverging)
-  }
-  h <- max(5.2, min(10.5, 0.32 * nrow(df) + 2.4))
-  save_gg(p, outfile, width = 9, height = h)
+  export_ora_bubble_plotdata(df, title, outfile)
+  style <- load_bubble_style()
+  p <- draw_ora_bubble_gg(df, title, style)
+  save_ora_bubble_gg(p, outfile, style, nrow(df))
 }
 
 plot_pathway_mean_fc <- function(de, go_tab, go_sets, title, outfile) {
@@ -1134,6 +1117,8 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "  2) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300",
       "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图（top15 与 top20）。",
       "最终气泡图只保留 p.adjust<0.2，再按 GeneRatio 取前15和前20。",
+      "气泡大小/坐标字体：改 TG_bubble_plot_style.R 后 source('TG_RNAseq_bubble_restyle.R')。",
+      "每张图旁边有 *_plotdata.csv，可改数据后 restyle，不必重跑 enrichGO。",
       paste("p-value estimated:", have_p)
     ),
     file.path(base, "00_READ_ME.txt")
@@ -1251,6 +1236,10 @@ analyze_one_comparison <- function(comp_name, de, full_de, heat_mat, sample_info
 # -----------------------------------------------------------------------------
 run_comparisons_1_to_4 <- function() {
   log_msg("Project dir: ", project_dir)
+  write_bubble_restyle_kit(
+    result_dir,
+    file.path(project_dir, "TG_bubble_plot_style.R")
+  )
   go_path <- find_custom_go_file(project_dir)
   go_tab <- parse_custom_go_file(go_path)
   expr <- load_expression(project_dir)

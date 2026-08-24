@@ -42,7 +42,7 @@ alwaysApply: true
 1. `p<0.05` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2（四档各自出图）
 2. `p<0.05` 后上调 top 50 / 75 / 100 / 150 / 200 / 250 / 300（七档各自出图）
 
-每个非空子集：差异表、火山图、热图。最终气泡图只保留 p.adjust < 0.2，再按 GeneRatio 取前 15 与前 20。全库表在 `GO/`，抽出结果在 `CustomGO/`。
+每个非空子集：差异表、火山图、热图。最终气泡图只保留 p.adjust < 0.2，再按 GeneRatio 取前 15 与前 20。全库表在 `GO/`，抽出结果在 `CustomGO/`。每张图导出 `*_plotdata.csv`；改气泡大小/坐标字体用 `TG_bubble_plot_style.R` + `TG_RNAseq_bubble_restyle.R`，不要为改字体重跑 enrichGO。
 
 ## 通路表达
 

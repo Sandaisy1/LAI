@@ -79,6 +79,12 @@ prepare_extra_expression <- function() {
 }
 
 log_msg("Extra comparisons 5-6: mean(TG_sh1, TG_sh5) vs each NTC; listed GO only")
+if (exists("write_bubble_restyle_kit", mode = "function")) {
+  write_bubble_restyle_kit(
+    result_dir,
+    file.path(project_dir, "TG_bubble_plot_style.R")
+  )
+}
 prep <- prepare_extra_expression()
 
 extra_list <- list(
