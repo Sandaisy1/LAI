@@ -11,19 +11,19 @@ alwaysApply: true
 ## 气泡图（每个非空子集）
 
 1. 对该子集基因跑标准 `clusterProfiler::enrichGO`（BP/MF/CC；BH 在全库条目上校正；`minGSSize=1` 以包含很细的通路，`maxGSSize=500`）
-2. 用全库结果里的 **GeneRatio、p.adjust、Count** 抽出列出的 GO ID；**禁止**对抽出的子集重新 `p.adjust`
-3. 全库图与列出通路图都只用 **全库 BH 的 p.adjust < 0.2** 上图（禁止改成原始 pvalue）。再按 **GeneRatio 从大到小**取前 15 与前 20；最大的在最上面。top20 = top15 再在下面加 5 条。不要把 p.adjust=1 的通路画进终图。不要改成 Bonferroni，也不要只在自选通路上重算 BH。
-4. 全库表、气泡图与 BP/CC/MF 柱状图写 `GO/`；抽出的列出通路写 `CustomGO/`（同样有气泡图和柱状图）。柱状图横轴出 **-lgP** 与 **Count** 两套。列出通路柱状图的 -lgP 也用全库 p.adjust；先出全部 p.adjust<0.2 的条目，再出 top 10/15/20；文件名以 `ORA_` 开头
+2. 用全库结果里的 **GeneRatio、pvalue、p.adjust、qvalue、Count** 抽出列出的 GO ID；**禁止**对抽出的子集重新 `p.adjust` / `qvalue`
+3. 全库图只保留 **p.adjust < 0.2**。列出通路（`CustomGO/`）按 **pvalue < 0.2** 上图，气泡颜色为 **q_adjust**（enrichGO 的 `qvalue`），再按 **GeneRatio 从大到小**取前 15 与前 20。不要改成 Bonferroni，也不要只在自选通路上重算 BH。
+4. 全库表、气泡图与 BP/CC/MF 柱状图写 `GO/`。抽出的列出通路写 `CustomGO/`：气泡图 + **不分 BP/CC/MF** 的柱状图。柱状图横轴出 **-lgP(pvalue)** 与 **Count** 两套；先出全部 pvalue<0.2 的列出通路，再出总体 top 10/15/20；文件名以 `ORA_` 开头，列出通路柱状图不要带 `BP_CC_MF`
 5. 每张终图旁写 `*_plotdata.csv`。气泡大小、坐标字体改 `TG_RNAseq_pipeline.R` 开头的参数；只重画设 `options(tg.rnaseq.restyle_only = TRUE)`
 
 比较级总 CustomGO（`results/<比较>/CustomGO/*_pathway_mean_log2FC*`）用列出 GO 里全部基因的 mean log2FC，不是 ORA：出上调+下调全图，以及上调通路 top 10 / 15 / 20。
 
 每个比较另出 `PathwayScore/`：ssGSEA 与 mean z 气泡图（x=处理−对照分数差，大小=基因数）。共同上调比较用 KD 均值 vs 该 NTC，不把基因交集当成样品。1-vs-1 不伪造通路 p。
 
-这样 `mitochondrion organization` 的 p.adjust 与正常 GO BP 图一致，而不是只在 ~70 条自选通路上重算后虚高。
+这样 `mitochondrion organization` 的 p.adjust / qvalue 与正常 GO BP 表一致，而不是只在 ~70 条自选通路上重算后虚高。
 
 ```r
-# ❌ BAD: 把 p.adjust=1 的通路按 GeneRatio 画进终图
-# ❌ BAD: 列出通路改用原始 pvalue 上图
-# ✅ GOOD: sig <- hit[p.adjust < 0.2]; for (n in c(15, 20)) plot(head(sig[order(-GeneRatio)], n))
+# ❌ BAD: 只在 ~70 条自选通路上重新 BH
+# ❌ BAD: 列出通路柱状图再按 BP/CC/MF 分面
+# ✅ GOOD: listed <- hit[pvalue < 0.2]; plot bubble fill=q_adjust; bar without ontology facets
 ```
