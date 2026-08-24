@@ -13,7 +13,8 @@
 # 分层只两种（均 p<0.05）：上调 FC>=1/1.25/1.5/2，以及上调 top 50–300。
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
 # 不在自选通路上重新校正 p。最终气泡图：p.adjust < 0.2，再按 GeneRatio 取前 15 与前 20。
-# 外观（气泡大小、坐标字体）改 TG_bubble_plot_style.R，再 source("TG_RNAseq_bubble_restyle.R")。
+# 气泡大小、坐标字体在本文件「分析参数」里改。只重画已有图：
+#   options(tg.rnaseq.restyle_only = TRUE); source("TG_RNAseq_pipeline.R")
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -58,9 +59,11 @@ install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
 }
 
 install_if_missing(cran_required, bioc = FALSE, required = TRUE)
-install_if_missing(cran_optional, bioc = FALSE, required = FALSE)
-install_if_missing(bioc_required, bioc = TRUE, required = TRUE)
-install_if_missing(bioc_optional, bioc = TRUE, required = FALSE)
+if (!isTRUE(getOption("tg.rnaseq.restyle_only", FALSE))) {
+  install_if_missing(cran_optional, bioc = FALSE, required = FALSE)
+  install_if_missing(bioc_required, bioc = TRUE, required = TRUE)
+  install_if_missing(bioc_optional, bioc = TRUE, required = FALSE)
+}
 
 safe_library <- function(pkgs) {
   for (p in pkgs) {
@@ -110,6 +113,21 @@ fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 bubble_top_ns <- c(15, 20)
 padj_plot_cutoff <- 0.2
+
+# 气泡图外观（改这里即可；不必另开文件）
+bubble_size_min <- 6     # 最小气泡
+bubble_size_max <- 18    # 最大气泡
+axis_text_y_size <- 10   # 左侧通路名字体
+axis_text_x_size <- 11   # 底部 GeneRatio 刻度字体
+axis_title_size  <- 12   # “GeneRatio” 轴标题
+title_size        <- 12
+legend_text_size  <- 10
+legend_title_size <- 11
+base_size         <- 12
+plot_width  <- 9         # 图宽（英寸）
+plot_height <- NA        # NA = 按条目数自动；填数字则固定，例如 7
+point_stroke <- 0.5
+only_this_csv <- ""      # 只重画一张图时填 *_plotdata.csv 路径；留空=全部
 
 # -----------------------------------------------------------------------------
 # 2. 样本名与基因名
@@ -697,25 +715,180 @@ pathway_score_matrix <- function(log_mat, go_sets) {
 # -----------------------------------------------------------------------------
 # 7. 绘图
 # -----------------------------------------------------------------------------
-load_bubble_restyle_functions <- function() {
-  if (exists("draw_ora_bubble_gg", mode = "function") &&
-      exists("export_ora_bubble_plotdata", mode = "function")) {
-    return(invisible(TRUE))
-  }
-  candidates <- c(
-    file.path(project_dir, "TG_RNAseq_bubble_restyle.R"),
-    file.path(getwd(), "TG_RNAseq_bubble_restyle.R")
+current_bubble_style <- function() {
+  list(
+    bubble_size_min = bubble_size_min,
+    bubble_size_max = bubble_size_max,
+    axis_text_y_size = axis_text_y_size,
+    axis_text_x_size = axis_text_x_size,
+    axis_title_size = axis_title_size,
+    title_size = title_size,
+    legend_text_size = legend_text_size,
+    legend_title_size = legend_title_size,
+    base_size = base_size,
+    plot_width = plot_width,
+    plot_height = plot_height,
+    point_stroke = point_stroke,
+    only_this_csv = only_this_csv
   )
-  src <- candidates[file.exists(candidates)]
-  if (length(src) == 0) {
-    stop("找不到 TG_RNAseq_bubble_restyle.R，请与 TG_RNAseq_pipeline.R 放在同一目录")
-  }
-  options(tg.bubble.skip_run = TRUE)
-  sys.source(src[[1]], envir = .GlobalEnv, keep.source = TRUE)
-  options(tg.bubble.skip_run = FALSE)
-  invisible(TRUE)
 }
-load_bubble_restyle_functions()
+
+prepare_ora_bubble_df <- function(ora, n_show, padj_cutoff = 0.2) {
+  df <- ora
+  if (is.null(df) || nrow(df) == 0) return(NULL)
+  if (!"GeneRatio_num" %in% names(df)) {
+    df$GeneRatio_num <- if (is.numeric(df$GeneRatio)) df$GeneRatio else parse_gene_ratio(df$GeneRatio)
+  }
+  df <- df[is.finite(df$GeneRatio_num), , drop = FALSE]
+  df <- df[is.finite(df$p.adjust) & df$p.adjust < padj_cutoff, , drop = FALSE]
+  if (nrow(df) == 0) return(NULL)
+  if (!"pvalue" %in% names(df)) df$pvalue <- NA_real_
+  df <- df[order(-df$GeneRatio_num, df$p.adjust, df$pvalue), , drop = FALSE]
+  df <- utils::head(df, n_show)
+  gid <- if ("go_id" %in% names(df)) df$go_id else df$ID
+  df$go_id <- as.character(gid)
+  df$label <- paste0(df$Description, " (", df$go_id, ")")
+  df
+}
+
+export_ora_bubble_plotdata <- function(df, title, outfile) {
+  keep <- intersect(
+    c("label", "Description", "go_id", "ID", "ONTOLOGY", "GeneRatio", "GeneRatio_num",
+      "pvalue", "p.adjust", "qvalue", "Count", "geneID", "BgRatio"),
+    names(df)
+  )
+  out <- df[, keep, drop = FALSE]
+  out$plot_title <- title
+  out$n_terms <- nrow(out)
+  write_table(out, paste0(outfile, "_plotdata"))
+  invisible(out)
+}
+
+draw_ora_bubble_gg <- function(df, title, style = NULL) {
+  if (is.null(style)) style <- current_bubble_style()
+  plot_df <- df
+  if (!"label" %in% names(plot_df) || any(!nzchar(as.character(plot_df$label)))) {
+    gid <- if ("go_id" %in% names(plot_df)) plot_df$go_id else plot_df$ID
+    plot_df$label <- paste0(plot_df$Description, " (", gid, ")")
+  }
+  if (!"GeneRatio_num" %in% names(plot_df) || any(!is.finite(plot_df$GeneRatio_num))) {
+    plot_df$GeneRatio_num <- if (is.numeric(plot_df$GeneRatio)) {
+      plot_df$GeneRatio
+    } else {
+      parse_gene_ratio(plot_df$GeneRatio)
+    }
+  }
+  plot_df$label <- factor(plot_df$label, levels = rev(unique(as.character(plot_df$label))))
+  plot_df$p_adjust <- plot_df$p.adjust
+  plot_df$p_adjust[!is.finite(plot_df$p_adjust)] <- 1
+  plot_df$p_adjust <- pmax(plot_df$p_adjust, 1e-300)
+  p <- ggplot2::ggplot(
+    plot_df,
+    ggplot2::aes(x = GeneRatio_num, y = label, size = Count, fill = p_adjust)
+  ) +
+    ggplot2::geom_point(shape = 21, color = "grey30", stroke = style$point_stroke) +
+    ggplot2::scale_size_continuous(range = c(style$bubble_size_min, style$bubble_size_max)) +
+    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0.08, 0.16))) +
+    ggplot2::scale_y_discrete(expand = ggplot2::expansion(add = 0.55)) +
+    ggplot2::theme_bw(base_size = style$base_size) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(size = style$title_size),
+      axis.text.y = ggplot2::element_text(size = style$axis_text_y_size),
+      axis.text.x = ggplot2::element_text(size = style$axis_text_x_size),
+      axis.title.x = ggplot2::element_text(size = style$axis_title_size),
+      legend.text = ggplot2::element_text(size = style$legend_text_size),
+      legend.title = ggplot2::element_text(size = style$legend_title_size),
+      plot.margin = ggplot2::margin(6, 10, 6, 6),
+      legend.margin = ggplot2::margin(0, 0, 0, 0),
+      panel.grid.minor = ggplot2::element_blank()
+    ) +
+    ggplot2::labs(
+      title = title,
+      x = "GeneRatio",
+      y = NULL,
+      fill = "p.adjust",
+      size = "Count"
+    )
+  rng <- range(plot_df$p_adjust[plot_df$p_adjust > 0], na.rm = TRUE)
+  diverging <- c("blue", "white", "red")
+  if (is.finite(rng[1]) && rng[1] > 0 && rng[2] / rng[1] >= 10) {
+    p <- p + ggplot2::scale_fill_gradientn(colours = diverging, trans = "log10")
+  } else {
+    p <- p + ggplot2::scale_fill_gradientn(colours = diverging)
+  }
+  p
+}
+
+bubble_auto_height <- function(n_rows) {
+  max(5.2, min(10.5, 0.32 * n_rows + 2.4))
+}
+
+save_ora_bubble_gg <- function(plot, outfile, style, n_rows) {
+  width <- style$plot_width
+  height <- style$plot_height
+  if (length(height) != 1 || !is.finite(height)) height <- bubble_auto_height(n_rows)
+  save_gg(plot, outfile, width = width, height = height)
+}
+
+read_ora_bubble_plotdata <- function(csv_path) {
+  df <- utils::read.csv(csv_path, check.names = FALSE, stringsAsFactors = FALSE)
+  if (nrow(df) == 0) return(NULL)
+  if (!"p.adjust" %in% names(df) && "p_adjust" %in% names(df)) df$p.adjust <- df$p_adjust
+  if (!"Count" %in% names(df) && "count" %in% names(df)) df$Count <- df$count
+  df
+}
+
+find_bubble_plotdata_files <- function(root, csv_one = "") {
+  if (nzchar(csv_one)) {
+    if (!file.exists(csv_one)) stop("找不到 only_this_csv: ", csv_one)
+    return(normalizePath(csv_one, winslash = "/", mustWork = TRUE))
+  }
+  if (!dir.exists(root)) return(character())
+  list.files(root, pattern = "_plotdata\\.csv$", full.names = TRUE, recursive = TRUE)
+}
+
+write_bubble_style_note <- function(result_root) {
+  kit <- file.path(result_root, "00_bubble_restyle")
+  dir.create(kit, recursive = TRUE, showWarnings = FALSE)
+  writeLines(
+    c(
+      "气泡大小和坐标字体在 TG_RNAseq_pipeline.R 开头改：",
+      "  bubble_size_min / bubble_size_max",
+      "  axis_text_y_size / axis_text_x_size",
+      "只重画已有 *_plotdata.csv（不重跑 enrichGO）：",
+      "  options(tg.rnaseq.restyle_only = TRUE)",
+      "  source(\"TG_RNAseq_pipeline.R\")"
+    ),
+    file.path(kit, "00_READ_ME.txt")
+  )
+  kit
+}
+
+restyle_ora_bubbles <- function(result_root = NULL) {
+  if (is.null(result_root) || !nzchar(result_root)) result_root <- result_dir
+  style <- current_bubble_style()
+  files <- find_bubble_plotdata_files(result_root, style$only_this_csv)
+  if (length(files) == 0) {
+    stop("在 ", result_root, " 下没有找到 *_plotdata.csv。请先完整运行 TG_RNAseq_pipeline.R")
+  }
+  n_ok <- 0L
+  for (f in files) {
+    df <- tryCatch(read_ora_bubble_plotdata(f), error = function(e) NULL)
+    if (is.null(df) || nrow(df) == 0) next
+    title <- if ("plot_title" %in% names(df) && nzchar(df$plot_title[1])) {
+      df$plot_title[1]
+    } else {
+      basename(sub("_plotdata\\.csv$", "", f, ignore.case = TRUE))
+    }
+    stub <- sub("_plotdata\\.csv$", "", f, ignore.case = TRUE)
+    p <- draw_ora_bubble_gg(df, title, style)
+    save_ora_bubble_gg(p, stub, style, nrow(df))
+    n_ok <- n_ok + 1L
+    log_msg("redrawn bubble: ", stub)
+  }
+  log_msg("Redrew ", n_ok, " bubble plot(s).")
+  invisible(n_ok)
+}
 
 save_gg <- function(plot, path_stub, width = 8, height = 6) {
   dir.create(dirname(path_stub), recursive = TRUE, showWarnings = FALSE)
@@ -864,7 +1037,7 @@ run_genome_enrichGO <- function(genes, go_dir, tag) {
       "  *_ORA_GO_BP_dotplot_top15.pdf / top20.pdf",
       "  *_ORA_GO_CC_dotplot_top15.pdf / top20.pdf",
       "  *_ORA_GO_MF_dotplot_top15.pdf / top20.pdf",
-      "作图数据：同名 *_plotdata.csv / .xlsx。改气泡大小和字体见 TG_bubble_plot_style.R。"
+      "作图数据：同名 *_plotdata.csv / .xlsx。气泡大小和字体在 TG_RNAseq_pipeline.R 开头改。"
     ),
     file.path(go_dir, "00_READ_ME_气泡图在这里.txt")
   )
@@ -938,7 +1111,6 @@ extract_listed_go_ora <- function(genome_ora, go_tab) {
 }
 
 plot_ora_bubble <- function(ora, title, outfile, n_show) {
-  load_bubble_restyle_functions()
   if (is.null(ora) || nrow(ora) == 0) {
     writeLines("no GO terms to plot", paste0(outfile, "_EMPTY.txt"))
     return(invisible(NULL))
@@ -952,7 +1124,7 @@ plot_ora_bubble <- function(ora, title, outfile, n_show) {
     return(invisible(NULL))
   }
   export_ora_bubble_plotdata(df, title, outfile)
-  style <- load_bubble_style()
+  style <- current_bubble_style()
   p <- draw_ora_bubble_gg(df, title, style)
   save_ora_bubble_gg(p, outfile, style, nrow(df))
 }
@@ -1117,8 +1289,8 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "  2) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300",
       "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图（top15 与 top20）。",
       "最终气泡图只保留 p.adjust<0.2，再按 GeneRatio 取前15和前20。",
-      "气泡大小/坐标字体：改 TG_bubble_plot_style.R 后 source('TG_RNAseq_bubble_restyle.R')。",
-      "每张图旁边有 *_plotdata.csv，可改数据后 restyle，不必重跑 enrichGO。",
+      "气泡大小/坐标字体：改 TG_RNAseq_pipeline.R 开头的 bubble_size_* 和 axis_text_*。",
+      "只重画：options(tg.rnaseq.restyle_only = TRUE); source('TG_RNAseq_pipeline.R')。",
       paste("p-value estimated:", have_p)
     ),
     file.path(base, "00_READ_ME.txt")
@@ -1236,10 +1408,7 @@ analyze_one_comparison <- function(comp_name, de, full_de, heat_mat, sample_info
 # -----------------------------------------------------------------------------
 run_comparisons_1_to_4 <- function() {
   log_msg("Project dir: ", project_dir)
-  write_bubble_restyle_kit(
-    result_dir,
-    file.path(project_dir, "TG_bubble_plot_style.R")
-  )
+  write_bubble_style_note(result_dir)
   go_path <- find_custom_go_file(project_dir)
   go_tab <- parse_custom_go_file(go_path)
   expr <- load_expression(project_dir)
@@ -1328,6 +1497,8 @@ run_comparisons_1_to_4 <- function() {
   log_msg("Comparisons 1-4 done. Results in: ", result_dir)
 }
 
-if (!isTRUE(getOption("tg.rnaseq.functions_only", FALSE))) {
+if (isTRUE(getOption("tg.rnaseq.restyle_only", FALSE))) {
+  restyle_ora_bubbles()
+} else if (!isTRUE(getOption("tg.rnaseq.functions_only", FALSE))) {
   run_comparisons_1_to_4()
 }

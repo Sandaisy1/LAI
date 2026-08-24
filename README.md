@@ -18,7 +18,6 @@
 setwd("E:/R/TG_BRCA/TG")
 source("TG_RNAseq_pipeline.R")                 # 比较 1–4
 source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
-# 把 TG_bubble_plot_style.R 和 TG_RNAseq_bubble_restyle.R 也放在同一目录
 ```
 
 先过滤低表达，再标准化（有 count 用 DESeq2 size factor；仅 FPKM 则 log2 后分位数标准化），然后做六组比较。不要用原始值算 FC。
@@ -43,7 +42,12 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
 
 每个非空子集：差异基因表、火山图、热图。`GO/` 里有全库 BP/CC/MF 表和气泡图（`*_dotplot_top15.pdf` 与 `top20.pdf`）。气泡图**先做全基因组 `enrichGO`**，再抽出 `metastasis_custom_genes.txt` 中通路的 GeneRatio、p.adjust、Count（不在自选通路上重新校正 p）。最终气泡图只保留 **p.adjust < 0.2**，再按 **GeneRatio 从大到小**取前 15 与前 20（同一套排序，20 比 15 只在下面多 5 条）。全库完整表仍写出，不改 p.adjust。
 
-全库 GO 表在各子集的 `GO/`（`*_ORA_GO_BP.csv` 等）；抽出的通路在 `CustomGO/`。每张气泡图会再导出 `*_plotdata.csv` / `.xlsx`（最终作图用的行）。改气泡大小和坐标字体：编辑 `TG_bubble_plot_style.R`，然后 `source("TG_RNAseq_bubble_restyle.R")`，不必重跑 pipeline。说明也在 `results/00_bubble_restyle/`。
+全库 GO 表在各子集的 `GO/`（`*_ORA_GO_BP.csv` 等）；抽出的通路在 `CustomGO/`。每张气泡图会再导出 `*_plotdata.csv` / `.xlsx`。气泡大小和坐标字体在 `TG_RNAseq_pipeline.R` 开头改（`bubble_size_min` / `bubble_size_max`、`axis_text_y_size` / `axis_text_x_size`）。只重画已有图、不重跑 enrichGO：
+
+```r
+options(tg.rnaseq.restyle_only = TRUE)
+source("TG_RNAseq_pipeline.R")
+```
 
 ## 通路表达（不改全库 p 值）
 
@@ -56,14 +60,5 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
 ```
 results/TG_sh1_vs_NTC_rep0/p0.05/FoldChange/FC_1/CustomGO/p0.05_FC_1_ORA_CustomGO_dotplot_top15.pdf
 results/TG_sh1_vs_NTC_rep0/p0.05/FoldChange/FC_1/CustomGO/p0.05_FC_1_ORA_CustomGO_dotplot_top15_plotdata.csv
-results/00_bubble_restyle/TG_bubble_plot_style.R
 results/00_PathwayExpression/pathway_score_heatmap.pdf
-```
-
-改完样式后重画全部气泡图：
-
-```r
-setwd("E:/R/TG_BRCA/TG")
-# 编辑 TG_bubble_plot_style.R（bubble_size_min/max、axis_text_y_size、axis_text_x_size）
-source("TG_RNAseq_bubble_restyle.R")
 ```

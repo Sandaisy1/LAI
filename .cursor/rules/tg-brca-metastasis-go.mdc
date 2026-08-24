@@ -14,7 +14,7 @@ alwaysApply: true
 2. 用全库结果里的 **GeneRatio、p.adjust、Count** 抽出列出的 GO ID；**禁止**对抽出的子集重新 `p.adjust`
 3. 最终作图只保留 **p.adjust < 0.2**，再按 **GeneRatio 从大到小**取前 15 与前 20；最大的在最上面。top20 = top15 再在下面加 5 条。不要把 p.adjust=1 的通路画进终图
 4. 全库表与气泡图写 `GO/*_ORA_GO_BP_dotplot_top15.pdf` 等；抽出的列出通路写 `CustomGO/`，文件名以 `ORA_` 开头
-5. 每张终图旁写 `*_plotdata.csv`。改气泡大小、坐标字体只改 `TG_bubble_plot_style.R` 再跑 `TG_RNAseq_bubble_restyle.R`
+5. 每张终图旁写 `*_plotdata.csv`。气泡大小、坐标字体改 `TG_RNAseq_pipeline.R` 开头的参数；只重画设 `options(tg.rnaseq.restyle_only = TRUE)`
 
 这样 `mitochondrion organization` 的 p.adjust 与正常 GO BP 图一致，而不是只在 ~70 条自选通路上重算后虚高。
 
