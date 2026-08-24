@@ -11,7 +11,7 @@
 # 比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–6 而改本文件主流程。
 #
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
-# 不在自选通路上重新校正 p。分别按 GeneRatio 取前 15 与前 20；最大在最上面，多出来的通路加在下面。
+# 不在自选通路上重新校正 p。最终气泡图：p.adjust < 0.05，再按 GeneRatio 取前 15 与前 20。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -107,6 +107,7 @@ p_cutoffs <- c("p0.05" = 0.05, "p0.01" = 0.01)
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 bubble_top_ns <- c(15, 20)
+padj_plot_cutoff <- 0.05
 
 # -----------------------------------------------------------------------------
 # 2. 样本名与基因名
@@ -880,7 +881,7 @@ run_genome_enrichGO <- function(genes, go_dir, tag) {
         tryCatch(
           plot_ora_bubble(
             df,
-            paste0(tag, " | ORA GO ", ont, " ", top_tag, " (not GSEA)"),
+            paste0(tag, " | ORA GO ", ont, " ", top_tag, " (p.adjust<0.05, by GeneRatio)"),
             file.path(go_dir, paste0(tag, "_ORA_GO_", ont, "_dotplot_", top_tag)),
             n_show = n_show
           ),
@@ -922,8 +923,12 @@ plot_ora_bubble <- function(ora, title, outfile, n_show) {
     df$GeneRatio_num <- if (is.numeric(df$GeneRatio)) df$GeneRatio else parse_gene_ratio(df$GeneRatio)
   }
   df <- df[is.finite(df$GeneRatio_num), , drop = FALSE]
+  df <- df[is.finite(df$p.adjust) & df$p.adjust < padj_plot_cutoff, , drop = FALSE]
   if (nrow(df) == 0) {
-    writeLines("no finite GeneRatio for listed GO", paste0(outfile, "_EMPTY.txt"))
+    writeLines(
+      paste0("no GO terms with p.adjust < ", padj_plot_cutoff),
+      paste0(outfile, "_EMPTY.txt")
+    )
     return(invisible(NULL))
   }
   df <- df[order(-df$GeneRatio_num, df$p.adjust, df$pvalue), , drop = FALSE]
@@ -1086,6 +1091,7 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
     top_tag <- paste0("top", n_show)
     if (!is.null(extracted$all_listed)) {
       ranked <- extracted$all_listed
+      ranked <- ranked[is.finite(ranked$p.adjust) & ranked$p.adjust < padj_plot_cutoff, , drop = FALSE]
       ranked <- ranked[order(-ranked$GeneRatio_num, ranked$p.adjust, ranked$pvalue), , drop = FALSE]
       write_table(
         utils::head(ranked, n_show),
@@ -1095,8 +1101,8 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
     tryCatch(
       plot_ora_bubble(
         extracted$all_listed,
-        paste0(title, " | ORA listed GO ", top_tag, " by GeneRatio",
-               " (p.adjust/Count from genome-wide GO)"),
+        paste0(title, " | ORA listed GO ", top_tag,
+               " (p.adjust<", padj_plot_cutoff, ", by GeneRatio)"),
         file.path(cg_dir, paste0(tag, "_ORA_CustomGO_dotplot_", top_tag)),
         n_show = n_show
       ),
@@ -1116,7 +1122,7 @@ run_five_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "本比较只分析 metastasis_custom_genes.txt 列出的 GO 通路表达。",
       "分层结果在 p0.05/ 、p0.01/ 、UpDE/ 、DownDE/ 、AllDE/ 。",
       "每个非空子集：差异表、火山图、热图；GO/ 里有全库 BP/CC/MF 气泡图（top15 与 top20）。",
-      "先全基因组 enrichGO，再抽出列出 GO；气泡图按 GeneRatio 分别取前15和前20（最大在上，多的加在下面）。",
+      "先全基因组 enrichGO；最终气泡图只保留 p.adjust<0.05，再按 GeneRatio 取前15和前20。",
       paste("p-value estimated:", have_p)
     ),
     file.path(base, "00_READ_ME.txt")

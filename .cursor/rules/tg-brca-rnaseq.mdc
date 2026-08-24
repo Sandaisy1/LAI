@@ -43,7 +43,7 @@ alwaysApply: true
 3–4. `p<0.01` 同样两套
 5. 方向三套（能估 p 时 `p<0.05`）：`UpDE/` 只上调、`DownDE/` 只下调、`AllDE/` 上调+下调一起
 
-分别按 GeneRatio 取前 15 与前 20（20 只在下面多 5 条）；y 轴 GeneRatio 最大在最上面。全库表和气泡图在 `GO/`，抽出结果在 `CustomGO/`。
+最终气泡图只保留 p.adjust < 0.05，再按 GeneRatio 取前 15 与前 20（20 只在下面多 5 条）。全库表在 `GO/`，抽出结果在 `CustomGO/`。
 
 ## 通路表达
 
@@ -51,5 +51,5 @@ alwaysApply: true
 
 ```r
 # ❌ BAD: 只在自选 GO 上做超几何并重新 BH，导致 mitochondrion organization 的 p.adjust 虚高
-# ✅ GOOD: enrichGO 全库 → 抽出列出 GO → 按 GeneRatio 分别出 top15 与 top20（20 只在下面多 5 条）
+# ✅ GOOD: sig <- hit[p.adjust < 0.05]; for (n in c(15, 20)) plot(head(sig[order(-GeneRatio)], n))
 ```
