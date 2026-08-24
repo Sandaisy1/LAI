@@ -1,0 +1,12 @@
+# Listed GO pathways for TG BRCA RNA-seq (human).
+# One pathway per line: name + GO ID. Blank lines and # comments are ignored.
+# Do NOT put gene symbols here. The script maps each GO ID to genes with org.Hs.eg.db (GOALL).
+#
+# Accepted examples (uncomment and replace with your list):
+# cell migration	GO:0016477
+# GO:0007411	axon guidance
+# GO:0030334
+# regulation of actin cytoskeleton	GO:0032956
+#
+# Put this file next to the Cuffdiff outputs:
+#   E:/R/TG_BRCA/TG/metastasis_custom_genes.txt

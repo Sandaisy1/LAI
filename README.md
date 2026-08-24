@@ -1,99 +1,90 @@
-# TG BRCA 细胞 RNA-seq 分析
+# TG BRCA 细胞 RNA-seq：按列出的 GO 通路分析表达
 
-针对 `NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5` 四个样品的 RNA-seq 分析。两个 NTC **不在 1-vs-1 比较里合并**。
+四个样品：`NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5`。两个 NTC **不在 1-vs-1 比较里合并**。
 
-## 数据位置
+本流程对列出的 GO 做通路表达（热图/分数），气泡图的统计量来自全基因组 enrichGO 再抽取，不在自选通路上重算 p。
 
-默认读取 `E:/R/TG_BRCA/TG`。输入为 Cuffdiff 文件（不再使用 Excel）：
+## 数据
 
-- `genes.read_group_tracking`（首选）
-- `genes.count_tracking`
-- `genes.fpkm_tracking`
+默认读取 `E:/R/TG_BRCA/TG`。输入为 Cuffdiff：
+
+- `genes.read_group_tracking` 的 **FPKM** 列（首选；Cuffdiff 已按长度和深度标准化）
+- 否则 `genes.fpkm_tracking`
+- 不用 `raw_frags` / `genes.count_tracking` 再做 DESeq2
+- `metastasis_custom_genes.txt`（每行：通路名称 + `GO:#######`，不要只写基因符号）
 
 ## 运行
 
 ```r
 setwd("E:/R/TG_BRCA/TG")
-source("TG_RNAseq_pipeline.R")
+source("TG_RNAseq_pipeline.R")   # 比较 1–7（1–4 之后自动跑 5–7）
 ```
 
-## 四种比较（各自单独出图）
+先过滤低表达，再用 Cuffdiff **FPKM** 做 `log2(x+1)` 后做比较。不再读 fragment count，也不做 DESeq2 size factor。不要用未过滤的值算 FC。
 
-1. 四个 1-vs-1：`TG_sh1 vs NTC_rep0`、`TG_sh5 vs NTC_rep0`、`TG_sh1 vs NTC_rep1`、`TG_sh5 vs NTC_rep1`（标准化后直接算 FC，无 P 值）
-2. `(TG_sh1 + TG_sh5)/2` vs NTC 组均值（`NTC_rep0` 与 `NTC_rep1`）
-3. 共同上调：相对 `NTC_rep0` 的 sh1 与 sh5 上调基因交集
-4. 共同上调：相对 `NTC_rep1` 的 sh1 与 sh5 上调基因交集
+## 七组比较（各自单独出图）
 
-每个比较再按 FC ≥ 1 / 1.25 / 1.5 / 2，以及上调 top 50–300，分别输出差异表、火山图、热图、GO、通路、KEGG、GSEA。
+1. 四个 1-vs-1：`TG_sh1 vs NTC_rep0`、`TG_sh5 vs NTC_rep0`、`TG_sh1 vs NTC_rep1`、`TG_sh5 vs NTC_rep1`
+2. `mean(TG_sh1, TG_sh5)` vs `mean(NTC_rep0, NTC_rep1)`
+3. 相对 `NTC_rep0` 的共同上调（sh1 与 sh5 交集）
+4. 相对 `NTC_rep1` 的共同上调
+5. `mean(TG_sh1, TG_sh5)` vs `NTC_rep0`（不要混入 NTC_rep1）
+6. `mean(TG_sh1, TG_sh5)` vs `NTC_rep1`（不要混入 NTC_rep0）
+7. 先找 **TG_sh1 与 TG_sh5 都检测到** 的基因，以及 **NTC_rep0 与 NTC_rep1 都检测到** 的基因（FPKM > 0），取交集后再 `mean(common KD)` vs `mean(common NTC)`
 
-## 结果目录
+## 两套分层（每组比较都跑，每档单独出图）
 
-```
-results/
-  TG_sh1_vs_NTC_rep0/
-  TG_sh5_vs_NTC_rep0/
-  TG_sh1_vs_NTC_rep1/
-  TG_sh5_vs_NTC_rep1/
-  TGsh_mean_vs_NTC/
-  common_up_vs_NTC_rep0/
-  common_up_vs_NTC_rep1/
-```
+1. **FoldChange** 四组：上调 FC ≥ 1 / 1.25 / 1.5 / 2  
+2. **上调排名** 七组：top 50 / 75 / 100 / 150 / 200 / 250 / 300  
 
-同一档里有两套富集，不要只看 GSEA 文件夹：
+分层**不用 p**：不按 p 过滤，也不伪造 p。不再跑 p<0.01，也不再单独出 AllDE/UpDE/DownDE。
 
-- `GO/`、`Pathway/`、`KEGG/`：单独的过表达分析（ORA），文件名以 `ORA_` 开头
-- `GSEA/`：GSEA 分析，文件名以 `GSEA_` 开头
-
-
-**注意：** 比较目录里的 `00_GSEA_all_genes_NOT_FC_or_topN` 是全部基因的 GSEA，**不是** FC/topN 分层图。分层图在：
+目录：
 
 ```
-results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/FC_1.5_volcano.pdf
-results/TG_sh1_vs_NTC_rep0/TopRank/top100/top100_heatmap.pdf
-results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
+results/<比较>/FoldChange/FC_1/
+results/<比较>/FoldChange/FC_1.25/
+results/<比较>/FoldChange/FC_1.5/
+results/<比较>/FoldChange/FC_2/
+results/<比较>/TopRank/top50/
+...
+results/<比较>/TopRank/top300/
+results/<比较>/00_analysis_tracks.csv
 ```
 
-文件名和图标题都会带上 `FC_1.5` 或 `top100`。重新运行前建议先删掉旧的 `results/`。
+每个非空子集：差异基因表、火山图、热图。`GO/` 里有全库 BP/CC/MF 表、气泡图，以及 BP/CC/MF 合在一张上的柱状图（红=生物过程、蓝=细胞组成、绿=分子功能；每个 ontology 取前 10/15/20）。柱状图出两套横轴：**-lgP**（按显著性排序）和 **Count**（该通路命中的差异基因数，按 Count 排序）。`CustomGO/` 对 `metastasis_custom_genes.txt` 中的列出通路：气泡图**先做全基因组 `enrichGO`**（`minGSSize=1`，很细的通路也会测；`maxGSSize=500`），再抽出列出通路的 GeneRatio、pvalue、p.adjust、qvalue、Count（不在自选通路上重新校正 p）。列出通路按 **pvalue < 0.2** 上图，再按 **GeneRatio 从大到小**取前 15 与前 20；气泡颜色为 **q_adjust**（即 enrichGO 的 `qvalue`）。列出通路柱状图**不分 BP/CC/MF**，先出全部 pvalue < 0.2 的列出通路，再出总体 top 10/15/20。全库图仍只保留 **p.adjust < 0.2**。全库完整表仍写出，不改 p.adjust。
 
-## 热图上的基因名（XLOC / 逗号）
-
-这些来自 Cuffdiff 的 `gene_short_name`，**不是 FC 算错**：
-
-- `XLOC_003812`：Cufflinks 组装出来的位点 ID，没有官方基因符号时会保留
-- `SAA2,SAA2-SAA4,SAA4`：重叠基因座被写成一条复合名；脚本会拆成官方符号（这里取 `SAA2`）
-
-读入时会清洗复合名并优先用官方符号。没有符号的 novel locus 仍会显示为 `XLOC_`，这些行会留在差异分析里，但 GO/KEGG 通常映射不上。
-
-## 细胞骨架运动 / 线粒体通路怎么看
-
-**不能、也不该**去改全库 GO/KEGG 的 p 值，把这两类通路人为抬到第一。全库排名由统计量和多重检验决定；这份数据的高 FC 基因如果主要是炎症/急性期（例如 SAA、CCL2），全库 GO 就会先出现那些条目。
-
-可以做的是专项检验（脚本已加）：
-
-1. 每个比较目录下的 `Focused_cytoskeleton_mito/`：只用细胞骨架运动、细胞迁移、线粒体相关基因集做 GSEA，所以这些条目会排在**这个文件夹**的前面。同时有对应基因热图。
-2. 全库 GO/KEGG/GSEA 表旁边的 `*_FOCUS_cytoskeleton_mito.csv`：把匹配到的条目抽出来，**保留原始 p 值和 `genome_wide_rank`**。
-3. 每个 FC / topN 子文件夹里也有 `Focused_cytoskeleton_mito/`，是针对该基因子集的专项 ORA。
-
-看专项结果请先看比较目录下的 `Focused_cytoskeleton_mito/`（全基因 GSEA），不要只看 topN 的 ORA。若专项分析仍不显著，说明这些通路在本数据里没有协同变化。
-
-## 额外两组（新脚本，不改原流程）
-
-`TG_RNAseq_TGsh_mean_vs_NTC_reps.R` 在原四种比较之外再做：
-
-1. `mean(TG_sh1, TG_sh5)` vs `NTC_rep0`
-2. `mean(TG_sh1, TG_sh5)` vs `NTC_rep1`
-
-同样按 FC ≥ 1 / 1.25 / 1.5 / 2 和上调 top 50–300 出差异表、火山图、热图、GO、通路、KEGG、GSEA。结果在：
-
-```
-results/TGsh_mean_vs_NTC_rep0/
-results/TGsh_mean_vs_NTC_rep1/
-```
+全库 GO 表在各子集的 `GO/`（`*_ORA_GO_BP.csv` 等）；抽出的通路在 `CustomGO/`。每张气泡图会再导出 `*_plotdata.csv` / `.xlsx`。气泡大小默认 **2.5–7**（原先 6–18 太大）；坐标字体在 `TG_RNAseq_pipeline.R` 开头改（`bubble_size_min` / `bubble_size_max`、`axis_text_y_size` / `axis_text_x_size`）。只重画已有气泡图，并从已有 ORA 表补画柱状图、不重跑 enrichGO：
 
 ```r
-setwd("E:/R/TG_BRCA/TG")
-source("TG_RNAseq_pipeline.R")                 # 原四种比较，不变
-source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
+options(tg.rnaseq.functions_only = TRUE)
+source("TG_RNAseq_pipeline.R")
+restyle_ora_bubbles()
 ```
 
-也可以只跑这个新脚本（会自己读入并标准化数据）。
+## 通路表达（不改全库 p 值）
+
+`results/00_PathwayExpression/`：
+
+- 每条列出 GO 的基因热图
+- 通路分数热图（ssGSEA；没有 GSVA 包则用基因 mean z-score）
+- 各比较目录 `CustomGO/` 还有总的 listed-GO mean log2FC 柱状图：上调+下调全部，以及只含上调通路的 top 10 / 15 / 20
+- 各比较目录 `PathwayScore/`：ssGSEA 与 mean z 气泡图。x 轴是该比较的通路分数差（处理 − 对照），点大小是通路基因数，颜色是分数差。出全部通路，以及分数升高的 top 10 / 15 / 20。1-vs-1 不伪造 p。共同上调比较用 `mean(TG_sh1, TG_sh5)` vs 对应 NTC（ssGSEA 不能用基因交集）
+
+```
+results/TG_sh1_vs_NTC_rep0/CustomGO/TG_sh1_vs_NTC_rep0_pathway_mean_log2FC.pdf
+results/TG_sh1_vs_NTC_rep0/CustomGO/TG_sh1_vs_NTC_rep0_pathway_mean_log2FC_up_top10.pdf
+results/TG_sh1_vs_NTC_rep0/CustomGO/TG_sh1_vs_NTC_rep0_pathway_mean_log2FC_up_top15.pdf
+results/TG_sh1_vs_NTC_rep0/CustomGO/TG_sh1_vs_NTC_rep0_pathway_mean_log2FC_up_top20.pdf
+results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1/GO/FC_1_ORA_GO_BP_CC_MF_barplot_top15.pdf
+results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1/GO/FC_1_ORA_GO_BP_CC_MF_barplot_count_top15.pdf
+results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1/CustomGO/FC_1_ORA_CustomGO_barplot.pdf
+results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1/CustomGO/FC_1_ORA_CustomGO_barplot_count.pdf
+results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1/CustomGO/FC_1_ORA_CustomGO_barplot_top15.pdf
+results/TG_sh1_vs_NTC_rep0/TopRank/top100/GO/top100_ORA_GO_BP_CC_MF_barplot_top15.pdf
+results/TG_sh1_vs_NTC_rep0/PathwayScore/TG_sh1_vs_NTC_rep0_ssgsea_dotplot_up_top15.pdf
+results/TG_sh1_vs_NTC_rep0/PathwayScore/TG_sh1_vs_NTC_rep0_mean_z_dotplot_up_top15.pdf
+results/mean_common_TGsh_vs_mean_common_NTC/00_COMMON_GENES.txt
+results/mean_common_TGsh_vs_mean_common_NTC/FoldChange/FC_1.5/FC_1.5_DE_selected_genes.csv
+results/00_PathwayExpression/pathway_score_heatmap_ssgsea.pdf
+```
