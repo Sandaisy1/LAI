@@ -1,5 +1,5 @@
 ---
-description: 列出 GO 的气泡图用全基因组 enrichGO 统计，前15条且 y 轴 GeneRatio 最大在上
+description: 列出 GO 的气泡图用全基因组 enrichGO 统计，前20条且 y 轴 GeneRatio 最大在上
 globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
@@ -12,12 +12,12 @@ alwaysApply: true
 
 1. 对该子集基因跑标准 `clusterProfiler::enrichGO`（BP/MF/CC；BH 在全库条目上校正；默认 minGSSize=10、maxGSSize=500）
 2. 用全库结果里的 **GeneRatio、p.adjust、Count** 抽出列出的 GO ID；**禁止**对抽出的子集重新 `p.adjust`
-3. 按 p.adjust 取前 15 条；**y 轴按 GeneRatio 从大到小**，最大的在最上面（不要按 p.adjust 编号排 y 轴）
+3. 按 p.adjust 取前 20 条；**y 轴按 GeneRatio 从大到小**，最大的在最上面（不要按 p.adjust 编号排 y 轴）
 4. 全库表写 `GO/*_ORA_GO_BP.csv` 等；抽出表与气泡图写 `CustomGO/`，文件名以 `ORA_` 开头
 
 这样 `mitochondrion organization` 的 p.adjust 与正常 GO BP 图一致，而不是只在 ~70 条自选通路上重算后虚高。
 
 ```r
 # ❌ BAD: y 轴按 p.adjust 写成 1–15，GeneRatio 最大的通路却在中间
-# ✅ GOOD: top15 <- head(hit[order(p.adjust)], 15); y = reorder(term, GeneRatio)  # 最大在上
+# ✅ GOOD: top20 <- head(hit[order(p.adjust)], 20); y = reorder(term, GeneRatio)  # 最大在上
 ```

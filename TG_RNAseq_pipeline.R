@@ -11,7 +11,7 @@
 # 比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–6 而改本文件主流程。
 #
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
-# 不在自选通路上重新校正 p。只画 p.adjust 前 15；y 轴按 GeneRatio 从大到小，最大在最上面。
+# 不在自选通路上重新校正 p。只画 p.adjust 前 20；y 轴按 GeneRatio 从大到小，最大在最上面。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -106,7 +106,7 @@ log_msg <- function(...) {
 p_cutoffs <- c("p0.05" = 0.05, "p0.01" = 0.01)
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
-bubble_top_n <- 15
+bubble_top_n <- 20
 
 # -----------------------------------------------------------------------------
 # 2. 样本名与基因名
@@ -916,7 +916,7 @@ plot_ora_bubble <- function(ora, title, outfile, n_show = bubble_top_n) {
   } else {
     p <- p + ggplot2::scale_fill_gradientn(colours = diverging)
   }
-  h <- max(5.5, min(10, 0.38 * nrow(df) + 3))
+  h <- max(5.5, min(12, 0.38 * nrow(df) + 3))
   save_gg(p, outfile, width = 10, height = h)
 }
 
@@ -1066,7 +1066,7 @@ run_five_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "本比较只分析 metastasis_custom_genes.txt 列出的 GO 通路表达。",
       "分层结果在 p0.05/ 、p0.01/ 、AllDE/ 。",
       "每个非空子集：差异表、火山图、热图。",
-      "先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio/p.adjust/Count 画气泡图（前15；GeneRatio 最大在最上面）。",
+      "先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio/p.adjust/Count 画气泡图（前20；GeneRatio 最大在最上面）。",
       paste("p-value estimated:", have_p)
     ),
     file.path(base, "00_READ_ME.txt")
