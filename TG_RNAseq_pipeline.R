@@ -10,7 +10,7 @@
 #   4) 相对 NTC_rep1 的共同上调（sh1 与 sh5 交集）
 # 比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–6 而改本文件主流程。
 #
-# 过滤低表达后只做 log2(x+1)，不再做 DESeq2 size factor / 分位数标准化（Cuffdiff 已定量）。
+# 读 Cuffdiff 各样品 FPKM（已按长度和深度标准化），过滤低表达后只做 log2(x+1)，不再做 DESeq2。
 # 总 CustomGO 柱状图：上调+下调全部，以及上调通路 mean log2FC 前 10/15/20。
 # 每个比较另出 ssGSEA 与 mean z 气泡图（分数差；1-vs-1 不伪造 p）。
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
@@ -250,16 +250,15 @@ read_read_group_tracking <- function(path) {
   rg <- utils::read.delim(path, check.names = FALSE, stringsAsFactors = FALSE)
   need <- c("tracking_id", "condition", "replicate")
   if (!all(need %in% names(rg))) return(NULL)
-  value_col <- if ("raw_frags" %in% names(rg)) {
-    "raw_frags"
-  } else if ("external_scaled_frags" %in% names(rg)) {
-    "external_scaled_frags"
-  } else if ("FPKM" %in% names(rg)) {
+  value_col <- if ("FPKM" %in% names(rg)) {
     "FPKM"
+  } else if ("fpkm" %in% names(rg)) {
+    "fpkm"
   } else {
+    log_msg("genes.read_group_tracking 没有 FPKM 列，改读 genes.fpkm_tracking")
     return(NULL)
   }
-  log_msg("Cuffdiff value column: ", value_col)
+  log_msg("Cuffdiff value column: ", value_col, " (already length- and depth-normalized)")
   rg$sample <- paste(rg$condition, rg$replicate, sep = "_rep")
   rg$group <- vapply(as.character(rg$condition), classify_sample, character(1))
   if (all(is.na(rg$group))) rg$group <- vapply(rg$sample, classify_sample, character(1))
@@ -331,26 +330,29 @@ read_tracking_matrix <- function(path, value_pattern) {
 load_expression <- function(project_dir) {
   rg <- file.path(project_dir, "genes.read_group_tracking")
   if (file.exists(rg)) {
-    log_msg("Reading Cuffdiff replicate file: genes.read_group_tracking")
+    log_msg("Reading Cuffdiff replicate FPKM: genes.read_group_tracking")
     obj <- tryCatch(read_read_group_tracking(rg), error = function(e) {
       log_msg("read_group_tracking import failed: ", e$message)
       NULL
     })
     if (!is.null(obj)) return(obj)
   }
-  ct <- file.path(project_dir, "genes.count_tracking")
-  if (file.exists(ct)) {
-    log_msg("Reading Cuffdiff count file: genes.count_tracking")
-    obj <- tryCatch(read_tracking_matrix(ct, "_count$|^q[0-9]+_count$"), error = function(e) NULL)
-    if (!is.null(obj)) return(obj)
-  }
   fp <- file.path(project_dir, "genes.fpkm_tracking")
   if (file.exists(fp)) {
     log_msg("Reading Cuffdiff FPKM file: genes.fpkm_tracking")
     obj <- tryCatch(read_tracking_matrix(fp, "_FPKM$|^q[0-9]+_FPKM$"), error = function(e) NULL)
-    if (!is.null(obj)) return(obj)
+    if (!is.null(obj)) {
+      obj$value_col <- "FPKM"
+      return(obj)
+    }
   }
-  stop("未找到 Cuffdiff 表达文件: ", project_dir)
+  stop("未找到 Cuffdiff FPKM 文件（genes.read_group_tracking 的 FPKM 列或 genes.fpkm_tracking）: ", project_dir)
+}
+
+infer_value_type <- function(expr) {
+  vc <- expr$value_col
+  if (!is.null(vc) && grepl("fpkm", vc, ignore.case = TRUE)) return("fpkm")
+  detect_value_type(expr$mat)
 }
 
 detect_value_type <- function(mat) {
@@ -1744,7 +1746,7 @@ run_comparisons_1_to_4 <- function() {
   utils::write.csv(expr$sample_info, file.path(log_dir, "sample_info.csv"), row.names = FALSE)
 
   if (!"NTC" %in% expr$sample_info$group) stop("未检测到 NTC 对照样本")
-  value_type <- detect_value_type(expr$mat)
+  value_type <- infer_value_type(expr)
   log_msg("Value type inferred as: ", value_type)
   filt <- filter_low_expression(expr$mat, expr$sample_info, value_type)
   norm <- normalize_expression(filt, expr$sample_info, value_type)

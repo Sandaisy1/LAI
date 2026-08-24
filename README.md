@@ -8,8 +8,9 @@
 
 默认读取 `E:/R/TG_BRCA/TG`。输入为 Cuffdiff：
 
-- `genes.read_group_tracking`（首选）
-- `genes.count_tracking` / `genes.fpkm_tracking`
+- `genes.read_group_tracking` 的 **FPKM** 列（首选；Cuffdiff 已按长度和深度标准化）
+- 否则 `genes.fpkm_tracking`
+- 不用 `raw_frags` / `genes.count_tracking` 再做 DESeq2
 - `metastasis_custom_genes.txt`（每行：通路名称 + `GO:#######`，不要只写基因符号）
 
 ## 运行
@@ -20,7 +21,7 @@ source("TG_RNAseq_pipeline.R")                 # 比较 1–4
 source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
 ```
 
-先过滤低表达，再 `log2(x+1)` 后做六组比较。Cuffdiff 已定量，不再做 DESeq2 size factor 或分位数标准化。不要用未过滤的值算 FC。
+先过滤低表达，再用 Cuffdiff **FPKM** 做 `log2(x+1)` 后做六组比较。不再读 fragment count，也不做 DESeq2 size factor。不要用未过滤的值算 FC。
 
 ## 六组比较（各自单独出图）
 

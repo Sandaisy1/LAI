@@ -12,15 +12,16 @@ alwaysApply: true
 ## 数据
 
 - 目录：`E:/R/TG_BRCA/TG`（脚本与结果同目录；缺失则回退仓库根）
-- 首选 `genes.read_group_tracking`，否则 `genes.count_tracking` / `genes.fpkm_tracking`
+- 首选 `genes.read_group_tracking` 的 **FPKM**（Cuffdiff 已标准化）；不要用 `raw_frags` 再做 DESeq2
+- 否则 `genes.fpkm_tracking`
 - 通路列表：`metastasis_custom_genes.txt`（GO 名称 + GO 号，不是基因符号）
 - 四个样品独立保留：`NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5`
 - 物种：人 `org.Hs.eg.db`（GOALL 含子术语）；复合名/`XLOC_` 清洗为一个官方符号
 
 ## 预处理（四个样品一起做一次，再做六组比较）
 
-1. 过滤低表达  2. 不再做 DESeq2 size factor / 分位数标准化（Cuffdiff 已定量）；只做 log2(x+1) 再算 FC
-3. 不要用未过滤的原始值算 FC
+1. 过滤低表达  2. 用 Cuffdiff FPKM，只做 log2(x+1)，不再做 DESeq2 size factor / 分位数标准化
+3. 不要用未过滤的 raw_frags 算 FC
 
 ## 六组比较（每组单独出表、单独作图）
 

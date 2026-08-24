@@ -61,10 +61,10 @@ prepare_extra_expression <- function() {
     ))
   }
 
-  log_msg("Load and normalize expression for extra KD-mean vs single NTC comparisons")
+  log_msg("Load Cuffdiff FPKM for extra KD-mean vs single NTC comparisons")
   expr <- load_expression(project_dir)
   expr$sample_info <- add_ntc_ids(expr$sample_info)
-  value_type <- detect_value_type(expr$mat)
+  value_type <- infer_value_type(expr)
   filt <- filter_low_expression(expr$mat, expr$sample_info, value_type)
   norm_obj <- normalize_expression(filt, expr$sample_info, value_type)
   si_df <- expr$sample_info[match(colnames(norm_obj$log_mat), expr$sample_info$sample), ]
