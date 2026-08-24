@@ -55,7 +55,7 @@ results/<比较>/00_analysis_tracks.csv
 
 每个非空子集：差异基因表、火山图、热图。`GO/` 里有全库 BP/CC/MF 表、气泡图，以及 BP/CC/MF 合在一张上的柱状图（红=生物过程、蓝=细胞组成、绿=分子功能；每个 ontology 取前 10/15/20）。柱状图出两套横轴：**-lgP**（按显著性排序）和 **Count**（该通路命中的差异基因数，按 Count 排序）。`CustomGO/` 对 `metastasis_custom_genes.txt` 中的列出通路用同一套柱状图：先出 **全部** p.adjust < 0.2 的列出通路，再出每个 ontology 的 top 10/15/20。气泡图**先做全基因组 `enrichGO`**（`minGSSize=1`，很细的通路也会测；`maxGSSize=500`），再抽出列出通路的 GeneRatio、p.adjust、Count（不在自选通路上重新校正 p）。最终气泡图只保留 **p.adjust < 0.2**，再按 **GeneRatio 从大到小**取前 15 与前 20。柱状图同样只保留 p.adjust < 0.2。全库完整表仍写出，不改 p.adjust。
 
-全库 GO 表在各子集的 `GO/`（`*_ORA_GO_BP.csv` 等）；抽出的通路在 `CustomGO/`。每张气泡图会再导出 `*_plotdata.csv` / `.xlsx`。气泡大小和坐标字体在 `TG_RNAseq_pipeline.R` 开头改（`bubble_size_min` / `bubble_size_max`、`axis_text_y_size` / `axis_text_x_size`）。只重画已有气泡图，并从已有 ORA 表补画柱状图、不重跑 enrichGO：
+全库 GO 表在各子集的 `GO/`（`*_ORA_GO_BP.csv` 等）；抽出的通路在 `CustomGO/`。每张气泡图会再导出 `*_plotdata.csv` / `.xlsx`。气泡大小默认 **2.5–7**（原先 6–18 太大）；坐标字体在 `TG_RNAseq_pipeline.R` 开头改（`bubble_size_min` / `bubble_size_max`、`axis_text_y_size` / `axis_text_x_size`）。只重画已有气泡图，并从已有 ORA 表补画柱状图、不重跑 enrichGO：
 
 ```r
 options(tg.rnaseq.restyle_only = TRUE)

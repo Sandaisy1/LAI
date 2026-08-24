@@ -127,8 +127,9 @@ ora_min_gs_size <- 1     # 很细的通路也测（1/4/8 个基因不会因 minG
 ora_max_gs_size <- 500   # 仍丢掉库里 >500 基因的超大通路
 
 # 气泡图外观（改这里即可；不必另开文件）
-bubble_size_min <- 6     # 最小气泡
-bubble_size_max <- 18    # 最大气泡
+# 建议尺寸：min 2.5、max 7（适合 10–20 条通路；原先 6–18 会挤成一团）
+bubble_size_min <- 2.5   # 最小气泡
+bubble_size_max <- 7     # 最大气泡
 axis_text_y_size <- 10   # 左侧通路名字体
 axis_text_x_size <- 11   # 底部 GeneRatio 刻度字体
 axis_title_size  <- 12   # “GeneRatio” 轴标题
