@@ -11,7 +11,7 @@
 # 比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–6 而改本文件主流程。
 #
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
-# 不在自选通路上重新校正 p。只画 p.adjust 前 20；y 轴按 GeneRatio 从大到小，最大在最上面。
+# 不在自选通路上重新校正 p。分别画 p.adjust 前 15 与前 20；y 轴按 GeneRatio 从大到小，最大在最上面。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -106,7 +106,7 @@ log_msg <- function(...) {
 p_cutoffs <- c("p0.05" = 0.05, "p0.01" = 0.01)
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
-bubble_top_n <- 20
+bubble_top_ns <- c(15, 20)
 
 # -----------------------------------------------------------------------------
 # 2. 样本名与基因名
@@ -854,9 +854,9 @@ run_genome_enrichGO <- function(genes, go_dir, tag) {
   dplyr::bind_rows(pieces)
 }
 
-extract_listed_go_ora <- function(genome_ora, go_tab, n_show = bubble_top_n) {
+extract_listed_go_ora <- function(genome_ora, go_tab) {
   missing <- go_tab$go_id
-  empty <- list(all_listed = NULL, top = NULL, missing = missing)
+  empty <- list(all_listed = NULL, missing = missing)
   if (is.null(genome_ora) || nrow(genome_ora) == 0) return(empty)
   id_col <- if ("ID" %in% names(genome_ora)) "ID" else "go_id"
   hit <- genome_ora[genome_ora[[id_col]] %in% go_tab$go_id, , drop = FALSE]
@@ -868,12 +868,11 @@ extract_listed_go_ora <- function(genome_ora, go_tab, n_show = bubble_top_n) {
   hit$listed_rank <- seq_len(nrow(hit))
   list(
     all_listed = hit,
-    top = utils::head(hit, n_show),
     missing = setdiff(go_tab$go_id, hit$go_id)
   )
 }
 
-plot_ora_bubble <- function(ora, title, outfile, n_show = bubble_top_n) {
+plot_ora_bubble <- function(ora, title, outfile, n_show) {
   df <- ora
   if (is.null(df) || nrow(df) == 0) {
     writeLines("no listed GO terms in genome-wide enrichGO", paste0(outfile, "_EMPTY.txt"))
@@ -887,8 +886,9 @@ plot_ora_bubble <- function(ora, title, outfile, n_show = bubble_top_n) {
     writeLines("no finite GeneRatio for listed GO", paste0(outfile, "_EMPTY.txt"))
     return(invisible(NULL))
   }
-  df <- df[order(-df$GeneRatio_num, df$p.adjust, df$pvalue), , drop = FALSE]
+  df <- df[order(df$p.adjust, df$pvalue, -df$Count), , drop = FALSE]
   df <- utils::head(df, n_show)
+  df <- df[order(-df$GeneRatio_num, df$p.adjust, df$pvalue), , drop = FALSE]
   gid <- if ("go_id" %in% names(df)) df$go_id else df$ID
   df$label <- paste0(df$Description, " (", gid, ")")
   df$label <- factor(df$label, levels = rev(unique(as.character(df$label))))
@@ -1029,7 +1029,7 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
       NULL
     }
   )
-  extracted <- extract_listed_go_ora(genome_ora, go_tab, n_show = bubble_top_n)
+  extracted <- extract_listed_go_ora(genome_ora, go_tab)
   if (!is.null(extracted$all_listed)) {
     write_table(extracted$all_listed, file.path(cg_dir, paste0(tag, "_ORA_CustomGO")))
   }
@@ -1043,16 +1043,27 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
       file.path(cg_dir, paste0(tag, "_listed_GO_not_in_genome_ORA.txt"))
     )
   }
-  tryCatch(
-    plot_ora_bubble(
-      extracted$top,
-      paste0(title, " | ORA listed GO top ", bubble_top_n,
-             " (GeneRatio/p.adjust/Count from genome-wide GO)"),
-      file.path(cg_dir, paste0(tag, "_ORA_CustomGO_dotplot")),
-      n_show = bubble_top_n
-    ),
-    error = function(e) log_msg("bubble failed: ", e$message)
-  )
+  for (n_show in bubble_top_ns) {
+    top_tag <- paste0("top", n_show)
+    if (!is.null(extracted$all_listed)) {
+      ranked <- extracted$all_listed
+      ranked <- ranked[order(ranked$p.adjust, ranked$pvalue, -ranked$Count), , drop = FALSE]
+      write_table(
+        utils::head(ranked, n_show),
+        file.path(cg_dir, paste0(tag, "_ORA_CustomGO_", top_tag))
+      )
+    }
+    tryCatch(
+      plot_ora_bubble(
+        extracted$all_listed,
+        paste0(title, " | ORA listed GO ", top_tag,
+               " (GeneRatio/p.adjust/Count from genome-wide GO)"),
+        file.path(cg_dir, paste0(tag, "_ORA_CustomGO_dotplot_", top_tag)),
+        n_show = n_show
+      ),
+      error = function(e) log_msg("bubble failed (", top_tag, "): ", e$message)
+    )
+  }
 }
 
 run_five_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
@@ -1066,7 +1077,7 @@ run_five_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "本比较只分析 metastasis_custom_genes.txt 列出的 GO 通路表达。",
       "分层结果在 p0.05/ 、p0.01/ 、AllDE/ 。",
       "每个非空子集：差异表、火山图、热图。",
-      "先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio/p.adjust/Count 画气泡图（前20；GeneRatio 最大在最上面）。",
+      "先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio/p.adjust/Count 画气泡图（分别前15和前20；GeneRatio 最大在最上面）。",
       paste("p-value estimated:", have_p)
     ),
     file.path(base, "00_READ_ME.txt")
