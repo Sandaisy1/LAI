@@ -12,12 +12,12 @@ alwaysApply: true
 
 1. 对该子集基因跑标准 `clusterProfiler::enrichGO`（BP/MF/CC；BH 在全库条目上校正；默认 minGSSize=10、maxGSSize=500）
 2. 用全库结果里的 **GeneRatio、p.adjust、Count** 抽出列出的 GO ID；**禁止**对抽出的子集重新 `p.adjust`
-3. 最终作图只保留 **p.adjust < 0.05**，再按 **GeneRatio 从大到小**取前 15 与前 20；最大的在最上面。top20 = top15 再在下面加 5 条。不要把 p.adjust=1 的通路画进终图
+3. 最终作图只保留 **p.adjust < 0.2**，再按 **GeneRatio 从大到小**取前 15 与前 20；最大的在最上面。top20 = top15 再在下面加 5 条。不要把 p.adjust=1 的通路画进终图
 4. 全库表与气泡图写 `GO/*_ORA_GO_BP_dotplot_top15.pdf` 等；抽出的列出通路写 `CustomGO/`，文件名以 `ORA_` 开头
 
 这样 `mitochondrion organization` 的 p.adjust 与正常 GO BP 图一致，而不是只在 ~70 条自选通路上重算后虚高。
 
 ```r
 # ❌ BAD: 把 p.adjust=1 的通路按 GeneRatio 画进终图
-# ✅ GOOD: sig <- hit[p.adjust < 0.05]; for (n in c(15, 20)) plot(head(sig[order(-GeneRatio)], n))
+# ✅ GOOD: sig <- hit[p.adjust < 0.2]; for (n in c(15, 20)) plot(head(sig[order(-GeneRatio)], n))
 ```

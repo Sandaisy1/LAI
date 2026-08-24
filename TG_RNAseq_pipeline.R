@@ -12,7 +12,7 @@
 #
 # 分层只两种（均 p<0.05）：上调 FC>=1/1.25/1.5/2，以及上调 top 50–300。
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
-# 不在自选通路上重新校正 p。最终气泡图：p.adjust < 0.05，再按 GeneRatio 取前 15 与前 20。
+# 不在自选通路上重新校正 p。最终气泡图：p.adjust < 0.2，再按 GeneRatio 取前 15 与前 20。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -108,7 +108,7 @@ p_cutoffs <- c("p0.05" = 0.05)
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 bubble_top_ns <- c(15, 20)
-padj_plot_cutoff <- 0.05
+padj_plot_cutoff <- 0.2
 
 # -----------------------------------------------------------------------------
 # 2. 样本名与基因名
@@ -882,7 +882,8 @@ run_genome_enrichGO <- function(genes, go_dir, tag) {
         tryCatch(
           plot_ora_bubble(
             df,
-            paste0(tag, " | ORA GO ", ont, " ", top_tag, " (p.adjust<0.05, by GeneRatio)"),
+            paste0(tag, " | ORA GO ", ont, " ", top_tag,
+                   " (p.adjust<", padj_plot_cutoff, ", by GeneRatio)"),
             file.path(go_dir, paste0(tag, "_ORA_GO_", ont, "_dotplot_", top_tag)),
             n_show = n_show
           ),
@@ -953,7 +954,6 @@ plot_ora_bubble <- function(ora, title, outfile, n_show) {
       axis.text.y = ggplot2::element_text(size = 10),
       plot.margin = ggplot2::margin(6, 10, 6, 6),
       legend.margin = ggplot2::margin(0, 0, 0, 0),
-      legend.box.spacing = grid::unit(4, "pt"),
       panel.grid.minor = ggplot2::element_blank()
     ) +
     ggplot2::labs(
@@ -1133,7 +1133,7 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "  1) FoldChange 上调 FC >= 1 / 1.25 / 1.5 / 2",
       "  2) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300",
       "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图（top15 与 top20）。",
-      "最终气泡图只保留 p.adjust<0.05，再按 GeneRatio 取前15和前20。",
+      "最终气泡图只保留 p.adjust<0.2，再按 GeneRatio 取前15和前20。",
       paste("p-value estimated:", have_p)
     ),
     file.path(base, "00_READ_ME.txt")

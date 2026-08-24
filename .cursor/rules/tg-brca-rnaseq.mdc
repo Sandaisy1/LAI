@@ -42,7 +42,7 @@ alwaysApply: true
 1. `p<0.05` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2（四档各自出图）
 2. `p<0.05` 后上调 top 50 / 75 / 100 / 150 / 200 / 250 / 300（七档各自出图）
 
-每个非空子集：差异表、火山图、热图。最终气泡图只保留 p.adjust < 0.05，再按 GeneRatio 取前 15 与前 20。全库表在 `GO/`，抽出结果在 `CustomGO/`。
+每个非空子集：差异表、火山图、热图。最终气泡图只保留 p.adjust < 0.2，再按 GeneRatio 取前 15 与前 20。全库表在 `GO/`，抽出结果在 `CustomGO/`。
 
 ## 通路表达
 
@@ -50,5 +50,5 @@ alwaysApply: true
 
 ```r
 # ❌ BAD: 只在自选 GO 上做超几何并重新 BH，导致 mitochondrion organization 的 p.adjust 虚高
-# ✅ GOOD: sig <- hit[p.adjust < 0.05]; for (n in c(15, 20)) plot(head(sig[order(-GeneRatio)], n))
+# ✅ GOOD: sig <- hit[p.adjust < 0.2]; for (n in c(15, 20)) plot(head(sig[order(-GeneRatio)], n))
 ```
