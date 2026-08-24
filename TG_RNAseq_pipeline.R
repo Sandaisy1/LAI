@@ -15,7 +15,7 @@
 # 每个比较另出 ssGSEA 与 mean z 气泡图（分数差；1-vs-1 不伪造 p）。
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
 # 不在自选通路上重新校正 p。最终气泡图：p.adjust < 0.2，再按 GeneRatio 取前 15 与前 20。
-# 另出 BP/CC/MF 合图柱状图（x=-lgP）：全库 top 10/15/20；列出通路再出全部 + top 10/15/20。
+# 另出 BP/CC/MF 合图柱状图：横轴 -lgP 与 Count 各一套；全库 top 10/15/20；列出通路再出全部 + top 10/15/20。
 # enrichGO 最小基因集为 1，很细的通路（1/4/8 个基因）也会测。
 # 气泡大小、坐标字体在本文件「分析参数」里改。只重画已有图（含从 ORA 表补画柱状图）：
 #   options(tg.rnaseq.restyle_only = TRUE); source("TG_RNAseq_pipeline.R")
@@ -118,6 +118,7 @@ top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 bubble_top_ns <- c(15, 20)
 pathway_up_top_ns <- c(10, 15, 20)  # 总 CustomGO：上调通路 mean log2FC 前 N
 ora_bar_top_ns <- c(10, 15, 20)     # BP/CC/MF 柱状图：每个 ontology 取前 N；列出通路另出全部
+# 柱状图横轴：neglogp = -lgP(p.adjust)；Count = 该通路命中的差异基因数。两套都出。
 padj_plot_cutoff <- 0.2
 ora_min_gs_size <- 1     # 很细的通路也测（1/4/8 个基因不会因 minGSSize 被丢掉）
 ora_max_gs_size <- 500   # 仍丢掉库里 >500 基因的超大通路
@@ -1160,7 +1161,8 @@ run_genome_enrichGO <- function(genes, go_dir, tag) {
     c(
       "全库 GO 图在本文件夹，不要只看 xlsx：",
       "  气泡图 *_ORA_GO_BP_dotplot_top15.pdf / top20.pdf（CC、MF 同）",
-      "  柱状图 *_ORA_GO_BP_CC_MF_barplot_top10.pdf / top15 / top20",
+      "  柱状图 *_ORA_GO_BP_CC_MF_barplot_top10.pdf / top15 / top20（横轴 -lgP）",
+      "  以及 *_barplot_count_top10.pdf / top15 / top20（横轴 Count）",
       "列出通路的同样柱状图在上一级 CustomGO/（含全部列出通路 + top10/15/20）。",
       "作图数据：气泡图同名 *_plotdata.csv。气泡大小和字体在 TG_RNAseq_pipeline.R 开头改。"
     ),
@@ -1262,7 +1264,7 @@ plot_ora_bubble <- function(ora, title, outfile, n_show) {
   save_ora_bubble_gg(p, outfile, style, nrow(df))
 }
 
-prepare_ora_bar_df <- function(ora, n_per_ont) {
+prepare_ora_bar_df <- function(ora, n_per_ont, rank_by = "p.adjust") {
   df <- ora
   if (is.null(df) || nrow(df) == 0) return(NULL)
   if (!"ONTOLOGY" %in% names(df)) df$ONTOLOGY <- "BP"
@@ -1271,15 +1273,28 @@ prepare_ora_bar_df <- function(ora, n_per_ont) {
   ont[ont %in% c("CELLULAR_COMPONENT", "CELLULAR COMPONENT")] <- "CC"
   ont[ont %in% c("MOLECULAR_FUNCTION", "MOLECULAR FUNCTION")] <- "MF"
   df$ONTOLOGY <- ont
+  if (!"p.adjust" %in% names(df) && "p_adjust" %in% names(df)) df$p.adjust <- df$p_adjust
+  if (!"Count" %in% names(df) && "count" %in% names(df)) df$Count <- df$count
+  if ("Count" %in% names(df)) df$Count <- suppressWarnings(as.numeric(df$Count))
   df <- df[is.finite(df$p.adjust) & df$p.adjust < padj_plot_cutoff, , drop = FALSE]
   if (nrow(df) == 0) return(NULL)
+  by_count <- identical(rank_by, "Count")
+  if (by_count) {
+    if (!"Count" %in% names(df)) return(NULL)
+    df <- df[is.finite(df$Count), , drop = FALSE]
+    if (nrow(df) == 0) return(NULL)
+  }
   id_col <- if ("ID" %in% names(df)) "ID" else if ("go_id" %in% names(df)) "go_id" else NULL
   pieces <- lapply(c("BP", "CC", "MF"), function(o) {
     sub <- df[df$ONTOLOGY == o, , drop = FALSE]
     if (nrow(sub) == 0) return(NULL)
     if (!is.null(id_col)) sub <- sub[!duplicated(sub[[id_col]]), , drop = FALSE]
     if (!"pvalue" %in% names(sub)) sub$pvalue <- NA_real_
-    sub <- sub[order(sub$p.adjust, sub$pvalue), , drop = FALSE]
+    if (by_count) {
+      sub <- sub[order(-sub$Count, sub$p.adjust, sub$pvalue), , drop = FALSE]
+    } else {
+      sub <- sub[order(sub$p.adjust, sub$pvalue), , drop = FALSE]
+    }
     if (length(n_per_ont) == 1 && is.finite(n_per_ont) && n_per_ont > 0) {
       sub <- utils::head(sub, as.integer(n_per_ont))
     }
@@ -1293,7 +1308,11 @@ prepare_ora_bar_df <- function(ora, n_per_ont) {
   for (o in c("MF", "CC", "BP")) {
     sub <- out[out$ONTOLOGY == o, , drop = FALSE]
     if (nrow(sub) == 0) next
-    sub <- sub[order(sub$neglogp, decreasing = FALSE), , drop = FALSE]
+    if (by_count) {
+      sub <- sub[order(sub$Count, decreasing = FALSE), , drop = FALSE]
+    } else {
+      sub <- sub[order(sub$neglogp, decreasing = FALSE), , drop = FALSE]
+    }
     y_levels <- c(y_levels, sub$label)
   }
   out$label <- factor(out$label, levels = y_levels)
@@ -1301,11 +1320,23 @@ prepare_ora_bar_df <- function(ora, n_per_ont) {
   out
 }
 
-plot_ora_ontology_bar <- function(ora, title, outfile, n_per_ont) {
-  df <- prepare_ora_bar_df(ora, n_per_ont)
-  if (is.null(df)) {
+plot_ora_ontology_bar <- function(ora, title, outfile, n_per_ont,
+                                  x_var = "neglogp", x_lab = "-lgP",
+                                  rank_by = "p.adjust") {
+  df <- prepare_ora_bar_df(ora, n_per_ont, rank_by = rank_by)
+  if (is.null(df) || !x_var %in% names(df)) {
     writeLines(
-      paste0("no GO terms with p.adjust < ", padj_plot_cutoff),
+      paste0("no GO terms with p.adjust < ", padj_plot_cutoff,
+             " (x=", x_var, ")"),
+      paste0(outfile, "_EMPTY.txt")
+    )
+    return(invisible(NULL))
+  }
+  df$x_plot <- suppressWarnings(as.numeric(df[[x_var]]))
+  df <- df[is.finite(df$x_plot), , drop = FALSE]
+  if (nrow(df) == 0) {
+    writeLines(
+      paste0("no finite ", x_var, " values after p.adjust < ", padj_plot_cutoff),
       paste0(outfile, "_EMPTY.txt")
     )
     return(invisible(NULL))
@@ -1314,12 +1345,21 @@ plot_ora_ontology_bar <- function(ora, title, outfile, n_per_ont) {
   style <- current_bubble_style()
   pal <- c(BP = "#E74C3C", CC = "#5DADE2", MF = "#27AE60")
   labs_ont <- c(BP = "生物过程", CC = "细胞组成", MF = "分子功能")
-  p <- ggplot2::ggplot(df, ggplot2::aes(x = neglogp, y = label, fill = ONTOLOGY)) +
+  x_scale <- ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.06)))
+  if (identical(x_var, "Count")) {
+    x_scale <- ggplot2::scale_x_continuous(
+      expand = ggplot2::expansion(mult = c(0, 0.06)),
+      breaks = function(lim) {
+        unique(pmax(0, round(pretty(c(0, max(lim[2], 1)), n = 6))))
+      }
+    )
+  }
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = x_plot, y = label, fill = ONTOLOGY)) +
     ggplot2::geom_col(width = 0.92) +
     ggplot2::scale_fill_manual(
       values = pal, labels = labs_ont, breaks = c("BP", "CC", "MF"), drop = FALSE
     ) +
-    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.06))) +
+    x_scale +
     ggplot2::facet_grid(
       ONTOLOGY ~ .,
       scales = "free_y",
@@ -1344,7 +1384,7 @@ plot_ora_ontology_bar <- function(ora, title, outfile, n_per_ont) {
     ) +
     ggplot2::labs(
       title = title,
-      x = "-lgP",
+      x = x_lab,
       y = NULL,
       fill = NULL
     )
@@ -1357,40 +1397,53 @@ plot_ora_ontology_bar <- function(ora, title, outfile, n_per_ont) {
   invisible(df)
 }
 
+ora_bar_axis_specs <- function() {
+  list(
+    list(
+      file_tag = "", x_var = "neglogp", x_lab = "-lgP",
+      rank_by = "p.adjust", axis_lab = "by -lgP"
+    ),
+    list(
+      file_tag = "_count", x_var = "Count", x_lab = "Count",
+      rank_by = "Count", axis_lab = "by Count"
+    )
+  )
+}
+
 plot_ora_bar_series <- function(ora, title_prefix, outfile_prefix,
                                 n_vec = ora_bar_top_ns, include_all = FALSE) {
   n_ok <- 0L
-  if (isTRUE(include_all)) {
+  draw_one <- function(spec, n_per_ont, n_lab, outfile) {
     ok <- tryCatch({
+      n_bit <- if (nzchar(n_lab)) paste0(" ", n_lab) else ""
       plot_ora_ontology_bar(
         ora,
-        paste0(title_prefix, " (p.adjust<", padj_plot_cutoff, ", all listed, by -lgP)"),
-        outfile_prefix,
-        n_per_ont = NA_real_
+        paste0(title_prefix, n_bit,
+               " (p.adjust<", padj_plot_cutoff, ", ", spec$axis_lab, ")"),
+        outfile,
+        n_per_ont = n_per_ont,
+        x_var = spec$x_var,
+        x_lab = spec$x_lab,
+        rank_by = spec$rank_by
       )
       TRUE
     }, error = function(e) {
-      log_msg("GO barplot (all listed) failed: ", e$message)
+      log_msg("GO barplot failed (", spec$axis_lab, " ", n_lab, "): ", e$message)
       FALSE
     })
-    if (isTRUE(ok)) n_ok <- n_ok + 1L
+    isTRUE(ok)
   }
-  for (n_show in n_vec) {
-    top_tag <- paste0("top", n_show)
-    ok <- tryCatch({
-      plot_ora_ontology_bar(
-        ora,
-        paste0(title_prefix, " ", top_tag,
-               " (p.adjust<", padj_plot_cutoff, ", by -lgP)"),
-        paste0(outfile_prefix, "_", top_tag),
-        n_per_ont = n_show
-      )
-      TRUE
-    }, error = function(e) {
-      log_msg("GO barplot failed (", top_tag, "): ", e$message)
-      FALSE
-    })
-    if (isTRUE(ok)) n_ok <- n_ok + 1L
+  for (spec in ora_bar_axis_specs()) {
+    stub <- paste0(outfile_prefix, spec$file_tag)
+    if (isTRUE(include_all)) {
+      if (draw_one(spec, NA_real_, "all listed", stub)) n_ok <- n_ok + 1L
+    }
+    for (n_show in n_vec) {
+      top_tag <- paste0("top", n_show)
+      if (draw_one(spec, n_show, top_tag, paste0(stub, "_", top_tag))) {
+        n_ok <- n_ok + 1L
+      }
+    }
   }
   n_ok
 }
@@ -1755,9 +1808,10 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
     c(
       "本文件夹是列出通路（metastasis_custom_genes.txt）的图，不要只看 xlsx：",
       "  气泡图 *_ORA_CustomGO_dotplot_top15.pdf / top20.pdf",
-      "  柱状图 *_ORA_CustomGO_BP_CC_MF_barplot.pdf（全部 p.adjust<0.2 的列出通路）",
-      "  以及 *_barplot_top10.pdf / top15 / top20",
-      "颜色：红=生物过程，蓝=细胞组成，绿=分子功能；x 轴是 -lgP。"
+      "  柱状图 *_ORA_CustomGO_BP_CC_MF_barplot.pdf（全部 p.adjust<0.2 的列出通路，横轴 -lgP）",
+      "  *_barplot_count.pdf（同样通路，横轴 Count）",
+      "  以及 *_barplot_top10.pdf / top15 / top20 与 *_barplot_count_top10.pdf 等",
+      "颜色：红=生物过程，蓝=细胞组成，绿=分子功能。"
     ),
     file.path(cg_dir, "00_READ_ME_列出通路柱状图在这里.txt")
   )
@@ -1829,7 +1883,7 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "  1) FoldChange 上调 FC >= 1 / 1.25 / 1.5 / 2",
       "  2) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300",
       "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图与柱状图。",
-      "CustomGO/：列出通路气泡图，以及 BP/CC/MF 柱状图（全部列出通路 + top10/15/20）。",
+      "CustomGO/：列出通路气泡图，以及 BP/CC/MF 柱状图（-lgP 与 Count；全部列出通路 + top10/15/20）。",
       "最终气泡图只保留 p.adjust<0.2，再按 GeneRatio 取前15和前20。",
       "总 CustomGO 柱状图：1) 上调+下调全部；2) 上调 mean log2FC 前10/15/20。",
       "PathwayScore/：ssGSEA 与 mean z 气泡图（分数差；升高通路 top10/15/20）。",
