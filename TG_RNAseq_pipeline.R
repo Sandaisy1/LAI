@@ -2391,6 +2391,8 @@ run_comparisons_1_to_4 <- function() {
 }
 
 if (isTRUE(getOption("tg.rnaseq.restyle_only", FALSE))) {
+  log_msg("tg.rnaseq.restyle_only=TRUE：只重画已有气泡图/柱状图，跳过比较 1-4。")
+  log_msg("要完整分析 1-4：options(tg.rnaseq.restyle_only = FALSE); source(\"TG_RNAseq_pipeline.R\")")
   restyle_ora_bubbles()
 } else if (!isTRUE(getOption("tg.rnaseq.functions_only", FALSE))) {
   run_comparisons_1_to_4()

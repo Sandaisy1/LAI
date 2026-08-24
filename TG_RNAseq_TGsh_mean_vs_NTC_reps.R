@@ -82,10 +82,12 @@ prepare_extra_expression <- function() {
   )
 }
 
-log_msg("Extra comparisons 5-7: KD-mean vs each NTC, plus common-gene means")
 if (isTRUE(getOption("tg.rnaseq.restyle_only", FALSE))) {
+  log_msg("tg.rnaseq.restyle_only=TRUE：只重画已有图，跳过比较 5-7。")
+  log_msg("要完整分析 5-7：options(tg.rnaseq.restyle_only = FALSE); source(\"TG_RNAseq_TGsh_mean_vs_NTC_reps.R\")")
   restyle_ora_bubbles()
 } else {
+log_msg("Extra comparisons 5-7: KD-mean vs each NTC, plus common-gene means")
 prep <- prepare_extra_expression()
 
 extra_list <- list(
