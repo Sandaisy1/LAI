@@ -15,8 +15,9 @@
 # 每个比较另出 ssGSEA 与 mean z 气泡图（分数差；1-vs-1 不伪造 p）。
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
 # 不在自选通路上重新校正 p。最终气泡图：p.adjust < 0.2，再按 GeneRatio 取前 15 与前 20。
+# 另出 BP/CC/MF 合图柱状图（x=-lgP）：全库 top 10/15/20；列出通路再出全部 + top 10/15/20。
 # enrichGO 最小基因集为 1，很细的通路（1/4/8 个基因）也会测。
-# 气泡大小、坐标字体在本文件「分析参数」里改。只重画已有图：
+# 气泡大小、坐标字体在本文件「分析参数」里改。只重画已有图（含从 ORA 表补画柱状图）：
 #   options(tg.rnaseq.restyle_only = TRUE); source("TG_RNAseq_pipeline.R")
 # =============================================================================
 
@@ -116,7 +117,7 @@ fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 bubble_top_ns <- c(15, 20)
 pathway_up_top_ns <- c(10, 15, 20)  # 总 CustomGO：上调通路 mean log2FC 前 N
-ora_bar_top_ns <- c(10, 15, 20)     # BP/CC/MF 柱状图：每个 ontology 取前 N
+ora_bar_top_ns <- c(10, 15, 20)     # BP/CC/MF 柱状图：每个 ontology 取前 N；列出通路另出全部
 padj_plot_cutoff <- 0.2
 ora_min_gs_size <- 1     # 很细的通路也测（1/4/8 个基因不会因 minGSSize 被丢掉）
 ora_max_gs_size <- 500   # 仍丢掉库里 >500 基因的超大通路
@@ -897,7 +898,7 @@ write_bubble_style_note <- function(result_root) {
       "气泡大小和坐标字体在 TG_RNAseq_pipeline.R 开头改：",
       "  bubble_size_min / bubble_size_max",
       "  axis_text_y_size / axis_text_x_size",
-      "只重画已有 *_plotdata.csv（不重跑 enrichGO）：",
+      "只重画已有 *_plotdata.csv，并从 ORA 表补画 BP/CC/MF 柱状图（不重跑 enrichGO）：",
       "  options(tg.rnaseq.restyle_only = TRUE)",
       "  source(\"TG_RNAseq_pipeline.R\")"
     ),
@@ -906,29 +907,95 @@ write_bubble_style_note <- function(result_root) {
   kit
 }
 
+read_ora_table_csv <- function(path) {
+  df <- utils::read.csv(path, check.names = FALSE, stringsAsFactors = FALSE)
+  if (nrow(df) == 0) return(NULL)
+  if (!"p.adjust" %in% names(df) && "p_adjust" %in% names(df)) df$p.adjust <- df$p_adjust
+  if (!"pvalue" %in% names(df) && "p.value" %in% names(df)) df$pvalue <- df$p.value
+  if (!"Description" %in% names(df) && "description" %in% names(df)) {
+    df$Description <- df$description
+  }
+  df
+}
+
+rebuild_ora_barplots <- function(result_root = NULL) {
+  if (is.null(result_root) || !nzchar(result_root)) result_root <- result_dir
+  if (!dir.exists(result_root)) return(0L)
+  n_ok <- 0L
+  bp_files <- list.files(
+    result_root, pattern = "_ORA_GO_BP\\.csv$", full.names = TRUE, recursive = TRUE
+  )
+  for (f in bp_files) {
+    prefix <- sub("_ORA_GO_BP\\.csv$", "", f)
+    pieces <- list()
+    for (ont in c("BP", "CC", "MF")) {
+      pth <- paste0(prefix, "_ORA_GO_", ont, ".csv")
+      if (!file.exists(pth)) next
+      d <- tryCatch(read_ora_table_csv(pth), error = function(e) NULL)
+      if (is.null(d) || nrow(d) == 0) next
+      if (!"ONTOLOGY" %in% names(d)) d$ONTOLOGY <- ont
+      pieces[[ont]] <- d
+    }
+    if (length(pieces) == 0) next
+    all_ont <- dplyr::bind_rows(pieces)
+    n_ok <- n_ok + plot_ora_bar_series(
+      all_ont,
+      paste0(basename(prefix), " | ORA GO BP/CC/MF"),
+      paste0(prefix, "_ORA_GO_BP_CC_MF_barplot"),
+      n_vec = ora_bar_top_ns,
+      include_all = FALSE
+    )
+  }
+  cg_files <- list.files(
+    result_root, pattern = "_ORA_CustomGO\\.csv$", full.names = TRUE, recursive = TRUE
+  )
+  for (f in cg_files) {
+    df <- tryCatch(read_ora_table_csv(f), error = function(e) NULL)
+    if (is.null(df) || nrow(df) == 0) next
+    prefix <- sub("_ORA_CustomGO\\.csv$", "", f)
+    n_ok <- n_ok + plot_ora_bar_series(
+      df,
+      paste0(basename(prefix), " | ORA listed GO BP/CC/MF"),
+      paste0(prefix, "_ORA_CustomGO_BP_CC_MF_barplot"),
+      n_vec = ora_bar_top_ns,
+      include_all = TRUE
+    )
+  }
+  log_msg("Drew ", n_ok, " GO bar plot(s) from existing ORA tables.")
+  n_ok
+}
+
 restyle_ora_bubbles <- function(result_root = NULL) {
   if (is.null(result_root) || !nzchar(result_root)) result_root <- result_dir
   style <- current_bubble_style()
   files <- find_bubble_plotdata_files(result_root, style$only_this_csv)
-  if (length(files) == 0) {
-    stop("在 ", result_root, " 下没有找到 *_plotdata.csv。请先完整运行 TG_RNAseq_pipeline.R")
-  }
   n_ok <- 0L
-  for (f in files) {
-    df <- tryCatch(read_ora_bubble_plotdata(f), error = function(e) NULL)
-    if (is.null(df) || nrow(df) == 0) next
-    title <- if ("plot_title" %in% names(df) && nzchar(df$plot_title[1])) {
-      df$plot_title[1]
-    } else {
-      basename(sub("_plotdata\\.csv$", "", f, ignore.case = TRUE))
+  if (length(files) == 0) {
+    log_msg("在 ", result_root, " 下没有找到 *_plotdata.csv，跳过气泡图重画。")
+  } else {
+    for (f in files) {
+      df <- tryCatch(read_ora_bubble_plotdata(f), error = function(e) NULL)
+      if (is.null(df) || nrow(df) == 0) next
+      title <- if ("plot_title" %in% names(df) && nzchar(df$plot_title[1])) {
+        df$plot_title[1]
+      } else {
+        basename(sub("_plotdata\\.csv$", "", f, ignore.case = TRUE))
+      }
+      stub <- sub("_plotdata\\.csv$", "", f, ignore.case = TRUE)
+      p <- draw_ora_bubble_gg(df, title, style)
+      save_ora_bubble_gg(p, stub, style, nrow(df))
+      n_ok <- n_ok + 1L
+      log_msg("redrawn bubble: ", stub)
     }
-    stub <- sub("_plotdata\\.csv$", "", f, ignore.case = TRUE)
-    p <- draw_ora_bubble_gg(df, title, style)
-    save_ora_bubble_gg(p, stub, style, nrow(df))
-    n_ok <- n_ok + 1L
-    log_msg("redrawn bubble: ", stub)
+    log_msg("Redrew ", n_ok, " bubble plot(s).")
   }
-  log_msg("Redrew ", n_ok, " bubble plot(s).")
+  n_bar <- 0L
+  if (!nzchar(style$only_this_csv)) {
+    n_bar <- rebuild_ora_barplots(result_root)
+  }
+  if (n_ok == 0L && n_bar == 0L) {
+    stop("在 ", result_root, " 下没有找到 *_plotdata.csv 或 ORA 表。请先完整运行 TG_RNAseq_pipeline.R")
+  }
   invisible(n_ok)
 }
 
@@ -1094,6 +1161,7 @@ run_genome_enrichGO <- function(genes, go_dir, tag) {
       "全库 GO 图在本文件夹，不要只看 xlsx：",
       "  气泡图 *_ORA_GO_BP_dotplot_top15.pdf / top20.pdf（CC、MF 同）",
       "  柱状图 *_ORA_GO_BP_CC_MF_barplot_top10.pdf / top15 / top20",
+      "列出通路的同样柱状图在上一级 CustomGO/（含全部列出通路 + top10/15/20）。",
       "作图数据：气泡图同名 *_plotdata.csv。气泡大小和字体在 TG_RNAseq_pipeline.R 开头改。"
     ),
     file.path(go_dir, "00_READ_ME_气泡图在这里.txt")
@@ -1147,19 +1215,13 @@ run_genome_enrichGO <- function(genes, go_dir, tag) {
   }
   if (length(pieces) == 0) return(NULL)
   all_ont <- dplyr::bind_rows(pieces)
-  for (n_show in ora_bar_top_ns) {
-    top_tag <- paste0("top", n_show)
-    tryCatch(
-      plot_ora_ontology_bar(
-        all_ont,
-        paste0(tag, " | ORA GO BP/CC/MF ", top_tag,
-               " (p.adjust<", padj_plot_cutoff, ", by -lgP)"),
-        file.path(go_dir, paste0(tag, "_ORA_GO_BP_CC_MF_barplot_", top_tag)),
-        n_per_ont = n_show
-      ),
-      error = function(e) log_msg("GO barplot failed (", top_tag, "): ", e$message)
-    )
-  }
+  plot_ora_bar_series(
+    all_ont,
+    paste0(tag, " | ORA GO BP/CC/MF"),
+    file.path(go_dir, paste0(tag, "_ORA_GO_BP_CC_MF_barplot")),
+    n_vec = ora_bar_top_ns,
+    include_all = FALSE
+  )
   all_ont
 }
 
@@ -1218,7 +1280,10 @@ prepare_ora_bar_df <- function(ora, n_per_ont) {
     if (!is.null(id_col)) sub <- sub[!duplicated(sub[[id_col]]), , drop = FALSE]
     if (!"pvalue" %in% names(sub)) sub$pvalue <- NA_real_
     sub <- sub[order(sub$p.adjust, sub$pvalue), , drop = FALSE]
-    utils::head(sub, n_per_ont)
+    if (length(n_per_ont) == 1 && is.finite(n_per_ont) && n_per_ont > 0) {
+      sub <- utils::head(sub, as.integer(n_per_ont))
+    }
+    sub
   })
   out <- dplyr::bind_rows(pieces)
   if (is.null(out) || nrow(out) == 0) return(NULL)
@@ -1232,7 +1297,7 @@ prepare_ora_bar_df <- function(ora, n_per_ont) {
     y_levels <- c(y_levels, sub$label)
   }
   out$label <- factor(out$label, levels = y_levels)
-  out$ONTOLOGY <- factor(out$ONTOLOGY, levels = c("BP", "CC", "MF"))
+  out$ONTOLOGY <- droplevels(factor(out$ONTOLOGY, levels = c("BP", "CC", "MF")))
   out
 }
 
@@ -1248,10 +1313,19 @@ plot_ora_ontology_bar <- function(ora, title, outfile, n_per_ont) {
   write_table(df, paste0(outfile))
   style <- current_bubble_style()
   pal <- c(BP = "#E74C3C", CC = "#5DADE2", MF = "#27AE60")
-  labs_ont <- c(BP = "生物过程 (BP)", CC = "细胞组成 (CC)", MF = "分子功能 (MF)")
+  labs_ont <- c(BP = "生物过程", CC = "细胞组成", MF = "分子功能")
   p <- ggplot2::ggplot(df, ggplot2::aes(x = neglogp, y = label, fill = ONTOLOGY)) +
-    ggplot2::geom_col(width = 0.75) +
-    ggplot2::scale_fill_manual(values = pal, labels = labs_ont, breaks = c("BP", "CC", "MF")) +
+    ggplot2::geom_col(width = 0.92) +
+    ggplot2::scale_fill_manual(
+      values = pal, labels = labs_ont, breaks = c("BP", "CC", "MF"), drop = FALSE
+    ) +
+    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.06))) +
+    ggplot2::facet_grid(
+      ONTOLOGY ~ .,
+      scales = "free_y",
+      space = "free_y",
+      labeller = ggplot2::as_labeller(labs_ont)
+    ) +
     ggplot2::theme_bw(base_size = style$base_size) +
     ggplot2::theme(
       plot.title = ggplot2::element_text(size = style$title_size),
@@ -1261,21 +1335,64 @@ plot_ora_ontology_bar <- function(ora, title, outfile, n_per_ont) {
       legend.text = ggplot2::element_text(size = style$legend_text_size),
       legend.title = ggplot2::element_blank(),
       legend.position = "bottom",
+      legend.direction = "horizontal",
+      strip.text.y = ggplot2::element_blank(),
+      strip.background = ggplot2::element_blank(),
+      panel.spacing.y = grid::unit(0.45, "lines"),
       panel.grid.major.y = ggplot2::element_blank(),
       panel.grid.minor = ggplot2::element_blank()
     ) +
     ggplot2::labs(
       title = title,
-      x = "-lgP (p.adjust)",
+      x = "-lgP",
       y = NULL,
       fill = NULL
     )
   width <- if (is.finite(style$plot_width)) style$plot_width else 8
   height <- style$plot_height
   if (length(height) != 1 || !is.finite(height)) {
-    height <- max(5.5, min(16, 0.28 * nrow(df) + 2.6))
+    height <- max(5.5, min(18, 0.28 * nrow(df) + 2.8))
   }
   save_gg(p, outfile, width = width, height = height)
+  invisible(df)
+}
+
+plot_ora_bar_series <- function(ora, title_prefix, outfile_prefix,
+                                n_vec = ora_bar_top_ns, include_all = FALSE) {
+  n_ok <- 0L
+  if (isTRUE(include_all)) {
+    ok <- tryCatch({
+      plot_ora_ontology_bar(
+        ora,
+        paste0(title_prefix, " (p.adjust<", padj_plot_cutoff, ", all listed, by -lgP)"),
+        outfile_prefix,
+        n_per_ont = NA_real_
+      )
+      TRUE
+    }, error = function(e) {
+      log_msg("GO barplot (all listed) failed: ", e$message)
+      FALSE
+    })
+    if (isTRUE(ok)) n_ok <- n_ok + 1L
+  }
+  for (n_show in n_vec) {
+    top_tag <- paste0("top", n_show)
+    ok <- tryCatch({
+      plot_ora_ontology_bar(
+        ora,
+        paste0(title_prefix, " ", top_tag,
+               " (p.adjust<", padj_plot_cutoff, ", by -lgP)"),
+        paste0(outfile_prefix, "_", top_tag),
+        n_per_ont = n_show
+      )
+      TRUE
+    }, error = function(e) {
+      log_msg("GO barplot failed (", top_tag, "): ", e$message)
+      FALSE
+    })
+    if (isTRUE(ok)) n_ok <- n_ok + 1L
+  }
+  n_ok
 }
 
 draw_pathway_mean_fc_bar <- function(df, title, outfile) {
@@ -1634,6 +1751,16 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
   cg_dir <- file.path(outdir, "CustomGO")
   go_dir <- file.path(outdir, "GO")
   dir.create(cg_dir, recursive = TRUE, showWarnings = FALSE)
+  writeLines(
+    c(
+      "本文件夹是列出通路（metastasis_custom_genes.txt）的图，不要只看 xlsx：",
+      "  气泡图 *_ORA_CustomGO_dotplot_top15.pdf / top20.pdf",
+      "  柱状图 *_ORA_CustomGO_BP_CC_MF_barplot.pdf（全部 p.adjust<0.2 的列出通路）",
+      "  以及 *_barplot_top10.pdf / top15 / top20",
+      "颜色：红=生物过程，蓝=细胞组成，绿=分子功能；x 轴是 -lgP。"
+    ),
+    file.path(cg_dir, "00_READ_ME_列出通路柱状图在这里.txt")
+  )
   genome_ora <- tryCatch(
     run_genome_enrichGO(sub$gene, go_dir, tag),
     error = function(e) {
@@ -1680,19 +1807,13 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
     )
   }
   if (!is.null(extracted$all_listed)) {
-    for (n_show in ora_bar_top_ns) {
-      top_tag <- paste0("top", n_show)
-      tryCatch(
-        plot_ora_ontology_bar(
-          extracted$all_listed,
-          paste0(title, " | ORA listed GO BP/CC/MF ", top_tag,
-                 " (p.adjust<", padj_plot_cutoff, ", by -lgP)"),
-          file.path(cg_dir, paste0(tag, "_ORA_CustomGO_BP_CC_MF_barplot_", top_tag)),
-          n_per_ont = n_show
-        ),
-        error = function(e) log_msg("listed GO barplot failed (", top_tag, "): ", e$message)
-      )
-    }
+    plot_ora_bar_series(
+      extracted$all_listed,
+      paste0(title, " | ORA listed GO BP/CC/MF"),
+      file.path(cg_dir, paste0(tag, "_ORA_CustomGO_BP_CC_MF_barplot")),
+      n_vec = ora_bar_top_ns,
+      include_all = TRUE
+    )
   }
 }
 
@@ -1708,6 +1829,7 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "  1) FoldChange 上调 FC >= 1 / 1.25 / 1.5 / 2",
       "  2) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300",
       "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图与柱状图。",
+      "CustomGO/：列出通路气泡图，以及 BP/CC/MF 柱状图（全部列出通路 + top10/15/20）。",
       "最终气泡图只保留 p.adjust<0.2，再按 GeneRatio 取前15和前20。",
       "总 CustomGO 柱状图：1) 上调+下调全部；2) 上调 mean log2FC 前10/15/20。",
       "PathwayScore/：ssGSEA 与 mean z 气泡图（分数差；升高通路 top10/15/20）。",
