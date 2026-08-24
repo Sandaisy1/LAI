@@ -10,8 +10,10 @@
 #
 # 用法：
 #   setwd("E:/R/TG_BRCA/TG")
+#   options(tg.rnaseq.restyle_only = FALSE)
 #   source("TG_RNAseq_pipeline.R")                 # 比较 1–4
 #   source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–7
+# 若只 source 本文件：会先跑 1–4（尚未跑过时），再跑 5–7。
 # =============================================================================
 
 if (!exists("analyze_one_comparison", mode = "function") ||
@@ -82,11 +84,25 @@ prepare_extra_expression <- function() {
   )
 }
 
+ensure_comparisons_1_to_4 <- function() {
+  if (isTRUE(getOption("tg.rnaseq.comparisons_1_4_done", FALSE))) {
+    log_msg("Comparisons 1-4 already finished in this session; continue to 5-7")
+    return(invisible(TRUE))
+  }
+  if (!exists("run_comparisons_1_to_4", mode = "function")) {
+    stop("找不到 run_comparisons_1_to_4()，请先 source(\"TG_RNAseq_pipeline.R\")")
+  }
+  log_msg("Comparisons 1-4 have not run yet; running them before 5-7")
+  run_comparisons_1_to_4()
+  invisible(TRUE)
+}
+
 if (isTRUE(getOption("tg.rnaseq.restyle_only", FALSE))) {
-  log_msg("tg.rnaseq.restyle_only=TRUE：只重画已有图，跳过比较 5-7。")
-  log_msg("要完整分析 5-7：options(tg.rnaseq.restyle_only = FALSE); source(\"TG_RNAseq_TGsh_mean_vs_NTC_reps.R\")")
+  log_msg("tg.rnaseq.restyle_only=TRUE：只重画已有图，跳过比较 1-7。")
+  log_msg("要完整分析：options(tg.rnaseq.restyle_only = FALSE); source(\"TG_RNAseq_pipeline.R\"); source(\"TG_RNAseq_TGsh_mean_vs_NTC_reps.R\")")
   restyle_ora_bubbles()
 } else {
+ensure_comparisons_1_to_4()
 log_msg("Extra comparisons 5-7: KD-mean vs each NTC, plus common-gene means")
 prep <- prepare_extra_expression()
 

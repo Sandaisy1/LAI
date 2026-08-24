@@ -17,8 +17,9 @@
 
 ```r
 setwd("E:/R/TG_BRCA/TG")
+options(tg.rnaseq.restyle_only = FALSE)
 source("TG_RNAseq_pipeline.R")                 # 比较 1–4
-source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–7
+source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–7（若 1–4 还没跑，会先补跑）
 ```
 
 先过滤低表达，再用 Cuffdiff **FPKM** 做 `log2(x+1)` 后做比较。不再读 fragment count，也不做 DESeq2 size factor。不要用未过滤的值算 FC。

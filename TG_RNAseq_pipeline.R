@@ -2388,6 +2388,7 @@ run_comparisons_1_to_4 <- function() {
 
   base::writeLines(capture.output(sessionInfo()), file.path(log_dir, "sessionInfo.txt"))
   log_msg("Comparisons 1-4 done. Results in: ", result_dir)
+  options(tg.rnaseq.comparisons_1_4_done = TRUE)
 }
 
 if (isTRUE(getOption("tg.rnaseq.restyle_only", FALSE))) {
