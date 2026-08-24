@@ -13,6 +13,7 @@
 # 分层只两种（均 p<0.05）：上调 FC>=1/1.25/1.5/2，以及上调 top 50–300。
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
 # 不在自选通路上重新校正 p。最终气泡图：p.adjust < 0.2，再按 GeneRatio 取前 15 与前 20。
+# enrichGO 最小基因集为 1，很细的通路（1/4/8 个基因）也会测。
 # 气泡大小、坐标字体在本文件「分析参数」里改。只重画已有图：
 #   options(tg.rnaseq.restyle_only = TRUE); source("TG_RNAseq_pipeline.R")
 # =============================================================================
@@ -113,6 +114,8 @@ fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 bubble_top_ns <- c(15, 20)
 padj_plot_cutoff <- 0.2
+ora_min_gs_size <- 1     # 很细的通路也测（1/4/8 个基因不会因 minGSSize 被丢掉）
+ora_max_gs_size <- 500   # 仍丢掉库里 >500 基因的超大通路
 
 # 气泡图外观（改这里即可；不必另开文件）
 bubble_size_min <- 6     # 最小气泡
@@ -1060,8 +1063,8 @@ run_genome_enrichGO <- function(genes, go_dir, tag) {
         pAdjustMethod = "BH",
         pvalueCutoff = 1,
         qvalueCutoff = 1,
-        minGSSize = 10,
-        maxGSSize = 500,
+        minGSSize = ora_min_gs_size,
+        maxGSSize = ora_max_gs_size,
         readable = TRUE
       ),
       error = function(e) {
@@ -1245,7 +1248,9 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
   if (length(extracted$missing) > 0) {
     writeLines(
       c(
-        "下列自选 GO 未出现在全基因组 enrichGO 结果中（可能超出 minGSSize/maxGSSize，或该子集没有注释到）。",
+        "下列自选 GO 未出现在全基因组 enrichGO 结果中。",
+        "常见原因：该子集差异基因没有注释到该通路，或通路在库里大于 maxGSSize。",
+        "minGSSize 已设为 1，不会因为通路很细（1/4/8 个基因）而丢掉。",
         "气泡图使用全库 GeneRatio / p.adjust / Count，未重新计算这些缺失项。",
         extracted$missing
       ),
