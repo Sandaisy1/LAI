@@ -698,6 +698,11 @@ mean_z_score_matrix <- function(log_mat, go_sets) {
     score <- t(score)
     colnames(score) <- colnames(z)
   }
+  keep <- rowSums(is.finite(score)) > 0
+  if (any(!keep)) {
+    log_msg("mean z: drop ", sum(!keep), " GO with no expressed genes")
+    score <- score[keep, , drop = FALSE]
+  }
   score
 }
 
@@ -992,6 +997,14 @@ plot_heatmap <- function(heat_mat, sample_info, genes, title, outfile) {
     return(invisible(NULL))
   }
   sub <- heat_mat[genes, , drop = FALSE]
+  sub[!is.finite(sub)] <- NA
+  rsd <- apply(sub, 1, stats::sd, na.rm = TRUE)
+  sub <- sub[is.finite(rsd) & rsd > 0, , drop = FALSE]
+  if (nrow(sub) < 2) {
+    log_msg("Heatmap skipped (no variable genes): ", title)
+    writeLines("heatmap skipped: no variable genes", paste0(outfile, "_EMPTY.txt"))
+    return(invisible(NULL))
+  }
   ann <- data.frame(Group = sample_info$group, row.names = sample_info$sample)
   ann <- ann[colnames(sub), , drop = FALSE]
   pal <- c(NTC = "#4C78A8", TG_sh1 = "#F58518", TG_sh5 = "#54A24B")
@@ -1005,7 +1018,14 @@ plot_heatmap <- function(heat_mat, sample_info, genes, title, outfile) {
     )
     tryCatch(
       do.call(pheatmap::pheatmap, c(args, list(clustering_distance_rows = "correlation"))),
-      error = function(e) do.call(pheatmap::pheatmap, c(args, list(clustering_distance_rows = "euclidean")))
+      error = function(e1) {
+        tryCatch(
+          do.call(pheatmap::pheatmap, c(args, list(clustering_distance_rows = "euclidean"))),
+          error = function(e2) {
+            do.call(pheatmap::pheatmap, c(args, list(cluster_rows = FALSE, cluster_cols = FALSE)))
+          }
+        )
+      }
     )
   }
   grDevices::pdf(paste0(outfile, ".pdf"), width = 8, height = max(6, min(18, 0.18 * nrow(sub) + 3)))
@@ -1253,18 +1273,42 @@ plot_pathway_mean_fc <- function(de, go_tab, go_sets, title, outfile) {
 plot_score_heatmap <- function(score, sample_info, go_tab, title, outfile) {
   if (is.null(score) || nrow(score) < 1 || ncol(score) < 2) return(invisible(NULL))
   plot_mat <- as.matrix(score)
+  storage.mode(plot_mat) <- "double"
+  plot_mat[!is.finite(plot_mat)] <- NA
+  keep <- apply(plot_mat, 1, function(x) all(is.finite(x)))
+  if (any(!keep)) {
+    log_msg("Score heatmap drop ", sum(!keep), " GO with NA/Inf: ", title)
+    plot_mat <- plot_mat[keep, , drop = FALSE]
+  }
+  if (nrow(plot_mat) < 1) {
+    writeLines("score heatmap skipped: no finite pathway scores", paste0(outfile, "_EMPTY.txt"))
+    return(invisible(NULL))
+  }
+  rsd <- apply(plot_mat, 1, stats::sd, na.rm = TRUE)
+  var_ok <- is.finite(rsd) & rsd > 0
+  cluster_rows <- sum(var_ok) >= 2
+  if (!all(var_ok) && any(var_ok)) {
+    plot_mat <- plot_mat[var_ok, , drop = FALSE]
+  }
   lab <- go_tab$name[match(rownames(plot_mat), go_tab$go_id)]
   lab[is.na(lab) | !nzchar(lab)] <- rownames(plot_mat)
   rownames(plot_mat) <- make.unique(paste0(lab, " (", rownames(plot_mat), ")"))
   ann <- data.frame(Group = sample_info$group, row.names = sample_info$sample)
   ann <- ann[colnames(plot_mat), , drop = FALSE]
   pal <- c(NTC = "#4C78A8", TG_sh1 = "#F58518", TG_sh5 = "#54A24B")
+  args <- list(
+    mat = plot_mat, scale = "none", annotation_col = ann,
+    annotation_colors = list(Group = pal[names(pal) %in% unique(ann$Group)]),
+    main = title, fontsize_row = 8,
+    color = colorRampPalette(rev(RColorBrewer::brewer.pal(9, "RdBu")))(100)
+  )
   draw <- function() {
-    pheatmap::pheatmap(
-      plot_mat, scale = "none", annotation_col = ann,
-      annotation_colors = list(Group = pal[names(pal) %in% unique(ann$Group)]),
-      main = title, fontsize_row = 8,
-      color = colorRampPalette(rev(RColorBrewer::brewer.pal(9, "RdBu")))(100)
+    tryCatch(
+      do.call(pheatmap::pheatmap, c(args, list(cluster_rows = cluster_rows))),
+      error = function(e) {
+        log_msg("Score heatmap cluster failed, draw without clustering: ", e$message)
+        do.call(pheatmap::pheatmap, c(args, list(cluster_rows = FALSE, cluster_cols = FALSE)))
+      }
     )
   }
   grDevices::pdf(paste0(outfile, ".pdf"), width = 9, height = max(5, min(16, 0.28 * nrow(plot_mat) + 3)))
@@ -1643,17 +1687,23 @@ write_pathway_expression <- function(log_mat, heat_mat, sample_info, go_tab, go_
   assign("pathway_score_list", scores, envir = .GlobalEnv)
   for (m in names(scores)) {
     save_pathway_score_csv(scores[[m]], file.path(out, paste0("pathway_scores_", m, ".csv")))
-    plot_score_heatmap(
-      scores[[m]], sample_info, go_tab,
-      paste0("Listed GO pathway expression (", m, ")"),
-      file.path(out, paste0("pathway_score_heatmap_", m))
+    tryCatch(
+      plot_score_heatmap(
+        scores[[m]], sample_info, go_tab,
+        paste0("Listed GO pathway expression (", m, ")"),
+        file.path(out, paste0("pathway_score_heatmap_", m))
+      ),
+      error = function(e) log_msg("score heatmap ", m, " failed: ", e$message)
     )
   }
   primary_name <- if ("ssgsea" %in% names(scores)) "ssgsea" else "mean_z"
-  plot_score_heatmap(
-    scores[[primary_name]], sample_info, go_tab,
-    paste0("Listed GO pathway expression (", primary_name, ")"),
-    file.path(out, "pathway_score_heatmap")
+  tryCatch(
+    plot_score_heatmap(
+      scores[[primary_name]], sample_info, go_tab,
+      paste0("Listed GO pathway expression (", primary_name, ")"),
+      file.path(out, "pathway_score_heatmap")
+    ),
+    error = function(e) log_msg("primary score heatmap failed: ", e$message)
   )
   per <- file.path(out, "per_GO")
   dir.create(per, recursive = TRUE, showWarnings = FALSE)
