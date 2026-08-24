@@ -11,6 +11,7 @@
 # 比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–6 而改本文件主流程。
 #
 # 分层只两种（均 p<0.05）：上调 FC>=1/1.25/1.5/2，以及上调 top 50–300。
+# 总 CustomGO 柱状图：上调+下调全部，以及上调通路 mean log2FC 前 10/15/20。
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
 # 不在自选通路上重新校正 p。最终气泡图：p.adjust < 0.2，再按 GeneRatio 取前 15 与前 20。
 # enrichGO 最小基因集为 1，很细的通路（1/4/8 个基因）也会测。
@@ -113,6 +114,7 @@ p_cutoffs <- c("p0.05" = 0.05)
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 bubble_top_ns <- c(15, 20)
+pathway_up_top_ns <- c(10, 15, 20)  # 总 CustomGO：上调通路 mean log2FC 前 N
 padj_plot_cutoff <- 0.2
 ora_min_gs_size <- 1     # 很细的通路也测（1/4/8 个基因不会因 minGSSize 被丢掉）
 ora_max_gs_size <- 500   # 仍丢掉库里 >500 基因的超大通路
@@ -1133,6 +1135,27 @@ plot_ora_bubble <- function(ora, title, outfile, n_show) {
   save_ora_bubble_gg(p, outfile, style, nrow(df))
 }
 
+draw_pathway_mean_fc_bar <- function(df, title, outfile) {
+  plot_df <- df
+  plot_df$label <- paste0(plot_df$Description, " (", plot_df$go_id, ")")
+  plot_df$label <- factor(plot_df$label, levels = plot_df$label[order(plot_df$mean_log2FC)])
+  plot_df$is_up <- factor(plot_df$mean_log2FC > 0, levels = c(FALSE, TRUE))
+  p <- ggplot2::ggplot(
+    plot_df,
+    ggplot2::aes(x = mean_log2FC, y = label, fill = is_up)
+  ) +
+    ggplot2::geom_col() +
+    ggplot2::scale_fill_manual(
+      values = c("FALSE" = "#4C78A8", "TRUE" = "#D62828"),
+      drop = FALSE,
+      guide = "none"
+    ) +
+    ggplot2::geom_vline(xintercept = 0, linetype = 2, color = "grey40") +
+    ggplot2::theme_bw(base_size = 12) +
+    ggplot2::labs(title = title, x = "Mean log2FC of genes in GO", y = NULL)
+  save_gg(p, outfile, width = 10, height = max(5, min(16, 0.35 * nrow(plot_df) + 3)))
+}
+
 plot_pathway_mean_fc <- function(de, go_tab, go_sets, title, outfile) {
   rows <- lapply(seq_len(nrow(go_tab)), function(i) {
     id <- go_tab$go_id[i]
@@ -1152,16 +1175,34 @@ plot_pathway_mean_fc <- function(de, go_tab, go_sets, title, outfile) {
   df <- do.call(rbind, rows)
   write_table(df, paste0(outfile, "_table"))
   df <- df[is.finite(df$mean_log2FC), , drop = FALSE]
-  if (nrow(df) == 0) return(invisible(df))
-  df$label <- paste0(df$Description, " (", df$go_id, ")")
-  df$label <- factor(df$label, levels = df$label[order(df$mean_log2FC)])
-  p <- ggplot2::ggplot(df, ggplot2::aes(x = mean_log2FC, y = label, fill = mean_log2FC > 0)) +
-    ggplot2::geom_col() +
-    ggplot2::scale_fill_manual(values = c("#4C78A8", "#D62828"), guide = "none") +
-    ggplot2::geom_vline(xintercept = 0, linetype = 2, color = "grey40") +
-    ggplot2::theme_bw(base_size = 12) +
-    ggplot2::labs(title = title, x = "Mean log2FC of genes in GO", y = NULL)
-  save_gg(p, outfile, width = 10, height = max(5, min(16, 0.35 * nrow(df) + 3)))
+  if (nrow(df) == 0) {
+    writeLines("no listed GO with finite mean log2FC", paste0(outfile, "_EMPTY.txt"))
+    return(invisible(df))
+  }
+
+  draw_pathway_mean_fc_bar(
+    df,
+    paste0(title, " | up and down"),
+    outfile
+  )
+
+  up <- df[df$mean_log2FC > 0, , drop = FALSE]
+  up <- up[order(-up$mean_log2FC, -up$n_up, up$go_id), , drop = FALSE]
+  write_table(up, paste0(outfile, "_up_table"))
+  if (nrow(up) == 0) {
+    writeLines("no upregulated listed GO (mean log2FC > 0)", paste0(outfile, "_up_EMPTY.txt"))
+    return(invisible(df))
+  }
+  for (n_show in pathway_up_top_ns) {
+    top_tag <- paste0("up_top", n_show)
+    sub <- utils::head(up, n_show)
+    write_table(sub, paste0(outfile, "_", top_tag))
+    draw_pathway_mean_fc_bar(
+      sub,
+      paste0(title, " | upregulated ", top_tag),
+      paste0(outfile, "_", top_tag)
+    )
+  }
   df
 }
 
@@ -1295,6 +1336,7 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "  2) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300",
       "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图（top15 与 top20）。",
       "最终气泡图只保留 p.adjust<0.2，再按 GeneRatio 取前15和前20。",
+      "总 CustomGO 柱状图：1) 上调+下调全部；2) 上调 mean log2FC 前10/15/20。",
       "气泡大小/坐标字体：改 TG_RNAseq_pipeline.R 开头的 bubble_size_* 和 axis_text_*。",
       "只重画：options(tg.rnaseq.restyle_only = TRUE); source('TG_RNAseq_pipeline.R')。",
       paste("p-value estimated:", have_p)
