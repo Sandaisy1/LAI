@@ -39,11 +39,11 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
 2. `p < 0.05` 后上调 top 50 / 75 / 100 / 150 / 200 / 250 / 300
 3. `p < 0.01` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2
 4. `p < 0.01` 后上调 top 50–300
-5. `AllDE`：全部上调 + 下调（能估 p 时先滤 `p < 0.05`）
+5. `AllDE`：全部上调 + 下调（能估 p 时先滤 `p < 0.05`）。同时单独出 `UpDE/`（只上调）和 `DownDE/`（只下调）
 
 无法估 p 时仍按 FC/排名分层，写 `NO_PVALUE.txt`，不伪造 p。
 
-每个非空子集：差异基因表、火山图、热图。气泡图**先做全基因组 `enrichGO`**，再抽出 `metastasis_custom_genes.txt` 中通路的 GeneRatio、p.adjust、Count（不在自选通路上重新校正 p）。分别画 **p.adjust 排名前 15 与前 20**；气泡图 y 轴按 **GeneRatio 从大到小**，最大的在最上面。
+每个非空子集：差异基因表、火山图、热图。`GO/` 里有全库 BP/CC/MF 表和气泡图（`*_dotplot_top15.pdf` 与 `top20.pdf`）。气泡图**先做全基因组 `enrichGO`**，再抽出 `metastasis_custom_genes.txt` 中通路的 GeneRatio、p.adjust、Count（不在自选通路上重新校正 p）。分别画 **p.adjust 排名前 15 与前 20**；气泡图 y 轴按 **GeneRatio 从大到小**，最大的在最上面。
 
 全库 GO 表在各子集的 `GO/`（`*_ORA_GO_BP.csv` 等）；抽出的通路在 `CustomGO/`。
 

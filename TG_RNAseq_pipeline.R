@@ -533,13 +533,32 @@ select_by_topn <- function(de, n, p_cutoff, have_pvalue) {
   utils::head(sig, n)
 }
 
-select_allde <- function(de, p_cutoff, have_pvalue) {
-  keep <- !is.na(de$log2FC) & de$log2FC != 0 & passes_p(de$pvalue, p_cutoff, have_pvalue)
-  if ("log2FC_sh1" %in% names(de) && "log2FC_sh5" %in% names(de)) {
-    same_dir <- (de$log2FC_sh1 > 0 & de$log2FC_sh5 > 0) | (de$log2FC_sh1 < 0 & de$log2FC_sh5 < 0)
-    keep <- keep & same_dir
+select_by_direction <- function(de, direction = c("up", "down", "all"), p_cutoff, have_pvalue) {
+  direction <- match.arg(direction)
+  keep <- !is.na(de$log2FC) & passes_p(de$pvalue, p_cutoff, have_pvalue)
+  has_arms <- all(c("log2FC_sh1", "log2FC_sh5") %in% names(de))
+  if (direction == "up") {
+    keep <- keep & de$log2FC > 0
+    if (has_arms) keep <- keep & de$log2FC_sh1 > 0 & de$log2FC_sh5 > 0
+  } else if (direction == "down") {
+    keep <- keep & de$log2FC < 0
+    if (has_arms) keep <- keep & de$log2FC_sh1 < 0 & de$log2FC_sh5 < 0
+  } else {
+    keep <- keep & de$log2FC != 0
+    if (has_arms) {
+      keep <- keep & (
+        (de$log2FC_sh1 > 0 & de$log2FC_sh5 > 0) |
+          (de$log2FC_sh1 < 0 & de$log2FC_sh5 < 0)
+      )
+    }
   }
-  de[keep, , drop = FALSE]
+  out <- de[keep, , drop = FALSE]
+  if (direction == "down") {
+    out <- out[order(out$log2FC, decreasing = FALSE), , drop = FALSE]
+  } else {
+    out <- out[order(out$log2FC, decreasing = TRUE), , drop = FALSE]
+  }
+  out
 }
 
 # -----------------------------------------------------------------------------
@@ -816,6 +835,15 @@ ora_df_from_enrich <- function(ego, ont) {
 # BH 在全库 GO 条目上校正。pvalueCutoff=1 只为留下自选通路，不改 p.adjust。
 run_genome_enrichGO <- function(genes, go_dir, tag) {
   dir.create(go_dir, recursive = TRUE, showWarnings = FALSE)
+  writeLines(
+    c(
+      "全库 GO 气泡图在本文件夹，不要只看 xlsx：",
+      "  *_ORA_GO_BP_dotplot_top15.pdf / top20.pdf",
+      "  *_ORA_GO_CC_dotplot_top15.pdf / top20.pdf",
+      "  *_ORA_GO_MF_dotplot_top15.pdf / top20.pdf"
+    ),
+    file.path(go_dir, "00_READ_ME_气泡图在这里.txt")
+  )
   entrez <- unique(map_to_entrez(genes)$entrez)
   if (length(entrez) < 3) {
     writeLines(
@@ -847,6 +875,18 @@ run_genome_enrichGO <- function(genes, go_dir, tag) {
     df <- ora_df_from_enrich(ego, ont)
     if (!is.null(df)) {
       write_table(df, file.path(go_dir, paste0(tag, "_ORA_GO_", ont)))
+      for (n_show in bubble_top_ns) {
+        top_tag <- paste0("top", n_show)
+        tryCatch(
+          plot_ora_bubble(
+            df,
+            paste0(tag, " | ORA GO ", ont, " ", top_tag, " (not GSEA)"),
+            file.path(go_dir, paste0(tag, "_ORA_GO_", ont, "_dotplot_", top_tag)),
+            n_show = n_show
+          ),
+          error = function(e) log_msg("GO ", ont, " bubble failed (", top_tag, "): ", e$message)
+        )
+      }
       pieces[[ont]] <- df
     }
   }
@@ -875,7 +915,7 @@ extract_listed_go_ora <- function(genome_ora, go_tab) {
 plot_ora_bubble <- function(ora, title, outfile, n_show) {
   df <- ora
   if (is.null(df) || nrow(df) == 0) {
-    writeLines("no listed GO terms in genome-wide enrichGO", paste0(outfile, "_EMPTY.txt"))
+    writeLines("no GO terms to plot", paste0(outfile, "_EMPTY.txt"))
     return(invisible(NULL))
   }
   if (!"GeneRatio_num" %in% names(df)) {
@@ -1075,9 +1115,9 @@ run_five_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
   writeLines(
     c(
       "本比较只分析 metastasis_custom_genes.txt 列出的 GO 通路表达。",
-      "分层结果在 p0.05/ 、p0.01/ 、AllDE/ 。",
-      "每个非空子集：差异表、火山图、热图。",
-      "先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio/p.adjust/Count 画气泡图（分别前15和前20；GeneRatio 最大在最上面）。",
+      "分层结果在 p0.05/ 、p0.01/ 、UpDE/ 、DownDE/ 、AllDE/ 。",
+      "每个非空子集：差异表、火山图、热图；GO/ 里有全库 BP/CC/MF 气泡图（top15 与 top20）。",
+      "先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio/p.adjust/Count 画 CustomGO 气泡图（分别前15和前20；GeneRatio 最大在最上面）。",
       paste("p-value estimated:", have_p)
     ),
     file.path(base, "00_READ_ME.txt")
@@ -1116,15 +1156,24 @@ run_five_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
     }
   }
 
-  all_p <- if (have_p) 0.05 else 1
-  all_sub <- select_allde(de, all_p, have_p)
-  emit_subset_analysis(
-    comp_name, all_sub, "AllDE",
-    paste0(comp_name, " | AllDE up+down", if (have_p) " (p<0.05)" else " (FC only)"),
-    file.path(base, "AllDE"),
-    full_de, heat_mat, sample_info, go_tab, go_sets, pathway_genes,
-    fc_line = 1, p_line = 0.05
+  dir_p <- if (have_p) 0.05 else 1
+  dir_specs <- list(
+    UpDE = list(direction = "up", label = "upregulated only"),
+    DownDE = list(direction = "down", label = "downregulated only"),
+    AllDE = list(direction = "all", label = "up+down together")
   )
+  for (dir_id in names(dir_specs)) {
+    spec <- dir_specs[[dir_id]]
+    sub <- select_by_direction(de, spec$direction, dir_p, have_p)
+    emit_subset_analysis(
+      comp_name, sub, dir_id,
+      paste0(comp_name, " | ", dir_id, " | ", spec$label,
+             if (have_p) " (p<0.05)" else " (FC only)"),
+      file.path(base, dir_id),
+      full_de, heat_mat, sample_info, go_tab, go_sets, pathway_genes,
+      fc_line = 1, p_line = 0.05
+    )
+  }
 
   tryCatch(
     plot_pathway_mean_fc(
