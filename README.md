@@ -18,12 +18,12 @@
 ```r
 setwd("E:/R/TG_BRCA/TG")
 source("TG_RNAseq_pipeline.R")                 # 比较 1–4
-source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
+source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–7
 ```
 
-先过滤低表达，再用 Cuffdiff **FPKM** 做 `log2(x+1)` 后做六组比较。不再读 fragment count，也不做 DESeq2 size factor。不要用未过滤的值算 FC。
+先过滤低表达，再用 Cuffdiff **FPKM** 做 `log2(x+1)` 后做比较。不再读 fragment count，也不做 DESeq2 size factor。不要用未过滤的值算 FC。
 
-## 六组比较（各自单独出图）
+## 七组比较（各自单独出图）
 
 1. 四个 1-vs-1：`TG_sh1 vs NTC_rep0`、`TG_sh5 vs NTC_rep0`、`TG_sh1 vs NTC_rep1`、`TG_sh5 vs NTC_rep1`
 2. `mean(TG_sh1, TG_sh5)` vs `mean(NTC_rep0, NTC_rep1)`
@@ -31,6 +31,7 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
 4. 相对 `NTC_rep1` 的共同上调
 5. `mean(TG_sh1, TG_sh5)` vs `NTC_rep0`（不要混入 NTC_rep1）
 6. `mean(TG_sh1, TG_sh5)` vs `NTC_rep1`（不要混入 NTC_rep0）
+7. 先找 **TG_sh1 与 TG_sh5 都检测到** 的基因，以及 **NTC_rep0 与 NTC_rep1 都检测到** 的基因（FPKM > 0），取交集后再 `mean(common KD)` vs `mean(common NTC)`
 
 ## 两套分层（每组比较都跑，每档单独出图）
 
@@ -83,5 +84,7 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1/CustomGO/FC_1_ORA_CustomGO_BP_CC_MF_b
 results/TG_sh1_vs_NTC_rep0/TopRank/top100/GO/top100_ORA_GO_BP_CC_MF_barplot_top15.pdf
 results/TG_sh1_vs_NTC_rep0/PathwayScore/TG_sh1_vs_NTC_rep0_ssgsea_dotplot_up_top15.pdf
 results/TG_sh1_vs_NTC_rep0/PathwayScore/TG_sh1_vs_NTC_rep0_mean_z_dotplot_up_top15.pdf
+results/mean_common_TGsh_vs_mean_common_NTC/00_COMMON_GENES.txt
+results/mean_common_TGsh_vs_mean_common_NTC/FoldChange/FC_1.5/FC_1.5_DE_selected_genes.csv
 results/00_PathwayExpression/pathway_score_heatmap_ssgsea.pdf
 ```

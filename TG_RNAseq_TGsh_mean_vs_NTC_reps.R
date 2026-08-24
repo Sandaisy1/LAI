@@ -1,19 +1,22 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# 额外两组（不修改 TG_RNAseq_pipeline.R 的比较 1–4）
+# 额外比较（不修改 TG_RNAseq_pipeline.R 的比较 1–4）
 #   5) mean(TG_sh1, TG_sh5) vs NTC_rep0
 #   6) mean(TG_sh1, TG_sh5) vs NTC_rep1
+#   7) mean(common(TG_sh1 & TG_sh5)) vs mean(common(NTC_rep0 & NTC_rep1))
+#      先找两 KD 都检测到的基因、两 NTC 都检测到的基因，取交集后再均值比较
 # 分层不用 p，只按 FoldChange 与上调排名。
 # 对列出 GO 出表、火山图、热图、气泡图与 BP/CC/MF 柱状图。
 #
 # 用法：
 #   setwd("E:/R/TG_BRCA/TG")
 #   source("TG_RNAseq_pipeline.R")                 # 比较 1–4
-#   source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
+#   source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–7
 # =============================================================================
 
 if (!exists("analyze_one_comparison", mode = "function") ||
-    !exists("mean_kd_vs_one_ntc_de", mode = "function")) {
+    !exists("mean_kd_vs_one_ntc_de", mode = "function") ||
+    !exists("mean_common_kd_vs_mean_common_ntc_de", mode = "function")) {
   options(tg.rnaseq.functions_only = TRUE)
   pipe <- "TG_RNAseq_pipeline.R"
   if (!file.exists(pipe)) pipe <- file.path(getwd(), "TG_RNAseq_pipeline.R")
@@ -62,7 +65,7 @@ prepare_extra_expression <- function() {
     ))
   }
 
-  log_msg("Load Cuffdiff FPKM for extra KD-mean vs single NTC comparisons")
+  log_msg("Load Cuffdiff FPKM for extra comparisons 5-7")
   expr <- load_expression(project_dir)
   expr$sample_info <- add_ntc_ids(expr$sample_info)
   value_type <- infer_value_type(expr)
@@ -79,7 +82,7 @@ prepare_extra_expression <- function() {
   )
 }
 
-log_msg("Extra comparisons 5-6: mean(TG_sh1, TG_sh5) vs each NTC; listed GO only")
+log_msg("Extra comparisons 5-7: KD-mean vs each NTC, plus common-gene means")
 if (isTRUE(getOption("tg.rnaseq.restyle_only", FALSE))) {
   restyle_ora_bubbles()
 } else {
@@ -91,14 +94,23 @@ extra_list <- list(
   ),
   TGsh_mean_vs_NTC_rep1 = mean_kd_vs_one_ntc_de(
     prep$log_mat, prep$sample_info, "NTC_rep1", "TGsh_mean_vs_NTC_rep1"
+  ),
+  mean_common_TGsh_vs_mean_common_NTC = mean_common_kd_vs_mean_common_ntc_de(
+    prep$log_mat, prep$sample_info
   )
 )
 extra_list <- extra_list[!vapply(extra_list, is.null, logical(1))]
 if (length(extra_list) == 0) {
-  stop("无法构建 mean(TG_sh1, TG_sh5) vs NTC_rep0 / NTC_rep1，请检查样本名")
+  stop("无法构建比较 5–7，请检查样本名 TG_sh1 / TG_sh5 / NTC_rep0 / NTC_rep1")
 }
 
 for (nm in names(extra_list)) {
+  if (identical(nm, "mean_common_TGsh_vs_mean_common_NTC")) {
+    tryCatch(
+      write_common_mean_gene_sets(extra_list[[nm]], file.path(result_dir, nm)),
+      error = function(e) log_msg("write common gene sets failed: ", e$message)
+    )
+  }
   tryCatch(
     analyze_one_comparison(
       nm, extra_list[[nm]], extra_list[[nm]],

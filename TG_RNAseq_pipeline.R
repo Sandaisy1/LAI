@@ -8,7 +8,7 @@
 #   2) mean(TG_sh1, TG_sh5) vs mean(NTC_rep0, NTC_rep1)
 #   3) 相对 NTC_rep0 的共同上调（sh1 与 sh5 交集）
 #   4) 相对 NTC_rep1 的共同上调（sh1 与 sh5 交集）
-# 比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–6 而改本文件主流程。
+# 比较 5–7 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–7 而改本文件主流程。
 #
 # 两套分层（每组比较都跑，各自独立出表出图）：
 #   1) FoldChange 上调 FC ≥ 1 / 1.25 / 1.5 / 2（四组）
@@ -476,6 +476,107 @@ mean_kd_vs_one_ntc_de <- function(log_mat, sample_info, ntc_id, comp_name) {
     ntc_sample = ntc,
     stringsAsFactors = FALSE
   )
+}
+
+fpkm_from_log2p1 <- function(log_mat) {
+  pmax(2^as.matrix(log_mat) - 1, 0)
+}
+
+genes_expressed_in_both <- function(fpkm, s1, s2, min_fpkm = 0) {
+  if (!all(c(s1, s2) %in% colnames(fpkm))) return(character())
+  v1 <- fpkm[, s1]
+  v2 <- fpkm[, s2]
+  rownames(fpkm)[is.finite(v1) & is.finite(v2) & v1 > min_fpkm & v2 > min_fpkm]
+}
+
+# 第 7 组：TG_sh1∩TG_sh5 共同检测到的基因，与 NTC_rep0∩NTC_rep1 共同检测到的基因，
+# 取交集后再 mean(KD) vs mean(NTC)。分层仍只用 FC / 上调排名。
+mean_common_kd_vs_mean_common_ntc_de <- function(log_mat, sample_info, min_fpkm = 0) {
+  sh1 <- find_sample(sample_info, "TG_sh1")
+  sh5 <- find_sample(sample_info, "TG_sh5")
+  ntc0 <- find_sample(sample_info, "NTC", "NTC_rep0")
+  ntc1 <- find_sample(sample_info, "NTC", "NTC_rep1")
+  if (anyNA(c(sh1, sh5, ntc0, ntc1))) return(NULL)
+  need <- c(sh1, sh5, ntc0, ntc1)
+  if (!all(need %in% colnames(log_mat))) return(NULL)
+  fpkm <- fpkm_from_log2p1(log_mat[, need, drop = FALSE])
+  kd_common <- genes_expressed_in_both(fpkm, sh1, sh5, min_fpkm)
+  ntc_common <- genes_expressed_in_both(fpkm, ntc0, ntc1, min_fpkm)
+  genes <- intersect(kd_common, ntc_common)
+  log_msg(
+    "mean_common_TGsh_vs_mean_common_NTC : KD common FPKM>", min_fpkm,
+    " in ", sh1, " & ", sh5, " n=", length(kd_common),
+    "; NTC common FPKM>", min_fpkm, " in ", ntc0, " & ", ntc1, " n=", length(ntc_common),
+    "; intersection n=", length(genes)
+  )
+  if (length(genes) == 0) {
+    de <- empty_de()
+  } else {
+    sub <- log_mat[genes, need, drop = FALSE]
+    sh_mean <- (sub[, sh1] + sub[, sh5]) / 2
+    ntc_mean <- (sub[, ntc0] + sub[, ntc1]) / 2
+    de <- data.frame(
+      gene = genes,
+      log2FC = as.numeric(sh_mean - ntc_mean),
+      AveExpr = as.numeric((sh_mean + ntc_mean) / 2),
+      pvalue = NA_real_,
+      padj = NA_real_,
+      treat_sample = paste0("mean(common(", sh1, ",", sh5, "))"),
+      ntc_sample = paste0("mean(common(", ntc0, ",", ntc1, "))"),
+      stringsAsFactors = FALSE
+    )
+    grp <- factor(
+      ifelse(colnames(sub) %in% c(ntc0, ntc1), "NTC", "KD"),
+      levels = c("NTC", "KD")
+    )
+    if (nrow(sub) >= 3 && nlevels(droplevels(grp)) == 2) {
+      design <- stats::model.matrix(~ grp)
+      fit <- tryCatch(
+        limma::eBayes(limma::lmFit(sub, design)),
+        error = function(e) {
+          log_msg("common-mean limma failed: ", e$message)
+          NULL
+        }
+      )
+      if (!is.null(fit)) {
+        tt <- limma::topTable(fit, coef = ncol(design), number = Inf, sort.by = "none")
+        de$pvalue <- tt$P.Value[match(de$gene, rownames(tt))]
+        de$padj <- tt$adj.P.Val[match(de$gene, rownames(tt))]
+        log_msg("mean_common_TGsh_vs_mean_common_NTC : limma p on common-gene subset (not used for FC/rank)")
+      }
+    }
+  }
+  attr(de, "kd_common_genes") <- kd_common
+  attr(de, "ntc_common_genes") <- ntc_common
+  attr(de, "min_fpkm") <- min_fpkm
+  de
+}
+
+write_common_mean_gene_sets <- function(de, outdir) {
+  dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  kd <- attr(de, "kd_common_genes")
+  ntc <- attr(de, "ntc_common_genes")
+  min_fpkm <- attr(de, "min_fpkm")
+  if (is.null(kd)) kd <- character()
+  if (is.null(ntc)) ntc <- character()
+  if (length(min_fpkm) != 1 || is.na(min_fpkm)) min_fpkm <- 0
+  both <- intersect(kd, ntc)
+  writeLines(
+    c(
+      "第 7 组：先找 TG_sh1 与 TG_sh5 都检测到的基因，以及 NTC_rep0 与 NTC_rep1 都检测到的基因。",
+      "检测到 = 由 log2(FPKM+1) 还原的 FPKM > min_fpkm。",
+      "再取两套共同基因的交集，对交集做 mean(TG_sh1, TG_sh5) vs mean(NTC_rep0, NTC_rep1)。",
+      "随后仍按 FoldChange 四档与上调排名七档分析，不用 p 过滤。",
+      paste("min_fpkm:", min_fpkm),
+      paste("n_KD_common:", length(kd)),
+      paste("n_NTC_common:", length(ntc)),
+      paste("n_intersection:", length(both))
+    ),
+    file.path(outdir, "00_COMMON_GENES.txt")
+  )
+  write_table(data.frame(gene = kd, stringsAsFactors = FALSE), file.path(outdir, "KD_common_genes"))
+  write_table(data.frame(gene = ntc, stringsAsFactors = FALSE), file.path(outdir, "NTC_common_genes"))
+  write_table(data.frame(gene = both, stringsAsFactors = FALSE), file.path(outdir, "KD_and_NTC_common_genes"))
 }
 
 build_common <- function(a, b, direction = c("up", "down")) {
@@ -1579,6 +1680,10 @@ pathway_score_contrast <- function(comp_name, sample_info) {
     TGsh_mean_vs_NTC = list(treat = kd, ctrl = c(ntc0, ntc1), design = "2-vs-2"),
     TGsh_mean_vs_NTC_rep0 = list(treat = kd, ctrl = ntc0, design = "2-vs-1"),
     TGsh_mean_vs_NTC_rep1 = list(treat = kd, ctrl = ntc1, design = "2-vs-1"),
+    mean_common_TGsh_vs_mean_common_NTC = list(
+      treat = kd, ctrl = c(ntc0, ntc1), design = "2-vs-2",
+      note = "基因先限制为两 KD 共同检测到且两 NTC 共同检测到；通路分数仍用四个样品"
+    ),
     common_up_vs_NTC_rep0 = list(
       treat = kd, ctrl = ntc0, design = "2-vs-1",
       note = "共同上调是基因交集；ssGSEA/mean z 用 mean(TG_sh1, TG_sh5) vs NTC_rep0，不伪造 p"
