@@ -1261,19 +1261,19 @@ plot_score_heatmap <- function(score, sample_info, go_tab, title, outfile) {
   pal <- c(NTC = "#4C78A8", TG_sh1 = "#F58518", TG_sh5 = "#54A24B")
   draw <- function() {
     pheatmap::pheatmap(
-      score, scale = "none", annotation_col = ann,
+      plot_mat, scale = "none", annotation_col = ann,
       annotation_colors = list(Group = pal[names(pal) %in% unique(ann$Group)]),
       main = title, fontsize_row = 8,
       color = colorRampPalette(rev(RColorBrewer::brewer.pal(9, "RdBu")))(100)
     )
   }
-  grDevices::pdf(paste0(outfile, ".pdf"), width = 9, height = max(5, min(16, 0.28 * nrow(score) + 3)))
+  grDevices::pdf(paste0(outfile, ".pdf"), width = 9, height = max(5, min(16, 0.28 * nrow(plot_mat) + 3)))
   on.exit({
     while (grDevices::dev.cur() > 1) grDevices::dev.off()
   }, add = TRUE)
   draw()
   grDevices::dev.off()
-  grDevices::png(paste0(outfile, ".png"), width = 2400, height = max(1600, 50 * nrow(score) + 400), res = 300)
+  grDevices::png(paste0(outfile, ".png"), width = 2400, height = max(1600, 50 * nrow(plot_mat) + 400), res = 300)
   draw()
   grDevices::dev.off()
 }
