@@ -116,6 +116,7 @@ fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 bubble_top_ns <- c(15, 20)
 pathway_up_top_ns <- c(10, 15, 20)  # 总 CustomGO：上调通路 mean log2FC 前 N
+ora_bar_top_ns <- c(10, 15, 20)     # BP/CC/MF 柱状图：每个 ontology 取前 N
 padj_plot_cutoff <- 0.2
 ora_min_gs_size <- 1     # 很细的通路也测（1/4/8 个基因不会因 minGSSize 被丢掉）
 ora_max_gs_size <- 500   # 仍丢掉库里 >500 基因的超大通路
@@ -1090,11 +1091,10 @@ run_genome_enrichGO <- function(genes, go_dir, tag) {
   dir.create(go_dir, recursive = TRUE, showWarnings = FALSE)
   writeLines(
     c(
-      "全库 GO 气泡图在本文件夹，不要只看 xlsx：",
-      "  *_ORA_GO_BP_dotplot_top15.pdf / top20.pdf",
-      "  *_ORA_GO_CC_dotplot_top15.pdf / top20.pdf",
-      "  *_ORA_GO_MF_dotplot_top15.pdf / top20.pdf",
-      "作图数据：同名 *_plotdata.csv / .xlsx。气泡大小和字体在 TG_RNAseq_pipeline.R 开头改。"
+      "全库 GO 图在本文件夹，不要只看 xlsx：",
+      "  气泡图 *_ORA_GO_BP_dotplot_top15.pdf / top20.pdf（CC、MF 同）",
+      "  柱状图 *_ORA_GO_BP_CC_MF_barplot_top10.pdf / top15 / top20",
+      "作图数据：气泡图同名 *_plotdata.csv。气泡大小和字体在 TG_RNAseq_pipeline.R 开头改。"
     ),
     file.path(go_dir, "00_READ_ME_气泡图在这里.txt")
   )
@@ -1146,7 +1146,21 @@ run_genome_enrichGO <- function(genes, go_dir, tag) {
     }
   }
   if (length(pieces) == 0) return(NULL)
-  dplyr::bind_rows(pieces)
+  all_ont <- dplyr::bind_rows(pieces)
+  for (n_show in ora_bar_top_ns) {
+    top_tag <- paste0("top", n_show)
+    tryCatch(
+      plot_ora_ontology_bar(
+        all_ont,
+        paste0(tag, " | ORA GO BP/CC/MF ", top_tag,
+               " (p.adjust<", padj_plot_cutoff, ", by -lgP)"),
+        file.path(go_dir, paste0(tag, "_ORA_GO_BP_CC_MF_barplot_", top_tag)),
+        n_per_ont = n_show
+      ),
+      error = function(e) log_msg("GO barplot failed (", top_tag, "): ", e$message)
+    )
+  }
+  all_ont
 }
 
 extract_listed_go_ora <- function(genome_ora, go_tab) {
@@ -1184,6 +1198,84 @@ plot_ora_bubble <- function(ora, title, outfile, n_show) {
   style <- current_bubble_style()
   p <- draw_ora_bubble_gg(df, title, style)
   save_ora_bubble_gg(p, outfile, style, nrow(df))
+}
+
+prepare_ora_bar_df <- function(ora, n_per_ont) {
+  df <- ora
+  if (is.null(df) || nrow(df) == 0) return(NULL)
+  if (!"ONTOLOGY" %in% names(df)) df$ONTOLOGY <- "BP"
+  ont <- toupper(as.character(df$ONTOLOGY))
+  ont[ont %in% c("BIOLOGICAL_PROCESS", "BIOLOGICAL PROCESS")] <- "BP"
+  ont[ont %in% c("CELLULAR_COMPONENT", "CELLULAR COMPONENT")] <- "CC"
+  ont[ont %in% c("MOLECULAR_FUNCTION", "MOLECULAR FUNCTION")] <- "MF"
+  df$ONTOLOGY <- ont
+  df <- df[is.finite(df$p.adjust) & df$p.adjust < padj_plot_cutoff, , drop = FALSE]
+  if (nrow(df) == 0) return(NULL)
+  id_col <- if ("ID" %in% names(df)) "ID" else if ("go_id" %in% names(df)) "go_id" else NULL
+  pieces <- lapply(c("BP", "CC", "MF"), function(o) {
+    sub <- df[df$ONTOLOGY == o, , drop = FALSE]
+    if (nrow(sub) == 0) return(NULL)
+    if (!is.null(id_col)) sub <- sub[!duplicated(sub[[id_col]]), , drop = FALSE]
+    if (!"pvalue" %in% names(sub)) sub$pvalue <- NA_real_
+    sub <- sub[order(sub$p.adjust, sub$pvalue), , drop = FALSE]
+    utils::head(sub, n_per_ont)
+  })
+  out <- dplyr::bind_rows(pieces)
+  if (is.null(out) || nrow(out) == 0) return(NULL)
+  out$neglogp <- -log10(pmax(out$p.adjust, 1e-300))
+  out$label <- make.unique(as.character(out$Description))
+  y_levels <- character()
+  for (o in c("MF", "CC", "BP")) {
+    sub <- out[out$ONTOLOGY == o, , drop = FALSE]
+    if (nrow(sub) == 0) next
+    sub <- sub[order(sub$neglogp, decreasing = FALSE), , drop = FALSE]
+    y_levels <- c(y_levels, sub$label)
+  }
+  out$label <- factor(out$label, levels = y_levels)
+  out$ONTOLOGY <- factor(out$ONTOLOGY, levels = c("BP", "CC", "MF"))
+  out
+}
+
+plot_ora_ontology_bar <- function(ora, title, outfile, n_per_ont) {
+  df <- prepare_ora_bar_df(ora, n_per_ont)
+  if (is.null(df)) {
+    writeLines(
+      paste0("no GO terms with p.adjust < ", padj_plot_cutoff),
+      paste0(outfile, "_EMPTY.txt")
+    )
+    return(invisible(NULL))
+  }
+  write_table(df, paste0(outfile))
+  style <- current_bubble_style()
+  pal <- c(BP = "#E74C3C", CC = "#5DADE2", MF = "#27AE60")
+  labs_ont <- c(BP = "生物过程 (BP)", CC = "细胞组成 (CC)", MF = "分子功能 (MF)")
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = neglogp, y = label, fill = ONTOLOGY)) +
+    ggplot2::geom_col(width = 0.75) +
+    ggplot2::scale_fill_manual(values = pal, labels = labs_ont, breaks = c("BP", "CC", "MF")) +
+    ggplot2::theme_bw(base_size = style$base_size) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(size = style$title_size),
+      axis.text.y = ggplot2::element_text(size = style$axis_text_y_size),
+      axis.text.x = ggplot2::element_text(size = style$axis_text_x_size),
+      axis.title.x = ggplot2::element_text(size = style$axis_title_size),
+      legend.text = ggplot2::element_text(size = style$legend_text_size),
+      legend.title = ggplot2::element_blank(),
+      legend.position = "bottom",
+      panel.grid.major.y = ggplot2::element_blank(),
+      panel.grid.minor = ggplot2::element_blank()
+    ) +
+    ggplot2::labs(
+      title = title,
+      x = "-lgP (p.adjust)",
+      y = NULL,
+      fill = NULL
+    )
+  width <- if (is.finite(style$plot_width)) style$plot_width else 8
+  height <- style$plot_height
+  if (length(height) != 1 || !is.finite(height)) {
+    height <- max(5.5, min(16, 0.28 * nrow(df) + 2.6))
+  }
+  save_gg(p, outfile, width = width, height = height)
 }
 
 draw_pathway_mean_fc_bar <- function(df, title, outfile) {
@@ -1587,6 +1679,21 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
       error = function(e) log_msg("bubble failed (", top_tag, "): ", e$message)
     )
   }
+  if (!is.null(extracted$all_listed)) {
+    for (n_show in ora_bar_top_ns) {
+      top_tag <- paste0("top", n_show)
+      tryCatch(
+        plot_ora_ontology_bar(
+          extracted$all_listed,
+          paste0(title, " | ORA listed GO BP/CC/MF ", top_tag,
+                 " (p.adjust<", padj_plot_cutoff, ", by -lgP)"),
+          file.path(cg_dir, paste0(tag, "_ORA_CustomGO_BP_CC_MF_barplot_", top_tag)),
+          n_per_ont = n_show
+        ),
+        error = function(e) log_msg("listed GO barplot failed (", top_tag, "): ", e$message)
+      )
+    }
+  }
 }
 
 run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
@@ -1600,7 +1707,7 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "本比较只跑两种分层（均要求 p<0.05，无法估 p 时不伪造 p，仍按 FC/排名）：",
       "  1) FoldChange 上调 FC >= 1 / 1.25 / 1.5 / 2",
       "  2) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300",
-      "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图（top15 与 top20）。",
+      "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图与柱状图。",
       "最终气泡图只保留 p.adjust<0.2，再按 GeneRatio 取前15和前20。",
       "总 CustomGO 柱状图：1) 上调+下调全部；2) 上调 mean log2FC 前10/15/20。",
       "PathwayScore/：ssGSEA 与 mean z 气泡图（分数差；升高通路 top10/15/20）。",
