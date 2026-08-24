@@ -46,7 +46,7 @@ alwaysApply: true
 
 不要再跑 p<0.01、AllDE/UpDE/DownDE。
 
-每个非空子集：差异表、火山图、热图。全库图只保留 p.adjust < 0.2。列出通路按 pvalue < 0.2 上图，气泡颜色为 q_adjust（全库 qvalue），柱状图不分 BP/CC/MF。不要在自选通路上重算 p.adjust。enrichGO 用 minGSSize=1，很细的通路也测。全库表在 `GO/`（含 BP/CC/MF 柱状图，横轴 -lgP 与 Count 各一套），抽出结果在 `CustomGO/`。气泡大小/坐标字体写在 `TG_RNAseq_pipeline.R` 开头；只重画用 `options(tg.rnaseq.restyle_only = TRUE)`。
+每个非空子集：差异表、火山图、热图。全库图只保留 p.adjust < 0.2。列出通路按 pvalue < 0.2 上图，气泡颜色为 q_adjust（全库 qvalue），柱状图不分 BP/CC/MF。不要在自选通路上重算 p.adjust。enrichGO 用 minGSSize=1，很细的通路也测。全库表在 `GO/`（含 BP/CC/MF 柱状图，横轴 -lgP 与 Count 各一套），抽出结果在 `CustomGO/`。气泡大小/坐标字体写在 `TG_RNAseq_pipeline.R` 开头；只重画调用 `restyle_ora_bubbles()`（不要设 `restyle_only` 再 source，那会跳过 1–7）。
 
 ## 通路表达
 

@@ -14,7 +14,7 @@ alwaysApply: true
 2. 用全库结果里的 **GeneRatio、pvalue、p.adjust、qvalue、Count** 抽出列出的 GO ID；**禁止**对抽出的子集重新 `p.adjust` / `qvalue`
 3. 全库图只保留 **p.adjust < 0.2**。列出通路（`CustomGO/`）按 **pvalue < 0.2** 上图，气泡颜色为 **q_adjust**（enrichGO 的 `qvalue`），再按 **GeneRatio 从大到小**取前 15 与前 20。不要改成 Bonferroni，也不要只在自选通路上重算 BH。
 4. 全库表、气泡图与 BP/CC/MF 柱状图写 `GO/`。抽出的列出通路写 `CustomGO/`：气泡图 + **不分 BP/CC/MF** 的柱状图。柱状图横轴出 **-lgP(pvalue)** 与 **Count** 两套；先出全部 pvalue<0.2 的列出通路，再出总体 top 10/15/20；文件名以 `ORA_` 开头，列出通路柱状图不要带 `BP_CC_MF`
-5. 每张终图旁写 `*_plotdata.csv`。气泡大小、坐标字体改 `TG_RNAseq_pipeline.R` 开头的参数；只重画设 `options(tg.rnaseq.restyle_only = TRUE)`
+5. 每张终图旁写 `*_plotdata.csv`。气泡大小、坐标字体改 `TG_RNAseq_pipeline.R` 开头的参数；只重画调用 `restyle_ora_bubbles()`
 
 比较级总 CustomGO（`results/<比较>/CustomGO/*_pathway_mean_log2FC*`）用列出 GO 里全部基因的 mean log2FC，不是 ORA：出上调+下调全图，以及上调通路 top 10 / 15 / 20。
 

@@ -17,9 +17,7 @@
 
 ```r
 setwd("E:/R/TG_BRCA/TG")
-options(tg.rnaseq.restyle_only = FALSE)
-source("TG_RNAseq_pipeline.R")                 # 比较 1–4
-source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–7（若 1–4 还没跑，会先补跑）
+source("TG_RNAseq_pipeline.R")   # 比较 1–7（1–4 之后自动跑 5–7）
 ```
 
 先过滤低表达，再用 Cuffdiff **FPKM** 做 `log2(x+1)` 后做比较。不再读 fragment count，也不做 DESeq2 size factor。不要用未过滤的值算 FC。
@@ -59,8 +57,9 @@ results/<比较>/00_analysis_tracks.csv
 全库 GO 表在各子集的 `GO/`（`*_ORA_GO_BP.csv` 等）；抽出的通路在 `CustomGO/`。每张气泡图会再导出 `*_plotdata.csv` / `.xlsx`。气泡大小默认 **2.5–7**（原先 6–18 太大）；坐标字体在 `TG_RNAseq_pipeline.R` 开头改（`bubble_size_min` / `bubble_size_max`、`axis_text_y_size` / `axis_text_x_size`）。只重画已有气泡图，并从已有 ORA 表补画柱状图、不重跑 enrichGO：
 
 ```r
-options(tg.rnaseq.restyle_only = TRUE)
+options(tg.rnaseq.functions_only = TRUE)
 source("TG_RNAseq_pipeline.R")
+restyle_ora_bubbles()
 ```
 
 ## 通路表达（不改全库 p 值）

@@ -1,30 +1,26 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# 额外比较（不修改 TG_RNAseq_pipeline.R 的比较 1–4）
+# 额外比较
 #   5) mean(TG_sh1, TG_sh5) vs NTC_rep0
 #   6) mean(TG_sh1, TG_sh5) vs NTC_rep1
 #   7) mean(common(TG_sh1 & TG_sh5)) vs mean(common(NTC_rep0 & NTC_rep1))
-#      先找两 KD 都检测到的基因、两 NTC 都检测到的基因，取交集后再均值比较
-# 分层不用 p，只按 FoldChange 与上调排名。
-# 对列出 GO 出表、火山图、热图、气泡图与 BP/CC/MF 柱状图。
-#
-# 用法：
-#   setwd("E:/R/TG_BRCA/TG")
-#   options(tg.rnaseq.restyle_only = FALSE)
-#   source("TG_RNAseq_pipeline.R")                 # 比较 1–4
-#   source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–7
-# 若只 source 本文件：会先跑 1–4（尚未跑过时），再跑 5–7。
+# source 本文件或主脚本都会跑完 1–7（1–4 若已在本会话跑过则不重复）。
+# 只重画不要 source 本文件，请调用 restyle_ora_bubbles()。
 # =============================================================================
 
 if (!exists("analyze_one_comparison", mode = "function") ||
     !exists("mean_kd_vs_one_ntc_de", mode = "function") ||
-    !exists("mean_common_kd_vs_mean_common_ntc_de", mode = "function")) {
-  options(tg.rnaseq.functions_only = TRUE)
+    !exists("mean_common_kd_vs_mean_common_ntc_de", mode = "function") ||
+    !exists("run_comparisons_1_to_4", mode = "function")) {
   pipe <- "TG_RNAseq_pipeline.R"
   if (!file.exists(pipe)) pipe <- file.path(getwd(), "TG_RNAseq_pipeline.R")
   if (!file.exists(pipe)) stop("找不到 TG_RNAseq_pipeline.R")
-  sys.source(pipe, envir = .GlobalEnv, keep.source = TRUE)
-  options(tg.rnaseq.functions_only = FALSE)
+  old_fn_only <- getOption("tg.rnaseq.functions_only", FALSE)
+  options(tg.rnaseq.functions_only = TRUE)
+  tryCatch(
+    sys.source(pipe, envir = .GlobalEnv, keep.source = TRUE),
+    finally = options(tg.rnaseq.functions_only = old_fn_only)
+  )
 }
 
 prepare_extra_expression <- function() {
@@ -92,51 +88,61 @@ ensure_comparisons_1_to_4 <- function() {
   if (!exists("run_comparisons_1_to_4", mode = "function")) {
     stop("找不到 run_comparisons_1_to_4()，请先 source(\"TG_RNAseq_pipeline.R\")")
   }
-  log_msg("Comparisons 1-4 have not run yet; running them before 5-7")
+  log_msg("Starting comparisons 1-4 before 5-7")
   run_comparisons_1_to_4()
   invisible(TRUE)
 }
 
-if (isTRUE(getOption("tg.rnaseq.restyle_only", FALSE))) {
-  log_msg("tg.rnaseq.restyle_only=TRUE：只重画已有图，跳过比较 1-7。")
-  log_msg("要完整分析：options(tg.rnaseq.restyle_only = FALSE); source(\"TG_RNAseq_pipeline.R\"); source(\"TG_RNAseq_TGsh_mean_vs_NTC_reps.R\")")
-  restyle_ora_bubbles()
-} else {
-ensure_comparisons_1_to_4()
-log_msg("Extra comparisons 5-7: KD-mean vs each NTC, plus common-gene means")
-prep <- prepare_extra_expression()
-
-extra_list <- list(
-  TGsh_mean_vs_NTC_rep0 = mean_kd_vs_one_ntc_de(
-    prep$log_mat, prep$sample_info, "NTC_rep0", "TGsh_mean_vs_NTC_rep0"
-  ),
-  TGsh_mean_vs_NTC_rep1 = mean_kd_vs_one_ntc_de(
-    prep$log_mat, prep$sample_info, "NTC_rep1", "TGsh_mean_vs_NTC_rep1"
-  ),
-  mean_common_TGsh_vs_mean_common_NTC = mean_common_kd_vs_mean_common_ntc_de(
-    prep$log_mat, prep$sample_info
+run_comparisons_5_to_7 <- function() {
+  if (isTRUE(getOption("tg.rnaseq.comparisons_5_7_done", FALSE))) {
+    log_msg("Comparisons 5-7 already finished in this session; skip rerun")
+    return(invisible(TRUE))
+  }
+  log_msg("Starting comparisons 5-7: KD-mean vs each NTC, plus common-gene means")
+  prep <- prepare_extra_expression()
+  extra_list <- list(
+    TGsh_mean_vs_NTC_rep0 = mean_kd_vs_one_ntc_de(
+      prep$log_mat, prep$sample_info, "NTC_rep0", "TGsh_mean_vs_NTC_rep0"
+    ),
+    TGsh_mean_vs_NTC_rep1 = mean_kd_vs_one_ntc_de(
+      prep$log_mat, prep$sample_info, "NTC_rep1", "TGsh_mean_vs_NTC_rep1"
+    ),
+    mean_common_TGsh_vs_mean_common_NTC = mean_common_kd_vs_mean_common_ntc_de(
+      prep$log_mat, prep$sample_info
+    )
   )
-)
-extra_list <- extra_list[!vapply(extra_list, is.null, logical(1))]
-if (length(extra_list) == 0) {
-  stop("无法构建比较 5–7，请检查样本名 TG_sh1 / TG_sh5 / NTC_rep0 / NTC_rep1")
-}
-
-for (nm in names(extra_list)) {
-  if (identical(nm, "mean_common_TGsh_vs_mean_common_NTC")) {
+  extra_list <- extra_list[!vapply(extra_list, is.null, logical(1))]
+  if (length(extra_list) == 0) {
+    stop("无法构建比较 5–7，请检查样本名 TG_sh1 / TG_sh5 / NTC_rep0 / NTC_rep1")
+  }
+  for (nm in names(extra_list)) {
+    if (identical(nm, "mean_common_TGsh_vs_mean_common_NTC")) {
+      tryCatch(
+        write_common_mean_gene_sets(extra_list[[nm]], file.path(result_dir, nm)),
+        error = function(e) log_msg("write common gene sets failed: ", e$message)
+      )
+    }
     tryCatch(
-      write_common_mean_gene_sets(extra_list[[nm]], file.path(result_dir, nm)),
-      error = function(e) log_msg("write common gene sets failed: ", e$message)
+      analyze_one_comparison(
+        nm, extra_list[[nm]], extra_list[[nm]],
+        prep$heat_mat, prep$sample_info, prep$go_tab, prep$go_sets, prep$pathway_genes
+      ),
+      error = function(e) log_msg("ERROR in extra comparison ", nm, ": ", e$message)
     )
   }
-  tryCatch(
-    analyze_one_comparison(
-      nm, extra_list[[nm]], extra_list[[nm]],
-      prep$heat_mat, prep$sample_info, prep$go_tab, prep$go_sets, prep$pathway_genes
-    ),
-    error = function(e) log_msg("ERROR in extra comparison ", nm, ": ", e$message)
-  )
+  options(tg.rnaseq.comparisons_5_7_done = TRUE)
+  log_msg("Comparisons 5-7 done: ", paste(names(extra_list), collapse = ", "))
+  invisible(TRUE)
 }
 
-log_msg("Extra comparisons done: ", paste(names(extra_list), collapse = ", "))
+run_comparisons_1_to_7 <- function() {
+  options(tg.rnaseq.restyle_only = FALSE)
+  ensure_comparisons_1_to_4()
+  run_comparisons_5_to_7()
+  log_msg("All comparisons 1-7 done. Results in: ", result_dir)
+  invisible(TRUE)
+}
+
+if (!isTRUE(getOption("tg.rnaseq.extra_functions_only", FALSE))) {
+  run_comparisons_1_to_7()
 }

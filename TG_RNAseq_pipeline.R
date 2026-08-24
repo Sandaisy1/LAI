@@ -8,21 +8,15 @@
 #   2) mean(TG_sh1, TG_sh5) vs mean(NTC_rep0, NTC_rep1)
 #   3) 相对 NTC_rep0 的共同上调（sh1 与 sh5 交集）
 #   4) 相对 NTC_rep1 的共同上调（sh1 与 sh5 交集）
-# 比较 5–7 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–7 而改本文件主流程。
+# 比较 5–7 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R。source 本文件会先跑 1–4，再自动跑 5–7。
 #
 # 两套分层（每组比较都跑，各自独立出表出图）：
 #   1) FoldChange 上调 FC ≥ 1 / 1.25 / 1.5 / 2（四组）
 #   2) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300（七组）
 # 分层不用 p：不按 p 过滤，也不伪造 p。
 # 读 Cuffdiff 各样品 FPKM（已按长度和深度标准化），过滤低表达后只做 log2(x+1)，不再做 DESeq2。
-# 总 CustomGO 柱状图：上调+下调全部，以及上调通路 mean log2FC 前 10/15/20。
-# 每个比较另出 ssGSEA 与 mean z 气泡图（分数差；1-vs-1 不伪造 p）。
-# 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / qvalue / Count。
-# 不在自选通路上重新校正 p。全库图：p.adjust < 0.2。列出通路图：pvalue < 0.2，气泡颜色为 q_adjust（enrichGO 的 qvalue）。
-# 全库柱状图按 BP/CC/MF 分面；列出通路柱状图不再分 ontology，横轴 -lgP 与 Count 各一套。
-# enrichGO 最小基因集为 1，很细的通路（1/4/8 个基因）也会测。
-# 气泡大小、坐标字体在本文件「分析参数」里改。只重画已有图（含从 ORA 表补画柱状图）：
-#   options(tg.rnaseq.restyle_only = TRUE); source("TG_RNAseq_pipeline.R")
+# 气泡图：先全基因组 enrichGO，再抽出列出 GO。全库图 p.adjust<0.2；列出通路 pvalue<0.2，颜色 q_adjust。
+# 只重画已有图请调用 restyle_ora_bubbles()，不要设 restyle_only 再 source。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -67,11 +61,9 @@ install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
 }
 
 install_if_missing(cran_required, bioc = FALSE, required = TRUE)
-if (!isTRUE(getOption("tg.rnaseq.restyle_only", FALSE))) {
-  install_if_missing(cran_optional, bioc = FALSE, required = FALSE)
-  install_if_missing(bioc_required, bioc = TRUE, required = TRUE)
-  install_if_missing(bioc_optional, bioc = TRUE, required = FALSE)
-}
+install_if_missing(cran_optional, bioc = FALSE, required = FALSE)
+install_if_missing(bioc_required, bioc = TRUE, required = TRUE)
+install_if_missing(bioc_optional, bioc = TRUE, required = FALSE)
 
 safe_library <- function(pkgs) {
   for (p in pkgs) {
@@ -1066,9 +1058,10 @@ write_bubble_style_note <- function(result_root) {
       "气泡大小和坐标字体在 TG_RNAseq_pipeline.R 开头改：",
       "  bubble_size_min / bubble_size_max",
       "  axis_text_y_size / axis_text_x_size",
-      "只重画已有 *_plotdata.csv，并从 ORA 表补画 BP/CC/MF 柱状图（不重跑 enrichGO）：",
-      "  options(tg.rnaseq.restyle_only = TRUE)",
-      "  source(\"TG_RNAseq_pipeline.R\")"
+      "只重画已有 *_plotdata.csv，并从 ORA 表补画柱状图（不重跑 enrichGO）：",
+      "  options(tg.rnaseq.functions_only = TRUE)",
+      "  source(\"TG_RNAseq_pipeline.R\")",
+      "  restyle_ora_bubbles()"
     ),
     file.path(kit, "00_READ_ME.txt")
   )
@@ -2165,7 +2158,7 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "总 CustomGO 柱状图：1) 上调+下调全部；2) 上调 mean log2FC 前10/15/20。",
       "PathwayScore/：ssGSEA 与 mean z 气泡图（分数差；升高通路 top10/15/20）。",
       "气泡大小/坐标字体：改 TG_RNAseq_pipeline.R 开头的 bubble_size_* 和 axis_text_*。",
-      "只重画：options(tg.rnaseq.restyle_only = TRUE); source('TG_RNAseq_pipeline.R')。"
+      "只重画：options(tg.rnaseq.functions_only = TRUE); source('TG_RNAseq_pipeline.R'); restyle_ora_bubbles()"
     ),
     file.path(base, "00_READ_ME.txt")
   )
@@ -2391,10 +2384,44 @@ run_comparisons_1_to_4 <- function() {
   options(tg.rnaseq.comparisons_1_4_done = TRUE)
 }
 
-if (isTRUE(getOption("tg.rnaseq.restyle_only", FALSE))) {
-  log_msg("tg.rnaseq.restyle_only=TRUE：只重画已有气泡图/柱状图，跳过比较 1-4。")
-  log_msg("要完整分析 1-4：options(tg.rnaseq.restyle_only = FALSE); source(\"TG_RNAseq_pipeline.R\")")
-  restyle_ora_bubbles()
-} else if (!isTRUE(getOption("tg.rnaseq.functions_only", FALSE))) {
+run_comparisons_5_to_7_from_pipeline <- function() {
+  extra <- c(
+    file.path(project_dir, "TG_RNAseq_TGsh_mean_vs_NTC_reps.R"),
+    file.path(getwd(), "TG_RNAseq_TGsh_mean_vs_NTC_reps.R"),
+    "TG_RNAseq_TGsh_mean_vs_NTC_reps.R"
+  )
+  extra <- extra[file.exists(extra)]
+  if (length(extra) == 0) {
+    log_msg("找不到 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，跳过比较 5-7")
+    return(invisible(FALSE))
+  }
+  extra <- normalizePath(extra[[1]], winslash = "/", mustWork = TRUE)
+  if (!exists("run_comparisons_5_to_7", mode = "function")) {
+    log_msg("Loading extra comparisons from ", extra)
+    old_extra_only <- getOption("tg.rnaseq.extra_functions_only", FALSE)
+    options(tg.rnaseq.extra_functions_only = TRUE)
+    tryCatch(
+      sys.source(extra, envir = .GlobalEnv, keep.source = TRUE),
+      finally = options(tg.rnaseq.extra_functions_only = old_extra_only)
+    )
+  }
+  if (!exists("run_comparisons_5_to_7", mode = "function")) {
+    log_msg("ERROR: extra script did not define run_comparisons_5_to_7()")
+    return(invisible(FALSE))
+  }
+  run_comparisons_5_to_7()
+  invisible(TRUE)
+}
+
+run_all_comparisons <- function() {
+  options(tg.rnaseq.restyle_only = FALSE)
+  log_msg("Running all comparisons 1-7")
   run_comparisons_1_to_4()
+  run_comparisons_5_to_7_from_pipeline()
+  log_msg("All comparisons 1-7 done. Results in: ", result_dir)
+  invisible(TRUE)
+}
+
+if (!isTRUE(getOption("tg.rnaseq.functions_only", FALSE))) {
+  run_all_comparisons()
 }
