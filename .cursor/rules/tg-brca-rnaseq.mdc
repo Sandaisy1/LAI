@@ -46,7 +46,7 @@ alwaysApply: true
 
 ## 通路表达
 
-每条列出的 GO 单独打分（ssGSEA 或 mean z），不要把所有 GO 并成一个基因集。结果在 `00_PathwayExpression/`。不要为凸显通路去改全基因组 p 值。
+每条列出的 GO 单独打分：同时算 mean z，有 GSVA 再算 ssGSEA。全样品热图在 `00_PathwayExpression/`。每个比较另出 `PathwayScore/` 气泡图（分数差）。不要为凸显通路去改全基因组 p 值。
 
 ```r
 # ❌ BAD: 只在自选 GO 上做超几何并重新 BH，导致 mitochondrion organization 的 p.adjust 虚高

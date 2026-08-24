@@ -18,6 +18,8 @@ alwaysApply: true
 
 比较级总 CustomGO（`results/<比较>/CustomGO/*_pathway_mean_log2FC*`）用列出 GO 里全部基因的 mean log2FC，不是 ORA：出上调+下调全图，以及上调通路 top 10 / 15 / 20。
 
+每个比较另出 `PathwayScore/`：ssGSEA 与 mean z 气泡图（x=处理−对照分数差，大小=基因数）。共同上调比较用 KD 均值 vs 该 NTC，不把基因交集当成样品。1-vs-1 不伪造通路 p。
+
 这样 `mitochondrion organization` 的 p.adjust 与正常 GO BP 图一致，而不是只在 ~70 条自选通路上重算后虚高。
 
 ```r

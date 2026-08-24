@@ -56,6 +56,7 @@ source("TG_RNAseq_pipeline.R")
 - 每条列出 GO 的基因热图
 - 通路分数热图（ssGSEA；没有 GSVA 包则用基因 mean z-score）
 - 各比较目录 `CustomGO/` 还有总的 listed-GO mean log2FC 柱状图：上调+下调全部，以及只含上调通路的 top 10 / 15 / 20
+- 各比较目录 `PathwayScore/`：ssGSEA 与 mean z 气泡图。x 轴是该比较的通路分数差（处理 − 对照），点大小是通路基因数，颜色是分数差。出全部通路，以及分数升高的 top 10 / 15 / 20。1-vs-1 不伪造 p。共同上调比较用 `mean(TG_sh1, TG_sh5)` vs 对应 NTC（ssGSEA 不能用基因交集）
 
 ```
 results/TG_sh1_vs_NTC_rep0/CustomGO/TG_sh1_vs_NTC_rep0_pathway_mean_log2FC.pdf
@@ -63,5 +64,7 @@ results/TG_sh1_vs_NTC_rep0/CustomGO/TG_sh1_vs_NTC_rep0_pathway_mean_log2FC_up_to
 results/TG_sh1_vs_NTC_rep0/CustomGO/TG_sh1_vs_NTC_rep0_pathway_mean_log2FC_up_top15.pdf
 results/TG_sh1_vs_NTC_rep0/CustomGO/TG_sh1_vs_NTC_rep0_pathway_mean_log2FC_up_top20.pdf
 results/TG_sh1_vs_NTC_rep0/p0.05/FoldChange/FC_1/CustomGO/p0.05_FC_1_ORA_CustomGO_dotplot_top15.pdf
-results/00_PathwayExpression/pathway_score_heatmap.pdf
+results/TG_sh1_vs_NTC_rep0/PathwayScore/TG_sh1_vs_NTC_rep0_ssgsea_dotplot_up_top15.pdf
+results/TG_sh1_vs_NTC_rep0/PathwayScore/TG_sh1_vs_NTC_rep0_mean_z_dotplot_up_top15.pdf
+results/00_PathwayExpression/pathway_score_heatmap_ssgsea.pdf
 ```

@@ -12,6 +12,7 @@
 #
 # 分层只两种（均 p<0.05）：上调 FC>=1/1.25/1.5/2，以及上调 top 50–300。
 # 总 CustomGO 柱状图：上调+下调全部，以及上调通路 mean log2FC 前 10/15/20。
+# 每个比较另出 ssGSEA 与 mean z 气泡图（分数差；1-vs-1 不伪造 p）。
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
 # 不在自选通路上重新校正 p。最终气泡图：p.adjust < 0.2，再按 GeneRatio 取前 15 与前 20。
 # enrichGO 最小基因集为 1，很细的通路（1/4/8 个基因）也会测。
@@ -163,13 +164,18 @@ add_ntc_ids <- function(sample_info) {
 }
 
 find_sample <- function(sample_info, group, ntc_id = NULL) {
+  hit <- find_samples(sample_info, group, ntc_id)
+  if (length(hit) == 0) return(NA_character_)
+  hit[1]
+}
+
+find_samples <- function(sample_info, group, ntc_id = NULL) {
   if (!is.null(ntc_id)) {
     hit <- sample_info$sample[sample_info$group == "NTC" & sample_info$ntc_id == ntc_id]
   } else {
     hit <- sample_info$sample[sample_info$group == group]
   }
-  if (length(hit) == 0) return(NA_character_)
-  hit[1]
+  as.character(hit[!is.na(hit) & nzchar(as.character(hit))])
 }
 
 pick_official_symbol <- function(x) {
@@ -678,7 +684,7 @@ map_go_to_symbols <- function(go_ids, expressed) {
 
 all_pathway_genes <- function(go_sets) unique(unlist(go_sets, use.names = FALSE))
 
-pathway_score_matrix <- function(log_mat, go_sets) {
+mean_z_score_matrix <- function(log_mat, go_sets) {
   z <- t(scale(t(log_mat)))
   z[!is.finite(z)] <- 0
   score <- vapply(go_sets, function(genes) {
@@ -692,29 +698,67 @@ pathway_score_matrix <- function(log_mat, go_sets) {
     score <- t(score)
     colnames(score) <- colnames(z)
   }
-  if (has_pkg("GSVA") && length(go_sets) > 0) {
-    gs <- lapply(go_sets, function(g) intersect(g, rownames(log_mat)))
-    gs <- gs[vapply(gs, length, integer(1)) >= 2]
-    if (length(gs) > 0) {
-      gsva_mat <- tryCatch({
-        expr <- as.matrix(log_mat)
-        if (utils::packageVersion("GSVA") >= "1.50.0" && exists("ssgseaParam", envir = asNamespace("GSVA"), inherits = FALSE)) {
-          GSVA::gsva(GSVA::ssgseaParam(expr, gs), verbose = FALSE)
-        } else {
-          GSVA::gsva(expr, gs, method = "ssgsea", kcdf = "Gaussian", verbose = FALSE)
-        }
-      }, error = function(e) {
-        log_msg("ssGSEA failed, use mean z-score: ", e$message)
-        NULL
-      })
-      if (!is.null(gsva_mat)) {
-        log_msg("Pathway scores: ssGSEA")
-        return(list(score = gsva_mat, method = "ssgsea"))
-      }
+  score
+}
+
+ssgsea_score_matrix <- function(log_mat, go_sets) {
+  if (!has_pkg("GSVA") || length(go_sets) == 0) return(NULL)
+  gs <- lapply(go_sets, function(g) intersect(g, rownames(log_mat)))
+  gs <- gs[vapply(gs, length, integer(1)) >= 2]
+  if (length(gs) == 0) return(NULL)
+  tryCatch({
+    expr <- as.matrix(log_mat)
+    if (utils::packageVersion("GSVA") >= "1.50.0" &&
+        exists("ssgseaParam", envir = asNamespace("GSVA"), inherits = FALSE)) {
+      GSVA::gsva(GSVA::ssgseaParam(expr, gs), verbose = FALSE)
+    } else {
+      GSVA::gsva(expr, gs, method = "ssgsea", kcdf = "Gaussian", verbose = FALSE)
     }
-  }
+  }, error = function(e) {
+    log_msg("ssGSEA failed: ", e$message)
+    NULL
+  })
+}
+
+compute_pathway_score_list <- function(log_mat, go_sets) {
+  go_sets <- setNames(go_sets, names(go_sets))
+  out <- list(mean_z = mean_z_score_matrix(log_mat, go_sets))
   log_msg("Pathway scores: mean z-score of genes in each GO")
-  list(score = score, method = "mean_z")
+  ss <- ssgsea_score_matrix(log_mat, go_sets)
+  if (!is.null(ss)) {
+    log_msg("Pathway scores: ssGSEA")
+    out$ssgsea <- ss
+  }
+  out
+}
+
+save_pathway_score_csv <- function(score, path) {
+  write.csv(
+    cbind(go_id = rownames(score), as.data.frame(score)),
+    path,
+    row.names = FALSE
+  )
+}
+
+load_pathway_score_list <- function() {
+  if (exists("pathway_score_list", envir = .GlobalEnv)) {
+    sc <- get("pathway_score_list", envir = .GlobalEnv)
+    if (is.list(sc) && length(sc) > 0) return(sc)
+  }
+  out <- list()
+  for (m in c("ssgsea", "mean_z")) {
+    f <- file.path(result_dir, "00_PathwayExpression", paste0("pathway_scores_", m, ".csv"))
+    if (!file.exists(f)) next
+    df <- utils::read.csv(f, check.names = FALSE, stringsAsFactors = FALSE)
+    if (nrow(df) == 0 || ncol(df) < 2) next
+    mat <- as.matrix(df[, -1, drop = FALSE])
+    storage.mode(mat) <- "double"
+    rownames(mat) <- as.character(df[[1]])
+    out[[m]] <- mat
+  }
+  if (length(out) > 0) assign("pathway_score_list", out, envir = .GlobalEnv)
+  if (length(out) == 0) return(NULL)
+  out
 }
 
 # -----------------------------------------------------------------------------
@@ -1208,11 +1252,12 @@ plot_pathway_mean_fc <- function(de, go_tab, go_sets, title, outfile) {
 
 plot_score_heatmap <- function(score, sample_info, go_tab, title, outfile) {
   if (is.null(score) || nrow(score) < 1 || ncol(score) < 2) return(invisible(NULL))
-  lab <- go_tab$name[match(rownames(score), go_tab$go_id)]
-  lab[is.na(lab) | !nzchar(lab)] <- rownames(score)
-  rownames(score) <- make.unique(paste0(lab, " (", rownames(score), ")"))
+  plot_mat <- as.matrix(score)
+  lab <- go_tab$name[match(rownames(plot_mat), go_tab$go_id)]
+  lab[is.na(lab) | !nzchar(lab)] <- rownames(plot_mat)
+  rownames(plot_mat) <- make.unique(paste0(lab, " (", rownames(plot_mat), ")"))
   ann <- data.frame(Group = sample_info$group, row.names = sample_info$sample)
-  ann <- ann[colnames(score), , drop = FALSE]
+  ann <- ann[colnames(plot_mat), , drop = FALSE]
   pal <- c(NTC = "#4C78A8", TG_sh1 = "#F58518", TG_sh5 = "#54A24B")
   draw <- function() {
     pheatmap::pheatmap(
@@ -1231,6 +1276,196 @@ plot_score_heatmap <- function(score, sample_info, go_tab, title, outfile) {
   grDevices::png(paste0(outfile, ".png"), width = 2400, height = max(1600, 50 * nrow(score) + 400), res = 300)
   draw()
   grDevices::dev.off()
+}
+
+pathway_score_contrast <- function(comp_name, sample_info) {
+  sh1 <- find_samples(sample_info, "TG_sh1")
+  sh5 <- find_samples(sample_info, "TG_sh5")
+  ntc0 <- find_samples(sample_info, "NTC", "NTC_rep0")
+  ntc1 <- find_samples(sample_info, "NTC", "NTC_rep1")
+  kd <- c(sh1, sh5)
+  spec <- switch(
+    comp_name,
+    TG_sh1_vs_NTC_rep0 = list(treat = sh1, ctrl = ntc0, design = "1-vs-1"),
+    TG_sh5_vs_NTC_rep0 = list(treat = sh5, ctrl = ntc0, design = "1-vs-1"),
+    TG_sh1_vs_NTC_rep1 = list(treat = sh1, ctrl = ntc1, design = "1-vs-1"),
+    TG_sh5_vs_NTC_rep1 = list(treat = sh5, ctrl = ntc1, design = "1-vs-1"),
+    TGsh_mean_vs_NTC = list(treat = kd, ctrl = c(ntc0, ntc1), design = "2-vs-2"),
+    TGsh_mean_vs_NTC_rep0 = list(treat = kd, ctrl = ntc0, design = "2-vs-1"),
+    TGsh_mean_vs_NTC_rep1 = list(treat = kd, ctrl = ntc1, design = "2-vs-1"),
+    common_up_vs_NTC_rep0 = list(
+      treat = kd, ctrl = ntc0, design = "2-vs-1",
+      note = "共同上调是基因交集；ssGSEA/mean z 用 mean(TG_sh1, TG_sh5) vs NTC_rep0，不伪造 p"
+    ),
+    common_up_vs_NTC_rep1 = list(
+      treat = kd, ctrl = ntc1, design = "2-vs-1",
+      note = "共同上调是基因交集；ssGSEA/mean z 用 mean(TG_sh1, TG_sh5) vs NTC_rep1，不伪造 p"
+    ),
+    NULL
+  )
+  if (is.null(spec)) return(NULL)
+  spec$treat <- unique(spec$treat[nzchar(spec$treat) & !is.na(spec$treat)])
+  spec$ctrl <- unique(spec$ctrl[nzchar(spec$ctrl) & !is.na(spec$ctrl)])
+  if (length(spec$treat) == 0 || length(spec$ctrl) == 0) return(NULL)
+  spec
+}
+
+pathway_score_delta_df <- function(score_mat, treat, ctrl, go_tab, go_sets) {
+  treat <- intersect(treat, colnames(score_mat))
+  ctrl <- intersect(ctrl, colnames(score_mat))
+  if (length(treat) == 0 || length(ctrl) == 0 || nrow(score_mat) == 0) return(NULL)
+  treat_mean <- rowMeans(score_mat[, treat, drop = FALSE], na.rm = TRUE)
+  ctrl_mean <- rowMeans(score_mat[, ctrl, drop = FALSE], na.rm = TRUE)
+  delta <- treat_mean - ctrl_mean
+  ids <- rownames(score_mat)
+  n_genes <- vapply(ids, function(id) {
+    if (id %in% names(go_sets)) length(go_sets[[id]]) else 0L
+  }, integer(1))
+  desc <- go_tab$name[match(ids, go_tab$go_id)]
+  desc[is.na(desc) | !nzchar(desc)] <- ids
+  data.frame(
+    go_id = ids,
+    Description = desc,
+    n_genes = as.integer(n_genes),
+    treat_mean = as.numeric(treat_mean),
+    ctrl_mean = as.numeric(ctrl_mean),
+    delta_score = as.numeric(delta),
+    treat_samples = paste(treat, collapse = ","),
+    ctrl_samples = paste(ctrl, collapse = ","),
+    stringsAsFactors = FALSE
+  )
+}
+
+draw_pathway_score_bubble <- function(df, title, outfile, xlab) {
+  style <- current_bubble_style()
+  plot_df <- df[is.finite(df$delta_score) & is.finite(df$n_genes), , drop = FALSE]
+  if (nrow(plot_df) == 0) {
+    writeLines("no pathway scores to plot", paste0(outfile, "_EMPTY.txt"))
+    return(invisible(NULL))
+  }
+  plot_df$label <- paste0(plot_df$Description, " (", plot_df$go_id, ")")
+  plot_df <- plot_df[order(plot_df$delta_score, plot_df$n_genes, plot_df$go_id), , drop = FALSE]
+  plot_df$label <- factor(plot_df$label, levels = unique(as.character(plot_df$label)))
+  p <- ggplot2::ggplot(
+    plot_df,
+    ggplot2::aes(x = delta_score, y = label, size = n_genes, fill = delta_score)
+  ) +
+    ggplot2::geom_point(shape = 21, color = "grey30", stroke = style$point_stroke) +
+    ggplot2::geom_vline(xintercept = 0, linetype = 2, color = "grey40") +
+    ggplot2::scale_size_continuous(range = c(style$bubble_size_min, style$bubble_size_max)) +
+    ggplot2::scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0.08, 0.16))) +
+    ggplot2::scale_y_discrete(expand = ggplot2::expansion(add = 0.55)) +
+    ggplot2::theme_bw(base_size = style$base_size) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(size = style$title_size),
+      axis.text.y = ggplot2::element_text(size = style$axis_text_y_size),
+      axis.text.x = ggplot2::element_text(size = style$axis_text_x_size),
+      axis.title.x = ggplot2::element_text(size = style$axis_title_size),
+      legend.text = ggplot2::element_text(size = style$legend_text_size),
+      legend.title = ggplot2::element_text(size = style$legend_title_size),
+      plot.margin = ggplot2::margin(6, 10, 6, 6),
+      legend.margin = ggplot2::margin(0, 0, 0, 0),
+      panel.grid.minor = ggplot2::element_blank()
+    ) +
+    ggplot2::labs(
+      title = title,
+      x = xlab,
+      y = NULL,
+      fill = "delta",
+      size = "n genes"
+    )
+  width <- style$plot_width
+  height <- style$plot_height
+  if (length(height) != 1 || !is.finite(height)) {
+    height <- max(5.2, min(16, 0.28 * nrow(plot_df) + 2.4))
+  }
+  save_gg(p, outfile, width = width, height = height)
+}
+
+plot_one_score_method_bubbles <- function(df, method, contrast, title_prefix, out_stub) {
+  method_lab <- if (identical(method, "ssgsea")) "ssGSEA" else "mean z"
+  xlab <- paste0(method_lab, " score (treat - ctrl)")
+  write_table(df, paste0(out_stub, "_delta"))
+  draw_pathway_score_bubble(
+    df,
+    paste0(title_prefix, " | ", method_lab, " | all | ", contrast$design),
+    paste0(out_stub, "_dotplot_all"),
+    xlab
+  )
+  up <- df[is.finite(df$delta_score) & df$delta_score > 0, , drop = FALSE]
+  up <- up[order(-up$delta_score, -up$n_genes, up$go_id), , drop = FALSE]
+  write_table(up, paste0(out_stub, "_delta_up"))
+  if (nrow(up) == 0) {
+    writeLines("no pathways with delta > 0", paste0(out_stub, "_up_EMPTY.txt"))
+    return(invisible(NULL))
+  }
+  for (n_show in pathway_up_top_ns) {
+    top_tag <- paste0("up_top", n_show)
+    sub <- utils::head(up, n_show)
+    write_table(sub, paste0(out_stub, "_", top_tag))
+    draw_pathway_score_bubble(
+      sub,
+      paste0(title_prefix, " | ", method_lab, " | ", top_tag, " | ", contrast$design),
+      paste0(out_stub, "_dotplot_", top_tag),
+      xlab
+    )
+  }
+}
+
+emit_pathway_score_bubbles <- function(comp_name, sample_info, go_tab, go_sets,
+                                       expr_mat = NULL) {
+  contrast <- pathway_score_contrast(comp_name, sample_info)
+  if (is.null(contrast)) {
+    log_msg("No pathway-score contrast for ", comp_name)
+    return(invisible(NULL))
+  }
+  scores <- load_pathway_score_list()
+  if (is.null(scores) && !is.null(expr_mat)) {
+    scores <- compute_pathway_score_list(expr_mat, go_sets)
+    assign("pathway_score_list", scores, envir = .GlobalEnv)
+  }
+  if (is.null(scores) || length(scores) == 0) {
+    log_msg("No ssGSEA/mean z scores for ", comp_name)
+    return(invisible(NULL))
+  }
+  outdir <- file.path(result_dir, comp_name, "PathwayScore")
+  dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  writeLines(
+    c(
+      "ssGSEA / mean z 气泡图（不是 enrichGO）：",
+      "  x = 处理组通路分数均值 - 对照组通路分数均值",
+      "  点大小 = 该 GO 在本数据中的表达基因数",
+      "  颜色 = 分数差（蓝负 / 白零 / 红正）",
+      "  1-vs-1 与 2-vs-1 不估计、不伪造通路 p 值",
+      paste("comparison:", comp_name),
+      paste("design:", contrast$design),
+      paste("treat:", paste(contrast$treat, collapse = ", ")),
+      paste("ctrl:", paste(contrast$ctrl, collapse = ", ")),
+      if (!is.null(contrast$note)) contrast$note else NULL,
+      "每个方法：全部通路 + 分数差>0 的 top 10 / 15 / 20。"
+    ),
+    file.path(outdir, "00_READ_ME.txt")
+  )
+  title_prefix <- comp_name
+  for (method in c("ssgsea", "mean_z")) {
+    if (!method %in% names(scores) || is.null(scores[[method]])) next
+    df <- pathway_score_delta_df(scores[[method]], contrast$treat, contrast$ctrl, go_tab, go_sets)
+    if (is.null(df) || nrow(df) == 0) {
+      writeLines(
+        paste("no overlapping samples/pathways for", method),
+        file.path(outdir, paste0(method, "_EMPTY.txt"))
+      )
+      next
+    }
+    tryCatch(
+      plot_one_score_method_bubbles(
+        df, method, contrast, title_prefix,
+        file.path(outdir, paste0(comp_name, "_", method))
+      ),
+      error = function(e) log_msg(method, " bubble failed: ", e$message)
+    )
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -1337,6 +1572,7 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图（top15 与 top20）。",
       "最终气泡图只保留 p.adjust<0.2，再按 GeneRatio 取前15和前20。",
       "总 CustomGO 柱状图：1) 上调+下调全部；2) 上调 mean log2FC 前10/15/20。",
+      "PathwayScore/：ssGSEA 与 mean z 气泡图（分数差；升高通路 top10/15/20）。",
       "气泡大小/坐标字体：改 TG_RNAseq_pipeline.R 开头的 bubble_size_* 和 axis_text_*。",
       "只重画：options(tg.rnaseq.restyle_only = TRUE); source('TG_RNAseq_pipeline.R')。",
       paste("p-value estimated:", have_p)
@@ -1384,6 +1620,10 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
     ),
     error = function(e) log_msg("pathway mean FC failed: ", e$message)
   )
+  tryCatch(
+    emit_pathway_score_bubbles(comp_name, sample_info, go_tab, go_sets, heat_mat),
+    error = function(e) log_msg("pathway score bubbles failed: ", e$message)
+  )
 }
 
 write_pathway_expression <- function(log_mat, heat_mat, sample_info, go_tab, go_sets) {
@@ -1399,16 +1639,20 @@ write_pathway_expression <- function(log_mat, heat_mat, sample_info, go_tab, go_
     )
   }))
   write_table(set_rows, file.path(out, "listed_GO_gene_sets"))
-  scored <- pathway_score_matrix(log_mat, setNames(go_sets, names(go_sets)))
-  score <- scored$score
-  write.csv(
-    cbind(go_id = rownames(score), as.data.frame(score)),
-    file.path(out, paste0("pathway_scores_", scored$method, ".csv")),
-    row.names = FALSE
-  )
+  scores <- compute_pathway_score_list(log_mat, go_sets)
+  assign("pathway_score_list", scores, envir = .GlobalEnv)
+  for (m in names(scores)) {
+    save_pathway_score_csv(scores[[m]], file.path(out, paste0("pathway_scores_", m, ".csv")))
+    plot_score_heatmap(
+      scores[[m]], sample_info, go_tab,
+      paste0("Listed GO pathway expression (", m, ")"),
+      file.path(out, paste0("pathway_score_heatmap_", m))
+    )
+  }
+  primary_name <- if ("ssgsea" %in% names(scores)) "ssgsea" else "mean_z"
   plot_score_heatmap(
-    score, sample_info, go_tab,
-    paste0("Listed GO pathway expression (", scored$method, ")"),
+    scores[[primary_name]], sample_info, go_tab,
+    paste0("Listed GO pathway expression (", primary_name, ")"),
     file.path(out, "pathway_score_heatmap")
   )
   per <- file.path(out, "per_GO")
