@@ -25,8 +25,8 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
 
 ## 六组比较（各自单独出图）
 
-1. 四个 1-vs-1：`TG_sh1 vs NTC_rep0`、`TG_sh5 vs NTC_rep0`、`TG_sh1 vs NTC_rep1`、`TG_sh5 vs NTC_rep1`（无 p，不伪造）
-2. `mean(TG_sh1, TG_sh5)` vs `mean(NTC_rep0, NTC_rep1)`（2-vs-2，limma 估 p）
+1. 四个 1-vs-1：`TG_sh1 vs NTC_rep0`、`TG_sh5 vs NTC_rep0`、`TG_sh1 vs NTC_rep1`、`TG_sh5 vs NTC_rep1`
+2. `mean(TG_sh1, TG_sh5)` vs `mean(NTC_rep0, NTC_rep1)`
 3. 相对 `NTC_rep0` 的共同上调（sh1 与 sh5 交集）
 4. 相对 `NTC_rep1` 的共同上调
 5. `mean(TG_sh1, TG_sh5)` vs `NTC_rep0`（不要混入 NTC_rep1）
@@ -37,7 +37,7 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
 1. **FoldChange** 四组：上调 FC ≥ 1 / 1.25 / 1.5 / 2  
 2. **上调排名** 七组：top 50 / 75 / 100 / 150 / 200 / 250 / 300  
 
-能估 p 时先用 **p < 0.05**（`pvalue`，不用 padj）再分层；1-vs-1 无法估 p 时不伪造，只按 FC/排名，并写 `NO_PVALUE.txt`。不再跑 p<0.01，也不再单独出 AllDE/UpDE/DownDE。
+分层**不用 p**：不按 p 过滤，也不伪造 p。不再跑 p<0.01，也不再单独出 AllDE/UpDE/DownDE。
 
 目录：
 

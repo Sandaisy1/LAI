@@ -13,7 +13,7 @@
 # 两套分层（每组比较都跑，各自独立出表出图）：
 #   1) FoldChange 上调 FC ≥ 1 / 1.25 / 1.5 / 2（四组）
 #   2) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300（七组）
-# 能估 p 时先 p<0.05 再分层；不能估 p 时不伪造，只按 FC/排名。
+# 分层不用 p：不按 p 过滤，也不伪造 p。
 # 读 Cuffdiff 各样品 FPKM（已按长度和深度标准化），过滤低表达后只做 log2(x+1)，不再做 DESeq2。
 # 总 CustomGO 柱状图：上调+下调全部，以及上调通路 mean log2FC 前 10/15/20。
 # 每个比较另出 ssGSEA 与 mean z 气泡图（分数差；1-vs-1 不伪造 p）。
@@ -116,7 +116,6 @@ log_msg <- function(...) {
   cat(msg, "\n", file = log_file, append = TRUE)
 }
 
-p_cutoffs <- c("p0.05" = 0.05)
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 bubble_top_ns <- c(15, 20)
@@ -535,33 +534,26 @@ has_real_pvalue <- function(de) {
   !is.null(de) && "pvalue" %in% names(de) && any(!is.na(de$pvalue))
 }
 
-passes_p <- function(pvalue, p_cutoff, have_pvalue) {
-  if (!have_pvalue) return(rep(TRUE, length(pvalue)))
-  !is.na(pvalue) & pvalue < p_cutoff
-}
-
-select_by_fc <- function(de, fc, p_cutoff, have_pvalue) {
-  keep <- !is.na(de$log2FC) & (2^de$log2FC >= fc) & passes_p(de$pvalue, p_cutoff, have_pvalue)
+select_by_fc <- function(de, fc) {
+  keep <- !is.na(de$log2FC) & (2^de$log2FC >= fc)
   if ("log2FC_sh1" %in% names(de)) {
     keep <- keep & (2^de$log2FC_sh1 >= fc) & (2^de$log2FC_sh5 >= fc)
   }
   de[keep, , drop = FALSE]
 }
 
-select_by_topn <- function(de, n, p_cutoff, have_pvalue) {
+select_by_topn <- function(de, n) {
   x <- de[!is.na(de$log2FC) & de$log2FC > 0, , drop = FALSE]
   if ("log2FC_sh1" %in% names(x)) {
     x <- x[x$log2FC_sh1 > 0 & x$log2FC_sh5 > 0, , drop = FALSE]
   }
-  sig <- x[passes_p(x$pvalue, p_cutoff, have_pvalue), , drop = FALSE]
-  if (nrow(sig) == 0) sig <- x
-  sig <- sig[order(sig$log2FC, decreasing = TRUE), , drop = FALSE]
-  utils::head(sig, n)
+  x <- x[order(x$log2FC, decreasing = TRUE), , drop = FALSE]
+  utils::head(x, n)
 }
 
-select_by_direction <- function(de, direction = c("up", "down", "all"), p_cutoff, have_pvalue) {
+select_by_direction <- function(de, direction = c("up", "down", "all")) {
   direction <- match.arg(direction)
-  keep <- !is.na(de$log2FC) & passes_p(de$pvalue, p_cutoff, have_pvalue)
+  keep <- !is.na(de$log2FC)
   has_arms <- all(c("log2FC_sh1", "log2FC_sh5") %in% names(de))
   if (direction == "up") {
     keep <- keep & de$log2FC > 0
@@ -1019,17 +1011,15 @@ write_table <- function(df, stub) {
            error = function(e) log_msg("xlsx write failed: ", e$message))
 }
 
-plot_volcano <- function(de, highlight, title, outfile, fc_line = 1, p_line = 0.05) {
+plot_volcano <- function(de, highlight, title, outfile, fc_line = 1) {
   df <- de
   has_p <- has_real_pvalue(df)
   if (has_p) {
     df$y <- -log10(pmax(df$pvalue, 1e-300))
     ylab <- "-log10(p value)"
-    hline <- -log10(p_line)
   } else {
     df$y <- df$AveExpr
-    ylab <- "Average expression (no p-value)"
-    hline <- NULL
+    ylab <- "Average expression"
   }
   df$set <- ifelse(df$gene %in% highlight, "selected", "other")
   df$label <- ifelse(df$gene %in% utils::head(highlight, 15), df$gene, NA)
@@ -1041,7 +1031,6 @@ plot_volcano <- function(de, highlight, title, outfile, fc_line = 1, p_line = 0.
     ggrepel::geom_text_repel(ggplot2::aes(label = label), size = 3, max.overlaps = 30, na.rm = TRUE) +
     ggplot2::theme_bw(base_size = 12) +
     ggplot2::labs(title = title, x = "log2 Fold Change", y = ylab, color = NULL)
-  if (!is.null(hline)) p <- p + ggplot2::geom_hline(yintercept = hline, linetype = 2, color = "grey40")
   save_gg(p, outfile)
 }
 
@@ -1770,7 +1759,7 @@ emit_pathway_score_bubbles <- function(comp_name, sample_info, go_tab, go_sets,
 # -----------------------------------------------------------------------------
 emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
                                  heat_mat, sample_info, go_tab, go_sets,
-                                 pathway_genes, fc_line = 1, p_line = 0.05) {
+                                 pathway_genes, fc_line = 1) {
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   writeLines(
     c(paste("comparison:", comp_name), paste("subset:", tag),
@@ -1785,7 +1774,7 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
   }
   tryCatch(
     plot_volcano(full_de, sub$gene, title, file.path(outdir, paste0(tag, "_volcano")),
-                 fc_line = fc_line, p_line = p_line),
+                 fc_line = fc_line),
     error = function(e) log_msg("volcano failed: ", e$message)
   )
   tryCatch(
@@ -1880,77 +1869,60 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
   base <- file.path(result_dir, comp_name)
   dir.create(base, recursive = TRUE, showWarnings = FALSE)
   write_table(de, file.path(base, "DE_full"))
-  have_p <- has_real_pvalue(de)
-  pcut <- unname(p_cutoffs[["p0.05"]])
-  p_bit <- if (have_p) paste0("；能估 p 时先 p<", pcut) else "；本比较无法估 p，未伪造 p，只按 FC/排名"
   writeLines(
     c(
-      "本比较按两套思路分层，每档单独出表、单独作图：",
+      "本比较按两套思路分层，每档单独出表、单独作图（不用 p 过滤）：",
       "  1) FoldChange：上调 FC ≥ 1 / 1.25 / 1.5 / 2（四组，目录 FoldChange/FC_*）",
       "  2) 上调排名：top 50 / 75 / 100 / 150 / 200 / 250 / 300（七组，目录 TopRank/top*）",
-      paste0("  ", p_bit),
       "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图与柱状图。",
       "CustomGO/：列出通路气泡图，以及 BP/CC/MF 柱状图（-lgP 与 Count；全部列出通路 + top10/15/20）。",
       "最终气泡图只保留 p.adjust<0.2，再按 GeneRatio 取前15和前20。",
       "总 CustomGO 柱状图：1) 上调+下调全部；2) 上调 mean log2FC 前10/15/20。",
       "PathwayScore/：ssGSEA 与 mean z 气泡图（分数差；升高通路 top10/15/20）。",
       "气泡大小/坐标字体：改 TG_RNAseq_pipeline.R 开头的 bubble_size_* 和 axis_text_*。",
-      "只重画：options(tg.rnaseq.restyle_only = TRUE); source('TG_RNAseq_pipeline.R')。",
-      paste("p-value estimated:", have_p)
+      "只重画：options(tg.rnaseq.restyle_only = TRUE); source('TG_RNAseq_pipeline.R')。"
     ),
     file.path(base, "00_READ_ME.txt")
   )
-  if (!have_p) {
-    writeLines(
-      "1-vs-1 或 2-vs-1 无法估计 p，未伪造 p 值。FoldChange/ 与 TopRank/ 只按倍数和上调排名分层。",
-      file.path(base, "NO_PVALUE.txt")
-    )
-  }
 
   track_rows <- list()
   for (nm in names(fc_cutoffs)) {
     fc <- unname(fc_cutoffs[[nm]])
-    sub <- select_by_fc(de, fc, pcut, have_p)
+    sub <- select_by_fc(de, fc)
     if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
-    log_msg(comp_name, " FoldChange ", nm, ": n = ", nrow(sub),
-            " (up FC >= ", fc, if (have_p) paste0(", p<", pcut) else "", ")")
+    log_msg(comp_name, " FoldChange ", nm, ": n = ", nrow(sub), " (up FC >= ", fc, ")")
     track_rows[[length(track_rows) + 1L]] <- data.frame(
       track = "FoldChange",
       subset = nm,
       rule = paste0("up FC >= ", fc),
       n_genes = nrow(sub),
-      p_filtered = have_p,
       stringsAsFactors = FALSE
     )
     emit_subset_analysis(
       comp_name, sub, nm,
-      paste0(comp_name, " | 上调 FoldChange ≥ ", fc,
-             if (have_p) paste0(" (p<", pcut, ")") else ""),
+      paste0(comp_name, " | 上调 FoldChange ≥ ", fc),
       file.path(base, "FoldChange", nm),
       full_de, heat_mat, sample_info, go_tab, go_sets, pathway_genes,
-      fc_line = fc, p_line = pcut
+      fc_line = fc
     )
   }
   for (n in top_ns) {
     tag <- paste0("top", n)
-    sub <- select_by_topn(de, n, pcut, have_p)
-    log_msg(comp_name, " TopRank ", tag, ": n = ", nrow(sub),
-            if (have_p) paste0(" (p<", pcut, ")") else "")
+    sub <- select_by_topn(de, n)
+    log_msg(comp_name, " TopRank ", tag, ": n = ", nrow(sub))
     track_rows[[length(track_rows) + 1L]] <- data.frame(
       track = "TopRank",
       subset = tag,
       rule = paste0("upregulated top ", n),
       n_genes = nrow(sub),
-      p_filtered = have_p,
       stringsAsFactors = FALSE
     )
     emit_subset_analysis(
       comp_name, sub, tag,
-      paste0(comp_name, " | 上调排名 top ", n,
-             if (have_p) paste0(" (p<", pcut, ")") else ""),
+      paste0(comp_name, " | 上调排名 top ", n),
       file.path(base, "TopRank", tag),
       full_de, heat_mat, sample_info, go_tab, go_sets, pathway_genes,
-      fc_line = 1, p_line = pcut
+      fc_line = 1
     )
   }
   write_table(do.call(rbind, track_rows), file.path(base, "00_analysis_tracks"))
@@ -2017,15 +1989,14 @@ write_pathway_expression <- function(log_mat, heat_mat, sample_info, go_tab, go_
   }
 }
 
-plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix,
-                         p_cutoff, have_pvalue) {
+plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix) {
   if (is.null(de_a) || is.null(de_b) || !has_pkg("ggvenn")) return(invisible(NULL))
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   for (nm in names(fc_cutoffs)) {
     fc <- unname(fc_cutoffs[[nm]])
     lst <- list(
-      x = select_by_fc(de_a, fc, p_cutoff, have_pvalue)$gene,
-      y = select_by_fc(de_b, fc, p_cutoff, have_pvalue)$gene
+      x = select_by_fc(de_a, fc)$gene,
+      y = select_by_fc(de_b, fc)$gene
     )
     names(lst) <- c(label_a, label_b)
     p <- tryCatch(
@@ -2119,18 +2090,15 @@ run_comparisons_1_to_4 <- function() {
     )
   }
 
-  pcut <- unname(p_cutoffs[["p0.05"]])
   tryCatch(plot_venn_up(
     de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0,
     file.path(result_dir, "common_up_vs_NTC_rep0"),
-    "TG_sh1_vs_NTC_rep0", "TG_sh5_vs_NTC_rep0", "Common up vs NTC_rep0",
-    pcut, has_real_pvalue(de_list$TG_sh1_vs_NTC_rep0)
+    "TG_sh1_vs_NTC_rep0", "TG_sh5_vs_NTC_rep0", "Common up vs NTC_rep0"
   ), error = function(e) log_msg("venn NTC_rep0 error: ", e$message))
   tryCatch(plot_venn_up(
     de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1,
     file.path(result_dir, "common_up_vs_NTC_rep1"),
-    "TG_sh1_vs_NTC_rep1", "TG_sh5_vs_NTC_rep1", "Common up vs NTC_rep1",
-    pcut, has_real_pvalue(de_list$TG_sh1_vs_NTC_rep1)
+    "TG_sh1_vs_NTC_rep1", "TG_sh5_vs_NTC_rep1", "Common up vs NTC_rep1"
   ), error = function(e) log_msg("venn NTC_rep1 error: ", e$message))
 
   base::writeLines(capture.output(sessionInfo()), file.path(log_dir, "sessionInfo.txt"))
