@@ -10,6 +10,7 @@
 #   4) 相对 NTC_rep1 的共同上调（sh1 与 sh5 交集）
 # 比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–6 而改本文件主流程。
 #
+# 分层只两种（均 p<0.05）：上调 FC>=1/1.25/1.5/2，以及上调 top 50–300。
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
 # 不在自选通路上重新校正 p。最终气泡图：p.adjust < 0.05，再按 GeneRatio 取前 15 与前 20。
 # =============================================================================
@@ -943,9 +944,18 @@ plot_ora_bubble <- function(ora, title, outfile, n_show) {
     df,
     ggplot2::aes(x = GeneRatio_num, y = label, size = Count, fill = p_adjust)
   ) +
-    ggplot2::geom_point(shape = 21, color = "grey30", stroke = 0.4) +
+    ggplot2::geom_point(shape = 21, color = "grey30", stroke = 0.5) +
+    ggplot2::scale_size_continuous(range = c(6, 18)) +
+    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0.08, 0.16))) +
+    ggplot2::scale_y_discrete(expand = ggplot2::expansion(add = 0.55)) +
     ggplot2::theme_bw(base_size = 12) +
-    ggplot2::theme(axis.text.y = ggplot2::element_text(size = 9)) +
+    ggplot2::theme(
+      axis.text.y = ggplot2::element_text(size = 10),
+      plot.margin = ggplot2::margin(6, 10, 6, 6),
+      legend.margin = ggplot2::margin(0, 0, 0, 0),
+      legend.box.spacing = grid::unit(4, "pt"),
+      panel.grid.minor = ggplot2::element_blank()
+    ) +
     ggplot2::labs(
       title = title,
       x = "GeneRatio",
@@ -960,8 +970,8 @@ plot_ora_bubble <- function(ora, title, outfile, n_show) {
   } else {
     p <- p + ggplot2::scale_fill_gradientn(colours = diverging)
   }
-  h <- max(5.5, min(12, 0.38 * nrow(df) + 3))
-  save_gg(p, outfile, width = 10, height = h)
+  h <- max(5.2, min(10.5, 0.32 * nrow(df) + 2.4))
+  save_gg(p, outfile, width = 9, height = h)
 }
 
 plot_pathway_mean_fc <- function(de, go_tab, go_sets, title, outfile) {
@@ -1279,14 +1289,11 @@ run_comparisons_1_to_4 <- function() {
   de_list$TG_sh1_vs_NTC_rep1 <- pairwise_de(log_mat, sh1, ntc1, "TG_sh1_vs_NTC_rep1")
   de_list$TG_sh5_vs_NTC_rep1 <- pairwise_de(log_mat, sh5, ntc1, "TG_sh5_vs_NTC_rep1")
   de_list$TGsh_mean_vs_NTC <- mean_kd_vs_ntc_de(log_mat, si)
-  combine_common <- function(a, b) {
-    rbind(build_common(a, b, "up"), build_common(a, b, "down"))
-  }
-  de_list$common_up_vs_NTC_rep0 <- combine_common(
-    de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0
+  de_list$common_up_vs_NTC_rep0 <- build_common(
+    de_list$TG_sh1_vs_NTC_rep0, de_list$TG_sh5_vs_NTC_rep0, "up"
   )
-  de_list$common_up_vs_NTC_rep1 <- combine_common(
-    de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1
+  de_list$common_up_vs_NTC_rep1 <- build_common(
+    de_list$TG_sh1_vs_NTC_rep1, de_list$TG_sh5_vs_NTC_rep1, "up"
   )
   de_list <- de_list[!vapply(de_list, is.null, logical(1))]
 
