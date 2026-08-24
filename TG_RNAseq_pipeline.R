@@ -18,7 +18,7 @@
 # 总 CustomGO 柱状图：上调+下调全部，以及上调通路 mean log2FC 前 10/15/20。
 # 每个比较另出 ssGSEA 与 mean z 气泡图（分数差；1-vs-1 不伪造 p）。
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
-# 不在自选通路上重新校正 p。全库图：p.adjust < 0.2；列出通路图：pvalue < 0.2（仍显示全库 BH 的 p.adjust）。
+# 不在自选通路上重新校正 p。全库图与列出通路图都用全库 BH 的 p.adjust < 0.2。
 # 另出 BP/CC/MF 合图柱状图：横轴 -lgP 与 Count 各一套；全库 top 10/15/20；列出通路再出全部 + top 10/15/20。
 # enrichGO 最小基因集为 1，很细的通路（1/4/8 个基因）也会测。
 # 气泡大小、坐标字体在本文件「分析参数」里改。只重画已有图（含从 ORA 表补画柱状图）：
@@ -123,12 +123,8 @@ pathway_up_top_ns <- c(10, 15, 20)  # 总 CustomGO：上调通路 mean log2FC �
 ora_bar_top_ns <- c(10, 15, 20)     # BP/CC/MF 柱状图：每个 ontology 取前 N；列出通路另出全部
 # 柱状图横轴：neglogp = -lgP(p.adjust)；Count = 该通路命中的差异基因数。两套都出。
 padj_plot_cutoff <- 0.2
-# 全库 enrichGO 一直用 BH。不要改成 Bonferroni（更严，更少通路上图），
-# 也不要只在自选通路上重算 p.adjust（条目少会虚高）。
-# 列出通路上图改用原始 pvalue，表里的 p.adjust 仍是全库 BH。
+# 全库 enrichGO 用 BH。列出通路抽出全库 p.adjust，不在自选通路上重算，也不改成 Bonferroni。
 ora_p_adjust_method <- "BH"
-listed_plot_p_col <- "pvalue"
-listed_plot_cutoff <- 0.2
 ora_min_gs_size <- 1     # 很细的通路也测（1/4/8 个基因不会因 minGSSize 被丢掉）
 ora_max_gs_size <- 500   # 仍丢掉库里 >500 基因的超大通路
 
@@ -1070,11 +1066,7 @@ rebuild_ora_barplots <- function(result_root = NULL) {
       paste0(basename(prefix), " | ORA listed GO BP/CC/MF"),
       paste0(prefix, "_ORA_CustomGO_BP_CC_MF_barplot"),
       n_vec = ora_bar_top_ns,
-      include_all = TRUE,
-      p_col = listed_plot_p_col,
-      p_cutoff = listed_plot_cutoff,
-      drop_padj1 = TRUE,
-      p_lab = listed_plot_p_col
+      include_all = TRUE
     )
   }
   log_msg("Drew ", n_ok, " GO bar plot(s) from existing ORA tables.")
@@ -1098,13 +1090,9 @@ rebuild_listed_ora_bubbles <- function(result_root = NULL) {
         plot_ora_bubble(
           df,
           paste0(basename(prefix), " | ORA listed GO ", top_tag,
-                 " (", listed_plot_p_col, "<", listed_plot_cutoff,
-                 ", by GeneRatio; color=genome BH p.adjust)"),
+                 " (p.adjust<", padj_plot_cutoff, ", by GeneRatio)"),
           paste0(prefix, "_ORA_CustomGO_dotplot_", top_tag),
-          n_show = n_show,
-          p_col = listed_plot_p_col,
-          p_cutoff = listed_plot_cutoff,
-          drop_padj1 = TRUE
+          n_show = n_show
         )
         TRUE
       }, error = function(e) {
@@ -1987,12 +1975,12 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
   writeLines(
     c(
       "本文件夹是列出通路（metastasis_custom_genes.txt）的图，不要只看 xlsx：",
-      "  气泡图 *_ORA_CustomGO_dotplot_top15.pdf / top20.pdf（列出通路用 pvalue < 0.2 上图）",
-      "  柱状图 *_ORA_CustomGO_BP_CC_MF_barplot.pdf（横轴 -lgP 用原始 pvalue）",
+      "  气泡图 *_ORA_CustomGO_dotplot_top15.pdf / top20.pdf",
+      "  柱状图 *_ORA_CustomGO_BP_CC_MF_barplot.pdf（全库 p.adjust < 0.2，横轴 -lgP）",
       "  *_barplot_count.pdf（同样通路，横轴 Count）",
       "  以及 *_barplot_top10.pdf / top15 / top20 与 *_barplot_count_top10.pdf 等",
       "颜色：红=生物过程，蓝=细胞组成，绿=分子功能。",
-      "表里的 p.adjust 仍是全库 BH，没有在自选通路上重算。"
+      "p.adjust 来自全库 BH，没有在自选通路上重算。"
     ),
     file.path(cg_dir, "00_READ_ME_列出通路柱状图在这里.txt")
   )
@@ -2023,13 +2011,8 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
     top_tag <- paste0("top", n_show)
     if (!is.null(extracted$all_listed)) {
       ranked <- extracted$all_listed
-      p_col <- listed_plot_p_col
-      keep <- is.finite(ranked[[p_col]]) & ranked[[p_col]] < listed_plot_cutoff
-      if ("p.adjust" %in% names(ranked)) {
-        keep <- keep & is.finite(ranked$p.adjust) & ranked$p.adjust < 1
-      }
-      ranked <- ranked[keep, , drop = FALSE]
-      ranked <- ranked[order(-ranked$GeneRatio_num, ranked[[p_col]], ranked$pvalue), , drop = FALSE]
+      ranked <- ranked[is.finite(ranked$p.adjust) & ranked$p.adjust < padj_plot_cutoff, , drop = FALSE]
+      ranked <- ranked[order(-ranked$GeneRatio_num, ranked$p.adjust, ranked$pvalue), , drop = FALSE]
       write_table(
         utils::head(ranked, n_show),
         file.path(cg_dir, paste0(tag, "_ORA_CustomGO_", top_tag))
@@ -2039,13 +2022,9 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
       plot_ora_bubble(
         extracted$all_listed,
         paste0(title, " | ORA listed GO ", top_tag,
-               " (", listed_plot_p_col, "<", listed_plot_cutoff,
-               ", by GeneRatio; color=genome BH p.adjust)"),
+               " (p.adjust<", padj_plot_cutoff, ", by GeneRatio)"),
         file.path(cg_dir, paste0(tag, "_ORA_CustomGO_dotplot_", top_tag)),
-        n_show = n_show,
-        p_col = listed_plot_p_col,
-        p_cutoff = listed_plot_cutoff,
-        drop_padj1 = TRUE
+        n_show = n_show
       ),
       error = function(e) log_msg("bubble failed (", top_tag, "): ", e$message)
     )
@@ -2056,11 +2035,7 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
       paste0(title, " | ORA listed GO BP/CC/MF"),
       file.path(cg_dir, paste0(tag, "_ORA_CustomGO_BP_CC_MF_barplot")),
       n_vec = ora_bar_top_ns,
-      include_all = TRUE,
-      p_col = listed_plot_p_col,
-      p_cutoff = listed_plot_cutoff,
-      drop_padj1 = TRUE,
-      p_lab = listed_plot_p_col
+      include_all = TRUE
     )
   }
 }
@@ -2076,8 +2051,8 @@ run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "  1) FoldChange：上调 FC ≥ 1 / 1.25 / 1.5 / 2（四组，目录 FoldChange/FC_*）",
       "  2) 上调排名：top 50 / 75 / 100 / 150 / 200 / 250 / 300（七组，目录 TopRank/top*）",
       "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图与柱状图。",
-      "CustomGO/：列出通路气泡图/柱状图用原始 pvalue<0.2 上图（不在自选通路上重算 p.adjust）。",
-      "全库 GO 图仍只保留 p.adjust<0.2。",
+      "CustomGO/：列出通路气泡图与柱状图，统计量是全库 BH 的 p.adjust（不在自选通路上重算）。",
+      "最终气泡图只保留 p.adjust<0.2，再按 GeneRatio 取前15和前20。",
       "总 CustomGO 柱状图：1) 上调+下调全部；2) 上调 mean log2FC 前10/15/20。",
       "PathwayScore/：ssGSEA 与 mean z 气泡图（分数差；升高通路 top10/15/20）。",
       "气泡大小/坐标字体：改 TG_RNAseq_pipeline.R 开头的 bubble_size_* 和 axis_text_*。",
