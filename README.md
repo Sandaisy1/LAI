@@ -20,7 +20,7 @@ source("TG_RNAseq_pipeline.R")                 # 比较 1–4
 source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
 ```
 
-先过滤低表达，再标准化（有 count 用 DESeq2 size factor；仅 FPKM 则 log2 后分位数标准化），然后做六组比较。不要用原始值算 FC。
+先过滤低表达，再 `log2(x+1)` 后做六组比较。Cuffdiff 已定量，不再做 DESeq2 size factor 或分位数标准化。不要用未过滤的值算 FC。
 
 ## 六组比较（各自单独出图）
 

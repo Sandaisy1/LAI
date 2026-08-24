@@ -19,8 +19,8 @@ alwaysApply: true
 
 ## 预处理（四个样品一起做一次，再做六组比较）
 
-1. 过滤低表达  2. 有 count 用 DESeq2 size factor；仅 FPKM 则 log2 后分位数标准化
-3. 不要用未过滤、未标准化的原始值算 FC
+1. 过滤低表达  2. 不再做 DESeq2 size factor / 分位数标准化（Cuffdiff 已定量）；只做 log2(x+1) 再算 FC
+3. 不要用未过滤的原始值算 FC
 
 ## 六组比较（每组单独出表、单独作图）
 

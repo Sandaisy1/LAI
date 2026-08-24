@@ -10,7 +10,7 @@
 #   4) 相对 NTC_rep1 的共同上调（sh1 与 sh5 交集）
 # 比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–6 而改本文件主流程。
 #
-# 分层只两种（均 p<0.05）：上调 FC>=1/1.25/1.5/2，以及上调 top 50–300。
+# 过滤低表达后只做 log2(x+1)，不再做 DESeq2 size factor / 分位数标准化（Cuffdiff 已定量）。
 # 总 CustomGO 柱状图：上调+下调全部，以及上调通路 mean log2FC 前 10/15/20。
 # 每个比较另出 ssGSEA 与 mean z 气泡图（分数差；1-vs-1 不伪造 p）。
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
@@ -362,7 +362,7 @@ detect_value_type <- function(mat) {
 }
 
 # -----------------------------------------------------------------------------
-# 4. 过滤低表达 + 标准化
+# 4. 过滤低表达；Cuffdiff 已定量，不再做 size factor / 分位数标准化
 # -----------------------------------------------------------------------------
 filter_low_expression <- function(mat, sample_info, value_type) {
   min_n <- max(2, min(table(sample_info$group)))
@@ -380,27 +380,12 @@ filter_low_expression <- function(mat, sample_info, value_type) {
 }
 
 normalize_expression <- function(mat, sample_info, value_type) {
-  group <- factor(sample_info$group, levels = c("NTC", "TG_sh1", "TG_sh5"))
-  group <- droplevels(group)
-  if (value_type == "counts") {
-    dds <- DESeq2::DESeqDataSetFromMatrix(
-      countData = round(mat),
-      colData = data.frame(row.names = colnames(mat), group = group),
-      design = ~ group
-    )
-    dds <- DESeq2::estimateSizeFactors(dds)
-    log_msg("DESeq2 size-factor normalization")
-    log_mat <- log2(DESeq2::counts(dds, normalized = TRUE) + 1)
-    vsd <- tryCatch(
-      SummarizedExperiment::assay(DESeq2::vst(dds, blind = TRUE)),
-      error = function(e) log_mat
-    )
-    list(log_mat = log_mat, heat_mat = vsd, method = "DESeq2")
-  } else {
-    log_msg("Quantile normalize log2(FPKM+1)")
-    log_mat <- limma::normalizeBetweenArrays(log2(pmax(mat, 0) + 1), method = "quantile")
-    list(log_mat = log_mat, heat_mat = log_mat, method = "quantile_logFPKM")
-  }
+  log_msg(
+    "Skip extra size-factor/quantile normalization (Cuffdiff already quantified); ",
+    "log2(x+1) only | value_type=", value_type
+  )
+  log_mat <- log2(pmax(as.matrix(mat), 0) + 1)
+  list(log_mat = log_mat, heat_mat = log_mat, method = "log2_plus1")
 }
 
 # -----------------------------------------------------------------------------
