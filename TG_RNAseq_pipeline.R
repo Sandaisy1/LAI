@@ -103,7 +103,7 @@ log_msg <- function(...) {
   cat(msg, "\n", file = log_file, append = TRUE)
 }
 
-p_cutoffs <- c("p0.05" = 0.05, "p0.01" = 0.01)
+p_cutoffs <- c("p0.05" = 0.05)
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 bubble_top_ns <- c(15, 20)
@@ -1111,7 +1111,7 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
   }
 }
 
-run_five_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
+run_two_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
                             go_tab, go_sets, pathway_genes) {
   base <- file.path(result_dir, comp_name)
   dir.create(base, recursive = TRUE, showWarnings = FALSE)
@@ -1119,64 +1119,45 @@ run_five_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
   have_p <- has_real_pvalue(de)
   writeLines(
     c(
-      "本比较只分析 metastasis_custom_genes.txt 列出的 GO 通路表达。",
-      "分层结果在 p0.05/ 、p0.01/ 、UpDE/ 、DownDE/ 、AllDE/ 。",
-      "每个非空子集：差异表、火山图、热图；GO/ 里有全库 BP/CC/MF 气泡图（top15 与 top20）。",
-      "先全基因组 enrichGO；最终气泡图只保留 p.adjust<0.05，再按 GeneRatio 取前15和前20。",
+      "本比较只跑两种分层（均要求 p<0.05，无法估 p 时不伪造 p，仍按 FC/排名）：",
+      "  1) FoldChange 上调 FC >= 1 / 1.25 / 1.5 / 2",
+      "  2) 上调排名 top 50 / 75 / 100 / 150 / 200 / 250 / 300",
+      "每个非空子集：差异表、火山图、热图；GO/ 全库 BP/CC/MF 气泡图（top15 与 top20）。",
+      "最终气泡图只保留 p.adjust<0.05，再按 GeneRatio 取前15和前20。",
       paste("p-value estimated:", have_p)
     ),
     file.path(base, "00_READ_ME.txt")
   )
   if (!have_p) {
     writeLines(
-      "1-vs-1 或 2-vs-1 无法估计 p，未伪造 p 值。p0.05 与 p0.01 目录里是同一套 FC/topN 结果。",
+      "1-vs-1 或 2-vs-1 无法估计 p，未伪造 p 值。p0.05 目录里是 FC/topN 分层（未用 p 过滤）。",
       file.path(base, "NO_PVALUE.txt")
     )
   }
 
-  for (p_tag in names(p_cutoffs)) {
-    pcut <- unname(p_cutoffs[[p_tag]])
-    for (nm in names(fc_cutoffs)) {
-      fc <- unname(fc_cutoffs[[nm]])
-      sub <- select_by_fc(de, fc, pcut, have_p)
-      if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
-      outdir <- file.path(base, p_tag, "FoldChange", nm)
-      emit_subset_analysis(
-        comp_name, sub, paste0(p_tag, "_", nm),
-        paste0(comp_name, " | ", p_tag, " | up FC >= ", fc),
-        outdir, full_de, heat_mat, sample_info, go_tab, go_sets, pathway_genes,
-        fc_line = fc, p_line = pcut
-      )
-    }
-    for (n in top_ns) {
-      tag <- paste0("top", n)
-      sub <- select_by_topn(de, n, pcut, have_p)
-      emit_subset_analysis(
-        comp_name, sub, paste0(p_tag, "_", tag),
-        paste0(comp_name, " | ", p_tag, " | upregulated top ", n),
-        file.path(base, p_tag, "TopRank", tag),
-        full_de, heat_mat, sample_info, go_tab, go_sets, pathway_genes,
-        fc_line = 1, p_line = pcut
-      )
-    }
-  }
-
-  dir_p <- if (have_p) 0.05 else 1
-  dir_specs <- list(
-    UpDE = list(direction = "up", label = "upregulated only"),
-    DownDE = list(direction = "down", label = "downregulated only"),
-    AllDE = list(direction = "all", label = "up+down together")
-  )
-  for (dir_id in names(dir_specs)) {
-    spec <- dir_specs[[dir_id]]
-    sub <- select_by_direction(de, spec$direction, dir_p, have_p)
+  p_tag <- "p0.05"
+  pcut <- unname(p_cutoffs[[p_tag]])
+  for (nm in names(fc_cutoffs)) {
+    fc <- unname(fc_cutoffs[[nm]])
+    sub <- select_by_fc(de, fc, pcut, have_p)
+    if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
     emit_subset_analysis(
-      comp_name, sub, dir_id,
-      paste0(comp_name, " | ", dir_id, " | ", spec$label,
-             if (have_p) " (p<0.05)" else " (FC only)"),
-      file.path(base, dir_id),
+      comp_name, sub, paste0(p_tag, "_", nm),
+      paste0(comp_name, " | ", p_tag, " | up FC >= ", fc),
+      file.path(base, p_tag, "FoldChange", nm),
       full_de, heat_mat, sample_info, go_tab, go_sets, pathway_genes,
-      fc_line = 1, p_line = 0.05
+      fc_line = fc, p_line = pcut
+    )
+  }
+  for (n in top_ns) {
+    tag <- paste0("top", n)
+    sub <- select_by_topn(de, n, pcut, have_p)
+    emit_subset_analysis(
+      comp_name, sub, paste0(p_tag, "_", tag),
+      paste0(comp_name, " | ", p_tag, " | upregulated top ", n),
+      file.path(base, p_tag, "TopRank", tag),
+      full_de, heat_mat, sample_info, go_tab, go_sets, pathway_genes,
+      fc_line = 1, p_line = pcut
     )
   }
 
@@ -1252,7 +1233,7 @@ plot_venn_up <- function(de_a, de_b, outdir, label_a, label_b, title_prefix,
 
 analyze_one_comparison <- function(comp_name, de, full_de, heat_mat, sample_info,
                                    go_tab, go_sets, pathway_genes) {
-  run_five_tracks(comp_name, de, full_de, heat_mat, sample_info, go_tab, go_sets, pathway_genes)
+  run_two_tracks(comp_name, de, full_de, heat_mat, sample_info, go_tab, go_sets, pathway_genes)
 }
 
 # -----------------------------------------------------------------------------

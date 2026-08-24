@@ -31,17 +31,14 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
 5. `mean(TG_sh1, TG_sh5)` vs `NTC_rep0`（不要混入 NTC_rep1）
 6. `mean(TG_sh1, TG_sh5)` vs `NTC_rep1`（不要混入 NTC_rep0）
 
-## 五套分层（每组都跑）
+## 两套分层（每组都跑）
 
-用 **p 值**（不是 padj）：
+用 **p 值**（不是 padj），一律 **p < 0.05**：
 
-1. `p < 0.05` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2
-2. `p < 0.05` 后上调 top 50 / 75 / 100 / 150 / 200 / 250 / 300
-3. `p < 0.01` 且上调 FC ≥ 1 / 1.25 / 1.5 / 2
-4. `p < 0.01` 后上调 top 50–300
-5. `AllDE`：全部上调 + 下调（能估 p 时先滤 `p < 0.05`）。同时单独出 `UpDE/`（只上调）和 `DownDE/`（只下调）
+1. 上调 FC ≥ 1 / 1.25 / 1.5 / 2
+2. 上调 top 50 / 75 / 100 / 150 / 200 / 250 / 300
 
-无法估 p 时仍按 FC/排名分层，写 `NO_PVALUE.txt`，不伪造 p。
+不再跑 p<0.01，也不再单独出 AllDE/UpDE/DownDE。无法估 p 时仍按 FC/排名分层，写 `NO_PVALUE.txt`，不伪造 p。
 
 每个非空子集：差异基因表、火山图、热图。`GO/` 里有全库 BP/CC/MF 表和气泡图（`*_dotplot_top15.pdf` 与 `top20.pdf`）。气泡图**先做全基因组 `enrichGO`**，再抽出 `metastasis_custom_genes.txt` 中通路的 GeneRatio、p.adjust、Count（不在自选通路上重新校正 p）。最终气泡图只保留 **p.adjust < 0.05**，再按 **GeneRatio 从大到小**取前 15 与前 20（同一套排序，20 比 15 只在下面多 5 条）。全库完整表仍写出，不改 p.adjust。
 
