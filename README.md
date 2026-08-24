@@ -43,7 +43,7 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 比较 5–6
 
 无法估 p 时仍按 FC/排名分层，写 `NO_PVALUE.txt`，不伪造 p。
 
-每个非空子集：差异基因表、火山图、热图。`GO/` 里有全库 BP/CC/MF 表和气泡图（`*_dotplot_top15.pdf` 与 `top20.pdf`）。气泡图**先做全基因组 `enrichGO`**，再抽出 `metastasis_custom_genes.txt` 中通路的 GeneRatio、p.adjust、Count（不在自选通路上重新校正 p）。分别画 **p.adjust 排名前 15 与前 20**；气泡图 y 轴按 **GeneRatio 从大到小**，最大的在最上面。
+每个非空子集：差异基因表、火山图、热图。`GO/` 里有全库 BP/CC/MF 表和气泡图（`*_dotplot_top15.pdf` 与 `top20.pdf`）。气泡图**先做全基因组 `enrichGO`**，再抽出 `metastasis_custom_genes.txt` 中通路的 GeneRatio、p.adjust、Count（不在自选通路上重新校正 p）。分别按 **GeneRatio 取前 15 与前 20**（同一套排序，20 比 15 只在下面多 5 条）；颜色仍是全库 p.adjust。
 
 全库 GO 表在各子集的 `GO/`（`*_ORA_GO_BP.csv` 等）；抽出的通路在 `CustomGO/`。
 

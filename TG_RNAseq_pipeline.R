@@ -11,7 +11,7 @@
 # 比较 5–6 在 TG_RNAseq_TGsh_mean_vs_NTC_reps.R，不要为加 5–6 而改本文件主流程。
 #
 # 气泡图：先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio / p.adjust / Count。
-# 不在自选通路上重新校正 p。分别画 p.adjust 前 15 与前 20；y 轴按 GeneRatio 从大到小，最大在最上面。
+# 不在自选通路上重新校正 p。分别按 GeneRatio 取前 15 与前 20；最大在最上面，多出来的通路加在下面。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -926,9 +926,8 @@ plot_ora_bubble <- function(ora, title, outfile, n_show) {
     writeLines("no finite GeneRatio for listed GO", paste0(outfile, "_EMPTY.txt"))
     return(invisible(NULL))
   }
-  df <- df[order(df$p.adjust, df$pvalue, -df$Count), , drop = FALSE]
-  df <- utils::head(df, n_show)
   df <- df[order(-df$GeneRatio_num, df$p.adjust, df$pvalue), , drop = FALSE]
+  df <- utils::head(df, n_show)
   gid <- if ("go_id" %in% names(df)) df$go_id else df$ID
   df$label <- paste0(df$Description, " (", gid, ")")
   df$label <- factor(df$label, levels = rev(unique(as.character(df$label))))
@@ -1087,7 +1086,7 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
     top_tag <- paste0("top", n_show)
     if (!is.null(extracted$all_listed)) {
       ranked <- extracted$all_listed
-      ranked <- ranked[order(ranked$p.adjust, ranked$pvalue, -ranked$Count), , drop = FALSE]
+      ranked <- ranked[order(-ranked$GeneRatio_num, ranked$p.adjust, ranked$pvalue), , drop = FALSE]
       write_table(
         utils::head(ranked, n_show),
         file.path(cg_dir, paste0(tag, "_ORA_CustomGO_", top_tag))
@@ -1096,8 +1095,8 @@ emit_subset_analysis <- function(comp_name, sub, tag, title, outdir, full_de,
     tryCatch(
       plot_ora_bubble(
         extracted$all_listed,
-        paste0(title, " | ORA listed GO ", top_tag,
-               " (GeneRatio/p.adjust/Count from genome-wide GO)"),
+        paste0(title, " | ORA listed GO ", top_tag, " by GeneRatio",
+               " (p.adjust/Count from genome-wide GO)"),
         file.path(cg_dir, paste0(tag, "_ORA_CustomGO_dotplot_", top_tag)),
         n_show = n_show
       ),
@@ -1117,7 +1116,7 @@ run_five_tracks <- function(comp_name, de, full_de, heat_mat, sample_info,
       "本比较只分析 metastasis_custom_genes.txt 列出的 GO 通路表达。",
       "分层结果在 p0.05/ 、p0.01/ 、UpDE/ 、DownDE/ 、AllDE/ 。",
       "每个非空子集：差异表、火山图、热图；GO/ 里有全库 BP/CC/MF 气泡图（top15 与 top20）。",
-      "先全基因组 enrichGO，再抽出列出 GO 的 GeneRatio/p.adjust/Count 画 CustomGO 气泡图（分别前15和前20；GeneRatio 最大在最上面）。",
+      "先全基因组 enrichGO，再抽出列出 GO；气泡图按 GeneRatio 分别取前15和前20（最大在上，多的加在下面）。",
       paste("p-value estimated:", have_p)
     ),
     file.path(base, "00_READ_ME.txt")

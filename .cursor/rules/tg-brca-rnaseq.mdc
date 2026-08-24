@@ -43,7 +43,7 @@ alwaysApply: true
 3–4. `p<0.01` 同样两套
 5. 方向三套（能估 p 时 `p<0.05`）：`UpDE/` 只上调、`DownDE/` 只下调、`AllDE/` 上调+下调一起
 
-每个非空子集：差异表、火山图、热图。全库 GO BP/CC/MF 的表和气泡图在 `GO/`（`*_dotplot_top15.pdf` / `top20.pdf`）。列出 GO 抽到 `CustomGO/`，同样各出 top15 与 top20 气泡图。y 轴按 GeneRatio 从大到小，最大在最上面。
+分别按 GeneRatio 取前 15 与前 20（20 只在下面多 5 条）；y 轴 GeneRatio 最大在最上面。全库表和气泡图在 `GO/`，抽出结果在 `CustomGO/`。
 
 ## 通路表达
 
@@ -51,5 +51,5 @@ alwaysApply: true
 
 ```r
 # ❌ BAD: 只在自选 GO 上做超几何并重新 BH，导致 mitochondrion organization 的 p.adjust 虚高
-# ✅ GOOD: enrichGO 全库 → 抽出列出 GO → 分别出 top15 与 top20 气泡图；GeneRatio 最大在最上面
+# ✅ GOOD: enrichGO 全库 → 抽出列出 GO → 按 GeneRatio 分别出 top15 与 top20（20 只在下面多 5 条）
 ```
