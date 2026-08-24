@@ -1032,6 +1032,7 @@ ora_df_from_enrich <- function(ego, ont) {
 
 # 与原先正常 GO 分析相同：clusterProfiler::enrichGO，不限制 universe，
 # BH 在全库 GO 条目上校正。pvalueCutoff=1 只为留下自选通路，不改 p.adjust。
+# minGSSize=1：很细的通路也测；maxGSSize 仍丢掉库里超大的通路。
 run_genome_enrichGO <- function(genes, go_dir, tag) {
   dir.create(go_dir, recursive = TRUE, showWarnings = FALSE)
   writeLines(
