@@ -3,7 +3,8 @@
 # 额外两组（不修改 TG_RNAseq_pipeline.R 的比较 1–4）
 #   5) mean(TG_sh1, TG_sh5) vs NTC_rep0
 #   6) mean(TG_sh1, TG_sh5) vs NTC_rep1
-# 同样只对 metastasis_custom_genes.txt 列出的 GO 通路做出表、火山图、热图、气泡图与 BP/CC/MF 柱状图。
+# 同样按两套思路分层：FoldChange 上调 FC≥1/1.25/1.5/2，以及上调 top 50–300；
+# 对列出 GO 出表、火山图、热图、气泡图与 BP/CC/MF 柱状图。
 #
 # 用法：
 #   setwd("E:/R/TG_BRCA/TG")
