@@ -649,23 +649,53 @@ annotate_clusters <- function(med, panel_id) {
       if (is.finite(igm) && igm > igd && (!is.finite(cd27) || cd27 <= igd)) return("Atypical_B")
       return("Naive_B")
     }
-    scores <- c(
-      Eosinophil = max(nv(i, "Siglec-F"), nv(i, "CCR3")),
-      Basophil_mast = max(nv(i, "FceRI"), nv(i, "CD200R3")),
-      Neutrophil = nv(i, "LY6G"),
-      cDC1_CD103 = nv(i, "CD103"),
-      DC = max(nv(i, "CD11C"), nv(i, "I-A/I-E")),
-      M1_like_Mac = nv(i, "iNOS"),
-      M2_like_Mac = max(nv(i, "CD206"), nv(i, "ARG-1"), nv(i, "IL-10")),
-      Macrophage = nv(i, "F4/80"),
-      Mono_Ly6Chi = nv(i, "LY6C"),
-      Mono_Ly6Clo = nv(i, "CD11B")
+    # P3：cluster 内比定义标志。嗜酸只用 Siglec-F（不用 CCR3）；不要用泛 CD11B 抢赢；平局不要标成嗜酸
+    siglec <- nv(i, "Siglec-F")
+    ly6g <- nv(i, "LY6G")
+    f480 <- nv(i, "F4/80")
+    cd11c <- nv(i, "CD11C")
+    mhc2 <- nv(i, "I-A/I-E")
+    cd103 <- nv(i, "CD103")
+    ly6c <- nv(i, "LY6C")
+    cd11b <- nv(i, "CD11B")
+    inos <- nv(i, "iNOS")
+    m2 <- max(nv(i, "CD206"), nv(i, "ARG-1"), nv(i, "IL-10"), nv(i, "TGF-b"))
+    baso <- max(nv(i, "FceRI"), nv(i, "CD200R3"))
+    cd3 <- nv(i, "CD3")
+    cd19 <- nv(i, "CD19")
+    nk <- nv(i, "NK1.1")
+    dc_score <- max(cd11c, mhc2)
+    myel_def <- max(siglec, ly6g, f480, dc_score, ly6c, inos, m2, baso, cd103)
+    lymph <- max(cd3, cd19, nk)
+    if (is.finite(cd19) && cd19 >= lymph && cd19 > myel_def + 0.15) return("B")
+    if (is.finite(cd3) && cd3 >= lymph && cd3 > myel_def + 0.15) return("T")
+    if (is.finite(nk) && nk >= lymph && nk > myel_def + 0.15) return("NK")
+    if (is.finite(cd103) && cd103 >= cd11c - 0.15 && cd103 > f480 && cd103 > ly6g &&
+        cd103 >= max(siglec, ly6c, baso) - 0.05) {
+      return("cDC1_CD103")
+    }
+    spec <- c(
+      Eosinophil = siglec,
+      Neutrophil = ly6g,
+      Basophil_mast = baso,
+      DC = dc_score,
+      M1_like_Mac = inos,
+      M2_like_Mac = m2,
+      Macrophage = f480,
+      Mono_Ly6Chi = ly6c
     )
-    scores[!is.finite(scores)] <- -Inf
-    if (max(scores) <= -Inf) return("Myeloid")
-    win <- names(scores)[which.max(scores)]
-    if (identical(win, "Mono_Ly6Clo") && nv(i, "LY6C") >= nv(i, "CD11B") - 0.05) return("Mono_Ly6Chi")
-    if (identical(win, "DC") && nv(i, "CD103") >= nv(i, "CD11C") - 0.1 && nv(i, "CD103") > 0) return("cDC1_CD103")
+    spec[!is.finite(spec)] <- -Inf
+    if (max(spec) <= -Inf) return("Myeloid")
+    n_tied <- sum(spec == max(spec))
+    if (n_tied >= 3 || (n_tied >= 2 && max(spec) < 1)) {
+      if (is.finite(cd11b) && ly6c <= f480 + 0.35 && ly6g < cd11b) return("Mono_Ly6Clo")
+      return("Myeloid")
+    }
+    win <- names(spec)[which.max(spec)]
+    if (identical(win, "Macrophage") && is.finite(cd11b) && cd11b > f480 && ly6c <= f480 + 0.2 &&
+        f480 < 1 && ly6g < cd11b) {
+      return("Mono_Ly6Clo")
+    }
     win
   }, character(1))
   data.frame(cluster = rownames(med), lineage = labs, stringsAsFactors = FALSE)
@@ -693,45 +723,52 @@ theme_dr <- function() {
 
 pal_group <- c(T = "#4C78A8", T6 = "#E45756")
 
-# 主图按细亚群着色，不要把 CD4/CD8 并成一类
+# P1 主图高对比色；P2/P3 亚群也从这套取色，不要做成全紫/全橙
+pal_p1_hues <- c(
+  "#E74C3C", "#7B52A5", "#5DADE2", "#E8C87A",
+  "#C0392B", "#D4A017", "#27AE60", "#E67E22",
+  "#922B21", "#F5CBA7", "#A9DFBF", "#1E8449",
+  "#145A32", "#7D3C98", "#CA6F1E", "#85C1E9"
+)
+
 pal_celltype <- c(
-  "B cell" = "#7B52A5",
-  "Naive B" = "#C39BD3",
-  "Atypical B" = "#AF7AC5",
-  "IgM memory B" = "#9B59B6",
-  "Memory B" = "#6C3483",
-  "Switched B" = "#5B2C6F",
-  "Activated B" = "#D2B4DE",
-  "Plasma" = "#4A235A",
-  "CD4 naive" = "#F5CBA7",
-  "CD4 TCM" = "#E67E22",
-  "CD4 TEM" = "#CA6F1E",
   "CD4 activated" = "#E74C3C",
-  "Treg" = "#922B21",
-  "CD4 T" = "#E69A3C",
-  "CD8 naive" = "#A9DFBF",
+  "B cell" = "#7B52A5",
+  "Macrophage" = "#5DADE2",
+  "NKT" = "#E8C87A",
+  "NK" = "#C0392B",
+  "T" = "#D4A017",
   "CD8 TCM" = "#27AE60",
+  "CD4 TCM" = "#E67E22",
+  "Treg" = "#922B21",
+  "CD4 naive" = "#F5CBA7",
+  "CD8 naive" = "#A9DFBF",
   "CD8 TEM" = "#1E8449",
   "CD8 effector" = "#145A32",
   "CD8 exhausted" = "#7D3C98",
+  "CD4 TEM" = "#CA6F1E",
+  "CD4 T" = "#E69A3C",
   "CD8 T" = "#3D8B40",
-  "NK" = "#C0392B",
-  "NKT" = "#E8C87A",
-  "T" = "#D4A017",
   "T naive" = "#F7DC6F",
   "T TCM" = "#F4D03F",
   "T TEM" = "#B7950B",
   "Myeloid" = "#85C1E9",
-  "Macrophage" = "#5DADE2",
   "M1-like Mac" = "#1A5276",
-  "M2-like Mac" = "#76D7C4",
-  "Neutrophil" = "#8B5A2B",
-  "Eosinophil" = "#D35400",
-  "Ly6C hi mono" = "#17A589",
-  "Ly6C lo mono" = "#73C6B6",
-  "DC" = "#148F77",
-  "CD103 DC" = "#0E6655",
-  "Basophil/mast" = "#AF7AC5",
+  "M2-like Mac" = "#27AE60",
+  "Naive B" = "#F5CBA7",
+  "Atypical B" = "#E8C87A",
+  "IgM memory B" = "#A9DFBF",
+  "Memory B" = "#27AE60",
+  "Switched B" = "#E67E22",
+  "Activated B" = "#E74C3C",
+  "Plasma" = "#922B21",
+  "Eosinophil" = "#E74C3C",
+  "Neutrophil" = "#E67E22",
+  "Ly6C hi mono" = "#CA6F1E",
+  "Ly6C lo mono" = "#E8C87A",
+  "DC" = "#7B52A5",
+  "CD103 DC" = "#922B21",
+  "Basophil/mast" = "#A9DFBF",
   "other" = "#B0B0B0",
   "Other" = "#B0B0B0"
 )
@@ -787,7 +824,7 @@ celltype_colors <- function(levels) {
   pal <- pal_celltype[levels]
   miss <- levels[is.na(pal)]
   if (length(miss) > 0) {
-    extra <- grDevices::hcl.colors(max(length(miss), 3), palette = "Dark 3")[seq_along(miss)]
+    extra <- pal_p1_hues[((seq_along(miss) - 1L) %% length(pal_p1_hues)) + 1L]
     pal[is.na(pal)] <- extra
   }
   names(pal) <- levels
@@ -829,18 +866,24 @@ plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title) {
 }
 
 plot_embedding <- function(df, x, y, color_col, title, point_size = 0.35) {
-  nlev <- length(unique(df[[color_col]]))
-  p <- ggplot2::ggplot(df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = .data[[color_col]])) +
+  plot_df <- df
+  if (identical(color_col, "lineage")) {
+    plot_df$lineage <- celltype_label(plot_df$lineage, NA)
+  }
+  nlev <- length(unique(plot_df[[color_col]]))
+  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = .data[[color_col]])) +
     ggplot2::geom_point(size = point_size, alpha = 0.75, stroke = 0) +
     ggplot2::coord_equal() +
     theme_dr() +
     ggplot2::labs(title = title, color = color_col, x = x, y = y)
   if (color_col == "group") {
     p <- p + ggplot2::scale_color_manual(values = pal_group)
-  } else if (is.numeric(df[[color_col]])) {
+  } else if (identical(color_col, "lineage")) {
+    p <- p + ggplot2::scale_color_manual(values = celltype_colors(unique(as.character(plot_df$lineage))))
+  } else if (is.numeric(plot_df[[color_col]])) {
     p <- p + ggplot2::scale_color_gradientn(colours = c("#440154", "#21908C", "#FDE725"))
   } else {
-    pal <- grDevices::hcl.colors(max(nlev, 3), palette = "Dark 3")[seq_len(nlev)]
+    pal <- pal_p1_hues[((seq_len(nlev) - 1L) %% length(pal_p1_hues)) + 1L]
     p <- p + ggplot2::scale_color_manual(values = pal)
   }
   p

@@ -31,7 +31,12 @@ alwaysApply: false
 
 比较只有 **T6 vs T**（三 vs 三）。联合 UMAP/tSNE，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
 
-每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 T、右 T6，点按**细亚群**着色（P1 用 cluster 内 CD4 vs CD8、CD62L vs CD44 分 naive/TCM/TEM 等，不要并成一个 CD4/CD8，也不要虚线凸包）。主图 `*_T_vs_T6_tSNE_lineage_split`。
+每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 T、右 T6，点按**细亚群**着色，不要虚线凸包。主图 `*_T_vs_T6_tSNE_lineage_split`。
+
+- P1：cluster 内 CD4 vs CD8、CD62L vs CD44 分 naive/TCM/TEM 等，不要并成一个 CD4/CD8
+- P2：cluster 内 IgD/IgM/IgG/CD27/BLIMP-1，默认 Naive B，不要大量 other
+- P3：cluster 内 Siglec-F（不要用 CCR3 当嗜酸）、Ly6G、F4/80、iNOS、CD206、CD11c/MHCII、CD103、Ly6C、FceRI；淋巴细胞污染标 T/B/NK；平局标 Myeloid / Ly6C lo，不要默认 other，也不要把泛 CD11B 当成一个亚群去抢赢
+- **P1/P2/P3 共用 P1 那套高对比色**（红/紫/蓝/米/酒红/金/绿/橙）。禁止 P2 全紫、P3 全橙
 
 ```r
 # ❌ BAD: 用 raw FCS；把 T6-1 解析成 T；三 panel 混降维；只出坐标表不出图
