@@ -989,9 +989,8 @@ gate_major_lineage <- function(mat, panel_id) {
   out[is_my] <- "Myeloid"
   out[is_nk] <- "NK"
   out[is_nkt] <- "NKT"
-  out[is_t & cd4 > cd8 + 0.1] <- "CD4"
-  out[is_t & cd8 > cd4 + 0.1] <- "CD8"
-  out[is_t & !(cd4 > cd8 + 0.1) & !(cd8 > cd4 + 0.1)] <- "T"
+  # T 细胞必须判到 CD4 或 CD8，不要留下 T TEM
+  out[is_t] <- ifelse(cd4 >= cd8, "CD4", "CD8")
   if (panel_id == "P3") {
     out[out %in% c("CD4", "CD8", "NKT")] <- "T"
   }
@@ -1027,6 +1026,98 @@ split_within_parent <- function(mat, idx, markers, k, label_fun, fallback) {
   labs
 }
 
+marker_score <- function(mat, idx, markers) {
+  markers <- intersect(markers, colnames(mat))
+  if (length(idx) == 0) return(numeric(0))
+  if (length(markers) == 0) return(rep(NA_real_, length(idx)))
+  x <- mat[idx, markers, drop = FALSE]
+  if (ncol(x) == 1) return(as.numeric(x[, 1]))
+  apply(x, 1, function(r) {
+    r <- r[is.finite(r)]
+    if (!length(r)) return(NA_real_)
+    max(r)
+  })
+}
+
+# 一层：k=2 圈出该标志高的一群；两群分不开则整层跳过
+gate_k2_high <- function(mat, idx, markers, min_sep = 0.15) {
+  n <- length(idx)
+  out <- rep(FALSE, n)
+  if (n < 40) return(out)
+  sc <- marker_score(mat, idx, markers)
+  ok <- is.finite(sc)
+  if (sum(ok) < 40) return(out)
+  xs <- scale(as.matrix(sc[ok]))
+  xs[!is.finite(xs)] <- 0
+  set.seed(seed_value)
+  km <- tryCatch(stats::kmeans(xs, centers = 2, nstart = 10, iter.max = 250, algorithm = "Lloyd"),
+                 error = function(e) NULL)
+  if (is.null(km)) return(out)
+  med <- tapply(sc[ok], km$cluster, median, na.rm = TRUE)
+  if (length(med) < 2 || diff(range(as.numeric(med))) < min_sep) return(out)
+  hi <- as.integer(names(med)[which.max(med)])
+  out[ok] <- km$cluster == hi
+  out
+}
+
+# 一层：只用 CD62L vs CD44，k=3 按 (CD62L-CD44) 高→低标 naive / TCM / TEM
+split_memory_3 <- function(mat, idx, prefix) {
+  n <- length(idx)
+  fallback <- paste0(prefix, "_TEM")
+  if (n == 0) return(character(0))
+  mk <- intersect(c("CD62L", "CD44"), colnames(mat))
+  if (n < 30 || length(mk) < 2) {
+    cd62 <- median(colv(mat, "CD62L")[idx], na.rm = TRUE)
+    cd44 <- median(colv(mat, "CD44")[idx], na.rm = TRUE)
+    return(rep(mem_from_cd62_cd44(cd62, cd44, prefix), n))
+  }
+  x <- mat[idx, mk, drop = FALSE]
+  xs <- scale(x)
+  xs[!is.finite(xs)] <- 0
+  k_use <- if (n >= 90) 3L else 2L
+  set.seed(seed_value)
+  km <- tryCatch(stats::kmeans(xs, centers = k_use, nstart = 10, iter.max = 250, algorithm = "Lloyd"),
+                 error = function(e) NULL)
+  if (is.null(km)) return(rep(fallback, n))
+  cl <- sort(unique(km$cluster))
+  delta <- vapply(cl, function(ci) {
+    hit <- km$cluster == ci
+    median(x[hit, "CD62L"], na.rm = TRUE) - median(x[hit, "CD44"], na.rm = TRUE)
+  }, numeric(1))
+  ord <- cl[order(delta, decreasing = TRUE)]
+  map <- setNames(rep(fallback, length(ord)), as.character(ord))
+  map[as.character(ord[1])] <- paste0(prefix, "_naive")
+  map[as.character(ord[length(ord)])] <- paste0(prefix, "_TEM")
+  if (length(ord) == 3) map[as.character(ord[2])] <- paste0(prefix, "_TCM")
+  labs <- unname(map[as.character(km$cluster)])
+  labs[is.na(labs) | !nzchar(labs)] <- fallback
+  labs
+}
+
+sequential_t_subsets <- function(mat, idx, line) {
+  n <- length(idx)
+  if (n == 0) return(character(0))
+  labs <- rep(if (identical(line, "CD4")) "CD4_TEM" else "CD8_TEM", n)
+  remain <- rep(TRUE, n)
+  take_high <- function(markers, label, min_sep) {
+    if (!any(remain)) return(invisible())
+    hi <- gate_k2_high(mat, idx[remain], markers, min_sep)
+    pos <- which(remain)
+    labs[pos[hi]] <<- label
+    remain[pos[hi]] <<- FALSE
+  }
+  if (identical(line, "CD4")) {
+    take_high("CD25", "Treg", 0.15)
+    take_high(c("CD69", "TNF-a"), "CD4_activated", 0.15)
+    if (any(remain)) labs[remain] <- split_memory_3(mat, idx[remain], "CD4")
+  } else {
+    take_high(c("LAG-3", "TIM-3"), "CD8_exhausted", 0.15)
+    take_high(c("GZMB", "Perforin"), "CD8_effector", 0.15)
+    if (any(remain)) labs[remain] <- split_memory_3(mat, idx[remain], "CD8")
+  }
+  labs
+}
+
 # 分层圈门：P1/P2/P3 都是先圈大类，再在类内用其余抗体/细胞因子分亚群
 hierarchical_gate <- function(mat, panel_id) {
   mat <- as.matrix(mat)
@@ -1034,17 +1125,9 @@ hierarchical_gate <- function(mat, panel_id) {
   subset <- major
   if (panel_id == "P1") {
     i4 <- which(major == "CD4")
-    subset[i4] <- split_within_parent(
-      mat, i4, c("CD62L", "CD44", "CD25", "CD69", "TNF-a"), 5, label_cd4_subset, "CD4_TCM"
-    )
+    subset[i4] <- sequential_t_subsets(mat, i4, "CD4")
     i8 <- which(major == "CD8")
-    subset[i8] <- split_within_parent(
-      mat, i8, c("CD62L", "CD44", "LAG-3", "TIM-3", "GZMB", "Perforin"), 5, label_cd8_subset, "CD8_TEM"
-    )
-    it <- which(major == "T")
-    subset[it] <- split_within_parent(
-      mat, it, c("CD62L", "CD44"), 3, label_t_subset, "T_TCM"
-    )
+    subset[i8] <- sequential_t_subsets(mat, i8, "CD8")
   } else if (panel_id == "P2") {
     i_n <- which(major == "Naive_B")
     subset[i_n] <- split_within_parent(

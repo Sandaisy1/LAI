@@ -33,7 +33,7 @@ alwaysApply: false
 
 每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 T、右 T6，点按**细亚群**着色，不要虚线凸包。主图 `*_T_vs_T6_tSNE_lineage_split`。
 
-- P1：**先圈大类**（B / 髓系 / NK / NKT / **CD4** / **CD8**，只用谱系抗体），再在 CD4 内用 CD25、CD69、TNF-a、CD62L、CD44 分亚群；在 CD8 内用 LAG-3、TIM-3、GZMB、Perforin、CD62L、CD44 分亚群
+- P1：**先圈大类**（B / 髓系 / NK / NKT / **CD4** / **CD8**）。T 细胞一律判到 CD4 或 CD8，不要输出 T TEM。CD4 内再一层层圈：CD25→Treg，CD69/TNF-a→activated，剩余只用 CD62L vs CD44 分成 naive/TCM/TEM。CD8 内：LAG-3/TIM-3→exhausted，GZMB/Perforin→effector，剩余 naive/TCM/TEM。
 - P2：**先圈大类**（IgD / CD27 / BLIMP-1 → Naive / Memory / Plasma），再在 Naive 内用 IgM、CD80·CD86 分 Atypical/Activated；在 Memory 内用 IgG、IgM、CD80·CD86 分 Switched / IgM memory / Activated
 - P3：**先圈大类**（CD3/CD19/NK1.1 vs 髓系；髓系内再用 Ly6G、Siglec-F、F4/80、CD11c、Ly6C、FceRI 圈中性粒/嗜酸/巨噬/DC/单核/嗜碱），**巨噬圈定后再用 iNOS、CD206、ARG-1 分 M1/M2**。不用 CCR3 当嗜酸，不用 IL-10/TGF-b 当 M2
 - 类内 kmeans 只跑该层标志。不要全局 kmeans 后整团贴一个名字，也不要按 rank 在 UMAP 上撒点
