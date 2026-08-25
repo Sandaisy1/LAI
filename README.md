@@ -97,7 +97,14 @@ source("Flow_dimred_pipeline.R")
 
 无 FCS 时可 `Sys.setenv(FLOW_DEMO = "1")` 导出演示图，不能当正式结果。
 
-读真实 FCS 需要 `BiocManager::install("flowCore")`；UMAP/tSNE 需要 `install.packages(c("uwot", "Rtsne"))`。缺这些包时脚本会退回 PCA，图标题会标明 fallback。
+读真实 FCS 需要 `flowCore`。若日志出现「读 FCS 需要 flowCore」，先在 R 里装好再重新 `source`：
+
+```r
+install.packages("BiocManager")
+BiocManager::install("flowCore")
+```
+
+UMAP/tSNE 需要 `install.packages(c("uwot", "Rtsne"))`。缺这些包时脚本会退回 PCA，图标题会标明 fallback。
 
 ## 额外两组（新脚本，不改原流程）
 

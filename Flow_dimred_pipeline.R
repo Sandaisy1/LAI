@@ -28,19 +28,18 @@ bioc_optional <- c("flowCore", "FlowSOM")
 install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
   miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
   if (length(miss) == 0) return(invisible(TRUE))
-  lib <- path.expand("~/R/library")
-  dir.create(lib, recursive = TRUE, showWarnings = FALSE)
+  message("Installing: ", paste(miss, collapse = ", "))
   if (bioc) {
     if (!requireNamespace("BiocManager", quietly = TRUE)) {
-      tryCatch(install.packages("BiocManager", repos = "https://cloud.r-project.org", lib = lib),
+      tryCatch(install.packages("BiocManager", repos = "https://cloud.r-project.org"),
                error = function(e) message("BiocManager install failed: ", e$message))
     }
     if (requireNamespace("BiocManager", quietly = TRUE)) {
-      tryCatch(BiocManager::install(miss, update = FALSE, ask = FALSE, lib = lib),
+      tryCatch(BiocManager::install(miss, update = FALSE, ask = FALSE),
                error = function(e) message("Bioconductor install failed: ", e$message))
     }
   } else {
-    tryCatch(install.packages(miss, repos = "https://cloud.r-project.org", lib = lib),
+    tryCatch(install.packages(miss, repos = "https://cloud.r-project.org"),
              error = function(e) message("CRAN install failed: ", e$message))
   }
   still <- miss[!vapply(miss, requireNamespace, logical(1), quietly = TRUE)]
@@ -53,7 +52,18 @@ install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
 
 install_if_missing(cran_required, bioc = FALSE, required = TRUE)
 install_if_missing(cran_optional, bioc = FALSE, required = FALSE)
-# flowCore / FlowSOM：有真实 FCS 时再装；演示模式不自动装 Bioconductor
+
+ensure_flowcore <- function() {
+  if (requireNamespace("flowCore", quietly = TRUE)) return(invisible(TRUE))
+  message("正在安装 flowCore（读 FCS 必需），可能要几分钟…")
+  install_if_missing("flowCore", bioc = TRUE, required = FALSE)
+  if (requireNamespace("flowCore", quietly = TRUE)) return(invisible(TRUE))
+  stop(
+    "读 FCS 需要 Bioconductor 包 flowCore。请先在 R 控制台运行这两行，装好后再 source 脚本：\n",
+    "  install.packages(\"BiocManager\")\n",
+    "  BiocManager::install(\"flowCore\")"
+  )
+}
 
 safe_library <- function(pkgs) {
   for (p in pkgs) {
@@ -337,7 +347,7 @@ scale_markers <- function(mat) {
 # 5. 读 FCS 或演示数据
 # -----------------------------------------------------------------------------
 read_fcs_expr <- function(path, panel_id) {
-  if (!has_pkg("flowCore")) stop("读 FCS 需要 flowCore")
+  ensure_flowcore()
   ff <- flowCore::read.FCS(path, transformation = FALSE, truncate_max_range = FALSE, emptyValue = FALSE)
   exprs <- flowCore::exprs(ff)
   pdata <- as.data.frame(flowCore::parameters(ff)@data)
@@ -1010,6 +1020,7 @@ if (nrow(file_tab) == 0) {
   if (any(file_tab$group == "T" & grepl("^T6", file_tab$file))) {
     stop("Filename parser classified a T6 file as T; refusing to continue")
   }
+  ensure_flowcore()
 }
 
 if (use_demo) {
