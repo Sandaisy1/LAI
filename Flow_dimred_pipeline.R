@@ -501,6 +501,7 @@ demo_means_p1 <- function() {
     Treg = pop(CD3 = 3.1, CD4 = 3.0, CD25 = 3.2, CD69 = 0.4, CD44 = 1.8),
     CD4_act = pop(CD3 = 3.2, CD4 = 3.0, CD25 = 1.2, CD69 = 3.1, CD44 = 2.6, CD62L = 0.4, `TNF-a` = 2.4, `IFN-g` = 1.8),
     CD8_naive = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.9, CD4 = 0.1, CD62L = 3.1, CD44 = 0.3),
+    CD8_TCM = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD62L = 2.7, CD44 = 2.6),
     CD8_TEM = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 3.0, CD62L = 0.3),
     CD8_eff = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 2.6, GZMB = 3.0, Perforin = 2.8, `IFN-g` = 2.2),
     CD8_exh = pop(CD3 = 3.0, CD8 = 3.0, CD8b = 2.6, `LAG-3` = 3.1, `TIM-3` = 2.9, `PD-L1` = 2.0, CD44 = 2.8),
@@ -556,13 +557,13 @@ demo_means_p3 <- function() {
 demo_props <- function(panel_id, group) {
   if (panel_id == "P1") {
     if (group == "T") {
-      return(c(CD4_naive = 0.16, CD4_TCM = 0.08, CD4_TEM = 0.07, Treg = 0.05, CD4_act = 0.05,
-               CD8_naive = 0.10, CD8_TEM = 0.08, CD8_eff = 0.06, CD8_exh = 0.04,
+      return(c(CD4_naive = 0.14, CD4_TCM = 0.07, CD4_TEM = 0.07, Treg = 0.05, CD4_act = 0.05,
+               CD8_naive = 0.09, CD8_TCM = 0.06, CD8_TEM = 0.07, CD8_eff = 0.05, CD8_exh = 0.04,
                NK = 0.12, NKT = 0.04, B = 0.09, Myeloid = 0.06))
     }
-    return(c(CD4_naive = 0.08, CD4_TCM = 0.06, CD4_TEM = 0.08, Treg = 0.05, CD4_act = 0.10,
-             CD8_naive = 0.06, CD8_TEM = 0.07, CD8_eff = 0.09, CD8_exh = 0.10,
-             NK = 0.13, NKT = 0.05, B = 0.08, Myeloid = 0.05))
+    return(c(CD4_naive = 0.07, CD4_TCM = 0.05, CD4_TEM = 0.07, Treg = 0.05, CD4_act = 0.09,
+             CD8_naive = 0.05, CD8_TCM = 0.05, CD8_TEM = 0.06, CD8_eff = 0.08, CD8_exh = 0.09,
+             NK = 0.12, NKT = 0.05, B = 0.08, Myeloid = 0.05))
   }
   if (panel_id == "P2") {
     if (group == "T") return(c(Naive_B = 0.38, IgM_memory = 0.10, Memory_B = 0.14, Switched_B = 0.10, Activated_B = 0.16, Plasma = 0.12))
@@ -622,7 +623,10 @@ run_tsne <- function(mat) {
   perplexity <- max(5, min(30, floor((nrow(mat) - 1) / 3)))
   if (has_pkg("Rtsne")) {
     set.seed(seed_value)
-    ts <- Rtsne::Rtsne(mat, perplexity = perplexity, verbose = FALSE, check_duplicates = FALSE, pca = TRUE)
+    ts <- Rtsne::Rtsne(
+      mat, perplexity = perplexity, verbose = FALSE, check_duplicates = FALSE,
+      pca = TRUE, max_iter = 1000
+    )
     emb <- ts$Y
     colnames(emb) <- c("tSNE1", "tSNE2")
     return(emb)
@@ -639,7 +643,7 @@ run_tsne <- function(mat) {
 }
 
 choose_k <- function(panel_id) {
-  switch(panel_id, P1 = 16, P2 = 14, P3 = 16, 12)
+  switch(panel_id, P1 = 22, P2 = 16, P3 = 20, 12)
 }
 
 cluster_cells <- function(mat, panel_id) {
@@ -658,7 +662,7 @@ cluster_cells <- function(mat, panel_id) {
   }
   set.seed(seed_value)
   # Hartigan-Wong 在细胞数多时会报 Quick-TRANSfer；Lloyd 更稳，结果仍可用于分群
-  km <- kmeans(mat, centers = k, nstart = 10, iter.max = 200, algorithm = "Lloyd")
+  km <- kmeans(mat, centers = k, nstart = 5, iter.max = 400, algorithm = "Lloyd")
   factor(paste0("C", km$cluster), levels = paste0("C", sort(unique(km$cluster))))
 }
 
@@ -675,38 +679,54 @@ annotate_clusters <- function(med, panel_id) {
   labs <- vapply(seq_len(nrow(med)), function(i) {
     cd4 <- nv(i, "CD4")
     cd8 <- max(nv(i, "CD8"), nv(i, "CD8b"))
-    is_cd4 <- cd4 > cd8
-    is_cd8 <- cd8 > cd4
-    mem <- function(prefix) {
+    cd3 <- nv(i, "CD3")
+    cd19 <- nv(i, "CD19")
+    cd11b <- nv(i, "CD11B")
+    nk <- max(nv(i, "NK1.1"), nv(i, "NKp46"))
+    t_mem <- function(prefix) {
       cd62 <- nv(i, "CD62L")
       cd44 <- nv(i, "CD44")
-      if (!is.finite(cd62)) cd62 <- 0
-      if (!is.finite(cd44)) cd44 <- 0
-      if (cd62 > cd44 + 0.08) return(paste0(prefix, "_naive"))
-      if (cd62 >= cd44 - 0.08 && cd44 >= cd62 - 0.08 && (cd62 > 0 || cd44 > 0)) return(paste0(prefix, "_TCM"))
-      if (cd44 > cd62) return(paste0(prefix, "_TEM"))
+      if (!is.finite(cd62)) cd62 <- -Inf
+      if (!is.finite(cd44)) cd44 <- -Inf
+      if (cd62 > cd44 + 0.3) return(paste0(prefix, "_naive"))
+      if (cd44 > cd62 + 0.3) return(paste0(prefix, "_TEM"))
+      if (is.finite(cd62) || is.finite(cd44)) return(paste0(prefix, "_TCM"))
       paste0(prefix, "_T")
     }
     if (panel_id == "P1") {
-      if (nv(i, "CD19") > max(nv(i, "CD3"), nv(i, "CD4"), cd8, nv(i, "NK1.1")) + 0.1) return("B")
-      if (max(nv(i, "NK1.1"), nv(i, "NKp46")) > max(nv(i, "CD3"), cd4, cd8) + 0.1) return("NK")
-      if (nv(i, "CD11B") > max(nv(i, "CD3"), cd4, cd8, nv(i, "CD19")) + 0.1) return("Myeloid")
-      nk <- max(nv(i, "NK1.1"), nv(i, "NKp46"))
-      if (nk > 1 && nv(i, "CD3") > 1 && nk > max(cd4, cd8) && abs(nv(i, "CD3") - nk) < 1.5) return("NKT")
-      if (is_cd8) {
-        if (max(nv(i, "LAG-3"), nv(i, "TIM-3")) > max(nv(i, "CD62L"), nv(i, "CD44")) - 0.05 &&
-            max(nv(i, "LAG-3"), nv(i, "TIM-3")) > 0) return("CD8_exhausted")
-        if (max(nv(i, "GZMB"), nv(i, "Perforin"), nv(i, "IFN-g")) > nv(i, "CD62L") &&
-            max(nv(i, "GZMB"), nv(i, "Perforin"), nv(i, "IFN-g")) > 0) return("CD8_effector")
-        return(mem("CD8"))
+      # NK 必须明显 CD3-；不要靠 NK1.1 背景把 T 吃掉
+      if (is.finite(cd19) && cd19 >= max(cd3, cd4, cd8, nk) - 0.05 && cd19 > cd3 + 0.15) return("B")
+      if (is.finite(cd11b) && cd11b > max(cd3, cd4, cd8, cd19) + 0.2) return("Myeloid")
+      if (is.finite(nk) && nk > cd3 + 0.3 && nk > cd19 && nk >= max(cd4, cd8) - 0.15) return("NK")
+      if (is.finite(nk) && is.finite(cd3) && nk > 1 && cd3 > 1 &&
+          abs(cd3 - nk) < 1.2 && nk > cd19 && cd3 > cd19 && nk >= max(cd4, cd8) - 0.4) {
+        return("NKT")
       }
-      if (is_cd4) {
-        if (nv(i, "CD25") > nv(i, "CD69") && nv(i, "CD25") > nv(i, "CD44") - 0.2 && nv(i, "CD25") > 0) return("Treg")
-        if (max(nv(i, "CD69"), nv(i, "TNF-a"), nv(i, "IFN-g")) > nv(i, "CD62L") &&
-            max(nv(i, "CD69"), nv(i, "TNF-a"), nv(i, "IFN-g")) > 0) return("CD4_activated")
-        return(mem("CD4"))
+      if (cd8 > cd4 + 0.15) {
+        exh <- max(nv(i, "LAG-3"), nv(i, "TIM-3"))
+        eff <- max(nv(i, "GZMB"), nv(i, "Perforin"))
+        cd62 <- nv(i, "CD62L")
+        cd44 <- nv(i, "CD44")
+        # IFN-g 背景不能当 effector；GZMB/Perforin 必须压过 CD44/CD62L
+        if (is.finite(exh) && exh > max(eff, cd62) + 0.2 && exh >= cd44 - 0.35) return("CD8_exhausted")
+        if (is.finite(eff) && eff > max(cd62, cd44) + 0.15 && eff > exh) return("CD8_effector")
+        return(t_mem("CD8"))
       }
-      return(mem("T"))
+      if (cd4 > cd8 + 0.15) {
+        cd25 <- nv(i, "CD25")
+        cd69 <- nv(i, "CD69")
+        tnfa <- nv(i, "TNF-a")
+        cd62 <- nv(i, "CD62L")
+        cd44 <- nv(i, "CD44")
+        act <- max(cd69, tnfa)
+        if (is.finite(cd25) && cd25 > max(cd69, tnfa, nv(i, "IFN-g")) + 0.2 &&
+            cd25 >= max(cd62, cd44) - 0.6) return("Treg")
+        # IFN-g 不能单独把 naive/TEM 标成 activated
+        if (is.finite(act) && act > max(cd62, cd44) + 0.2 && act > cd25) return("CD4_activated")
+        return(t_mem("CD4"))
+      }
+      if (is.finite(cd3) && cd3 > max(cd19, cd11b, nk)) return(t_mem("T"))
+      return("Myeloid")
     }
     if (panel_id == "P2") {
       blimp <- nv(i, "BLIMP-1")
@@ -715,13 +735,15 @@ annotate_clusters <- function(med, panel_id) {
       igg <- nv(i, "IgG")
       cd27 <- nv(i, "CD27")
       act <- max(nv(i, "CD80"), nv(i, "CD86"))
-      ig_max <- max(igd, igm, igg)
-      if (is.finite(blimp) && blimp >= ig_max - 0.05 && blimp >= cd27 - 0.1 && blimp > -Inf) return("Plasma")
-      if (is.finite(igg) && igg > igd + 0.15 && igg > igm + 0.15) return("Switched_B")
-      if (is.finite(act) && act > max(igd, igm, cd27) + 0.1) return("Activated_B")
-      if (is.finite(cd27) && cd27 > igd && is.finite(igm) && igm > igd + 0.15 && igm >= igg) return("IgM_memory")
-      if (is.finite(cd27) && cd27 > igd) return("Memory_B")
-      if (is.finite(igm) && igm > igd && (!is.finite(cd27) || cd27 <= igd)) return("Atypical_B")
+      if (is.finite(blimp) && blimp > igd + 0.4 && blimp > igm + 0.25) return("Plasma")
+      if (is.finite(igg) && igg > igd + 0.25 && igg > igm + 0.2) return("Switched_B")
+      if (is.finite(act) && act > max(igd, igm, igg) + 0.2) return("Activated_B")
+      if (is.finite(cd27) && cd27 > igd + 0.25) {
+        if (is.finite(igm) && igm > igd + 0.2 && igm >= igg) return("IgM_memory")
+        return("Memory_B")
+      }
+      if (is.finite(igd) && igd >= igm - 0.2) return("Naive_B")
+      if (is.finite(igm) && igm > igd + 0.35) return("Atypical_B")
       return("Naive_B")
     }
     # P3：cluster 内比定义标志。嗜酸只用 Siglec-F（不用 CCR3）；不要用泛 CD11B 抢赢；平局不要标成嗜酸
@@ -734,7 +756,7 @@ annotate_clusters <- function(med, panel_id) {
     ly6c <- nv(i, "LY6C")
     cd11b <- nv(i, "CD11B")
     inos <- nv(i, "iNOS")
-    m2 <- max(nv(i, "CD206"), nv(i, "ARG-1"), nv(i, "IL-10"), nv(i, "TGF-b"))
+    m2 <- max(nv(i, "CD206"), nv(i, "ARG-1"))
     baso <- max(nv(i, "FceRI"), nv(i, "CD200R3"))
     cd3 <- nv(i, "CD3")
     cd19 <- nv(i, "CD19")
@@ -1278,7 +1300,7 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   tsne_is_pca <- !has_pkg("Rtsne")
   umap <- run_umap(pca_use)
   tsne <- run_tsne(pca_use)
-  cl <- cluster_cells(pca_use, panel_id)
+  cl <- cluster_cells(mat, panel_id)
 
   cells <- data.frame(
     sample = smp,

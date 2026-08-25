@@ -43,6 +43,8 @@ if (identical(ccr3_only, "Eosinophil")) fail("CCR3-only must not be Eosinophil")
 expect(lab_of(mk(CD19 = 3.3, CD3 = 0.2, CD11B = 0.3)), "B", "dump-B")
 expect(lab_of(mk(CD3 = 3.2, CD19 = 0.2, CD11B = 0.3)), "T", "dump-T")
 expect(lab_of(mk(`NK1.1` = 3.2, CD3 = 0.2, CD11B = 0.3)), "NK", "dump-NK")
+# IL-10 / TGF-b 背景不得把巨噬打成 M2
+expect(lab_of(mk(CD11B = 3.0, `F4/80` = 3.2, `IL-10` = 2.8, `TGF-b` = 2.6, CD206 = 0.2, `ARG-1` = 0.2)), "Macrophage", "il10-not-m2")
 
 p2 <- c("Naive B", "Atypical B", "IgM memory B", "Memory B", "Switched B", "Activated B", "Plasma")
 p2_cols <- unname(pal_celltype[p2])
