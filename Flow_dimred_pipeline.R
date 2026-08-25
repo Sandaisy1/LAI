@@ -861,7 +861,7 @@ label_b_subset <- function(v) {
   igg <- vec_get(v, "IgG")
   cd27 <- vec_get(v, "CD27")
   act <- max(vec_get(v, "CD80"), vec_get(v, "CD86"))
-  if (blimp > igd + 0.2 && blimp > igm + 0.15) return("Plasma")
+  if (blimp > igd + 0.4 && blimp > igm + 0.25 && blimp >= cd27 - 0.15) return("Plasma")
   if (igg > igd + 0.2 && igg > igm + 0.15) return("Switched_B")
   if (act > max(igd, igm, igg) + 0.15) return("Activated_B")
   if (cd27 > igd + 0.15) {
@@ -873,12 +873,11 @@ label_b_subset <- function(v) {
   "Naive_B"
 }
 
-# P2 第 1 层：只用 IgD / CD27 / BLIMP-1 圈 Naive / Memory / Plasma
+# P2 第 1 层：只用表面 IgD vs CD27 圈 Naive / Memory。不要把 BLIMP-1 放进这一层，
+# 核染色背景会让几乎所有团都变成 Plasma，后面再也分不出亚群。
 label_b_major <- function(v) {
-  blimp <- vec_get(v, "BLIMP-1")
   igd <- vec_get(v, "IgD")
   cd27 <- vec_get(v, "CD27")
-  if (blimp > igd + 0.2 && blimp >= cd27 - 0.15) return("Plasma")
   if (cd27 > igd + 0.12) return("Memory_B")
   "Naive_B"
 }
@@ -964,13 +963,13 @@ label_myeloid_subset <- function(v) {
   "Mono_Ly6Clo"
 }
 
-# 第 1 层：只用谱系抗体圈大类（P1 T/NK，P2 B 三大类，P3 淋巴 vs 髓系）
+# 第 1 层：只用谱系抗体圈大类（P1 T/NK，P2 B 的 Naive/Memory，P3 淋巴 vs 髓系）
 gate_major_lineage <- function(mat, panel_id) {
   mat <- as.matrix(mat)
   n <- nrow(mat)
   if (panel_id == "P2") {
     return(split_within_parent(
-      mat, seq_len(n), c("IgD", "CD27", "BLIMP-1"), 3, label_b_major, "Naive_B"
+      mat, seq_len(n), c("IgD", "CD27"), 2, label_b_major, "Naive_B"
     ))
   }
   cd3 <- colv(mat, "CD3")
@@ -1118,6 +1117,87 @@ sequential_t_subsets <- function(mat, idx, line) {
   labs
 }
 
+# P2 Naive 内：CD80/CD86 → Activated；剩余 IgD vs IgM → Naive / Atypical
+sequential_b_naive <- function(mat, idx) {
+  n <- length(idx)
+  if (n == 0) return(character(0))
+  out <- rep("Naive_B", n)
+  remain <- rep(TRUE, n)
+  take_high <- function(markers, label, min_sep, beat = NULL, margin = 0.2) {
+    if (!any(remain)) return(invisible())
+    hi <- gate_k2_high(mat, idx[remain], markers, min_sep)
+    if (!any(hi)) return(invisible())
+    pos <- which(remain)
+    if (length(beat)) {
+      hi_idx <- idx[remain][hi]
+      sc <- median(marker_score(mat, hi_idx, markers), na.rm = TRUE)
+      bt <- max(vapply(beat, function(m) median(colv(mat, m)[hi_idx], na.rm = TRUE), numeric(1)))
+      if (!is.finite(sc) || !is.finite(bt) || sc <= bt + margin) return(invisible())
+    }
+    out[pos[hi]] <<- label
+    remain[pos[hi]] <<- FALSE
+  }
+  take_high(c("CD80", "CD86", "CD40"), "Activated_B", 0.2, beat = c("IgD", "IgM"), margin = 0.2)
+  if (any(remain)) {
+    hi <- gate_k2_high(mat, idx[remain], "IgM", 0.2)
+    pos <- which(remain)
+    if (any(hi)) {
+      hi_idx <- idx[remain][hi]
+      igm <- median(colv(mat, "IgM")[hi_idx], na.rm = TRUE)
+      igd <- median(colv(mat, "IgD")[hi_idx], na.rm = TRUE)
+      if (is.finite(igm) && igm > igd + 0.25) {
+        out[pos[hi]] <- "Atypical_B"
+        remain[pos[hi]] <- FALSE
+      }
+    }
+    out[remain] <- "Naive_B"
+  }
+  out
+}
+
+# P2 Memory 内一层层圈：Plasma（BLIMP 必须真能分开）→ Switched → Activated → IgM memory / Memory
+# 默认剩余是 Memory，不是 Plasma。多数派不得打成 Plasma（核背景常见）。
+sequential_b_memory <- function(mat, idx) {
+  n <- length(idx)
+  if (n == 0) return(character(0))
+  out <- rep("Memory_B", n)
+  remain <- rep(TRUE, n)
+  take_high <- function(markers, label, min_sep, beat = NULL, margin = 0.2, max_frac = 1) {
+    if (!any(remain)) return(invisible())
+    hi <- gate_k2_high(mat, idx[remain], markers, min_sep)
+    if (!any(hi)) return(invisible())
+    if (mean(hi) > max_frac) return(invisible())
+    pos <- which(remain)
+    if (length(beat)) {
+      hi_idx <- idx[remain][hi]
+      sc <- median(marker_score(mat, hi_idx, markers), na.rm = TRUE)
+      bt <- max(vapply(beat, function(m) median(colv(mat, m)[hi_idx], na.rm = TRUE), numeric(1)))
+      if (!is.finite(sc) || !is.finite(bt) || sc <= bt + margin) return(invisible())
+    }
+    out[pos[hi]] <<- label
+    remain[pos[hi]] <<- FALSE
+  }
+  take_high("BLIMP-1", "Plasma", 0.4, beat = c("IgD", "IgM"), margin = 0.4, max_frac = 0.4)
+  take_high("IgG", "Switched_B", 0.2, beat = c("IgD", "IgM"), margin = 0.2)
+  take_high(c("CD80", "CD86"), "Activated_B", 0.2, beat = c("IgD", "IgM", "IgG"), margin = 0.2)
+  if (any(remain)) {
+    hi <- gate_k2_high(mat, idx[remain], "IgM", 0.15)
+    pos <- which(remain)
+    if (any(hi)) {
+      hi_idx <- idx[remain][hi]
+      igm <- median(colv(mat, "IgM")[hi_idx], na.rm = TRUE)
+      igd <- median(colv(mat, "IgD")[hi_idx], na.rm = TRUE)
+      igg <- median(colv(mat, "IgG")[hi_idx], na.rm = TRUE)
+      if (is.finite(igm) && igm > igd + 0.1 && igm >= igg) {
+        out[pos[hi]] <- "IgM_memory"
+        remain[pos[hi]] <- FALSE
+      }
+    }
+    out[remain] <- "Memory_B"
+  }
+  out
+}
+
 # 分层圈门：P1/P2/P3 都是先圈大类，再在类内用其余抗体/细胞因子分亚群
 hierarchical_gate <- function(mat, panel_id) {
   mat <- as.matrix(mat)
@@ -1130,13 +1210,9 @@ hierarchical_gate <- function(mat, panel_id) {
     subset[i8] <- sequential_t_subsets(mat, i8, "CD8")
   } else if (panel_id == "P2") {
     i_n <- which(major == "Naive_B")
-    subset[i_n] <- split_within_parent(
-      mat, i_n, c("IgD", "IgM", "CD80", "CD86", "CD40"), 3, label_b_naive_subset, "Naive_B"
-    )
+    subset[i_n] <- sequential_b_naive(mat, i_n)
     i_m <- which(major == "Memory_B")
-    subset[i_m] <- split_within_parent(
-      mat, i_m, c("IgM", "IgG", "CD27", "CD80", "CD86"), 4, label_b_memory_subset, "Memory_B"
-    )
+    subset[i_m] <- sequential_b_memory(mat, i_m)
   } else if (panel_id == "P3") {
     im <- which(major == "Myeloid")
     subset[im] <- split_within_parent(

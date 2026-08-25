@@ -65,12 +65,28 @@ bp <- function(name, n) {
   colnames(m) <- f2
   m + matrix(rnorm(n * length(f2), 0, 0.1), n)
 }
-m2 <- rbind(bp("Naive_B", 100), bp("Plasma", 80), bp("Switched_B", 80), bp("Activated_B", 80), bp("IgM_memory", 80))
+m2 <- rbind(
+  bp("Naive_B", 100), bp("Plasma", 80), bp("Switched_B", 80),
+  bp("Activated_B", 80), bp("IgM_memory", 80), bp("Memory_B", 80)
+)
 h2 <- hierarchical_gate(m2, "P2")
-if (!all(h2$major %in% c("Naive_B", "Memory_B", "Plasma"))) {
-  fail(sprintf("P2 layer1 should be Naive/Memory/Plasma, got %s", paste(unique(h2$major), collapse = ",")))
+if (!all(h2$major %in% c("Naive_B", "Memory_B"))) {
+  fail(sprintf("P2 layer1 should be Naive/Memory only (no BLIMP), got %s", paste(unique(h2$major), collapse = ",")))
 }
-if (length(unique(h2$subset)) < 4) fail(sprintf("P2 subsets too few: %s", paste(unique(h2$subset), collapse = ",")))
+need2 <- c("Naive_B", "Plasma", "Switched_B", "Activated_B", "IgM_memory", "Memory_B")
+miss2 <- setdiff(need2, unique(h2$subset))
+if (length(miss2)) fail(sprintf("P2 missing subsets: %s; got %s", paste(miss2, collapse = ","), paste(unique(h2$subset), collapse = ",")))
+if (length(unique(h2$subset)) < 5) fail(sprintf("P2 subsets too few: %s", paste(unique(h2$subset), collapse = ",")))
+# BLIMP-1 核背景不得把 Memory 整团打成 Plasma
+m2_bg <- m2
+m2_bg[, "BLIMP-1"] <- 2.2 + rnorm(nrow(m2_bg), 0, 0.08)
+h2_bg <- hierarchical_gate(m2_bg, "P2")
+if (mean(h2_bg$subset == "Plasma") > 0.35) {
+  fail(sprintf("P2 BLIMP background collapsed to Plasma: %s", paste(unique(h2_bg$subset), collapse = ",")))
+}
+if (length(unique(h2_bg$subset)) < 4) {
+  fail(sprintf("P2 BLIMP background should still split subsets, got %s", paste(unique(h2_bg$subset), collapse = ",")))
+}
 
 p3p <- demo_means_p3()
 f3 <- names(p3p[[1]])
