@@ -90,7 +90,7 @@ source("Flow_dimred_pipeline.R")
 
 每个 panel 的图在 `results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
 
-- `*_T_vs_T6_tSNE_lineage_split`：**主图**，左 T、右 T6。先圈大类（P1 先 CD4/CD8），再在类内分亚群；无虚线；三板共用 P1 配色
+- `*_T_vs_T6_tSNE_lineage_split`：**主图**，左 T、右 T6。P1/P2/P3 都是先圈大类再分亚群；无虚线；共用 P1 配色
 - `*_UMAP_by_group` / `*_tSNE_by_group`：T vs T6
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `markers/`：各通道在 UMAP 上的着色
