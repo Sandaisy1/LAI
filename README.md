@@ -98,6 +98,8 @@ source("Flow_dimred_pipeline.R")
 
 无 FCS 时可 `Sys.setenv(FLOW_DEMO = "1")` 导出演示图，不能当正式结果。
 
+若日志出现「没有匹配到任何分析通道」，多半是 Cytek 通道名带 `-A`（如 `BUV496-A`）或 desc 为空，不是文件没找到。用最新脚本再跑；仍失败时日志会列出通道名，并在 `results_flow/00_logs/` 写 `*_channels.csv`。
+
 读真实 FCS 需要 `flowCore`。若日志出现「读 FCS 需要 flowCore」，先在 R 里装好再重新 `source`：
 
 ```r

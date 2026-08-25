@@ -262,7 +262,35 @@ norm_id <- function(x) {
 
 marker_aliases <- function(item) {
   ids <- c(item$marker, item$fluorochrome, item$aliases)
+  fl <- as.character(item$fluorochrome)[1]
+  if (!is.null(panel_map$fluorochrome_aliases) && nzchar(fl) && !is.null(panel_map$fluorochrome_aliases[[fl]])) {
+    ids <- c(ids, unlist(panel_map$fluorochrome_aliases[[fl]], use.names = FALSE))
+  }
   unique(norm_id(ids[nzchar(as.character(ids))]))
+}
+
+# Cytek/FlowJo: "BUV496-A"、"FJComp-APC-Cy7-A"、"CD45 V500"
+fcs_clean_label <- function(x) {
+  x <- as.character(x)
+  x[is.na(x)] <- ""
+  x <- gsub("^(FJCOMP[-_ ]*|COMP[-_ ]*|UNMIX[-_ ]*)", "", x, ignore.case = TRUE)
+  x <- gsub("[-_ .]([AHW])$", "", x, ignore.case = TRUE)
+  x
+}
+
+fcs_tokens <- function(...) {
+  raw <- paste(..., collapse = " ")
+  raw <- fcs_clean_label(raw)
+  raw <- toupper(raw)
+  raw <- gsub("\u03B1|\u0391", "A", raw)
+  raw <- gsub("\u03B3|\u0393", "G", raw)
+  raw <- gsub("\u03B2|\u0392", "B", raw)
+  raw <- gsub("\u03B5|\u0395", "E", raw)
+  raw <- gsub("GAMMA", "G", raw)
+  raw <- gsub("ALPHA", "A", raw)
+  parts <- unlist(strsplit(raw, "[^A-Z0-9]+"), use.names = FALSE)
+  parts <- parts[nzchar(parts) & !parts %in% c("A", "H", "W")]
+  unique(c(parts, if (length(parts)) paste(parts, collapse = "") else character(0)))
 }
 
 panel_markers <- function(panel_id) {
@@ -287,9 +315,9 @@ match_channels <- function(channel_names, channel_desc, panel_id) {
   nms <- as.character(channel_names)
   desc <- as.character(channel_desc)
   if (length(desc) != length(nms)) desc <- rep("", length(nms))
+  nms[is.na(nms)] <- ""
   desc[is.na(desc)] <- ""
-  combo <- paste(nms, desc)
-  combo_id <- norm_id(combo)
+  tok_list <- lapply(seq_along(nms), function(j) fcs_tokens(nms[j], desc[j]))
   used <- rep(FALSE, length(nms))
   mapping <- data.frame(
     marker = vapply(items, function(it) it$marker, character(1)),
@@ -301,17 +329,19 @@ match_channels <- function(channel_names, channel_desc, panel_id) {
   )
   score_one <- function(item, idx) {
     al <- marker_aliases(item)
-    cid <- combo_id[idx]
-    nid_n <- norm_id(nms[idx])
-    nid_d <- norm_id(desc[idx])
-    if (any(al %in% c(cid, nid_n, nid_d))) return(100)
-    # 禁止 CD8 误配到 CD8b：别名必须当独立 token
-    tok <- vapply(al, function(a) {
-      if (nchar(a) < 3) return(FALSE)
-      grepl(paste0("(^|[^A-Z0-9])", a, "([^A-Z0-9]|$)"), cid)
-    }, logical(1))
-    if (any(tok)) return(if (max(nchar(al[tok])) >= 5) 80 else 60)
-    0
+    toks <- tok_list[[idx]]
+    hit <- al[al %in% toks]
+    if (!length(hit)) return(0)
+    mx <- max(nchar(hit))
+    full <- max(nchar(toks))
+    coverage <- mx / max(full, 1)
+    base <- mx * 10 + as.integer(round(coverage * 30))
+    if (any(hit == norm_id(item$marker))) {
+      base <- base + 100
+    } else if (any(hit == norm_id(item$fluorochrome))) {
+      base <- base + 40
+    }
+    base
   }
   for (i in seq_along(items)) {
     best <- 0
@@ -325,13 +355,25 @@ match_channels <- function(channel_names, channel_desc, panel_id) {
         best_j <- j
       }
     }
-    if (!is.na(best_j) && best >= 60) {
+    if (!is.na(best_j) && best >= 50) {
       used[best_j] <- TRUE
       mapping$channel[i] <- nms[best_j]
       mapping$channel_index[i] <- best_j
     }
   }
   mapping
+}
+
+format_channel_preview <- function(nms, desc, n = 40) {
+  nms <- as.character(nms)
+  desc <- as.character(desc)
+  if (length(desc) != length(nms)) desc <- rep("", length(nms))
+  desc[is.na(desc)] <- ""
+  nms[is.na(nms)] <- ""
+  nshow <- min(length(nms), n)
+  lines <- sprintf("  [%d] name='%s'  desc='%s'", seq_len(nshow), nms[seq_len(nshow)], desc[seq_len(nshow)])
+  extra <- if (length(nms) > nshow) paste0("  ... ", length(nms) - nshow, " more") else NULL
+  paste(c(lines, extra), collapse = "\n")
 }
 
 asinh_mat <- function(mat, cofactor = asinh_cofactor) {
@@ -358,7 +400,38 @@ read_fcs_expr <- function(path, panel_id) {
   pdata <- as.data.frame(flowCore::parameters(ff)@data)
   nms <- as.character(pdata$name)
   desc <- if ("desc" %in% names(pdata)) as.character(pdata$desc) else rep("", length(nms))
+  expr_nms <- colnames(exprs)
+  if (length(expr_nms) == length(nms)) {
+    blank <- !nzchar(nms) | is.na(nms)
+    nms[blank] <- expr_nms[blank]
+    # 有的 Cytek 文件 $PnN 是 BJ1-A，标志物写在 exprs 列名
+    weak <- grepl("^(UV|V|B|YG|R|IR|U|G)?[0-9]+", nms, ignore.case = TRUE)
+    richer <- nchar(fcs_clean_label(expr_nms)) > nchar(fcs_clean_label(nms))
+    use_expr <- weak & richer & !grepl("^(FSC|SSC|TIME|EVENT)", expr_nms, ignore.case = TRUE)
+    nms[use_expr] <- expr_nms[use_expr]
+  }
   map <- match_channels(nms, desc, panel_id)
+  n_hit <- sum(!is.na(map$channel_index))
+  log_msg(basename(path), " matched ", n_hit, "/", nrow(map), " markers")
+  if (n_hit == 0) {
+    preview <- format_channel_preview(nms, desc)
+    dump <- file.path(log_dir, paste0(panel_id, "_", tools::file_path_sans_ext(basename(path)), "_channels.csv"))
+    tryCatch({
+      utils::write.csv(
+        data.frame(index = seq_along(nms), name = nms, desc = desc, stringsAsFactors = FALSE),
+        dump, row.names = FALSE
+      )
+      log_msg("Wrote channel dump: ", dump)
+    }, error = function(e) NULL)
+    stop(
+      "没有匹配到任何分析通道。不是 FCS 没读到，是通道名和 panel 地图对不上。\n",
+      "Cytek unmixed 常见通道名是 BUV496-A / APC-Cy7-A（带 -A），或 desc 里才写 CD4。\n",
+      basename(path), " 里的通道是：\n", preview, "\n",
+      "请把这段贴回来；若只有 V1-A/B1-A 这种检测器名，需要在 SpectroFlo 把 fluorescent tag 写成标志物后再导出 unmixed。"
+    )
+  }
+  miss <- map$marker[is.na(map$channel_index)]
+  if (length(miss) > 0) log_msg("Unmatched markers: ", paste(miss, collapse = ", "))
   list(exprs = exprs, names = nms, desc = desc, map = map)
 }
 
@@ -394,7 +467,9 @@ extract_marker_mat <- function(exprs, map, markers) {
   idx <- match(markers, map$marker)
   ch <- map$channel_index[idx]
   ok <- !is.na(ch)
-  if (!any(ok)) stop("没有匹配到任何分析通道")
+  if (!any(ok)) {
+    stop("没有匹配到任何分析通道（match_channels 结果全空）")
+  }
   mat <- exprs[, ch[ok], drop = FALSE]
   colnames(mat) <- markers[ok]
   mat
