@@ -174,16 +174,63 @@ list_unmixed_files <- function(root) {
 
 # -----------------------------------------------------------------------------
 # 3. Panel 地图
+# Windows 常把“另存为”弄成 flow_panel_map.json.txt（资源管理器显示“文本文档”）
 # -----------------------------------------------------------------------------
-load_panel_map <- function() {
-  candidates <- c(
-    file.path(script_dir, "flow_panel_map.json"),
-    file.path(project_dir, "flow_panel_map.json"),
-    file.path(getwd(), "flow_panel_map.json")
+panel_map_search_dirs <- function() {
+  dirs <- c(
+    getwd(),
+    script_dir,
+    project_dir,
+    "E:/R/flow J",
+    "E:\\R\\flow J",
+    Sys.getenv("FLOW_DIR", unset = "")
   )
-  hit <- candidates[file.exists(candidates)][1]
-  if (is.na(hit) || !nzchar(hit)) stop("找不到 flow_panel_map.json")
-  jsonlite::fromJSON(hit, simplifyVector = FALSE)
+  dirs <- unique(dirs[nzchar(dirs)])
+  dirs[dir.exists(dirs)]
+}
+
+find_panel_map_file <- function(dirs = panel_map_search_dirs()) {
+  dirs <- dirs[nzchar(dirs) & dir.exists(dirs)]
+  names <- c(
+    "flow_panel_map.json",
+    "flow_panel_map.json.txt",
+    "flow_panel_map.txt"
+  )
+  exact <- unlist(lapply(dirs, function(d) file.path(d, names)), use.names = FALSE)
+  hit <- exact[file.exists(exact)]
+  if (length(hit) > 0) return(hit[[1]])
+  fuzzy <- unlist(lapply(dirs, function(d) {
+    list.files(d, pattern = "^flow_panel_map", ignore.case = TRUE, full.names = TRUE)
+  }), use.names = FALSE)
+  if (length(fuzzy) > 0) return(fuzzy[[1]])
+  NULL
+}
+
+read_panel_map_file <- function(path) {
+  parsed <- tryCatch(jsonlite::fromJSON(path, simplifyVector = FALSE), error = function(e) NULL)
+  if (!is.null(parsed) && !is.null(parsed$panels)) return(parsed)
+  con <- file(path, open = "r", encoding = "UTF-16LE")
+  on.exit(close(con), add = TRUE)
+  txt <- paste(readLines(con, warn = FALSE), collapse = "\n")
+  jsonlite::fromJSON(txt, simplifyVector = FALSE)
+}
+
+load_panel_map <- function() {
+  hit <- find_panel_map_file()
+  if (!is.null(hit)) {
+    log_msg("Panel map: ", hit)
+    return(read_panel_map_file(hit))
+  }
+  dirs <- panel_map_search_dirs()
+  listing <- paste(vapply(dirs, function(d) {
+    paste0("  ", d, " -> ", paste(list.files(d), collapse = ", "))
+  }, character(1)), collapse = "\n")
+  stop(
+    "找不到 flow_panel_map.json。\n",
+    "Windows 若类型是“文本文档”、图标是记事本，真实文件名多半是 flow_panel_map.json.txt。\n",
+    "在资源管理器：查看 → 去掉“隐藏已知文件类型的扩展名”，再改名为 flow_panel_map.json。\n",
+    "已搜索：\n", listing
+  )
 }
 
 panel_map <- load_panel_map()
@@ -940,6 +987,10 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
 # -----------------------------------------------------------------------------
 # 10. 主流程
 # -----------------------------------------------------------------------------
+if (identical(toupper(Sys.getenv("FLOW_FUNCTIONS_ONLY", "0")), "1")) {
+  log_msg("FLOW_FUNCTIONS_ONLY=1: skip analysis")
+} else {
+
 log_msg("Flow dir: ", project_dir)
 log_msg("Results: ", result_dir)
 file_tab <- list_unmixed_files(project_dir)
@@ -992,3 +1043,5 @@ if (length(lin_rows) > 0) {
 
 log_msg("Done. Open results_flow/P1, P2, P3 for UMAP/tSNE PDF+PNG.")
 invisible(summaries)
+
+}

@@ -86,6 +86,8 @@ setwd("E:/R/flow J")
 source("Flow_dimred_pipeline.R")
 ```
 
+若 Windows 把 json 显示成“文本文档”，真实文件名多半是 `flow_panel_map.json.txt`。关掉“隐藏已知文件类型的扩展名”后改名为 `flow_panel_map.json`；新版脚本两种名字都能读。
+
 每个 panel 的图在 `results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
 
 - `*_UMAP_by_group` / `*_tSNE_by_group`：T vs T6

@@ -59,6 +59,13 @@ def main() -> int:
     if data["qc"]["asinh_cofactor"] == 5:
         errors.append("asinh cofactor 5 is CyTOF-scale; fluorescence flow should use ~150")
 
+    # Windows 隐藏扩展名时，记事本另存为会变成 .json.txt
+    if parse_fcs_filename("flow_panel_map.json.txt") is not None:
+        errors.append("json.txt is not an FCS name")
+    txt_alias = "flow_panel_map.json.txt"
+    if not txt_alias.startswith("flow_panel_map"):
+        errors.append("txt alias should still be the panel map")
+
     if errors:
         print("FAIL")
         for e in errors:

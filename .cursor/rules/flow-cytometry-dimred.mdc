@@ -17,6 +17,7 @@ alwaysApply: false
 - 三个 panel **分开分析、分开出图**，禁止把 P1/P2/P3 拼成一张表达矩阵
 - 物种：小鼠（NK1.1、F4/80、I-A/I-E、Ly6C/G、Siglec-F、Sca-1）
 - 荧光素→标志物以 `flow_panel_map.json` / `Flow_dimred_pipeline.R` 为准（通道名可能是 `BUV496-A` 或 `CD4`）
+- Windows 若把 json 存成“文本文档”，真实名常是 `flow_panel_map.json.txt`：脚本要认这个名字，不要只找 `.json`
 
 ## 预处理（每个 panel 六个样品一起做一次，再降维）
 
