@@ -302,10 +302,15 @@ match_channels <- function(channel_names, channel_desc, panel_id) {
   score_one <- function(item, idx) {
     al <- marker_aliases(item)
     cid <- combo_id[idx]
-    if (any(al == cid) || any(vapply(al, function(a) grepl(a, cid, fixed = TRUE), logical(1)) & nchar(al) >= 3)) {
-      exact <- any(al == cid)
-      return(if (exact) 100 else 60)
-    }
+    nid_n <- norm_id(nms[idx])
+    nid_d <- norm_id(desc[idx])
+    if (any(al %in% c(cid, nid_n, nid_d))) return(100)
+    # 禁止 CD8 误配到 CD8b：别名必须当独立 token
+    tok <- vapply(al, function(a) {
+      if (nchar(a) < 3) return(FALSE)
+      grepl(paste0("(^|[^A-Z0-9])", a, "([^A-Z0-9]|$)"), cid)
+    }, logical(1))
+    if (any(tok)) return(if (max(nchar(al[tok])) >= 5) 80 else 60)
     0
   }
   for (i in seq_along(items)) {
@@ -583,62 +588,86 @@ cluster_cells <- function(mat, panel_id) {
 }
 
 annotate_clusters <- function(med, panel_id) {
-  z <- scale(med)
-  z[is.na(z)] <- 0
+  med <- as.matrix(med)
+  minmax01 <- function(x) {
+    x <- as.numeric(x)
+    r <- range(x, na.rm = TRUE)
+    if (!is.finite(r[1]) || (r[2] - r[1]) < 1e-8) return(rep(0, length(x)))
+    (x - r[1]) / (r[2] - r[1])
+  }
+  mm <- apply(med, 2, minmax01)
+  rawv <- function(i, m) {
+    if (!m %in% colnames(med)) return(NA_real_)
+    as.numeric(med[i, m])
+  }
+  mmv <- function(i, m) {
+    if (!m %in% colnames(mm)) return(0)
+    v <- as.numeric(mm[i, m])
+    if (!is.finite(v)) 0 else v
+  }
+  hi <- function(i, m, cut = 0.55) mmv(i, m) >= cut
+  lo <- function(i, m, cut = 0.4) mmv(i, m) <= cut
   labs <- vapply(seq_len(nrow(med)), function(i) {
-    hz <- function(m, cut = 0.3) {
-      if (!m %in% colnames(z)) return(FALSE)
-      val <- as.numeric(z[i, m, drop = TRUE])[1]
-      is.finite(val) && val > cut
+    cd4 <- rawv(i, "CD4")
+    cd8 <- suppressWarnings(max(rawv(i, "CD8"), rawv(i, "CD8b"), na.rm = TRUE))
+    if (!is.finite(cd4)) cd4 <- -Inf
+    if (!is.finite(cd8)) cd8 <- -Inf
+    is_cd4 <- (cd4 > cd8 + 0.12) || (hi(i, "CD4", 0.4) && lo(i, "CD8", 0.5) && lo(i, "CD8b", 0.5))
+    is_cd8 <- (cd8 > cd4 + 0.12) || ((hi(i, "CD8", 0.4) || hi(i, "CD8b", 0.4)) && lo(i, "CD4", 0.5))
+    if (is_cd4 && is_cd8) {
+      if (cd4 >= cd8) is_cd8 <- FALSE else is_cd4 <- FALSE
     }
-    lz <- function(m, cut = -0.15) {
-      if (!m %in% colnames(z)) return(FALSE)
-      val <- as.numeric(z[i, m, drop = TRUE])[1]
-      is.finite(val) && val < cut
+    mem <- function(prefix) {
+      cd62 <- rawv(i, "CD62L")
+      cd44 <- rawv(i, "CD44")
+      if (!is.finite(cd62)) cd62 <- 0
+      if (!is.finite(cd44)) cd44 <- 0
+      if (hi(i, "CD62L", 0.5) && lo(i, "CD44", 0.45)) return(paste0(prefix, "_naive"))
+      if (cd62 > cd44 + 0.15 && lo(i, "CD44", 0.55)) return(paste0(prefix, "_naive"))
+      if (hi(i, "CD62L", 0.45) && hi(i, "CD44", 0.45)) return(paste0(prefix, "_TCM"))
+      if (lo(i, "CD62L", 0.5) && (hi(i, "CD44", 0.45) || cd44 > cd62 + 0.1)) return(paste0(prefix, "_TEM"))
+      paste0(prefix, "_T")
     }
-    is_cd8 <- hz("CD8") || hz("CD8b")
-    is_cd4 <- hz("CD4") && !is_cd8
     if (panel_id == "P1") {
-      if (hz("CD19") && lz("CD3")) return("B")
-      if ((hz("NK1.1") || hz("NKp46")) && lz("CD3")) return("NK")
-      if (hz("CD11B") && lz("CD3") && lz("CD19")) return("Myeloid")
-      if ((hz("NK1.1") || hz("NKp46")) && !lz("CD3")) return("NKT")
-      if (is_cd8 && (hz("LAG-3") || hz("TIM-3"))) return("CD8_exhausted")
-      if (is_cd8 && (hz("GZMB") || hz("Perforin") || hz("IFN-g"))) return("CD8_effector")
-      if (is_cd8 && hz("CD62L") && lz("CD44")) return("CD8_naive")
-      if (is_cd8 && hz("CD62L") && hz("CD44")) return("CD8_TCM")
-      if (is_cd8 && lz("CD62L") && hz("CD44")) return("CD8_TEM")
-      if (is_cd8) return("CD8_T")
-      if (is_cd4 && hz("CD25") && !hz("CD69")) return("Treg")
-      if (is_cd4 && (hz("CD69") || hz("TNF-a") || hz("IFN-g"))) return("CD4_activated")
-      if (is_cd4 && hz("CD62L") && lz("CD44")) return("CD4_naive")
-      if (is_cd4 && hz("CD62L") && hz("CD44")) return("CD4_TCM")
-      if (is_cd4 && lz("CD62L") && hz("CD44")) return("CD4_TEM")
-      if (is_cd4) return("CD4_T")
-      if (hz("CD3")) return("T")
+      if (hi(i, "CD19", 0.5) && lo(i, "CD3", 0.45)) return("B")
+      if ((hi(i, "NK1.1", 0.5) || hi(i, "NKp46", 0.5)) && lo(i, "CD3", 0.4)) return("NK")
+      if (hi(i, "CD11B", 0.5) && lo(i, "CD3", 0.4) && lo(i, "CD19", 0.45)) return("Myeloid")
+      if ((hi(i, "NK1.1", 0.45) || hi(i, "NKp46", 0.45)) && !lo(i, "CD3", 0.35)) return("NKT")
+      if (is_cd8) {
+        if (hi(i, "LAG-3", 0.5) || hi(i, "TIM-3", 0.5)) return("CD8_exhausted")
+        if (hi(i, "GZMB", 0.5) || hi(i, "Perforin", 0.5) || hi(i, "IFN-g", 0.55)) return("CD8_effector")
+        return(mem("CD8"))
+      }
+      if (is_cd4) {
+        if (hi(i, "CD25", 0.55) && lo(i, "CD69", 0.5)) return("Treg")
+        if (hi(i, "CD69", 0.5) || hi(i, "TNF-a", 0.55) || hi(i, "IFN-g", 0.55)) return("CD4_activated")
+        return(mem("CD4"))
+      }
+      if (hi(i, "CD3", 0.45)) return("T")
       return("Other")
     }
     if (panel_id == "P2") {
-      if (hz("BLIMP-1")) return("Plasma")
-      if (hz("IgG")) return("Switched_B")
-      if (hz("CD27") && hz("IgM") && lz("IgD") && lz("IgG", 0.3)) return("IgM_memory")
-      if (hz("CD80") || hz("CD86") || hz("CD40")) return("Activated_B")
-      if (hz("CD27") && lz("IgD")) return("Memory_B")
-      if ((hz("IgD") || hz("IgM")) && lz("CD27", 0.2)) return("Naive_B")
-      if (hz("CD19")) return("B")
+      if (hi(i, "BLIMP-1", 0.5)) return("Plasma")
+      if (hi(i, "IgG", 0.5)) return("Switched_B")
+      if (hi(i, "CD27", 0.5) && hi(i, "IgM", 0.45) && lo(i, "IgD", 0.45) && lo(i, "IgG", 0.45)) return("IgM_memory")
+      if (hi(i, "CD80", 0.5) || hi(i, "CD86", 0.5) || hi(i, "CD40", 0.5)) return("Activated_B")
+      if (hi(i, "CD27", 0.5) && lo(i, "IgD", 0.45)) return("Memory_B")
+      if ((hi(i, "IgD", 0.45) || hi(i, "IgM", 0.45)) && lo(i, "CD27", 0.45)) return("Naive_B")
+      if (hi(i, "CD19", 0.45)) return("B")
       return("Other")
     }
-    if (hz("Siglec-F") || (hz("CCR3") && lz("LY6G"))) return("Eosinophil")
-    if (hz("FceRI") || hz("CD200R3")) return("Basophil_mast")
-    if (hz("LY6G") && hz("CD11B")) return("Neutrophil")
-    if (hz("CD103") && hz("CD11C")) return("cDC1_CD103")
-    if (hz("CD11C") && hz("I-A/I-E")) return("DC")
-    if (hz("iNOS") && (hz("F4/80") || hz("CD11B"))) return("M1_like_Mac")
-    if ((hz("CD206") || hz("ARG-1") || hz("IL-10")) && (hz("F4/80") || hz("CD11B"))) return("M2_like_Mac")
-    if (hz("F4/80")) return("Macrophage")
-    if (hz("LY6C") && hz("CD11B") && lz("LY6G")) return("Mono_Ly6Chi")
-    if (hz("CD11B") && lz("LY6C") && lz("LY6G") && lz("F4/80", 0.3)) return("Mono_Ly6Clo")
-    if (hz("CD11B")) return("Myeloid")
+    if (hi(i, "Siglec-F", 0.5) || (hi(i, "CCR3", 0.5) && lo(i, "LY6G", 0.45))) return("Eosinophil")
+    if (hi(i, "FceRI", 0.5) || hi(i, "CD200R3", 0.5)) return("Basophil_mast")
+    if (hi(i, "LY6G", 0.5) && hi(i, "CD11B", 0.4)) return("Neutrophil")
+    if (hi(i, "CD103", 0.5) && hi(i, "CD11C", 0.45)) return("cDC1_CD103")
+    if (hi(i, "CD11C", 0.5) && hi(i, "I-A/I-E", 0.45)) return("DC")
+    if (hi(i, "iNOS", 0.5) && (hi(i, "F4/80", 0.4) || hi(i, "CD11B", 0.4))) return("M1_like_Mac")
+    if ((hi(i, "CD206", 0.5) || hi(i, "ARG-1", 0.5) || hi(i, "IL-10", 0.5)) &&
+        (hi(i, "F4/80", 0.4) || hi(i, "CD11B", 0.4))) return("M2_like_Mac")
+    if (hi(i, "F4/80", 0.5)) return("Macrophage")
+    if (hi(i, "LY6C", 0.5) && hi(i, "CD11B", 0.4) && lo(i, "LY6G", 0.45)) return("Mono_Ly6Chi")
+    if (hi(i, "CD11B", 0.45) && lo(i, "LY6C", 0.45) && lo(i, "LY6G", 0.45) && lo(i, "F4/80", 0.5)) return("Mono_Ly6Clo")
+    if (hi(i, "CD11B", 0.45)) return("Myeloid")
     "Other"
   }, character(1))
   data.frame(cluster = rownames(med), lineage = labs, stringsAsFactors = FALSE)
@@ -758,22 +787,6 @@ celltype_colors <- function(levels) {
   pal
 }
 
-cluster_hulls <- function(df, x, y) {
-  keys <- unique(df[, c("group", "cluster", "celltype"), drop = FALSE])
-  parts <- lapply(seq_len(nrow(keys)), function(i) {
-    sub <- df[df$group == keys$group[i] & df$cluster == keys$cluster[i], , drop = FALSE]
-    if (nrow(sub) < 8) return(NULL)
-    id <- grDevices::chull(sub[[x]], sub[[y]])
-    if (length(id) < 3) return(NULL)
-    out <- sub[c(id, id[1]), c("group", "cluster", "celltype", x, y), drop = FALSE]
-    out$hull_id <- paste(keys$group[i], keys$cluster[i], sep = "_")
-    out
-  })
-  parts <- Filter(Negate(is.null), parts)
-  if (length(parts) == 0) return(NULL)
-  do.call(rbind, parts)
-}
-
 theme_split_dr <- function() {
   ggplot2::theme_classic(base_size = 13) +
     ggplot2::theme(
@@ -790,35 +803,22 @@ theme_split_dr <- function() {
     )
 }
 
-# 主图：左 T、右 T6；颜色=免疫细胞；虚线=各 cluster 边界
+# 主图：左 T、右 T6；颜色=细亚群；不要虚线
 plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title) {
   plot_df <- df
   plot_df$group <- factor(plot_df$group, levels = c("T", "T6"))
   plot_df$celltype <- celltype_label(plot_df$lineage, panel_id)
   levs <- unique(plot_df$celltype)
   plot_df$celltype <- factor(plot_df$celltype, levels = levs)
-  hulls <- cluster_hulls(plot_df, x, y)
   pal <- celltype_colors(levels(plot_df$celltype))
-  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype))
-  if (!is.null(hulls)) {
-    p <- p + ggplot2::geom_path(
-      data = hulls,
-      ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype, group = hull_id),
-      linetype = "dashed",
-      linewidth = 0.7,
-      alpha = 1,
-      inherit.aes = FALSE
-    )
-  }
-  p <- p +
-    ggplot2::geom_point(size = 0.55, alpha = 0.9, stroke = 0) +
+  ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype)) +
+    ggplot2::geom_point(size = 0.45, alpha = 0.85, stroke = 0) +
     ggplot2::facet_wrap(~group, ncol = 2) +
     ggplot2::coord_equal() +
     ggplot2::scale_color_manual(values = pal, drop = FALSE) +
-    ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(size = 3.2, alpha = 1, linetype = "solid", linewidth = 0))) +
+    ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(size = 3.2, alpha = 1))) +
     ggplot2::labs(title = title, x = xlab, y = ylab, color = NULL) +
     theme_split_dr()
-  p
 }
 
 plot_embedding <- function(df, x, y, color_col, title, point_size = 0.35) {
@@ -1173,6 +1173,7 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   rownames(med) <- as.character(med_df$cluster)
 
   annot <- annotate_clusters(med, panel_id)
+  log_msg(panel_id, " cluster labels: ", paste(paste(annot$cluster, annot$lineage, sep = "="), collapse = ", "))
   cells$lineage <- annot$lineage[match(as.character(cells$cluster), annot$cluster)]
   if (use_demo) cells$true_lineage <- true_lin
 
