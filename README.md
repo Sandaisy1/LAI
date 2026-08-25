@@ -90,7 +90,7 @@ source("Flow_dimred_pipeline.R")
 
 每个 panel 的图在 `results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
 
-- `*_T_vs_T6_tSNE_lineage_split`：**主图**，左 T、右 T6，细亚群着色，无虚线；P1/P2/P3 共用 P1 配色
+- `*_T_vs_T6_tSNE_lineage_split`：**主图**，左 T、右 T6，细亚群着色，无虚线；P1/P2/P3 共用 P1 配色。P1 应能看到 CD4/CD8 的 naive·TCM·TEM，不要只剩 activated/effector
 - `*_UMAP_by_group` / `*_tSNE_by_group`：T vs T6
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `markers/`：各通道在 UMAP 上的着色
