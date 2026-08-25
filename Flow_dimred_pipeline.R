@@ -630,6 +630,126 @@ theme_dr <- function() {
 
 pal_group <- c(T = "#4C78A8", T6 = "#E45756")
 
+# 主图配色：贴近常见流式分群图（B 紫、CD4 橙、CD8 绿、NK 红、巨噬青、粒细棕）
+pal_celltype <- c(
+  "B cell" = "#7B52A5",
+  "Naive_B" = "#9B7EBD",
+  "Memory_B" = "#6C3483",
+  "Switched_B" = "#5B2C6F",
+  "Activated_B" = "#BB8FCE",
+  "Plasma" = "#4A235A",
+  "CD4+ T" = "#E69A3C",
+  "CD8+ T" = "#3D8B40",
+  "NK" = "#C0392B",
+  "NKT" = "#E8C87A",
+  "T" = "#D4A017",
+  "macrophage" = "#5DADE2",
+  "myeloid" = "#5DADE2",
+  "Myeloid" = "#5DADE2",
+  "Macrophage" = "#5DADE2",
+  "M1_like_Mac" = "#2874A6",
+  "M2_like_Mac" = "#76D7C4",
+  "granulocyte" = "#8B5A2B",
+  "Neutrophil" = "#8B5A2B",
+  "Eosinophil" = "#CA6F1E",
+  "monocyte" = "#1ABC9C",
+  "Mono_Ly6Chi" = "#1ABC9C",
+  "DC" = "#16A085",
+  "cDC1_CD103" = "#0E6655",
+  "basophil" = "#AF7AC5",
+  "Basophil_mast" = "#AF7AC5",
+  "other" = "#B0B0B0",
+  "Other" = "#B0B0B0"
+)
+
+celltype_label <- function(lineage, panel_id) {
+  lab <- as.character(lineage)
+  if (identical(panel_id, "P1")) {
+    rec <- c(
+      B = "B cell", CD4_naive = "CD4+ T", CD4_activated = "CD4+ T", CD4_T = "CD4+ T",
+      CD8_T = "CD8+ T", CD8_exhausted = "CD8+ T", NK = "NK", NKT = "NKT",
+      Myeloid = "macrophage", Other = "other", T = "T"
+    )
+    out <- rec[lab]
+    return(unname(ifelse(is.na(out), lab, out)))
+  }
+  lab
+}
+
+celltype_colors <- function(levels) {
+  pal <- pal_celltype[levels]
+  miss <- levels[is.na(pal)]
+  if (length(miss) > 0) {
+    extra <- grDevices::hcl.colors(max(length(miss), 3), palette = "Dark 3")[seq_along(miss)]
+    pal[is.na(pal)] <- extra
+  }
+  names(pal) <- levels
+  pal
+}
+
+cluster_hulls <- function(df, x, y) {
+  keys <- unique(df[, c("group", "cluster", "celltype"), drop = FALSE])
+  parts <- lapply(seq_len(nrow(keys)), function(i) {
+    sub <- df[df$group == keys$group[i] & df$cluster == keys$cluster[i], , drop = FALSE]
+    if (nrow(sub) < 8) return(NULL)
+    id <- grDevices::chull(sub[[x]], sub[[y]])
+    if (length(id) < 3) return(NULL)
+    out <- sub[c(id, id[1]), c("group", "cluster", "celltype", x, y), drop = FALSE]
+    out$hull_id <- paste(keys$group[i], keys$cluster[i], sep = "_")
+    out
+  })
+  parts <- Filter(Negate(is.null), parts)
+  if (length(parts) == 0) return(NULL)
+  do.call(rbind, parts)
+}
+
+theme_split_dr <- function() {
+  ggplot2::theme_classic(base_size = 13) +
+    ggplot2::theme(
+      panel.grid = ggplot2::element_blank(),
+      strip.background = ggplot2::element_blank(),
+      strip.text = ggplot2::element_text(face = "bold", size = 16),
+      legend.title = ggplot2::element_blank(),
+      legend.position = "right",
+      axis.line = ggplot2::element_line(
+        linewidth = 0.6,
+        arrow = grid::arrow(type = "open", length = grid::unit(0.12, "inches"))
+      ),
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5)
+    )
+}
+
+# 主图：左 T、右 T6；颜色=免疫细胞；虚线=各 cluster 边界
+plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title) {
+  plot_df <- df
+  plot_df$group <- factor(plot_df$group, levels = c("T", "T6"))
+  plot_df$celltype <- celltype_label(plot_df$lineage, panel_id)
+  levs <- unique(plot_df$celltype)
+  plot_df$celltype <- factor(plot_df$celltype, levels = levs)
+  hulls <- cluster_hulls(plot_df, x, y)
+  pal <- celltype_colors(levels(plot_df$celltype))
+  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype))
+  if (!is.null(hulls)) {
+    p <- p + ggplot2::geom_path(
+      data = hulls,
+      ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype, group = hull_id),
+      linetype = "dashed",
+      linewidth = 0.7,
+      alpha = 1,
+      inherit.aes = FALSE
+    )
+  }
+  p <- p +
+    ggplot2::geom_point(size = 0.55, alpha = 0.9, stroke = 0) +
+    ggplot2::facet_wrap(~group, ncol = 2) +
+    ggplot2::coord_equal() +
+    ggplot2::scale_color_manual(values = pal, drop = FALSE) +
+    ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(size = 3.2, alpha = 1, linetype = "solid", linewidth = 0))) +
+    ggplot2::labs(title = title, x = xlab, y = ylab, color = NULL) +
+    theme_split_dr()
+  p
+}
+
 plot_embedding <- function(df, x, y, color_col, title, point_size = 0.35) {
   nlev <- length(unique(df[[color_col]]))
   p <- ggplot2::ggplot(df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = .data[[color_col]])) +
@@ -727,6 +847,19 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
   umap_lab <- if (umap_is_pca) "PCA (UMAP fallback)" else "UMAP"
   tsne_lab <- if (tsne_is_pca) "PCA (tSNE fallback)" else "tSNE"
   tag <- paste0(panel_id, " T6 vs T")
+
+  save_gg(
+    plot_split_lineage(cells, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2",
+                       paste0(panel_id, "  T | T6")),
+    file.path(out_dir, paste0(panel_id, "_T_vs_T6_tSNE_lineage_split")),
+    width = 11, height = 5.2
+  )
+  save_gg(
+    plot_split_lineage(cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
+                       paste0(panel_id, "  T | T6")),
+    file.path(out_dir, paste0(panel_id, "_T_vs_T6_UMAP_lineage_split")),
+    width = 11, height = 5.2
+  )
 
   save_gg(plot_embedding(cells, "UMAP1", "UMAP2", "group", paste(tag, "-", umap_lab, "by group")),
           file.path(out_dir, paste0(panel_id, "_UMAP_by_group")))
