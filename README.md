@@ -90,7 +90,7 @@ source("Flow_dimred_pipeline.R")
 
 每个 panel 的图在 `results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
 
-- `*_T_vs_T6_tSNE_lineage_split`：**主图**，左 T、右 T6，颜色=细胞类型，虚线=各群边界
+- `*_T_vs_T6_tSNE_lineage_split`：**主图**，左 T、右 T6；P1 分到 CD4/CD8 naive·TCM·TEM·effector/exhausted、Treg 等，不要并成一个 CD4/CD8
 - `*_UMAP_by_group` / `*_tSNE_by_group`：T vs T6
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `markers/`：各通道在 UMAP 上的着色

@@ -415,11 +415,17 @@ demo_means_p1 <- function() {
     v
   }
   list(
-    CD4_naive = pop(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD8b = 0.1, CD19 = 0.1, CD62L = 3.0, CD44 = 0.4, CD27 = 2.2),
-    CD4_act = pop(CD3 = 3.2, CD4 = 3.0, CD25 = 2.8, CD69 = 3.0, CD44 = 2.6, CD62L = 0.4, `TNF-a` = 2.2, `IFN-g` = 1.6),
-    CD8_T = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD4 = 0.1, CD44 = 2.2, GZMB = 1.8, Perforin = 1.5),
-    CD8_exh = pop(CD3 = 3.0, CD8 = 3.0, CD8b = 2.6, `LAG-3` = 3.0, `TIM-3` = 2.8, `PD-L1` = 2.0, CD44 = 2.8),
+    CD4_naive = pop(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD8b = 0.1, CD19 = 0.1, CD62L = 3.2, CD44 = 0.3, CD27 = 2.2),
+    CD4_TCM = pop(CD3 = 3.2, CD4 = 3.0, CD62L = 2.8, CD44 = 2.8, CD27 = 2.4),
+    CD4_TEM = pop(CD3 = 3.2, CD4 = 3.0, CD62L = 0.3, CD44 = 3.1, CD27 = 0.8),
+    Treg = pop(CD3 = 3.1, CD4 = 3.0, CD25 = 3.2, CD69 = 0.4, CD44 = 1.8),
+    CD4_act = pop(CD3 = 3.2, CD4 = 3.0, CD25 = 1.2, CD69 = 3.1, CD44 = 2.6, CD62L = 0.4, `TNF-a` = 2.4, `IFN-g` = 1.8),
+    CD8_naive = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.9, CD4 = 0.1, CD62L = 3.1, CD44 = 0.3),
+    CD8_TEM = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 3.0, CD62L = 0.3),
+    CD8_eff = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 2.6, GZMB = 3.0, Perforin = 2.8, `IFN-g` = 2.2),
+    CD8_exh = pop(CD3 = 3.0, CD8 = 3.0, CD8b = 2.6, `LAG-3` = 3.1, `TIM-3` = 2.9, `PD-L1` = 2.0, CD44 = 2.8),
     NK = pop(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, NKG2D = 2.6, CD8 = 1.0, GZMB = 2.4, Perforin = 2.2),
+    NKT = pop(CD3 = 3.0, `NK1.1` = 2.8, NKp46 = 2.2, CD4 = 1.2, CD44 = 2.4),
     B = pop(CD19 = 3.3, CD3 = 0.1, CD27 = 1.2),
     Myeloid = pop(CD11B = 3.2, CD3 = 0.1, CD19 = 0.1, `NK1.1` = 0.1)
   )
@@ -436,8 +442,9 @@ demo_means_p2 <- function() {
   }
   list(
     Naive_B = pop(CD19 = 3.2, IgD = 3.0, IgM = 2.6, CD27 = 0.3),
+    IgM_memory = pop(CD19 = 3.1, CD27 = 3.0, IgM = 2.9, IgD = 0.3, IgG = 0.2),
     Memory_B = pop(CD19 = 3.1, CD27 = 3.0, IgD = 0.4, IgM = 0.8),
-    Switched_B = pop(CD19 = 3.0, IgG = 3.1, CD27 = 2.4, IgD = 0.2),
+    Switched_B = pop(CD19 = 3.0, IgG = 3.1, CD27 = 2.4, IgD = 0.2, IgM = 0.3),
     Activated_B = pop(CD19 = 3.0, CD80 = 2.8, CD86 = 3.0, CD40 = 2.6, CD27 = 1.5),
     Plasma = pop(CD19 = 1.2, `BLIMP-1` = 3.3, CD27 = 2.8, IgD = 0.2)
   )
@@ -454,29 +461,37 @@ demo_means_p3 <- function() {
   }
   list(
     Neutrophil = pop(CD11B = 3.2, LY6G = 3.3, LY6C = 1.5, CD3 = 0.1, CD19 = 0.1),
-    Mono_Ly6Chi = pop(CD11B = 3.1, LY6C = 3.2, LY6G = 0.2, CD86 = 1.8),
+    Mono_Ly6Chi = pop(CD11B = 3.1, LY6C = 3.2, LY6G = 0.2, CD86 = 1.8, `F4/80` = 0.4),
+    Mono_Ly6Clo = pop(CD11B = 3.0, LY6C = 0.3, LY6G = 0.2, `F4/80` = 0.4, CD86 = 1.2),
     Macrophage = pop(CD11B = 3.0, `F4/80` = 3.2, `I-A/I-E` = 1.8, CD86 = 1.6),
+    M1_like = pop(CD11B = 3.0, `F4/80` = 3.0, iNOS = 3.2, CD86 = 2.6, CD80 = 2.2),
     M2_like = pop(CD11B = 3.0, `F4/80` = 3.0, CD206 = 3.1, `ARG-1` = 2.8, `IL-10` = 2.2, `TGF-b` = 2.0),
     DC = pop(CD11C = 3.2, `I-A/I-E` = 3.3, CD80 = 2.2, CD86 = 2.4, CD11B = 1.4),
     cDC1 = pop(CD11C = 3.1, CD103 = 3.0, `I-A/I-E` = 3.0, CD11B = 0.6),
-    Eosinophil = pop(`Siglec-F` = 3.2, CCR3 = 2.8, CD11B = 2.4),
+    Eosinophil = pop(`Siglec-F` = 3.2, CCR3 = 2.8, CD11B = 2.4, LY6G = 0.2),
     Basophil = pop(FceRI = 3.1, CD200R3 = 2.8, CD11B = 1.6)
   )
 }
 
 demo_props <- function(panel_id, group) {
   if (panel_id == "P1") {
-    if (group == "T") return(c(CD4_naive = 0.28, CD4_act = 0.08, CD8_T = 0.22, CD8_exh = 0.06, NK = 0.16, B = 0.12, Myeloid = 0.08))
-    return(c(CD4_naive = 0.16, CD4_act = 0.16, CD8_T = 0.16, CD8_exh = 0.16, NK = 0.18, B = 0.10, Myeloid = 0.08))
+    if (group == "T") {
+      return(c(CD4_naive = 0.16, CD4_TCM = 0.08, CD4_TEM = 0.07, Treg = 0.05, CD4_act = 0.05,
+               CD8_naive = 0.10, CD8_TEM = 0.08, CD8_eff = 0.06, CD8_exh = 0.04,
+               NK = 0.12, NKT = 0.04, B = 0.09, Myeloid = 0.06))
+    }
+    return(c(CD4_naive = 0.08, CD4_TCM = 0.06, CD4_TEM = 0.08, Treg = 0.05, CD4_act = 0.10,
+             CD8_naive = 0.06, CD8_TEM = 0.07, CD8_eff = 0.09, CD8_exh = 0.10,
+             NK = 0.13, NKT = 0.05, B = 0.08, Myeloid = 0.05))
   }
   if (panel_id == "P2") {
-    if (group == "T") return(c(Naive_B = 0.45, Memory_B = 0.18, Switched_B = 0.12, Activated_B = 0.15, Plasma = 0.10))
-    return(c(Naive_B = 0.28, Memory_B = 0.16, Switched_B = 0.18, Activated_B = 0.20, Plasma = 0.18))
+    if (group == "T") return(c(Naive_B = 0.38, IgM_memory = 0.10, Memory_B = 0.14, Switched_B = 0.10, Activated_B = 0.16, Plasma = 0.12))
+    return(c(Naive_B = 0.22, IgM_memory = 0.10, Memory_B = 0.12, Switched_B = 0.18, Activated_B = 0.20, Plasma = 0.18))
   }
   if (group == "T") {
-    return(c(Neutrophil = 0.22, Mono_Ly6Chi = 0.16, Macrophage = 0.16, M2_like = 0.08, DC = 0.14, cDC1 = 0.08, Eosinophil = 0.10, Basophil = 0.06))
+    return(c(Neutrophil = 0.18, Mono_Ly6Chi = 0.12, Mono_Ly6Clo = 0.08, Macrophage = 0.12, M1_like = 0.06, M2_like = 0.06, DC = 0.12, cDC1 = 0.08, Eosinophil = 0.10, Basophil = 0.08))
   }
-  c(Neutrophil = 0.14, Mono_Ly6Chi = 0.12, Macrophage = 0.14, M2_like = 0.18, DC = 0.16, cDC1 = 0.10, Eosinophil = 0.10, Basophil = 0.06)
+  c(Neutrophil = 0.12, Mono_Ly6Chi = 0.08, Mono_Ly6Clo = 0.07, Macrophage = 0.10, M1_like = 0.06, M2_like = 0.14, DC = 0.14, cDC1 = 0.09, Eosinophil = 0.12, Basophil = 0.08)
 }
 
 make_demo_sample <- function(panel_id, group, sample, n) {
@@ -544,7 +559,7 @@ run_tsne <- function(mat) {
 }
 
 choose_k <- function(panel_id) {
-  switch(panel_id, P1 = 10, P2 = 6, P3 = 10, 8)
+  switch(panel_id, P1 = 16, P2 = 10, P3 = 16, 12)
 }
 
 cluster_cells <- function(mat, panel_id) {
@@ -568,41 +583,62 @@ cluster_cells <- function(mat, panel_id) {
 }
 
 annotate_clusters <- function(med, panel_id) {
+  z <- scale(med)
+  z[is.na(z)] <- 0
   labs <- vapply(seq_len(nrow(med)), function(i) {
-    hi <- function(m, cut = 1.5) m %in% colnames(med) && med[i, m] > cut
-    lo <- function(m, cut = 1.0) m %in% colnames(med) && med[i, m] < cut
+    hz <- function(m, cut = 0.3) {
+      if (!m %in% colnames(z)) return(FALSE)
+      val <- as.numeric(z[i, m, drop = TRUE])[1]
+      is.finite(val) && val > cut
+    }
+    lz <- function(m, cut = -0.15) {
+      if (!m %in% colnames(z)) return(FALSE)
+      val <- as.numeric(z[i, m, drop = TRUE])[1]
+      is.finite(val) && val < cut
+    }
+    is_cd8 <- hz("CD8") || hz("CD8b")
+    is_cd4 <- hz("CD4") && !is_cd8
     if (panel_id == "P1") {
-      if (hi("CD19") && lo("CD3")) return("B")
-      if ((hi("NK1.1") || hi("NKp46")) && lo("CD3")) return("NK")
-      if (hi("CD11B") && lo("CD3") && lo("CD19")) return("Myeloid")
-      if (hi("CD3") && (hi("NK1.1") || hi("NKp46"))) return("NKT")
-      if (hi("CD3") && (hi("CD8") || hi("CD8b")) && (hi("LAG-3") || hi("TIM-3"))) return("CD8_exhausted")
-      if (hi("CD3") && (hi("CD8") || hi("CD8b"))) return("CD8_T")
-      if (hi("CD3") && hi("CD4") && (hi("CD69") || hi("CD25"))) return("CD4_activated")
-      if (hi("CD3") && hi("CD4") && hi("CD62L") && lo("CD44")) return("CD4_naive")
-      if (hi("CD3") && hi("CD4")) return("CD4_T")
-      if (hi("CD3")) return("T")
+      if (hz("CD19") && lz("CD3")) return("B")
+      if ((hz("NK1.1") || hz("NKp46")) && lz("CD3")) return("NK")
+      if (hz("CD11B") && lz("CD3") && lz("CD19")) return("Myeloid")
+      if ((hz("NK1.1") || hz("NKp46")) && !lz("CD3")) return("NKT")
+      if (is_cd8 && (hz("LAG-3") || hz("TIM-3"))) return("CD8_exhausted")
+      if (is_cd8 && (hz("GZMB") || hz("Perforin") || hz("IFN-g"))) return("CD8_effector")
+      if (is_cd8 && hz("CD62L") && lz("CD44")) return("CD8_naive")
+      if (is_cd8 && hz("CD62L") && hz("CD44")) return("CD8_TCM")
+      if (is_cd8 && lz("CD62L") && hz("CD44")) return("CD8_TEM")
+      if (is_cd8) return("CD8_T")
+      if (is_cd4 && hz("CD25") && !hz("CD69")) return("Treg")
+      if (is_cd4 && (hz("CD69") || hz("TNF-a") || hz("IFN-g"))) return("CD4_activated")
+      if (is_cd4 && hz("CD62L") && lz("CD44")) return("CD4_naive")
+      if (is_cd4 && hz("CD62L") && hz("CD44")) return("CD4_TCM")
+      if (is_cd4 && lz("CD62L") && hz("CD44")) return("CD4_TEM")
+      if (is_cd4) return("CD4_T")
+      if (hz("CD3")) return("T")
       return("Other")
     }
     if (panel_id == "P2") {
-      if (hi("BLIMP-1")) return("Plasma")
-      if (hi("IgG")) return("Switched_B")
-      if (hi("CD80") || hi("CD86")) return("Activated_B")
-      if (hi("CD27") && lo("IgD")) return("Memory_B")
-      if (hi("IgD") || hi("IgM")) return("Naive_B")
-      if (hi("CD19")) return("B")
+      if (hz("BLIMP-1")) return("Plasma")
+      if (hz("IgG")) return("Switched_B")
+      if (hz("CD27") && hz("IgM") && lz("IgD") && lz("IgG", 0.3)) return("IgM_memory")
+      if (hz("CD80") || hz("CD86") || hz("CD40")) return("Activated_B")
+      if (hz("CD27") && lz("IgD")) return("Memory_B")
+      if ((hz("IgD") || hz("IgM")) && lz("CD27", 0.2)) return("Naive_B")
+      if (hz("CD19")) return("B")
       return("Other")
     }
-    if (hi("Siglec-F") || hi("CCR3")) return("Eosinophil")
-    if (hi("FceRI") || hi("CD200R3")) return("Basophil_mast")
-    if (hi("CD103") && hi("CD11C")) return("cDC1_CD103")
-    if (hi("CD11C") && hi("I-A/I-E")) return("DC")
-    if (hi("CD206") || hi("ARG-1")) return("M2_like_Mac")
-    if (hi("iNOS") && hi("F4/80")) return("M1_like_Mac")
-    if (hi("F4/80")) return("Macrophage")
-    if (hi("LY6G")) return("Neutrophil")
-    if (hi("LY6C") && hi("CD11B")) return("Mono_Ly6Chi")
-    if (hi("CD11B")) return("Myeloid")
+    if (hz("Siglec-F") || (hz("CCR3") && lz("LY6G"))) return("Eosinophil")
+    if (hz("FceRI") || hz("CD200R3")) return("Basophil_mast")
+    if (hz("LY6G") && hz("CD11B")) return("Neutrophil")
+    if (hz("CD103") && hz("CD11C")) return("cDC1_CD103")
+    if (hz("CD11C") && hz("I-A/I-E")) return("DC")
+    if (hz("iNOS") && (hz("F4/80") || hz("CD11B"))) return("M1_like_Mac")
+    if ((hz("CD206") || hz("ARG-1") || hz("IL-10")) && (hz("F4/80") || hz("CD11B"))) return("M2_like_Mac")
+    if (hz("F4/80")) return("Macrophage")
+    if (hz("LY6C") && hz("CD11B") && lz("LY6G")) return("Mono_Ly6Chi")
+    if (hz("CD11B") && lz("LY6C") && lz("LY6G") && lz("F4/80", 0.3)) return("Mono_Ly6Clo")
+    if (hz("CD11B")) return("Myeloid")
     "Other"
   }, character(1))
   data.frame(cluster = rownames(med), lineage = labs, stringsAsFactors = FALSE)
@@ -630,50 +666,85 @@ theme_dr <- function() {
 
 pal_group <- c(T = "#4C78A8", T6 = "#E45756")
 
-# 主图配色：贴近常见流式分群图（B 紫、CD4 橙、CD8 绿、NK 红、巨噬青、粒细棕）
+# 主图按细亚群着色，不要把 CD4/CD8 并成一类
 pal_celltype <- c(
   "B cell" = "#7B52A5",
-  "Naive_B" = "#9B7EBD",
-  "Memory_B" = "#6C3483",
-  "Switched_B" = "#5B2C6F",
-  "Activated_B" = "#BB8FCE",
+  "Naive B" = "#C39BD3",
+  "IgM memory B" = "#9B59B6",
+  "Memory B" = "#6C3483",
+  "Switched B" = "#5B2C6F",
+  "Activated B" = "#D2B4DE",
   "Plasma" = "#4A235A",
-  "CD4+ T" = "#E69A3C",
-  "CD8+ T" = "#3D8B40",
+  "CD4 naive" = "#F5CBA7",
+  "CD4 TCM" = "#E67E22",
+  "CD4 TEM" = "#CA6F1E",
+  "CD4 activated" = "#E74C3C",
+  "Treg" = "#922B21",
+  "CD4 T" = "#E69A3C",
+  "CD8 naive" = "#A9DFBF",
+  "CD8 TCM" = "#27AE60",
+  "CD8 TEM" = "#1E8449",
+  "CD8 effector" = "#145A32",
+  "CD8 exhausted" = "#7D3C98",
+  "CD8 T" = "#3D8B40",
   "NK" = "#C0392B",
   "NKT" = "#E8C87A",
   "T" = "#D4A017",
-  "macrophage" = "#5DADE2",
-  "myeloid" = "#5DADE2",
-  "Myeloid" = "#5DADE2",
+  "Myeloid" = "#85C1E9",
   "Macrophage" = "#5DADE2",
-  "M1_like_Mac" = "#2874A6",
-  "M2_like_Mac" = "#76D7C4",
-  "granulocyte" = "#8B5A2B",
+  "M1-like Mac" = "#1A5276",
+  "M2-like Mac" = "#76D7C4",
   "Neutrophil" = "#8B5A2B",
-  "Eosinophil" = "#CA6F1E",
-  "monocyte" = "#1ABC9C",
-  "Mono_Ly6Chi" = "#1ABC9C",
-  "DC" = "#16A085",
-  "cDC1_CD103" = "#0E6655",
-  "basophil" = "#AF7AC5",
-  "Basophil_mast" = "#AF7AC5",
+  "Eosinophil" = "#D35400",
+  "Ly6C hi mono" = "#17A589",
+  "Ly6C lo mono" = "#73C6B6",
+  "DC" = "#148F77",
+  "CD103 DC" = "#0E6655",
+  "Basophil/mast" = "#AF7AC5",
   "other" = "#B0B0B0",
   "Other" = "#B0B0B0"
 )
 
 celltype_label <- function(lineage, panel_id) {
+  rec <- c(
+    B = "B cell",
+    Naive_B = "Naive B",
+    IgM_memory = "IgM memory B",
+    Memory_B = "Memory B",
+    Switched_B = "Switched B",
+    Activated_B = "Activated B",
+    Plasma = "Plasma",
+    CD4_naive = "CD4 naive",
+    CD4_TCM = "CD4 TCM",
+    CD4_TEM = "CD4 TEM",
+    CD4_activated = "CD4 activated",
+    Treg = "Treg",
+    CD4_T = "CD4 T",
+    CD8_naive = "CD8 naive",
+    CD8_TCM = "CD8 TCM",
+    CD8_TEM = "CD8 TEM",
+    CD8_effector = "CD8 effector",
+    CD8_exhausted = "CD8 exhausted",
+    CD8_T = "CD8 T",
+    NK = "NK",
+    NKT = "NKT",
+    T = "T",
+    Myeloid = "Myeloid",
+    Macrophage = "Macrophage",
+    M1_like_Mac = "M1-like Mac",
+    M2_like_Mac = "M2-like Mac",
+    Neutrophil = "Neutrophil",
+    Eosinophil = "Eosinophil",
+    Mono_Ly6Chi = "Ly6C hi mono",
+    Mono_Ly6Clo = "Ly6C lo mono",
+    DC = "DC",
+    cDC1_CD103 = "CD103 DC",
+    Basophil_mast = "Basophil/mast",
+    Other = "other"
+  )
   lab <- as.character(lineage)
-  if (identical(panel_id, "P1")) {
-    rec <- c(
-      B = "B cell", CD4_naive = "CD4+ T", CD4_activated = "CD4+ T", CD4_T = "CD4+ T",
-      CD8_T = "CD8+ T", CD8_exhausted = "CD8+ T", NK = "NK", NKT = "NKT",
-      Myeloid = "macrophage", Other = "other", T = "T"
-    )
-    out <- rec[lab]
-    return(unname(ifelse(is.na(out), lab, out)))
-  }
-  lab
+  out <- rec[lab]
+  unname(ifelse(is.na(out), lab, out))
 }
 
 celltype_colors <- function(levels) {
@@ -852,13 +923,13 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     plot_split_lineage(cells, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2",
                        paste0(panel_id, "  T | T6")),
     file.path(out_dir, paste0(panel_id, "_T_vs_T6_tSNE_lineage_split")),
-    width = 11, height = 5.2
+    width = 12.4, height = 5.6
   )
   save_gg(
     plot_split_lineage(cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
                        paste0(panel_id, "  T | T6")),
     file.path(out_dir, paste0(panel_id, "_T_vs_T6_UMAP_lineage_split")),
-    width = 11, height = 5.2
+    width = 12.4, height = 5.6
   )
 
   save_gg(plot_embedding(cells, "UMAP1", "UMAP2", "group", paste(tag, "-", umap_lab, "by group")),

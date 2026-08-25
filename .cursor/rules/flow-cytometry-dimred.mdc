@@ -31,7 +31,7 @@ alwaysApply: false
 
 比较只有 **T6 vs T**（三 vs 三）。联合 UMAP/tSNE，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
 
-每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 T、右 T6，点按免疫细胞类型着色，各群用虚线凸包分开（`*_T_vs_T6_tSNE_lineage_split`）。另出 UMAP/tSNE（group、sample、cluster、lineage）、marker 着色、cluster 热图、频率图。P1=T/NK，P2=B，P3=髓系，按 panel 注释，不要跨 panel 套门。
+每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 T、右 T6，点按**细亚群**着色（P1 的 CD4 naive/TCM/TEM/Treg/activated、CD8 naive/TCM/TEM/effector/exhausted 等不要并成一个 CD4/CD8），各群用虚线凸包分开（`*_T_vs_T6_tSNE_lineage_split`）。另出 UMAP/tSNE、marker、热图、频率图。P1=T/NK，P2=B，P3=髓系，按 panel 注释，不要跨 panel 套门。
 
 ```r
 # ❌ BAD: 用 raw FCS；把 T6-1 解析成 T；三 panel 混降维；只出坐标表不出图
