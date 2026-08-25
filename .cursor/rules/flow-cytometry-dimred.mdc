@@ -1,0 +1,39 @@
+---
+description: 流式 T vs T6 三 panel 降维（P1/P2/P3，unmixed FCS，导出 UMAP/tSNE 图）
+globs: "**/Flow*.{R,r,Rmd}"
+alwaysApply: false
+---
+
+# 流式 T6 vs T：降维与免疫细胞比较
+
+写或改流式分析时按本规则。输入是 **unmixed FCS**，不是 raw、不是 Cuffdiff。RNA-seq 仍走 `TG_RNAseq_*.R`。
+
+## 数据
+
+- 目录：`E:/R/flow J`（脚本与结果同目录；缺失则回退仓库根 / `flow_J`）
+- 只用 `*_unmixed.fcs`，不要拿 raw 做降维
+- 文件名：`{T|T6}-{1|2|3}_P{1|2|3}_unmixed.fcs`；**先匹配 T6 再匹配 T**，禁止把 `T6-1` 当成 T
+- 六个样品独立保留：`T-1` `T-2` `T-3` `T6-1` `T6-2` `T6-3`
+- 三个 panel **分开分析、分开出图**，禁止把 P1/P2/P3 拼成一张表达矩阵
+- 物种：小鼠（NK1.1、F4/80、I-A/I-E、Ly6C/G、Siglec-F、Sca-1）
+- 荧光素→标志物以 `flow_panel_map.json` / `Flow_dimred_pipeline.R` 为准（通道名可能是 `BUV496-A` 或 `CD4`）
+
+## 预处理（每个 panel 六个样品一起做一次，再降维）
+
+1. 去碎片 / 双联体（有 FSC/SSC 时）；L/D(FVS450) 去死；CD45+ 白细胞
+2. 荧光通道 asinh（流式 cofactor 约 150，不要用 CyTOF 的 5）
+3. L/D 只用于 QC，**不要**作为 UMAP/tSNE 特征；CD45 门控后默认可排除
+4. 按样品等量下采样再联合 embedding，避免大文件主导；频率统计用 QC 后细胞，不要只用 DR 子集冒充频率
+5. 不要用未门控、未转换的 raw 强度做降维
+
+## 比较与出图（每 panel 必须单独出）
+
+比较只有 **T6 vs T**（三 vs 三）。联合 UMAP/tSNE，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
+
+每个非空 panel 必须导出 PDF+PNG：UMAP/tSNE（group、sample、cluster、lineage）、marker 着色、cluster 热图、T6 vs T 频率柱/箱线图。P1=T/NK，P2=B，P3=髓系，按 panel 注释，不要跨 panel 套门。
+
+```r
+# ❌ BAD: 用 raw FCS；把 T6-1 解析成 T；三 panel 混降维；只出坐标表不出图
+# ❌ BAD: 把 T-1/T-2/T-3 先平均成一个“T”再 UMAP
+# ✅ GOOD: 仅 unmixed；P1/P2/P3 各自目录；联合 embedding + 每图 PDF/PNG
+```

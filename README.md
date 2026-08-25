@@ -76,6 +76,27 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 
 看专项结果请先看比较目录下的 `Focused_cytoskeleton_mito/`（全基因 GSEA），不要只看 topN 的 ORA。若专项分析仍不显著，说明这些通路在本数据里没有协同变化。
 
+## 流式降维（T6 vs T，P1 / P2 / P3）
+
+小鼠流式在 `E:/R/flow J`，只用 `*_unmixed.fcs`。三个 panel **分开**做 UMAP/tSNE，比较 T（T-1/2/3）与 T6（T6-1/2/3）。
+
+```r
+setwd("E:/R/flow J")
+# 把 Flow_dimred_pipeline.R 与 flow_panel_map.json 放在该目录（或仓库根）
+source("Flow_dimred_pipeline.R")
+```
+
+每个 panel 的图在 `results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
+
+- `*_UMAP_by_group` / `*_tSNE_by_group`：T vs T6
+- `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
+- `markers/`：各通道在 UMAP 上的着色
+- `*_cluster_marker_heatmap`、`*_cluster_frequency_T6_vs_T`、`*_T6_vs_T_dimred_overview`
+
+无 FCS 时可 `Sys.setenv(FLOW_DEMO = "1")` 导出演示图，不能当正式结果。
+
+读真实 FCS 需要 `BiocManager::install("flowCore")`；UMAP/tSNE 需要 `install.packages(c("uwot", "Rtsne"))`。缺这些包时脚本会退回 PCA，图标题会标明 fallback。
+
 ## 额外两组（新脚本，不改原流程）
 
 `TG_RNAseq_TGsh_mean_vs_NTC_reps.R` 在原四种比较之外再做：

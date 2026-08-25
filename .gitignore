@@ -3,6 +3,7 @@
 .Rproj.user
 .Ruserdata
 results/
+results_flow/
 figures/
 *.html
 *.pdf
