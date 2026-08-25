@@ -562,7 +562,8 @@ cluster_cells <- function(mat, panel_id) {
     }
   }
   set.seed(seed_value)
-  km <- kmeans(mat, centers = k, nstart = 10, iter.max = 100)
+  # Hartigan-Wong 在细胞数多时会报 Quick-TRANSfer；Lloyd 更稳，结果仍可用于分群
+  km <- kmeans(mat, centers = k, nstart = 10, iter.max = 200, algorithm = "Lloyd")
   factor(paste0("C", km$cluster), levels = paste0("C", sort(unique(km$cluster))))
 }
 
