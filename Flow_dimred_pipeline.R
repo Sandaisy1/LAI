@@ -448,7 +448,7 @@ demo_means_p2 <- function() {
   list(
     Naive_B = pop(CD19 = 3.2, IgD = 3.0, IgM = 2.6, CD27 = 0.3),
     IgM_memory = pop(CD19 = 3.1, CD27 = 3.0, IgM = 2.9, IgD = 0.3, IgG = 0.2),
-    Memory_B = pop(CD19 = 3.1, CD27 = 3.0, IgD = 0.4, IgM = 0.8),
+    Memory_B = pop(CD19 = 3.1, CD27 = 3.0, IgD = 0.3, IgM = 0.3, IgG = 0.3),
     Switched_B = pop(CD19 = 3.0, IgG = 3.1, CD27 = 2.4, IgD = 0.2, IgM = 0.3),
     Activated_B = pop(CD19 = 3.0, CD80 = 2.8, CD86 = 3.0, CD40 = 2.6, CD27 = 1.5),
     Plasma = pop(CD19 = 1.2, `BLIMP-1` = 3.3, CD27 = 2.8, IgD = 0.2)
@@ -564,7 +564,7 @@ run_tsne <- function(mat) {
 }
 
 choose_k <- function(panel_id) {
-  switch(panel_id, P1 = 16, P2 = 10, P3 = 16, 12)
+  switch(panel_id, P1 = 16, P2 = 14, P3 = 16, 12)
 }
 
 cluster_cells <- function(mat, panel_id) {
@@ -589,86 +589,84 @@ cluster_cells <- function(mat, panel_id) {
 
 annotate_clusters <- function(med, panel_id) {
   med <- as.matrix(med)
-  minmax01 <- function(x) {
-    x <- as.numeric(x)
-    r <- range(x, na.rm = TRUE)
-    if (!is.finite(r[1]) || (r[2] - r[1]) < 1e-8) return(rep(0, length(x)))
-    (x - r[1]) / (r[2] - r[1])
-  }
-  mm <- apply(med, 2, minmax01)
   rawv <- function(i, m) {
     if (!m %in% colnames(med)) return(NA_real_)
     as.numeric(med[i, m])
   }
-  mmv <- function(i, m) {
-    if (!m %in% colnames(mm)) return(0)
-    v <- as.numeric(mm[i, m])
-    if (!is.finite(v)) 0 else v
+  nv <- function(i, m) {
+    x <- rawv(i, m)
+    if (!is.finite(x)) -Inf else x
   }
-  hi <- function(i, m, cut = 0.55) mmv(i, m) >= cut
-  lo <- function(i, m, cut = 0.4) mmv(i, m) <= cut
   labs <- vapply(seq_len(nrow(med)), function(i) {
-    cd4 <- rawv(i, "CD4")
-    cd8 <- suppressWarnings(max(rawv(i, "CD8"), rawv(i, "CD8b"), na.rm = TRUE))
-    if (!is.finite(cd4)) cd4 <- -Inf
-    if (!is.finite(cd8)) cd8 <- -Inf
-    is_cd4 <- (cd4 > cd8 + 0.12) || (hi(i, "CD4", 0.4) && lo(i, "CD8", 0.5) && lo(i, "CD8b", 0.5))
-    is_cd8 <- (cd8 > cd4 + 0.12) || ((hi(i, "CD8", 0.4) || hi(i, "CD8b", 0.4)) && lo(i, "CD4", 0.5))
-    if (is_cd4 && is_cd8) {
-      if (cd4 >= cd8) is_cd8 <- FALSE else is_cd4 <- FALSE
-    }
+    cd4 <- nv(i, "CD4")
+    cd8 <- max(nv(i, "CD8"), nv(i, "CD8b"))
+    is_cd4 <- cd4 > cd8
+    is_cd8 <- cd8 > cd4
     mem <- function(prefix) {
-      cd62 <- rawv(i, "CD62L")
-      cd44 <- rawv(i, "CD44")
+      cd62 <- nv(i, "CD62L")
+      cd44 <- nv(i, "CD44")
       if (!is.finite(cd62)) cd62 <- 0
       if (!is.finite(cd44)) cd44 <- 0
-      if (hi(i, "CD62L", 0.5) && lo(i, "CD44", 0.45)) return(paste0(prefix, "_naive"))
-      if (cd62 > cd44 + 0.15 && lo(i, "CD44", 0.55)) return(paste0(prefix, "_naive"))
-      if (hi(i, "CD62L", 0.45) && hi(i, "CD44", 0.45)) return(paste0(prefix, "_TCM"))
-      if (lo(i, "CD62L", 0.5) && (hi(i, "CD44", 0.45) || cd44 > cd62 + 0.1)) return(paste0(prefix, "_TEM"))
+      if (cd62 > cd44 + 0.08) return(paste0(prefix, "_naive"))
+      if (cd62 >= cd44 - 0.08 && cd44 >= cd62 - 0.08 && (cd62 > 0 || cd44 > 0)) return(paste0(prefix, "_TCM"))
+      if (cd44 > cd62) return(paste0(prefix, "_TEM"))
       paste0(prefix, "_T")
     }
     if (panel_id == "P1") {
-      if (hi(i, "CD19", 0.5) && lo(i, "CD3", 0.45)) return("B")
-      if ((hi(i, "NK1.1", 0.5) || hi(i, "NKp46", 0.5)) && lo(i, "CD3", 0.4)) return("NK")
-      if (hi(i, "CD11B", 0.5) && lo(i, "CD3", 0.4) && lo(i, "CD19", 0.45)) return("Myeloid")
-      if ((hi(i, "NK1.1", 0.45) || hi(i, "NKp46", 0.45)) && !lo(i, "CD3", 0.35)) return("NKT")
+      if (nv(i, "CD19") > max(nv(i, "CD3"), nv(i, "CD4"), cd8, nv(i, "NK1.1")) + 0.1) return("B")
+      if (max(nv(i, "NK1.1"), nv(i, "NKp46")) > max(nv(i, "CD3"), cd4, cd8) + 0.1) return("NK")
+      if (nv(i, "CD11B") > max(nv(i, "CD3"), cd4, cd8, nv(i, "CD19")) + 0.1) return("Myeloid")
+      nk <- max(nv(i, "NK1.1"), nv(i, "NKp46"))
+      if (nk > 1 && nv(i, "CD3") > 1 && nk > max(cd4, cd8) && abs(nv(i, "CD3") - nk) < 1.5) return("NKT")
       if (is_cd8) {
-        if (hi(i, "LAG-3", 0.5) || hi(i, "TIM-3", 0.5)) return("CD8_exhausted")
-        if (hi(i, "GZMB", 0.5) || hi(i, "Perforin", 0.5) || hi(i, "IFN-g", 0.55)) return("CD8_effector")
+        if (max(nv(i, "LAG-3"), nv(i, "TIM-3")) > max(nv(i, "CD62L"), nv(i, "CD44")) - 0.05 &&
+            max(nv(i, "LAG-3"), nv(i, "TIM-3")) > 0) return("CD8_exhausted")
+        if (max(nv(i, "GZMB"), nv(i, "Perforin"), nv(i, "IFN-g")) > nv(i, "CD62L") &&
+            max(nv(i, "GZMB"), nv(i, "Perforin"), nv(i, "IFN-g")) > 0) return("CD8_effector")
         return(mem("CD8"))
       }
       if (is_cd4) {
-        if (hi(i, "CD25", 0.55) && lo(i, "CD69", 0.5)) return("Treg")
-        if (hi(i, "CD69", 0.5) || hi(i, "TNF-a", 0.55) || hi(i, "IFN-g", 0.55)) return("CD4_activated")
+        if (nv(i, "CD25") > nv(i, "CD69") && nv(i, "CD25") > nv(i, "CD44") - 0.2 && nv(i, "CD25") > 0) return("Treg")
+        if (max(nv(i, "CD69"), nv(i, "TNF-a"), nv(i, "IFN-g")) > nv(i, "CD62L") &&
+            max(nv(i, "CD69"), nv(i, "TNF-a"), nv(i, "IFN-g")) > 0) return("CD4_activated")
         return(mem("CD4"))
       }
-      if (hi(i, "CD3", 0.45)) return("T")
-      return("Other")
+      return(mem("T"))
     }
     if (panel_id == "P2") {
-      if (hi(i, "BLIMP-1", 0.5)) return("Plasma")
-      if (hi(i, "IgG", 0.5)) return("Switched_B")
-      if (hi(i, "CD27", 0.5) && hi(i, "IgM", 0.45) && lo(i, "IgD", 0.45) && lo(i, "IgG", 0.45)) return("IgM_memory")
-      if (hi(i, "CD80", 0.5) || hi(i, "CD86", 0.5) || hi(i, "CD40", 0.5)) return("Activated_B")
-      if (hi(i, "CD27", 0.5) && lo(i, "IgD", 0.45)) return("Memory_B")
-      if ((hi(i, "IgD", 0.45) || hi(i, "IgM", 0.45)) && lo(i, "CD27", 0.45)) return("Naive_B")
-      if (hi(i, "CD19", 0.45)) return("B")
-      return("Other")
+      blimp <- nv(i, "BLIMP-1")
+      igd <- nv(i, "IgD")
+      igm <- nv(i, "IgM")
+      igg <- nv(i, "IgG")
+      cd27 <- nv(i, "CD27")
+      act <- max(nv(i, "CD80"), nv(i, "CD86"))
+      ig_max <- max(igd, igm, igg)
+      if (is.finite(blimp) && blimp >= ig_max - 0.05 && blimp >= cd27 - 0.1 && blimp > -Inf) return("Plasma")
+      if (is.finite(igg) && igg > igd + 0.15 && igg > igm + 0.15) return("Switched_B")
+      if (is.finite(act) && act > max(igd, igm, cd27) + 0.1) return("Activated_B")
+      if (is.finite(cd27) && cd27 > igd && is.finite(igm) && igm > igd + 0.15 && igm >= igg) return("IgM_memory")
+      if (is.finite(cd27) && cd27 > igd) return("Memory_B")
+      if (is.finite(igm) && igm > igd && (!is.finite(cd27) || cd27 <= igd)) return("Atypical_B")
+      return("Naive_B")
     }
-    if (hi(i, "Siglec-F", 0.5) || (hi(i, "CCR3", 0.5) && lo(i, "LY6G", 0.45))) return("Eosinophil")
-    if (hi(i, "FceRI", 0.5) || hi(i, "CD200R3", 0.5)) return("Basophil_mast")
-    if (hi(i, "LY6G", 0.5) && hi(i, "CD11B", 0.4)) return("Neutrophil")
-    if (hi(i, "CD103", 0.5) && hi(i, "CD11C", 0.45)) return("cDC1_CD103")
-    if (hi(i, "CD11C", 0.5) && hi(i, "I-A/I-E", 0.45)) return("DC")
-    if (hi(i, "iNOS", 0.5) && (hi(i, "F4/80", 0.4) || hi(i, "CD11B", 0.4))) return("M1_like_Mac")
-    if ((hi(i, "CD206", 0.5) || hi(i, "ARG-1", 0.5) || hi(i, "IL-10", 0.5)) &&
-        (hi(i, "F4/80", 0.4) || hi(i, "CD11B", 0.4))) return("M2_like_Mac")
-    if (hi(i, "F4/80", 0.5)) return("Macrophage")
-    if (hi(i, "LY6C", 0.5) && hi(i, "CD11B", 0.4) && lo(i, "LY6G", 0.45)) return("Mono_Ly6Chi")
-    if (hi(i, "CD11B", 0.45) && lo(i, "LY6C", 0.45) && lo(i, "LY6G", 0.45) && lo(i, "F4/80", 0.5)) return("Mono_Ly6Clo")
-    if (hi(i, "CD11B", 0.45)) return("Myeloid")
-    "Other"
+    scores <- c(
+      Eosinophil = max(nv(i, "Siglec-F"), nv(i, "CCR3")),
+      Basophil_mast = max(nv(i, "FceRI"), nv(i, "CD200R3")),
+      Neutrophil = nv(i, "LY6G"),
+      cDC1_CD103 = nv(i, "CD103"),
+      DC = max(nv(i, "CD11C"), nv(i, "I-A/I-E")),
+      M1_like_Mac = nv(i, "iNOS"),
+      M2_like_Mac = max(nv(i, "CD206"), nv(i, "ARG-1"), nv(i, "IL-10")),
+      Macrophage = nv(i, "F4/80"),
+      Mono_Ly6Chi = nv(i, "LY6C"),
+      Mono_Ly6Clo = nv(i, "CD11B")
+    )
+    scores[!is.finite(scores)] <- -Inf
+    if (max(scores) <= -Inf) return("Myeloid")
+    win <- names(scores)[which.max(scores)]
+    if (identical(win, "Mono_Ly6Clo") && nv(i, "LY6C") >= nv(i, "CD11B") - 0.05) return("Mono_Ly6Chi")
+    if (identical(win, "DC") && nv(i, "CD103") >= nv(i, "CD11C") - 0.1 && nv(i, "CD103") > 0) return("cDC1_CD103")
+    win
   }, character(1))
   data.frame(cluster = rownames(med), lineage = labs, stringsAsFactors = FALSE)
 }
@@ -699,6 +697,7 @@ pal_group <- c(T = "#4C78A8", T6 = "#E45756")
 pal_celltype <- c(
   "B cell" = "#7B52A5",
   "Naive B" = "#C39BD3",
+  "Atypical B" = "#AF7AC5",
   "IgM memory B" = "#9B59B6",
   "Memory B" = "#6C3483",
   "Switched B" = "#5B2C6F",
@@ -719,6 +718,9 @@ pal_celltype <- c(
   "NK" = "#C0392B",
   "NKT" = "#E8C87A",
   "T" = "#D4A017",
+  "T naive" = "#F7DC6F",
+  "T TCM" = "#F4D03F",
+  "T TEM" = "#B7950B",
   "Myeloid" = "#85C1E9",
   "Macrophage" = "#5DADE2",
   "M1-like Mac" = "#1A5276",
@@ -738,6 +740,7 @@ celltype_label <- function(lineage, panel_id) {
   rec <- c(
     B = "B cell",
     Naive_B = "Naive B",
+    Atypical_B = "Atypical B",
     IgM_memory = "IgM memory B",
     Memory_B = "Memory B",
     Switched_B = "Switched B",
@@ -758,6 +761,10 @@ celltype_label <- function(lineage, panel_id) {
     NK = "NK",
     NKT = "NKT",
     T = "T",
+    T_naive = "T naive",
+    T_TCM = "T TCM",
+    T_TEM = "T TEM",
+    T_T = "T",
     Myeloid = "Myeloid",
     Macrophage = "Macrophage",
     M1_like_Mac = "M1-like Mac",
