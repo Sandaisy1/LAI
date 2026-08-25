@@ -873,6 +873,73 @@ label_b_subset <- function(v) {
   "Naive_B"
 }
 
+# P2 第 1 层：只用 IgD / CD27 / BLIMP-1 圈 Naive / Memory / Plasma
+label_b_major <- function(v) {
+  blimp <- vec_get(v, "BLIMP-1")
+  igd <- vec_get(v, "IgD")
+  cd27 <- vec_get(v, "CD27")
+  if (blimp > igd + 0.2 && blimp >= cd27 - 0.15) return("Plasma")
+  if (cd27 > igd + 0.12) return("Memory_B")
+  "Naive_B"
+}
+
+label_b_naive_subset <- function(v) {
+  igd <- vec_get(v, "IgD")
+  igm <- vec_get(v, "IgM")
+  act <- max(vec_get(v, "CD80"), vec_get(v, "CD86"), vec_get(v, "CD40"))
+  if (act > igd + 0.2) return("Activated_B")
+  if (igm > igd + 0.25) return("Atypical_B")
+  "Naive_B"
+}
+
+label_b_memory_subset <- function(v) {
+  igd <- vec_get(v, "IgD")
+  igm <- vec_get(v, "IgM")
+  igg <- vec_get(v, "IgG")
+  act <- max(vec_get(v, "CD80"), vec_get(v, "CD86"))
+  if (act > max(igd, igm, igg) + 0.15) return("Activated_B")
+  if (igg > igm + 0.15 && igg > igd) return("Switched_B")
+  if (igm > igd + 0.1 && igm >= igg) return("IgM_memory")
+  "Memory_B"
+}
+
+# P3 第 2 层：只用表面谱系圈髓系大类（不用细胞因子）
+label_myeloid_major <- function(v) {
+  siglec <- vec_get(v, "Siglec-F")
+  ly6g <- vec_get(v, "LY6G")
+  f480 <- vec_get(v, "F4/80")
+  cd11c <- vec_get(v, "CD11C")
+  mhc2 <- vec_get(v, "I-A/I-E")
+  cd103 <- vec_get(v, "CD103")
+  ly6c <- vec_get(v, "LY6C")
+  baso <- max(vec_get(v, "FceRI"), vec_get(v, "CD200R3"))
+  dc <- max(cd11c, mhc2)
+  if (ly6g >= max(siglec, f480, dc, baso, ly6c) && ly6g > -Inf) return("Neutrophil")
+  if (siglec >= max(ly6g, f480, dc, baso, ly6c) && siglec > -Inf) return("Eosinophil")
+  if (baso >= max(siglec, ly6g, f480, dc) && baso > -Inf) return("Basophil_mast")
+  if (cd103 >= cd11c - 0.15 && cd103 > f480 && cd103 > ly6g) return("cDC1_CD103")
+  if (dc > f480 && dc > ly6g && dc > ly6c) return("DC")
+  if (f480 > ly6c && f480 > ly6g && f480 > dc) return("Macrophage")
+  if (ly6c > f480 && ly6c > ly6g && ly6c > dc) return("Mono_Ly6Chi")
+  "Mono_Ly6Clo"
+}
+
+# P3 第 3 层：巨噬圈定后再用 iNOS / CD206 / ARG-1
+label_mac_cytokine <- function(v) {
+  inos <- vec_get(v, "iNOS")
+  m2 <- max(vec_get(v, "CD206"), vec_get(v, "ARG-1"))
+  if (inos > m2 + 0.15) return("M1_like_Mac")
+  if (m2 > inos + 0.15) return("M2_like_Mac")
+  "Macrophage"
+}
+
+label_dc_cytokine <- function(v) {
+  cd103 <- vec_get(v, "CD103")
+  cd11c <- vec_get(v, "CD11C")
+  if (cd103 >= cd11c - 0.15 && cd103 > vec_get(v, "F4/80")) return("cDC1_CD103")
+  "DC"
+}
+
 label_myeloid_subset <- function(v) {
   siglec <- vec_get(v, "Siglec-F")
   ly6g <- vec_get(v, "LY6G")
@@ -897,11 +964,15 @@ label_myeloid_subset <- function(v) {
   "Mono_Ly6Clo"
 }
 
-# 第 1 层：只用谱系抗体圈大类
+# 第 1 层：只用谱系抗体圈大类（P1 T/NK，P2 B 三大类，P3 淋巴 vs 髓系）
 gate_major_lineage <- function(mat, panel_id) {
   mat <- as.matrix(mat)
   n <- nrow(mat)
-  if (panel_id == "P2") return(rep("B", n))
+  if (panel_id == "P2") {
+    return(split_within_parent(
+      mat, seq_len(n), c("IgD", "CD27", "BLIMP-1"), 3, label_b_major, "Naive_B"
+    ))
+  }
   cd3 <- colv(mat, "CD3")
   cd4 <- colv(mat, "CD4")
   cd8 <- finite_pmax(colv(mat, "CD8"), colv(mat, "CD8b"))
@@ -922,7 +993,7 @@ gate_major_lineage <- function(mat, panel_id) {
   out[is_t & cd8 > cd4 + 0.1] <- "CD8"
   out[is_t & !(cd4 > cd8 + 0.1) & !(cd8 > cd4 + 0.1)] <- "T"
   if (panel_id == "P3") {
-    out[out %in% c("CD4", "CD8")] <- "T"
+    out[out %in% c("CD4", "CD8", "NKT")] <- "T"
   }
   out
 }
@@ -956,7 +1027,7 @@ split_within_parent <- function(mat, idx, markers, k, label_fun, fallback) {
   labs
 }
 
-# 分层圈门：先大类，再在类内分亚群
+# 分层圈门：P1/P2/P3 都是先圈大类，再在类内用其余抗体/细胞因子分亚群
 hierarchical_gate <- function(mat, panel_id) {
   mat <- as.matrix(mat)
   major <- gate_major_lineage(mat, panel_id)
@@ -975,17 +1046,29 @@ hierarchical_gate <- function(mat, panel_id) {
       mat, it, c("CD62L", "CD44"), 3, label_t_subset, "T_TCM"
     )
   } else if (panel_id == "P2") {
-    ib <- which(major == "B")
-    subset[ib] <- split_within_parent(
-      mat, ib, c("IgD", "IgM", "IgG", "CD27", "BLIMP-1", "CD80", "CD86"), 6, label_b_subset, "Naive_B"
+    i_n <- which(major == "Naive_B")
+    subset[i_n] <- split_within_parent(
+      mat, i_n, c("IgD", "IgM", "CD80", "CD86", "CD40"), 3, label_b_naive_subset, "Naive_B"
+    )
+    i_m <- which(major == "Memory_B")
+    subset[i_m] <- split_within_parent(
+      mat, i_m, c("IgM", "IgG", "CD27", "CD80", "CD86"), 4, label_b_memory_subset, "Memory_B"
     )
   } else if (panel_id == "P3") {
-    im <- which(!major %in% c("B", "T", "NK"))
+    im <- which(major == "Myeloid")
     subset[im] <- split_within_parent(
       mat, im,
-      c("LY6G", "Siglec-F", "F4/80", "iNOS", "CD206", "ARG-1", "CD11C", "I-A/I-E",
-        "CD103", "LY6C", "FceRI", "CD200R3"),
-      8, label_myeloid_subset, "Myeloid"
+      c("LY6G", "Siglec-F", "F4/80", "CD11C", "I-A/I-E", "CD103", "LY6C", "FceRI", "CD200R3", "CD11B"),
+      7, label_myeloid_major, "Myeloid"
+    )
+    i_mac <- which(subset == "Macrophage")
+    subset[i_mac] <- split_within_parent(
+      mat, i_mac, c("iNOS", "CD206", "ARG-1", "TNF-a", "IL-6", "CD86", "CD80"), 3,
+      label_mac_cytokine, "Macrophage"
+    )
+    i_dc <- which(subset == "DC")
+    subset[i_dc] <- split_within_parent(
+      mat, i_dc, c("CD103", "CD11C", "I-A/I-E", "F4/80"), 2, label_dc_cytokine, "DC"
     )
   }
   subset[is.na(subset) | !nzchar(subset)] <- major[is.na(subset) | !nzchar(subset)]

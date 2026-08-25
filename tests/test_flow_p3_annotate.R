@@ -67,7 +67,24 @@ bp <- function(name, n) {
 }
 m2 <- rbind(bp("Naive_B", 100), bp("Plasma", 80), bp("Switched_B", 80), bp("Activated_B", 80), bp("IgM_memory", 80))
 h2 <- hierarchical_gate(m2, "P2")
-if (any(h2$major != "B")) fail("P2 layer1 must be B")
+if (!all(h2$major %in% c("Naive_B", "Memory_B", "Plasma"))) {
+  fail(sprintf("P2 layer1 should be Naive/Memory/Plasma, got %s", paste(unique(h2$major), collapse = ",")))
+}
 if (length(unique(h2$subset)) < 4) fail(sprintf("P2 subsets too few: %s", paste(unique(h2$subset), collapse = ",")))
+
+p3p <- demo_means_p3()
+f3 <- names(p3p[[1]])
+bp3 <- function(name, n) {
+  m <- matrix(unlist(p3p[[name]]), n, length(f3), byrow = TRUE)
+  colnames(m) <- f3
+  m + matrix(rnorm(n * length(f3), 0, 0.1), n)
+}
+m3 <- rbind(
+  bp3("Neutrophil", 80), bp3("Eosinophil", 80), bp3("Macrophage", 80),
+  bp3("M1_like", 70), bp3("M2_like", 70), bp3("DC", 80), bp3("Mono_Ly6Chi", 80)
+)
+h3 <- hierarchical_gate(m3, "P3")
+if (sum(h3$major == "Myeloid") < 0.8 * nrow(m3)) fail("P3 layer1 should be mostly Myeloid")
+if (length(unique(h3$subset)) < 5) fail(sprintf("P3 subsets too few: %s", paste(unique(h3$subset), collapse = ",")))
 
 cat("OK: P3 labels and P1-shared palette\n")
