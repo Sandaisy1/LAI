@@ -7,6 +7,8 @@
 # 用法：
 #   setwd("E:/R/flow J")
 #   source("Flow_dimred_pipeline.R")
+# 三个 panel 跑完后会自动汇总全亚群频率（不合并表达矩阵）：
+#   source("Flow_dimred_all_subsets.R")   # 也可单独重出 results_flow/all_subsets/
 # 无 FCS 时可跑演示数据（会在日志里标明 DEMO，不可当正式结果）：
 #   Sys.setenv(FLOW_DEMO = "1")
 #   source("Flow_dimred_pipeline.R")
@@ -1905,7 +1907,17 @@ if (length(lin_rows) > 0) {
   log_msg("Summary table: ", sum_path)
 }
 
-log_msg("Done. Open results_flow/P1, P2, P3 for UMAP/tSNE PDF+PNG.")
+extra <- file.path(script_dir, "Flow_dimred_all_subsets.R")
+if (file.exists(extra)) {
+  tryCatch({
+    Sys.setenv(FLOW_ALL_SUBSETS_FROM_PIPELINE = "1")
+    sys.source(extra, envir = .GlobalEnv)
+    export_all_subsets_analysis(result_dir)
+  }, error = function(e) log_msg("all-subsets summary failed: ", e$message))
+  Sys.unsetenv("FLOW_ALL_SUBSETS_FROM_PIPELINE")
+}
+
+log_msg("Done. Open results_flow/P1, P2, P3 for UMAP/tSNE; results_flow/all_subsets for combined frequencies.")
 invisible(summaries)
 
 }
