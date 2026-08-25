@@ -746,12 +746,12 @@ annotate_clusters <- function(med, panel_id) {
       if (is.finite(igm) && igm > igd + 0.35) return("Atypical_B")
       return("Naive_B")
     }
-    # P3：cluster 内比定义标志。嗜酸只用 Siglec-F（不用 CCR3）；不要用泛 CD11B 抢赢；平局不要标成嗜酸
+    # P3：按定义标志先后判断。中性粒可 Ly6C 中阳，不能输给单核；巨噬可 MHCII+，不能输给 DC。
+    # 嗜酸只用 Siglec-F（不用 CCR3）；M1/M2 只用 iNOS / CD206 / ARG-1（不用 IL-10/TGF-b）。
     siglec <- nv(i, "Siglec-F")
     ly6g <- nv(i, "LY6G")
     f480 <- nv(i, "F4/80")
     cd11c <- nv(i, "CD11C")
-    mhc2 <- nv(i, "I-A/I-E")
     cd103 <- nv(i, "CD103")
     ly6c <- nv(i, "LY6C")
     cd11b <- nv(i, "CD11B")
@@ -761,39 +761,26 @@ annotate_clusters <- function(med, panel_id) {
     cd3 <- nv(i, "CD3")
     cd19 <- nv(i, "CD19")
     nk <- nv(i, "NK1.1")
-    dc_score <- max(cd11c, mhc2)
-    myel_def <- max(siglec, ly6g, f480, dc_score, ly6c, inos, m2, baso, cd103)
+    myel_def <- max(siglec, ly6g, f480, cd11c, ly6c, inos, m2, baso, cd103)
     lymph <- max(cd3, cd19, nk)
     if (is.finite(cd19) && cd19 >= lymph && cd19 > myel_def + 0.15) return("B")
     if (is.finite(cd3) && cd3 >= lymph && cd3 > myel_def + 0.15) return("T")
     if (is.finite(nk) && nk >= lymph && nk > myel_def + 0.15) return("NK")
-    if (is.finite(cd103) && cd103 >= cd11c - 0.15 && cd103 > f480 && cd103 > ly6g &&
-        cd103 >= max(siglec, ly6c, baso) - 0.05) {
+    if (is.finite(ly6g) && ly6g >= 1.2 && ly6g > siglec && ly6g > baso && ly6g > cd11c) return("Neutrophil")
+    if (is.finite(siglec) && siglec >= 1.2 && siglec > ly6g && siglec > baso) return("Eosinophil")
+    if (is.finite(baso) && baso >= 1.2 && baso > ly6g && baso > siglec && baso > cd11c) return("Basophil_mast")
+    if (is.finite(f480) && f480 >= 1.2 && f480 > cd11c && f480 > ly6g && f480 > siglec) {
+      if (is.finite(inos) && inos > m2 + 0.15) return("M1_like_Mac")
+      if (is.finite(m2) && m2 > inos + 0.15) return("M2_like_Mac")
+      return("Macrophage")
+    }
+    if (is.finite(cd103) && cd103 >= 1.2 && cd103 >= cd11c - 0.15 && cd103 > f480 && cd103 > ly6g) {
       return("cDC1_CD103")
     }
-    spec <- c(
-      Eosinophil = siglec,
-      Neutrophil = ly6g,
-      Basophil_mast = baso,
-      DC = dc_score,
-      M1_like_Mac = inos,
-      M2_like_Mac = m2,
-      Macrophage = f480,
-      Mono_Ly6Chi = ly6c
-    )
-    spec[!is.finite(spec)] <- -Inf
-    if (max(spec) <= -Inf) return("Myeloid")
-    n_tied <- sum(spec == max(spec))
-    if (n_tied >= 3 || (n_tied >= 2 && max(spec) < 1)) {
-      if (is.finite(cd11b) && ly6c <= f480 + 0.35 && ly6g < cd11b) return("Mono_Ly6Clo")
-      return("Myeloid")
-    }
-    win <- names(spec)[which.max(spec)]
-    if (identical(win, "Macrophage") && is.finite(cd11b) && cd11b > f480 && ly6c <= f480 + 0.2 &&
-        f480 < 1 && ly6g < cd11b) {
-      return("Mono_Ly6Clo")
-    }
-    win
+    if (is.finite(cd11c) && cd11c >= 1.2 && cd11c > f480 && cd11c > ly6g) return("DC")
+    if (is.finite(ly6c) && ly6c >= 1.2 && ly6c > f480 && ly6c > ly6g) return("Mono_Ly6Chi")
+    if (is.finite(cd11b) && cd11b > max(cd3, cd19, nk, 0)) return("Mono_Ly6Clo")
+    "Myeloid"
   }, character(1))
   data.frame(cluster = rownames(med), lineage = labs, stringsAsFactors = FALSE)
 }
@@ -902,24 +889,22 @@ label_b_memory_subset <- function(v) {
   "Memory_B"
 }
 
-# P3 第 2 层：只用表面谱系圈髓系大类（不用细胞因子）
+# P3 第 2 层命名（后备）：先后判断，Ly6C/MHCII 不得把中性粒/巨噬抢走
 label_myeloid_major <- function(v) {
   siglec <- vec_get(v, "Siglec-F")
   ly6g <- vec_get(v, "LY6G")
   f480 <- vec_get(v, "F4/80")
   cd11c <- vec_get(v, "CD11C")
-  mhc2 <- vec_get(v, "I-A/I-E")
   cd103 <- vec_get(v, "CD103")
   ly6c <- vec_get(v, "LY6C")
   baso <- max(vec_get(v, "FceRI"), vec_get(v, "CD200R3"))
-  dc <- max(cd11c, mhc2)
-  if (ly6g >= max(siglec, f480, dc, baso, ly6c) && ly6g > -Inf) return("Neutrophil")
-  if (siglec >= max(ly6g, f480, dc, baso, ly6c) && siglec > -Inf) return("Eosinophil")
-  if (baso >= max(siglec, ly6g, f480, dc) && baso > -Inf) return("Basophil_mast")
-  if (cd103 >= cd11c - 0.15 && cd103 > f480 && cd103 > ly6g) return("cDC1_CD103")
-  if (dc > f480 && dc > ly6g && dc > ly6c) return("DC")
-  if (f480 > ly6c && f480 > ly6g && f480 > dc) return("Macrophage")
-  if (ly6c > f480 && ly6c > ly6g && ly6c > dc) return("Mono_Ly6Chi")
+  if (ly6g >= 1.2 && ly6g > siglec && ly6g > baso && ly6g > cd11c) return("Neutrophil")
+  if (siglec >= 1.2 && siglec > ly6g && siglec > baso) return("Eosinophil")
+  if (baso >= 1.2 && baso > ly6g && baso > siglec && baso > cd11c) return("Basophil_mast")
+  if (f480 >= 1.2 && f480 > cd11c && f480 > ly6g && f480 > siglec) return("Macrophage")
+  if (cd103 >= 1.2 && cd103 >= cd11c - 0.15 && cd103 > f480 && cd103 > ly6g) return("cDC1_CD103")
+  if (cd11c >= 1.2 && cd11c > f480 && cd11c > ly6g) return("DC")
+  if (ly6c >= 1.2 && ly6c > f480 && ly6c > ly6g) return("Mono_Ly6Chi")
   "Mono_Ly6Clo"
 }
 
@@ -944,22 +929,22 @@ label_myeloid_subset <- function(v) {
   ly6g <- vec_get(v, "LY6G")
   f480 <- vec_get(v, "F4/80")
   cd11c <- vec_get(v, "CD11C")
-  mhc2 <- vec_get(v, "I-A/I-E")
   cd103 <- vec_get(v, "CD103")
   ly6c <- vec_get(v, "LY6C")
   inos <- vec_get(v, "iNOS")
   m2 <- max(vec_get(v, "CD206"), vec_get(v, "ARG-1"))
   baso <- max(vec_get(v, "FceRI"), vec_get(v, "CD200R3"))
-  dc <- max(cd11c, mhc2)
-  if (ly6g >= max(siglec, f480, dc, baso, ly6c) && ly6g > -Inf) return("Neutrophil")
-  if (siglec >= max(ly6g, f480, dc, baso, ly6c) && siglec > -Inf) return("Eosinophil")
-  if (baso >= max(siglec, ly6g, f480, dc) && baso > -Inf) return("Basophil_mast")
-  if (cd103 >= cd11c - 0.15 && cd103 > f480 && cd103 > ly6g) return("cDC1_CD103")
-  if (dc > f480 && dc > ly6g && dc > ly6c) return("DC")
-  if (inos > m2 && inos > ly6c && f480 >= ly6c - 0.3) return("M1_like_Mac")
-  if (m2 > inos && m2 > ly6c && f480 >= ly6c - 0.3) return("M2_like_Mac")
-  if (f480 > ly6c && f480 > ly6g && f480 > dc) return("Macrophage")
-  if (ly6c > f480 && ly6c > ly6g && ly6c > dc) return("Mono_Ly6Chi")
+  if (ly6g >= 1.2 && ly6g > siglec && ly6g > baso && ly6g > cd11c) return("Neutrophil")
+  if (siglec >= 1.2 && siglec > ly6g && siglec > baso) return("Eosinophil")
+  if (baso >= 1.2 && baso > ly6g && baso > siglec && baso > cd11c) return("Basophil_mast")
+  if (f480 >= 1.2 && f480 > cd11c && f480 > ly6g && f480 > siglec) {
+    if (inos > m2 + 0.15) return("M1_like_Mac")
+    if (m2 > inos + 0.15) return("M2_like_Mac")
+    return("Macrophage")
+  }
+  if (cd103 >= 1.2 && cd103 >= cd11c - 0.15 && cd103 > f480 && cd103 > ly6g) return("cDC1_CD103")
+  if (cd11c >= 1.2 && cd11c > f480 && cd11c > ly6g) return("DC")
+  if (ly6c >= 1.2 && ly6c > f480 && ly6c > ly6g) return("Mono_Ly6Chi")
   "Mono_Ly6Clo"
 }
 
@@ -1198,6 +1183,73 @@ sequential_b_memory <- function(mat, idx) {
   out
 }
 
+# P3 巨噬圈定后：只用 iNOS → M1，CD206/ARG-1 → M2；不用 IL-10/TGF-b/TNF-a/CD86
+sequential_mac <- function(mat, idx) {
+  n <- length(idx)
+  if (n == 0) return(character(0))
+  out <- rep("Macrophage", n)
+  remain <- rep(TRUE, n)
+  take_high <- function(markers, label, min_sep, beat = NULL, margin = 0.15) {
+    if (!any(remain)) return(invisible())
+    hi <- gate_k2_high(mat, idx[remain], markers, min_sep)
+    if (!any(hi)) return(invisible())
+    pos <- which(remain)
+    if (length(beat)) {
+      hi_idx <- idx[remain][hi]
+      sc <- median(marker_score(mat, hi_idx, markers), na.rm = TRUE)
+      bt <- max(vapply(beat, function(m) median(colv(mat, m)[hi_idx], na.rm = TRUE), numeric(1)))
+      if (!is.finite(sc) || !is.finite(bt) || sc <= bt + margin) return(invisible())
+    }
+    out[pos[hi]] <<- label
+    remain[pos[hi]] <<- FALSE
+  }
+  take_high("iNOS", "M1_like_Mac", 0.2, beat = c("CD206", "ARG-1"), margin = 0.15)
+  take_high(c("CD206", "ARG-1"), "M2_like_Mac", 0.2, beat = "iNOS", margin = 0.15)
+  out
+}
+
+# P3 髓系内一层层圈：中性粒 → 嗜酸 → 嗜碱 → 巨噬 → CD103 DC → DC → 剩余单核
+# 不要一次 kmeans 拿 Ly6C/MHCII 和 Ly6G/F4/80 比大小。
+sequential_myeloid <- function(mat, idx) {
+  n <- length(idx)
+  if (n == 0) return(character(0))
+  out <- rep("Mono_Ly6Clo", n)
+  remain <- rep(TRUE, n)
+  take_high <- function(markers, label, min_sep, beat = NULL, margin = 0.15, min_abs = 1.2) {
+    if (!any(remain)) return(invisible())
+    hi <- gate_k2_high(mat, idx[remain], markers, min_sep)
+    if (!any(hi)) return(invisible())
+    pos <- which(remain)
+    hi_idx <- idx[remain][hi]
+    sc <- median(marker_score(mat, hi_idx, markers), na.rm = TRUE)
+    if (!is.finite(sc) || sc < min_abs) return(invisible())
+    if (length(beat)) {
+      bt <- max(vapply(beat, function(m) median(colv(mat, m)[hi_idx], na.rm = TRUE), numeric(1)))
+      if (!is.finite(bt) || sc <= bt + margin) return(invisible())
+    }
+    out[pos[hi]] <<- label
+    remain[pos[hi]] <<- FALSE
+  }
+  take_high("LY6G", "Neutrophil", 0.2, beat = c("Siglec-F", "FceRI", "CD11C"), margin = 0.15)
+  take_high("Siglec-F", "Eosinophil", 0.2, beat = c("LY6G", "FceRI"), margin = 0.2)
+  take_high(c("FceRI", "CD200R3"), "Basophil_mast", 0.2, beat = c("LY6G", "Siglec-F", "CD11C"), margin = 0.15)
+  take_high("F4/80", "Macrophage", 0.2, beat = c("CD11C", "LY6G", "Siglec-F"), margin = 0.1)
+  take_high("CD103", "cDC1_CD103", 0.2, beat = c("F4/80", "LY6G", "Siglec-F"), margin = 0.15)
+  take_high("CD11C", "DC", 0.2, beat = c("F4/80", "LY6G"), margin = 0.15)
+  if (any(remain)) {
+    hi <- gate_k2_high(mat, idx[remain], "LY6C", 0.15)
+    pos <- which(remain)
+    if (any(hi)) {
+      out[pos[hi]] <- "Mono_Ly6Chi"
+      remain[pos[hi]] <- FALSE
+    }
+    out[remain] <- "Mono_Ly6Clo"
+  }
+  i_mac <- which(out == "Macrophage")
+  if (length(i_mac)) out[i_mac] <- sequential_mac(mat, idx[i_mac])
+  out
+}
+
 # 分层圈门：P1/P2/P3 都是先圈大类，再在类内用其余抗体/细胞因子分亚群
 hierarchical_gate <- function(mat, panel_id) {
   mat <- as.matrix(mat)
@@ -1215,20 +1267,7 @@ hierarchical_gate <- function(mat, panel_id) {
     subset[i_m] <- sequential_b_memory(mat, i_m)
   } else if (panel_id == "P3") {
     im <- which(major == "Myeloid")
-    subset[im] <- split_within_parent(
-      mat, im,
-      c("LY6G", "Siglec-F", "F4/80", "CD11C", "I-A/I-E", "CD103", "LY6C", "FceRI", "CD200R3", "CD11B"),
-      7, label_myeloid_major, "Myeloid"
-    )
-    i_mac <- which(subset == "Macrophage")
-    subset[i_mac] <- split_within_parent(
-      mat, i_mac, c("iNOS", "CD206", "ARG-1", "TNF-a", "IL-6", "CD86", "CD80"), 3,
-      label_mac_cytokine, "Macrophage"
-    )
-    i_dc <- which(subset == "DC")
-    subset[i_dc] <- split_within_parent(
-      mat, i_dc, c("CD103", "CD11C", "I-A/I-E", "F4/80"), 2, label_dc_cytokine, "DC"
-    )
+    subset[im] <- sequential_myeloid(mat, im)
   }
   subset[is.na(subset) | !nzchar(subset)] <- major[is.na(subset) | !nzchar(subset)]
   list(major = major, subset = subset)
@@ -1301,6 +1340,7 @@ pal_celltype <- c(
   "Ly6C lo mono" = "#E8C87A",
   "DC" = "#7B52A5",
   "CD103 DC" = "#922B21",
+  "Basophil" = "#A9DFBF",
   "Basophil/mast" = "#A9DFBF",
   "other" = "#B0B0B0",
   "Other" = "#B0B0B0"
@@ -1345,7 +1385,8 @@ celltype_label <- function(lineage, panel_id) {
     Mono_Ly6Clo = "Ly6C lo mono",
     DC = "DC",
     cDC1_CD103 = "CD103 DC",
-    Basophil_mast = "Basophil/mast",
+    Basophil_mast = "Basophil",
+    Basophil = "Basophil",
     Other = "other"
   )
   lab <- as.character(lineage)

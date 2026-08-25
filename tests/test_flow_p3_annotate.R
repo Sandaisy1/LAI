@@ -97,10 +97,36 @@ bp3 <- function(name, n) {
 }
 m3 <- rbind(
   bp3("Neutrophil", 80), bp3("Eosinophil", 80), bp3("Macrophage", 80),
-  bp3("M1_like", 70), bp3("M2_like", 70), bp3("DC", 80), bp3("Mono_Ly6Chi", 80)
+  bp3("M1_like", 70), bp3("M2_like", 70), bp3("DC", 80), bp3("Mono_Ly6Chi", 80),
+  bp3("Basophil", 80)
 )
 h3 <- hierarchical_gate(m3, "P3")
 if (sum(h3$major == "Myeloid") < 0.8 * nrow(m3)) fail("P3 layer1 should be mostly Myeloid")
-if (length(unique(h3$subset)) < 5) fail(sprintf("P3 subsets too few: %s", paste(unique(h3$subset), collapse = ",")))
+need3 <- c("Neutrophil", "M1_like_Mac", "M2_like_Mac", "Basophil_mast")
+miss3 <- setdiff(need3, unique(h3$subset))
+if (length(miss3)) {
+  fail(sprintf("P3 missing subsets: %s; got %s", paste(miss3, collapse = ","), paste(unique(h3$subset), collapse = ",")))
+}
+if (length(unique(h3$subset)) < 6) fail(sprintf("P3 subsets too few: %s", paste(unique(h3$subset), collapse = ",")))
+# Ly6C 中阳的中性粒不得并成 Ly6C hi 单核
+set.seed(4)
+neu_ly6c <- bp3("Neutrophil", 100)
+neu_ly6c[, "LY6C"] <- 2.8 + rnorm(100, 0, 0.08)
+h_neu <- hierarchical_gate(rbind(neu_ly6c, bp3("Mono_Ly6Chi", 100)), "P3")
+if (mean(h_neu$subset[seq_len(100)] == "Neutrophil") < 0.7) {
+  fail(sprintf("Ly6C-int neutrophils swallowed: %s", paste(unique(h_neu$subset), collapse = ",")))
+}
+# MHCII+ 巨噬不得整团并成 DC，否则后面没有 M1/M2
+set.seed(5)
+mac_mhc <- bp3("Macrophage", 80)
+mac_mhc[, "I-A/I-E"] <- 3.0 + rnorm(80, 0, 0.08)
+h_mac <- hierarchical_gate(rbind(mac_mhc, bp3("DC", 80), bp3("M1_like", 70), bp3("M2_like", 70)), "P3")
+mac_labs <- c("Macrophage", "M1_like_Mac", "M2_like_Mac")
+if (mean(h_mac$subset[seq_len(80)] %in% mac_labs) < 0.5) {
+  fail(sprintf("MHCII macrophages swallowed by DC: %s", paste(unique(h_mac$subset[seq_len(80)]), collapse = ",")))
+}
+if (!all(c("M1_like_Mac", "M2_like_Mac") %in% unique(h_mac$subset))) {
+  fail(sprintf("P3 M1/M2 missing after MHCII macs, got %s", paste(unique(h_mac$subset), collapse = ",")))
+}
 
 cat("OK: P3 labels and P1-shared palette\n")

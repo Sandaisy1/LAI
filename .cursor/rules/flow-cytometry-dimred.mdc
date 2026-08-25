@@ -35,7 +35,7 @@ alwaysApply: false
 
 - P1：**先圈大类**（B / 髓系 / NK / NKT / **CD4** / **CD8**）。T 细胞一律判到 CD4 或 CD8，不要输出 T TEM。CD4 内再一层层圈：CD25→Treg，CD69/TNF-a→activated，剩余只用 CD62L vs CD44 分成 naive/TCM/TEM。CD8 内：LAG-3/TIM-3→exhausted，GZMB/Perforin→effector，剩余 naive/TCM/TEM。
 - P2：**先圈大类**（只用 IgD vs CD27 → Naive / Memory；**不要把 BLIMP-1 放进第 1 层**，核背景会把几乎所有细胞打成 Plasma）。Memory 内再一层层圈：BLIMP-1（两群分得开、高于 IgD、且不是多数派才叫 Plasma）→ IgG→Switched → CD80/CD86→Activated → 剩余 IgM→IgM memory / Memory。Naive 内：CD80/CD86→Activated，剩余 IgD vs IgM → Naive / Atypical。默认剩余是 Naive/Memory，不是 Plasma。
-- P3：**先圈大类**（CD3/CD19/NK1.1 vs 髓系；髓系内再用 Ly6G、Siglec-F、F4/80、CD11c、Ly6C、FceRI 圈中性粒/嗜酸/巨噬/DC/单核/嗜碱），**巨噬圈定后再用 iNOS、CD206、ARG-1 分 M1/M2**。不用 CCR3 当嗜酸，不用 IL-10/TGF-b 当 M2
+- P3：**先圈大类**（CD3/CD19/NK1.1 vs 髓系）。髓系内**一层层圈**，不要把 Ly6G/Siglec-F/F4/80/CD11c/Ly6C 丢进一次 kmeans 比大小：Ly6G→中性粒（Ly6C 中阳仍是中性粒），Siglec-F→嗜酸（不用 CCR3），FceRI/CD200R3→嗜碱，F4/80（须高于 CD11c，不用 MHCII 抢赢）→巨噬，CD103→CD103 DC，CD11c→DC，剩余 Ly6C hi/lo 单核。巨噬圈定后再用 iNOS→M1、CD206/ARG-1→M2；不用 IL-10/TGF-b/TNF-a/CD86 当极化。
 - 类内 kmeans 只跑该层标志。不要全局 kmeans 后整团贴一个名字，也不要按 rank 在 UMAP 上撒点
 - **P1/P2/P3 共用 P1 那套高对比色**（红/紫/蓝/米/酒红/金/绿/橙）。禁止 P2 全紫、P3 全橙
 
