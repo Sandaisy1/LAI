@@ -55,4 +55,31 @@ expect(
   "CD4_naive", "nk-bg-not-nk"
 )
 
+# 分层：先 CD4/CD8，再在类内分亚群；不得出现 NA
+set.seed(42)
+pops <- demo_means_p1()
+feat <- names(pops[[1]])
+bind_pop <- function(name, n) {
+  m <- matrix(unlist(pops[[name]]), n, length(feat), byrow = TRUE)
+  colnames(m) <- feat
+  m + matrix(rnorm(n * length(feat), 0, 0.12), n)
+}
+mat <- rbind(
+  bind_pop("CD4_naive", 80), bind_pop("CD4_TCM", 80), bind_pop("CD4_TEM", 80),
+  bind_pop("Treg", 60), bind_pop("CD4_act", 60),
+  bind_pop("CD8_naive", 80), bind_pop("CD8_TEM", 80), bind_pop("CD8_eff", 60)
+)
+h <- hierarchical_gate(mat, "P1")
+if (anyNA(h$subset) || any(!nzchar(h$subset))) fail("hierarchical labels contain NA")
+n4 <- sum(h$major == "CD4")
+n8 <- sum(h$major == "CD8")
+if (n4 < 300) fail(sprintf("layer1 CD4 too few: %s", n4))
+if (n8 < 180) fail(sprintf("layer1 CD8 too few: %s", n8))
+if (any(h$major == "CD4" & grepl("^CD8", h$subset))) fail("CD4 parent received CD8 subset")
+if (any(h$major == "CD8" & grepl("^CD4|^Treg$", h$subset))) fail("CD8 parent received CD4 subset")
+cd4_labs <- unique(h$subset[h$major == "CD4"])
+if (length(cd4_labs) < 3) fail(sprintf("CD4 subsets too few: %s", paste(cd4_labs, collapse = ",")))
+cd8_labs <- unique(h$subset[h$major == "CD8"])
+if (length(cd8_labs) < 2) fail(sprintf("CD8 subsets too few: %s", paste(cd8_labs, collapse = ",")))
+
 cat("OK: P1 T/NK subset labels\n")

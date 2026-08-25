@@ -798,6 +798,200 @@ annotate_clusters <- function(med, panel_id) {
   data.frame(cluster = rownames(med), lineage = labs, stringsAsFactors = FALSE)
 }
 
+colv <- function(mat, name) {
+  if (!name %in% colnames(mat)) return(rep(NA_real_, nrow(mat)))
+  as.numeric(mat[, name])
+}
+
+finite_pmax <- function(...) {
+  args <- list(...)
+  out <- args[[1]]
+  out[!is.finite(out)] <- -Inf
+  if (length(args) == 1) return(out)
+  for (a in args[-1]) {
+    a[!is.finite(a)] <- -Inf
+    out <- pmax(out, a)
+  }
+  out
+}
+
+vec_get <- function(v, name) {
+  if (!name %in% names(v)) return(-Inf)
+  x <- as.numeric(v[[name]])
+  if (!is.finite(x)) -Inf else x
+}
+
+mem_from_cd62_cd44 <- function(cd62, cd44, prefix) {
+  if (cd62 > cd44 + 0.15) return(paste0(prefix, "_naive"))
+  if (cd44 > cd62 + 0.15) return(paste0(prefix, "_TEM"))
+  paste0(prefix, "_TCM")
+}
+
+# 大类圈定之后，只根据这一层的定义标志给亚群命名
+label_cd4_subset <- function(v) {
+  cd25 <- vec_get(v, "CD25")
+  cd69 <- vec_get(v, "CD69")
+  tnfa <- vec_get(v, "TNF-a")
+  cd62 <- vec_get(v, "CD62L")
+  cd44 <- vec_get(v, "CD44")
+  act <- max(cd69, tnfa)
+  if (cd25 > act + 0.15 && cd25 > max(cd62, cd44) - 0.8) return("Treg")
+  if (act > max(cd62, cd44) + 0.1 && act > cd25) return("CD4_activated")
+  mem_from_cd62_cd44(cd62, cd44, "CD4")
+}
+
+label_cd8_subset <- function(v) {
+  exh <- max(vec_get(v, "LAG-3"), vec_get(v, "TIM-3"))
+  eff <- max(vec_get(v, "GZMB"), vec_get(v, "Perforin"))
+  cd62 <- vec_get(v, "CD62L")
+  cd44 <- vec_get(v, "CD44")
+  if (exh > eff + 0.1 && exh > cd62 + 0.1) return("CD8_exhausted")
+  if (eff > max(cd62, cd44) + 0.1 && eff > exh) return("CD8_effector")
+  mem_from_cd62_cd44(cd62, cd44, "CD8")
+}
+
+label_t_subset <- function(v) {
+  mem_from_cd62_cd44(vec_get(v, "CD62L"), vec_get(v, "CD44"), "T")
+}
+
+label_b_subset <- function(v) {
+  blimp <- vec_get(v, "BLIMP-1")
+  igd <- vec_get(v, "IgD")
+  igm <- vec_get(v, "IgM")
+  igg <- vec_get(v, "IgG")
+  cd27 <- vec_get(v, "CD27")
+  act <- max(vec_get(v, "CD80"), vec_get(v, "CD86"))
+  if (blimp > igd + 0.2 && blimp > igm + 0.15) return("Plasma")
+  if (igg > igd + 0.2 && igg > igm + 0.15) return("Switched_B")
+  if (act > max(igd, igm, igg) + 0.15) return("Activated_B")
+  if (cd27 > igd + 0.15) {
+    if (igm > igd + 0.1 && igm >= igg) return("IgM_memory")
+    return("Memory_B")
+  }
+  if (igd >= igm - 0.15) return("Naive_B")
+  if (igm > igd + 0.2) return("Atypical_B")
+  "Naive_B"
+}
+
+label_myeloid_subset <- function(v) {
+  siglec <- vec_get(v, "Siglec-F")
+  ly6g <- vec_get(v, "LY6G")
+  f480 <- vec_get(v, "F4/80")
+  cd11c <- vec_get(v, "CD11C")
+  mhc2 <- vec_get(v, "I-A/I-E")
+  cd103 <- vec_get(v, "CD103")
+  ly6c <- vec_get(v, "LY6C")
+  inos <- vec_get(v, "iNOS")
+  m2 <- max(vec_get(v, "CD206"), vec_get(v, "ARG-1"))
+  baso <- max(vec_get(v, "FceRI"), vec_get(v, "CD200R3"))
+  dc <- max(cd11c, mhc2)
+  if (ly6g >= max(siglec, f480, dc, baso, ly6c) && ly6g > -Inf) return("Neutrophil")
+  if (siglec >= max(ly6g, f480, dc, baso, ly6c) && siglec > -Inf) return("Eosinophil")
+  if (baso >= max(siglec, ly6g, f480, dc) && baso > -Inf) return("Basophil_mast")
+  if (cd103 >= cd11c - 0.15 && cd103 > f480 && cd103 > ly6g) return("cDC1_CD103")
+  if (dc > f480 && dc > ly6g && dc > ly6c) return("DC")
+  if (inos > m2 && inos > ly6c && f480 >= ly6c - 0.3) return("M1_like_Mac")
+  if (m2 > inos && m2 > ly6c && f480 >= ly6c - 0.3) return("M2_like_Mac")
+  if (f480 > ly6c && f480 > ly6g && f480 > dc) return("Macrophage")
+  if (ly6c > f480 && ly6c > ly6g && ly6c > dc) return("Mono_Ly6Chi")
+  "Mono_Ly6Clo"
+}
+
+# 第 1 层：只用谱系抗体圈大类
+gate_major_lineage <- function(mat, panel_id) {
+  mat <- as.matrix(mat)
+  n <- nrow(mat)
+  if (panel_id == "P2") return(rep("B", n))
+  cd3 <- colv(mat, "CD3")
+  cd4 <- colv(mat, "CD4")
+  cd8 <- finite_pmax(colv(mat, "CD8"), colv(mat, "CD8b"))
+  cd19 <- colv(mat, "CD19")
+  cd11b <- colv(mat, "CD11B")
+  nk <- finite_pmax(colv(mat, "NK1.1"), colv(mat, "NKp46"))
+  out <- rep("Myeloid", n)
+  is_b <- cd19 > finite_pmax(cd3, cd4, cd8, nk) + 0.1
+  is_my <- !is_b & cd11b > finite_pmax(cd3, cd19, cd4, cd8) + 0.2
+  is_nk <- !is_b & !is_my & nk > cd3 + 0.3 & nk > cd19
+  is_nkt <- !is_b & !is_my & !is_nk & nk > 1 & cd3 > 1 & abs(cd3 - nk) < 1.2 & nk > cd19
+  is_t <- !is_b & !is_my & !is_nk & !is_nkt & cd3 >= finite_pmax(cd19, cd11b)
+  out[is_b] <- "B"
+  out[is_my] <- "Myeloid"
+  out[is_nk] <- "NK"
+  out[is_nkt] <- "NKT"
+  out[is_t & cd4 > cd8 + 0.1] <- "CD4"
+  out[is_t & cd8 > cd4 + 0.1] <- "CD8"
+  out[is_t & !(cd4 > cd8 + 0.1) & !(cd8 > cd4 + 0.1)] <- "T"
+  if (panel_id == "P3") {
+    out[out %in% c("CD4", "CD8")] <- "T"
+  }
+  out
+}
+
+# 第 2 层：大类内部只用亚群标志做 kmeans，再用中位数命名（同一亚群一块颜色，不撒点）
+split_within_parent <- function(mat, idx, markers, k, label_fun, fallback) {
+  n <- length(idx)
+  if (n == 0) return(character(0))
+  markers <- intersect(markers, colnames(mat))
+  if (n < 25 || length(markers) < 2) {
+    med <- apply(mat[idx, , drop = FALSE], 2, median, na.rm = TRUE)
+    return(rep(label_fun(med), n))
+  }
+  k_use <- max(2L, min(as.integer(k), max(2L, floor(n / 80L))))
+  x <- mat[idx, markers, drop = FALSE]
+  xs <- scale(x)
+  xs[!is.finite(xs)] <- 0
+  set.seed(seed_value)
+  km <- tryCatch(
+    kmeans(xs, centers = k_use, nstart = 8, iter.max = 250, algorithm = "Lloyd"),
+    error = function(e) NULL
+  )
+  if (is.null(km)) return(rep(fallback, n))
+  labs <- rep(fallback, n)
+  for (ci in sort(unique(km$cluster))) {
+    hit <- km$cluster == ci
+    med <- apply(x[hit, , drop = FALSE], 2, median, na.rm = TRUE)
+    labs[hit] <- label_fun(med)
+  }
+  labs[is.na(labs) | !nzchar(labs)] <- fallback
+  labs
+}
+
+# 分层圈门：先大类，再在类内分亚群
+hierarchical_gate <- function(mat, panel_id) {
+  mat <- as.matrix(mat)
+  major <- gate_major_lineage(mat, panel_id)
+  subset <- major
+  if (panel_id == "P1") {
+    i4 <- which(major == "CD4")
+    subset[i4] <- split_within_parent(
+      mat, i4, c("CD62L", "CD44", "CD25", "CD69", "TNF-a"), 5, label_cd4_subset, "CD4_TCM"
+    )
+    i8 <- which(major == "CD8")
+    subset[i8] <- split_within_parent(
+      mat, i8, c("CD62L", "CD44", "LAG-3", "TIM-3", "GZMB", "Perforin"), 5, label_cd8_subset, "CD8_TEM"
+    )
+    it <- which(major == "T")
+    subset[it] <- split_within_parent(
+      mat, it, c("CD62L", "CD44"), 3, label_t_subset, "T_TCM"
+    )
+  } else if (panel_id == "P2") {
+    ib <- which(major == "B")
+    subset[ib] <- split_within_parent(
+      mat, ib, c("IgD", "IgM", "IgG", "CD27", "BLIMP-1", "CD80", "CD86"), 6, label_b_subset, "Naive_B"
+    )
+  } else if (panel_id == "P3") {
+    im <- which(!major %in% c("B", "T", "NK"))
+    subset[im] <- split_within_parent(
+      mat, im,
+      c("LY6G", "Siglec-F", "F4/80", "iNOS", "CD206", "ARG-1", "CD11C", "I-A/I-E",
+        "CD103", "LY6C", "FceRI", "CD200R3"),
+      8, label_myeloid_subset, "Myeloid"
+    )
+  }
+  subset[is.na(subset) | !nzchar(subset)] <- major[is.na(subset) | !nzchar(subset)]
+  list(major = major, subset = subset)
+}
+
 # -----------------------------------------------------------------------------
 # 7. 出图（每个 panel 都导出 PDF + PNG）
 # -----------------------------------------------------------------------------
@@ -1117,7 +1311,7 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
           file.path(out_dir, paste0(panel_id, "_cluster_frequency_T6_vs_T")),
           width = max(8, 0.7 * length(unique(freq_df$cluster)) + 2), height = 5.5)
 
-  lin_freq <- aggregate(percent ~ sample + group + lineage, data = freq_df, FUN = sum)
+  lin_freq <- lineage_frequencies(cells)
   names(lin_freq)[names(lin_freq) == "lineage"] <- "cluster"
   save_gg(plot_freq_box(lin_freq, paste(tag, "lineage frequency")),
           file.path(out_dir, paste0(panel_id, "_lineage_frequency_T6_vs_T")),
@@ -1155,8 +1349,26 @@ cluster_frequencies <- function(cells) {
   names(tot)[2] <- "total"
   tab <- merge(tab, tot, by = "sample")
   tab$percent <- 100 * tab$n / pmax(tab$total, 1)
-  lin_map <- unique(cells[, c("cluster", "lineage")])
-  tab <- merge(tab, lin_map, by = "cluster", all.x = TRUE)
+  lin_col <- if ("cluster_lineage" %in% names(cells)) "cluster_lineage" else "lineage"
+  if (lin_col %in% names(cells)) {
+    maj <- aggregate(cells[[lin_col]], by = list(cluster = cells$cluster), FUN = function(x) {
+      names(sort(table(x), decreasing = TRUE))[1]
+    })
+    names(maj)[2] <- "lineage"
+    tab <- merge(tab, maj, by = "cluster", all.x = TRUE)
+  }
+  tab
+}
+
+lineage_frequencies <- function(cells) {
+  tab <- as.data.frame(table(sample = cells$sample, lineage = cells$lineage), stringsAsFactors = FALSE)
+  names(tab)[3] <- "n"
+  smp_group <- unique(cells[, c("sample", "group")])
+  tab <- merge(tab, smp_group, by = "sample")
+  tot <- aggregate(n ~ sample, data = tab, FUN = sum)
+  names(tot)[2] <- "total"
+  tab <- merge(tab, tot, by = "sample")
+  tab$percent <- 100 * tab$n / pmax(tab$total, 1)
   tab
 }
 
@@ -1321,13 +1533,18 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
 
   annot <- annotate_clusters(med, panel_id)
   log_msg(panel_id, " cluster labels: ", paste(paste(annot$cluster, annot$lineage, sep = "="), collapse = ", "))
-  cells$lineage <- annot$lineage[match(as.character(cells$cluster), annot$cluster)]
+  hier <- hierarchical_gate(as.matrix(mat_raw), panel_id)
+  cells$cluster_lineage <- hier$major
+  cells$lineage <- hier$subset
+  maj_n <- sort(table(hier$major), decreasing = TRUE)
+  lin_n <- sort(table(hier$subset), decreasing = TRUE)
+  log_msg(panel_id, " layer1 major: ", paste(paste(names(maj_n), as.integer(maj_n), sep = "="), collapse = ", "))
+  log_msg(panel_id, " layer2 subset: ", paste(paste(names(lin_n), as.integer(lin_n), sep = "="), collapse = ", "))
   if (use_demo) cells$true_lineage <- true_lin
 
   freq_df <- cluster_frequencies(cells)
-  freq_df$lineage <- annot$lineage[match(as.character(freq_df$cluster), annot$cluster)]
   stats_cl <- compare_group_freq(freq_df, "cluster")
-  lin_freq <- aggregate(percent ~ sample + group + lineage, data = freq_df, FUN = sum)
+  lin_freq <- lineage_frequencies(cells)
   stats_lin <- compare_group_freq(lin_freq, "lineage")
 
   utils::write.csv(annot, file.path(out_dir, paste0(panel_id, "_cluster_annotation.csv")), row.names = FALSE)

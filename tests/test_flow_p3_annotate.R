@@ -57,4 +57,17 @@ if (!identical(unname(pal_celltype[["Eosinophil"]]), unname(pal_celltype[["CD4 a
 }
 if (identical(unname(pal_celltype[["Eosinophil"]]), "#D35400")) fail("old P3 orange still in palette")
 
+set.seed(1)
+p2p <- demo_means_p2()
+f2 <- names(p2p[[1]])
+bp <- function(name, n) {
+  m <- matrix(unlist(p2p[[name]]), n, length(f2), byrow = TRUE)
+  colnames(m) <- f2
+  m + matrix(rnorm(n * length(f2), 0, 0.1), n)
+}
+m2 <- rbind(bp("Naive_B", 100), bp("Plasma", 80), bp("Switched_B", 80), bp("Activated_B", 80), bp("IgM_memory", 80))
+h2 <- hierarchical_gate(m2, "P2")
+if (any(h2$major != "B")) fail("P2 layer1 must be B")
+if (length(unique(h2$subset)) < 4) fail(sprintf("P2 subsets too few: %s", paste(unique(h2$subset), collapse = ",")))
+
 cat("OK: P3 labels and P1-shared palette\n")

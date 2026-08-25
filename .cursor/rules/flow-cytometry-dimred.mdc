@@ -33,7 +33,9 @@ alwaysApply: false
 
 每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 T、右 T6，点按**细亚群**着色，不要虚线凸包。主图 `*_T_vs_T6_tSNE_lineage_split`。
 
-- P1：先分 B / 髓系 / NK（须 CD3−）/ NKT / CD4 / CD8。CD4/CD8 默认按 CD62L vs CD44 分成 naive / TCM / TEM。只有 CD69·TNF-a 明显压过 CD62L/CD44 才标 activated；只有 GZMB·Perforin 压过 CD44 才标 effector；LAG-3/TIM-3 才 exhausted；CD25 才 Treg。**不要用 IFN-g 背景把 naive/TEM 并成 activated/effector**
+- P1：**先圈大类**（B / 髓系 / NK / NKT / CD4 / CD8，只用谱系抗体），**大类圈定后再分亚群**（CD4 用 CD25、CD69、TNF-a、CD62L、CD44；CD8 用 LAG-3、TIM-3、GZMB、Perforin、CD62L、CD44）。类内 kmeans 只跑这一层的标志，再按亚群中位数命名。不要全局 kmeans 后整团贴一个 TEM，也不要按 rank 在 UMAP 上撒点。
+- P2：先圈 B，再在 B 内用 IgD/IgM/IgG/CD27/BLIMP-1/CD80·CD86 分 Naive / IgM memory / Memory / Switched / Activated / Plasma
+- P3：先丢掉 T/B/NK，再在髓系内用 Ly6G、Siglec-F、F4/80、iNOS、CD206、CD11c、CD103、Ly6C、FceRI 分亚群（不用 CCR3 当嗜酸，不用 IL-10/TGF-b 当 M2）
 - P2：cluster 内 IgD/IgM/IgG/CD27/BLIMP-1，默认 Naive B，不要大量 other
 - P3：cluster 内 Siglec-F（不要用 CCR3 当嗜酸）、Ly6G、F4/80、iNOS、CD206、CD11c/MHCII、CD103、Ly6C、FceRI；淋巴细胞污染标 T/B/NK；平局标 Myeloid / Ly6C lo，不要默认 other，也不要把泛 CD11B 当成一个亚群去抢赢
 - **P1/P2/P3 共用 P1 那套高对比色**（红/紫/蓝/米/酒红/金/绿/橙）。禁止 P2 全紫、P3 全橙
