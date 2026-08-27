@@ -7,8 +7,9 @@
 # 用法：
 #   setwd("E:/R/flow J")
 #   source("Flow_dimred_pipeline.R")
-# 三个 panel 跑完后会自动汇总全亚群频率（不合并表达矩阵）：
+# 三个 panel 跑完后会自动汇总全亚群频率，并按大类画轨迹：
 #   source("Flow_dimred_all_subsets.R")   # 也可单独重出 results_flow/all_subsets/
+#   source("Flow_dimred_trajectory.R")    # 也可单独重出 P1/P2/P3/trajectory/
 # 无 FCS 时可跑演示数据（会在日志里标明 DEMO，不可当正式结果）：
 #   Sys.setenv(FLOW_DEMO = "1")
 #   source("Flow_dimred_pipeline.R")
@@ -1625,6 +1626,19 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
 # -----------------------------------------------------------------------------
 # 8. 频率统计 T6 vs T
 # -----------------------------------------------------------------------------
+# "T" 单独成列时 read.csv 会变成 TRUE
+read_embed_csv <- function(path) {
+  df <- utils::read.csv(path, check.names = FALSE, stringsAsFactors = FALSE)
+  chr <- intersect(c("sample", "group", "cluster", "cluster_lineage", "lineage"), names(df))
+  for (cn in chr) {
+    v <- as.character(df[[cn]])
+    v[v %in% c("TRUE", "True")] <- "T"
+    v[v %in% c("FALSE", "False")] <- "F"
+    df[[cn]] <- v
+  }
+  df
+}
+
 cluster_frequencies <- function(cells) {
   tab <- as.data.frame(table(sample = cells$sample, cluster = cells$cluster), stringsAsFactors = FALSE)
   names(tab)[3] <- "n"
@@ -1841,7 +1855,10 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   if (!is.null(dat$map)) {
     utils::write.csv(dat$map, file.path(out_dir, paste0(panel_id, "_channel_map.csv")), row.names = FALSE)
   }
-  embed_out <- cells[, c("sample", "group", "cluster", "lineage", "UMAP1", "UMAP2", "tSNE1", "tSNE2")]
+  embed_cols <- c("sample", "group", "cluster", "cluster_lineage", "lineage",
+                  "UMAP1", "UMAP2", "tSNE1", "tSNE2")
+  extra_cols <- setdiff(names(cells), c(embed_cols, "true_lineage"))
+  embed_out <- cells[, intersect(c(embed_cols, extra_cols), names(cells)), drop = FALSE]
   utils::write.csv(embed_out, file.path(out_dir, paste0(panel_id, "_cell_embeddings.csv")), row.names = FALSE)
 
   export_dimred_plots(cells, med, annot, freq_df, panel_id, out_dir, umap_is_pca, tsne_is_pca)
@@ -1917,7 +1934,17 @@ if (file.exists(extra)) {
   Sys.unsetenv("FLOW_ALL_SUBSETS_FROM_PIPELINE")
 }
 
-log_msg("Done. Open results_flow/P1, P2, P3 for UMAP/tSNE; results_flow/all_subsets for combined frequencies.")
+traj <- file.path(script_dir, "Flow_dimred_trajectory.R")
+if (file.exists(traj)) {
+  tryCatch({
+    Sys.setenv(FLOW_TRAJECTORY_FROM_PIPELINE = "1")
+    sys.source(traj, envir = .GlobalEnv)
+    export_all_panel_trajectories(result_dir)
+  }, error = function(e) log_msg("trajectory summary failed: ", e$message))
+  Sys.unsetenv("FLOW_TRAJECTORY_FROM_PIPELINE")
+}
+
+log_msg("Done. Open results_flow/P1, P2, P3 for UMAP/tSNE; all_subsets for frequencies; P*/trajectory for trees.")
 invisible(summaries)
 
 }

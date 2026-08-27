@@ -15,6 +15,7 @@ alwaysApply: false
 - 文件名：`{T|T6}-{1|2|3}_P{1|2|3}_unmixed.fcs`；**先匹配 T6 再匹配 T**，禁止把 `T6-1` 当成 T
 - 六个样品独立保留：`T-1` `T-2` `T-3` `T6-1` `T6-2` `T6-3`
 - 三个 panel **分开分析、分开出图**，禁止把 P1/P2/P3 拼成一张表达矩阵。全亚群总览只汇总各 panel 已圈好的**管内频率**（`Flow_dimred_all_subsets.R` → `results_flow/all_subsets/`），百分数不能跨 panel 加总，也不能拿去再做联合 UMAP
+- 细胞轨迹（`Flow_dimred_trajectory.R`）按 **panel × 大类** 单独做：P1 的 CD4/CD8，P2 的 B，P3 的髓系。类内 PCA 当 Component 1/2，骨架用 slingshot（若已装）或亚群中心 MST。根节点按惯例取 naive / Naive B / Ly6C hi 单核。轨迹是标志物状态连续体，不要当成发育起源证明
 - 物种：小鼠（NK1.1、F4/80、I-A/I-E、Ly6C/G、Siglec-F、Sca-1）
 - 荧光素→标志物以 `flow_panel_map.json` / `Flow_dimred_pipeline.R` 为准。Cytek unmixed 通道名常是 `BUV496-A`、`APC-Cy7-A`（带 Area 后缀）或 `CD45 V500`；匹配时要去掉 `-A/-H/-W`、按 token 认标志物/荧光素，不要要求整串 equal。对不上时必须把 `$PnN`/`$PnS` 打进日志，不要只报「没有匹配到任何分析通道」
 - Windows 若把 json 存成“文本文档”，真实名常是 `flow_panel_map.json.txt`：脚本要认这个名字，不要只找 `.json`

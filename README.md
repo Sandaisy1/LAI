@@ -82,7 +82,7 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 
 ```r
 setwd("E:/R/flow J")
-# 把 Flow_dimred_pipeline.R、Flow_dimred_all_subsets.R 与 flow_panel_map.json 放在该目录（或仓库根）
+# 把 Flow_dimred_pipeline.R、Flow_dimred_all_subsets.R、Flow_dimred_trajectory.R 与 flow_panel_map.json 放在该目录（或仓库根）
 source("Flow_dimred_pipeline.R")
 ```
 
@@ -97,6 +97,8 @@ source("Flow_dimred_pipeline.R")
 - `*_cluster_marker_heatmap`、`*_cluster_frequency_T6_vs_T`、`*_T6_vs_T_dimred_overview`
 
 三个 panel 的抗体不同，**不能**拼成一张矩阵做联合 UMAP。`Flow_dimred_all_subsets.R` 在各自圈完亚群后，把频率汇总到 `results_flow/all_subsets/`（T vs T6 柱状图、堆叠组成、热图、T6−T 差值）。百分数是该 panel 管子里的比例，P1 的 B/髓系、P3 的 T/B/NK 只是 dump。主流程跑完会自动出这份总览；也可单独 `source("Flow_dimred_all_subsets.R")`。
+
+每个 panel 的每一大类另出细胞轨迹（类似 Monocle 骨架图）：`Flow_dimred_trajectory.R` → `results_flow/P1/trajectory/` 等。P1 画 CD4、CD8；P2 画 B；P3 画髓系。坐标是该类内的 Component 1/2，点按细亚群着色，黑线是分支骨架。根节点按惯例是 naive T/B 或 Ly6C hi 单核。也可单独 `source("Flow_dimred_trajectory.R")`。
 
 无 FCS 时可 `Sys.setenv(FLOW_DEMO = "1")` 导出演示图，不能当正式结果。
 

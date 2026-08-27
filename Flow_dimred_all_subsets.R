@@ -60,7 +60,7 @@ subset_role <- function(panel_id, lineage) {
 read_panel_embeddings <- function(result_dir, panel_id) {
   p <- file.path(result_dir, panel_id, paste0(panel_id, "_cell_embeddings.csv"))
   if (!file.exists(p)) return(NULL)
-  df <- utils::read.csv(p, check.names = FALSE, stringsAsFactors = FALSE)
+  df <- read_embed_csv(p)
   need <- c("sample", "group", "lineage")
   if (!all(need %in% names(df))) return(NULL)
   df[, need, drop = FALSE]
