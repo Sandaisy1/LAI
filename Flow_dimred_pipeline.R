@@ -1665,6 +1665,90 @@ p_to_star <- function(p) {
   "ns"
 }
 
+# ns 时把 P 值写出来：n=3 时柱高看起来不同，t 检验仍常不显著
+p_annot_label <- function(p) {
+  star <- p_to_star(p)
+  if (!is.finite(p)) return(star)
+  if (identical(star, "ns")) return(sprintf("ns  P = %.2f", p))
+  star
+}
+
+finite_axis_lim <- function(v, pad = 0.06) {
+  v <- as.numeric(v)
+  v <- v[is.finite(v)]
+  if (!length(v)) return(c(0, 1))
+  r <- range(v)
+  if (!is.finite(diff(r)) || diff(r) < 1e-6) {
+    return(c(r[1] - 0.4, r[2] + 0.4))
+  }
+  r + c(-1, 1) * diff(r) * pad
+}
+
+safe_kde_bw <- function(v) {
+  v <- as.numeric(v)
+  v <- v[is.finite(v)]
+  if (length(v) < 2) return(0.25)
+  h <- NA_real_
+  if (requireNamespace("MASS", quietly = TRUE)) {
+    h <- tryCatch(MASS::bandwidth.nrd(v), error = function(e) NA_real_)
+  }
+  if (!is.finite(h) || h <= 0) {
+    h <- stats::sd(v)
+    if (!is.finite(h) || h <= 0) h <- stats::IQR(v) / 1.34
+  }
+  if (!is.finite(h) || h <= 0) h <- 0.25
+  h
+}
+
+# FlowJo 风格：概率等高线（圈住约 25–90% 事件）+ 最外圈以外的 outliers
+flow_prob_contour <- function(x, y, n_grid = 70, bw_mult = 1.45,
+                              probs = c(0.25, 0.4, 0.55, 0.7, 0.82, 0.9)) {
+  x <- as.numeric(x)
+  y <- as.numeric(y)
+  ok <- is.finite(x) & is.finite(y)
+  x <- x[ok]
+  y <- y[ok]
+  n <- length(x)
+  empty <- list(
+    grid = data.frame(x = numeric(0), y = numeric(0), z = numeric(0)),
+    levels = numeric(0), x = x, y = y, outlier = rep(TRUE, n)
+  )
+  if (n < 8 || !requireNamespace("MASS", quietly = TRUE)) return(empty)
+  hx <- safe_kde_bw(x) * bw_mult
+  hy <- safe_kde_bw(y) * bw_mult
+  rx <- range(x)
+  ry <- range(y)
+  lims <- c(rx + c(-1, 1) * max(diff(rx) * 0.08, 0.05),
+            ry + c(-1, 1) * max(diff(ry) * 0.08, 0.05))
+  kd <- tryCatch(
+    MASS::kde2d(x, y, n = n_grid, h = c(hx, hy), lims = lims),
+    error = function(e) NULL
+  )
+  if (is.null(kd) || !is.matrix(kd$z)) return(empty)
+  dx <- diff(kd$x[1:2])
+  dy <- diff(kd$y[1:2])
+  if (!is.finite(dx) || !is.finite(dy) || dx <= 0 || dy <= 0) return(empty)
+  mass <- as.numeric(kd$z) * dx * dy
+  s <- sum(mass)
+  if (!is.finite(s) || s <= 0) return(empty)
+  mass <- mass / s
+  ord <- order(as.numeric(kd$z), decreasing = TRUE)
+  cum <- cumsum(mass[ord])
+  zord <- as.numeric(kd$z)[ord]
+  levs <- unique(vapply(probs, function(p) {
+    i <- which(cum >= p)[1]
+    if (is.na(i)) zord[length(zord)] else zord[i]
+  }, numeric(1)))
+  levs <- sort(levs[is.finite(levs) & levs > 0])
+  grid <- expand.grid(x = kd$x, y = kd$y, KEEP.OUT.ATTRS = FALSE)
+  grid$z <- as.vector(kd$z)
+  ix <- findInterval(x, kd$x, all.inside = TRUE)
+  iy <- findInterval(y, kd$y, all.inside = TRUE)
+  dens <- kd$z[cbind(ix, iy)]
+  outer_lev <- if (length(levs)) min(levs) else 0
+  list(grid = grid, levels = levs, x = x, y = y, outlier = !is.finite(dens) | dens < outer_lev)
+}
+
 parent_mask <- function(cells, parent) {
   n <- nrow(cells)
   if (n < 1) return(logical(0))
@@ -1783,10 +1867,10 @@ gate_rect_from_xy <- function(x, y) {
     ))
   }
   list(
-    xmin = as.numeric(stats::quantile(x[ok], 0.08, names = FALSE)),
-    xmax = as.numeric(stats::quantile(x[ok], 0.95, names = FALSE)),
-    ymin = as.numeric(stats::quantile(y[ok], 0.08, names = FALSE)),
-    ymax = as.numeric(stats::quantile(y[ok], 0.95, names = FALSE))
+    xmin = as.numeric(stats::quantile(x[ok], 0.10, names = FALSE)),
+    xmax = as.numeric(stats::quantile(x[ok], 0.90, names = FALSE)),
+    ymin = as.numeric(stats::quantile(y[ok], 0.10, names = FALSE)),
+    ymax = as.numeric(stats::quantile(y[ok], 0.90, names = FALSE))
   )
 }
 
@@ -1807,7 +1891,7 @@ plot_subset_stat_bar <- function(sample_df, ylab, pval) {
   means$sd[!is.finite(means$sd)] <- 0
   y_top <- max(c(sample_df$percent, means$mean + means$sd), na.rm = TRUE)
   if (!is.finite(y_top) || y_top <= 0) y_top <- 1
-  star <- p_to_star(pval)
+  star <- p_annot_label(pval)
   ggplot2::ggplot() +
     ggplot2::geom_col(
       data = means, ggplot2::aes(x = group, y = mean, fill = group),
@@ -1820,16 +1904,16 @@ plot_subset_stat_bar <- function(sample_df, ylab, pval) {
     ggplot2::geom_point(
       data = sample_df,
       ggplot2::aes(x = group, y = percent, color = group, shape = group),
-      size = 2.6, stroke = 0.4,
-      position = ggplot2::position_jitter(width = 0.07, height = 0, seed = 1)
+      fill = "white", size = 2.7, stroke = 0.95,
+      position = ggplot2::position_jitter(width = 0.12, height = 0, seed = 1)
     ) +
-    ggplot2::annotate("segment", x = 1, xend = 2, y = y_top * 1.08, yend = y_top * 1.08, linewidth = 0.4) +
-    ggplot2::annotate("text", x = 1.5, y = y_top * 1.14, label = star, fontface = "bold", size = 4.2) +
+    ggplot2::annotate("segment", x = 1, xend = 2, y = y_top * 1.10, yend = y_top * 1.10, linewidth = 0.4) +
+    ggplot2::annotate("text", x = 1.5, y = y_top * 1.18, label = star, fontface = "bold", size = 3.6) +
     ggplot2::scale_fill_manual(values = pal_group, drop = FALSE) +
     ggplot2::scale_color_manual(values = pal_group, drop = FALSE) +
-    ggplot2::scale_shape_manual(values = pal_group_shape, drop = FALSE) +
-    ggplot2::scale_y_continuous(expand = ggplot2::expansion(mult = c(0, 0.22))) +
-    ggplot2::coord_cartesian(ylim = c(0, y_top * 1.28)) +
+    ggplot2::scale_shape_manual(values = setNames(c(21, 22), glev), drop = FALSE) +
+    ggplot2::scale_y_continuous(expand = ggplot2::expansion(mult = c(0, 0.28))) +
+    ggplot2::coord_cartesian(ylim = c(0, y_top * 1.36)) +
     ggplot2::theme_classic(base_size = 12) +
     ggplot2::theme(
       legend.position = "none",
@@ -1839,19 +1923,39 @@ plot_subset_stat_bar <- function(sample_df, ylab, pval) {
     ggplot2::labs(y = ylab)
 }
 
-plot_subset_contour <- function(df, x, y, color, xlab, ylab, pct, gate) {
+plot_subset_contour <- function(df, x, y, color, xlab, ylab, pct, gate,
+                                xlim = NULL, ylim = NULL) {
   d <- df[is.finite(df[[x]]) & is.finite(df[[y]]), c(x, y), drop = FALSE]
-  if (nrow(d) > 3500) {
+  names(d) <- c("x", "y")
+  if (nrow(d) > 4000) {
     set.seed(if (exists("seed_value")) seed_value else 42)
-    d <- d[sample.int(nrow(d), 3500), , drop = FALSE]
+    d <- d[sample.int(nrow(d), 4000), , drop = FALSE]
   }
-  p <- ggplot2::ggplot(d, ggplot2::aes(x = .data[[x]], y = .data[[y]]))
-  if (nrow(d) >= 30) {
-    p <- p + ggplot2::stat_density_2d(
-      contour_var = "ndensity", bins = 9, color = color, linewidth = 0.42
+  if (is.null(xlim)) xlim <- finite_axis_lim(c(d$x, gate$xmin, gate$xmax))
+  if (is.null(ylim)) ylim <- finite_axis_lim(c(d$y, gate$ymin, gate$ymax))
+  p <- ggplot2::ggplot()
+  pc <- if (nrow(d) >= 40) flow_prob_contour(d$x, d$y) else NULL
+  if (!is.null(pc) && length(pc$levels) >= 2 && nrow(pc$grid) > 10) {
+    out <- data.frame(x = pc$x[pc$outlier], y = pc$y[pc$outlier])
+    if (nrow(out) > 2500) {
+      set.seed(if (exists("seed_value")) seed_value else 42)
+      out <- out[sample.int(nrow(out), 2500), , drop = FALSE]
+    }
+    if (nrow(out)) {
+      p <- p + ggplot2::geom_point(
+        data = out, ggplot2::aes(x = x, y = y),
+        size = 0.22, alpha = 0.45, color = color, stroke = 0, shape = 16
+      )
+    }
+    p <- p + ggplot2::geom_contour(
+      data = pc$grid, ggplot2::aes(x = x, y = y, z = z),
+      breaks = pc$levels, color = color, linewidth = 0.38, lineend = "round"
     )
   } else {
-    p <- p + ggplot2::geom_point(size = 0.35, alpha = 0.5, color = color, stroke = 0)
+    p <- p + ggplot2::geom_point(
+      data = d, ggplot2::aes(x = x, y = y),
+      size = 0.28, alpha = 0.35, color = color, stroke = 0
+    )
   }
   p +
     ggplot2::annotate(
@@ -1863,8 +1967,12 @@ plot_subset_contour <- function(df, x, y, color, xlab, ylab, pct, gate) {
       label = sprintf("%.2f%%", pct), hjust = 1.08, vjust = -0.35,
       color = color, fontface = "bold", size = 3.4
     ) +
+    ggplot2::coord_cartesian(xlim = xlim, ylim = ylim, expand = FALSE, clip = "off") +
     ggplot2::theme_classic(base_size = 11) +
-    ggplot2::theme(plot.title = ggplot2::element_blank()) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(8, 10, 4, 4)
+    ) +
     ggplot2::labs(x = xlab, y = ylab)
 }
 
@@ -1936,8 +2044,10 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
     col_trt <- unname(pal_group[flow_trt_group])
     if (is.na(col_ctrl)) col_ctrl <- "#1A1A1A"
     if (is.na(col_trt)) col_trt <- "#E31A1C"
-    c_ctrl <- plot_subset_contour(d_ctrl, spec$x, spec$y, col_ctrl, xlab, yfl, pct_of(flow_ctrl_group), gate)
-    c_trt <- plot_subset_contour(d_trt, spec$x, spec$y, col_trt, xlab, yfl, pct_of(flow_trt_group), gate)
+    xlim <- finite_axis_lim(c(d_ctrl[[spec$x]], d_trt[[spec$x]], gate$xmin, gate$xmax))
+    ylim <- finite_axis_lim(c(d_ctrl[[spec$y]], d_trt[[spec$y]], gate$ymin, gate$ymax))
+    c_ctrl <- plot_subset_contour(d_ctrl, spec$x, spec$y, col_ctrl, xlab, yfl, pct_of(flow_ctrl_group), gate, xlim, ylim)
+    c_trt <- plot_subset_contour(d_trt, spec$x, spec$y, col_trt, xlab, yfl, pct_of(flow_trt_group), gate, xlim, ylim)
     stub <- paste0(panel_id, "_", gsub("[^A-Za-z0-9]+", "_", spec$lineage), "_H_vs_EV")
     save_subset_figure(bar, c_ctrl, c_trt, file.path(sub_dir, stub))
     utils::write.csv(samp, file.path(sub_dir, paste0(stub, "_by_sample.csv")), row.names = FALSE)

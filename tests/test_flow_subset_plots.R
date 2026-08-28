@@ -12,6 +12,28 @@ fail <- function(msg) {
 if (!identical(p_to_star(0.0004), "***")) fail("p<0.001 should be ***")
 if (!identical(p_to_star(0.02), "*")) fail("p<0.05 should be *")
 if (!identical(p_to_star(0.2), "ns")) fail("p>=0.05 should be ns")
+if (!grepl("P = 0.20", p_annot_label(0.2), fixed = TRUE)) fail("ns label should include the P value")
+
+set.seed(5)
+blob_x <- c(rnorm(300, 1.0, 0.18), runif(25, 3.8, 4.6))
+blob_y <- c(rnorm(300, 1.0, 0.18), runif(25, 3.2, 4.0))
+pc <- flow_prob_contour(blob_x, blob_y)
+if (length(pc$levels) < 2) fail("probability contours should have several levels")
+if (sum(pc$outlier) < 5) fail("far-away events should be outliers outside the last contour")
+
+ct <- plot_subset_contour(
+  data.frame(CD3 = blob_x, `NK1.1` = blob_y, check.names = FALSE),
+  "CD3", "NK1.1", "#1A1A1A", "CD3", "NK1.1", 12.3,
+  list(xmin = 0.7, xmax = 1.3, ymin = 0.7, ymax = 1.3)
+)
+has_contour <- FALSE
+has_out_pts <- FALSE
+for (ly in ct$layers) {
+  if (inherits(ly$geom, "GeomContour")) has_contour <- TRUE
+  if (inherits(ly$geom, "GeomPoint")) has_out_pts <- TRUE
+}
+if (!has_contour) fail("subset contour plot should draw FlowJo-style contours")
+if (!has_out_pts) fail("subset contour plot should draw outlier events")
 
 specs <- subset_plot_specs("P1")
 nk <- Filter(function(s) identical(s$lineage, "NK"), specs)
@@ -80,6 +102,17 @@ if (!"NK" %in% st$subset) fail("NK not in subset stats")
 if (st$mean_H[st$subset == "NK"] >= st$mean_EV[st$subset == "NK"]) {
   fail("H NK frequency should be lower than EV in this synthetic set")
 }
+bar <- plot_subset_stat_bar(data.frame(
+  sample = c("EV1", "EV2", "EV3", "H1", "H2", "H3"),
+  group = c("EV", "EV", "EV", "H", "H", "H"),
+  percent = c(6.3, 7.0, 3.8, 4.1, 4.3, 3.0),
+  stringsAsFactors = FALSE
+), "CD4 TEM in CD4+ (%)", 0.18)
+pt_fill <- NA
+for (ly in bar$layers) {
+  if (inherits(ly$geom, "GeomPoint") && !is.null(ly$aes_params$fill)) pt_fill <- ly$aes_params$fill
+}
+if (!identical(pt_fill, "white")) fail("replicate points must be white-filled so they stay visible on the bars")
 
 cells_na_plot <- cells
 cells_na_plot$cluster_lineage[1] <- NA_character_

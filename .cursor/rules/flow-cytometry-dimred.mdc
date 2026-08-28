@@ -36,7 +36,7 @@ alwaysApply: false
 
 每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 EV、右 H，点按**细亚群**着色，不要虚线凸包。主图 `*_H_vs_EV_tSNE_lineage_split`。
 
-**每个亚群**还要出一组论文风格图（`subset_stats/`）：上方 EV（黑）vs H（红）柱状图（均值、误差棒、每个重复的点、显著性 `ns/*/**/***`），下方对应 2D 等高线图（黑/红轮廓 + 门框 + 百分数）。
+**每个亚群**还要出一组论文风格图（`subset_stats/`）：上方 EV（黑）vs H（红）柱状图（均值、**SD** 误差棒、每个重复的白心点、显著性 `ns/*/**/*** `；ns 时标出 P 值）。n=3 时柱高看起来不同也会 ns，不要为了出星号改检验。下方 2D 图按 FlowJo：**概率等高线 + 最外圈以外的 outliers**，EV/H 共用坐标轴、同一门框和百分数。不要只用 ggplot `stat_density_2d(ndensity)`（那是峰值等高线，看起来不像文章里的流式图）。
 
 - P1：**先圈大类**（B / 髓系 / NK / NKT / **CD4** / **CD8**）。T 细胞一律判到 CD4 或 CD8，不要输出 T TEM。CD4 内再一层层圈：CD25→Treg，CD69/TNF-a→activated，剩余只用 CD62L vs CD44 分成 naive/TCM/TEM。CD8 内：LAG-3/TIM-3→exhausted，GZMB/Perforin→effector，剩余 naive/TCM/TEM。
 - P2：**先圈大类**（IgD vs CD27 的 **两个团互相比较** CD27−IgD，CD27 相对更高的一团是 Memory；**不要**要求同一细胞 CD27 绝对值压过 IgD，IgD 背景会把全部打成 Naive）。**不要把 BLIMP-1 放进第 1 层**。Memory 内再一层层圈：BLIMP-1（两群分得开、高于 IgD、且不是多数派才叫 Plasma）→ **少数** CD80/CD86 岛才叫 Activated（**不要用 CD40**，静息 B 也有 CD40；k=2 对单峰 CD80 会把一半吞掉）→ IgG→Switched → 剩余 IgM→IgM memory / Memory。Naive 内同样：只用 CD80/CD86 圈少数 Activated，且必须明显高于 IgD；剩余 IgD vs IgM → Naive / Atypical。默认剩余是 Naive/Memory，不是 Plasma，也不是 Activated。
