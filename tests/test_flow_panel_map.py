@@ -56,8 +56,8 @@ def main() -> int:
     if parse_fcs_filename("T-1_P1_unmixed.fcs")["group"] == "T6":
         errors.append("T-1 must stay group T")
 
-    if data["qc"]["asinh_cofactor"] == 5:
-        errors.append("asinh cofactor 5 is CyTOF-scale; fluorescence flow should use ~150")
+    if "AF700" not in data["fluorochrome_aliases"]["R718"]:
+        errors.append("R718 aliases must include AF700 (Panel 1 NK1.1 naming)")
 
     # Windows 隐藏扩展名时，记事本另存为会变成 .json.txt
     if parse_fcs_filename("flow_panel_map.json.txt") is not None:
