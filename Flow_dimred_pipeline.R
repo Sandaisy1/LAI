@@ -917,8 +917,9 @@ label_b_major <- function(v) {
 label_b_naive_subset <- function(v) {
   igd <- vec_get(v, "IgD")
   igm <- vec_get(v, "IgM")
-  act <- max(vec_get(v, "CD80"), vec_get(v, "CD86"), vec_get(v, "CD40"))
-  if (act > igd + 0.2) return("Activated_B")
+  # CD40 在静息 B 上也有，不能当 Activated
+  act <- max(vec_get(v, "CD80"), vec_get(v, "CD86"))
+  if (act > igd + 0.25) return("Activated_B")
   if (igm > igd + 0.25) return("Atypical_B")
   "Naive_B"
 }
@@ -928,9 +929,9 @@ label_b_memory_subset <- function(v) {
   igm <- vec_get(v, "IgM")
   igg <- vec_get(v, "IgG")
   act <- max(vec_get(v, "CD80"), vec_get(v, "CD86"))
-  if (act > max(igd, igm, igg) + 0.15) return("Activated_B")
   if (igg > igm + 0.15 && igg > igd) return("Switched_B")
   if (igm > igd + 0.1 && igm >= igg) return("IgM_memory")
+  if (act > max(igd, igm, igg) + 0.25) return("Activated_B")
   "Memory_B"
 }
 
@@ -1128,8 +1129,8 @@ marker_score <- function(mat, idx, markers) {
   })
 }
 
-# 一层：k=2 圈出该标志高的一群；两群分不开则整层跳过
-gate_k2_high <- function(mat, idx, markers, min_sep = 0.15) {
+# 一层：k=2 圈出该标志高的一群；两群分不开、或高群占了多数则整层跳过
+gate_k2_high <- function(mat, idx, markers, min_sep = 0.15, max_frac = 1) {
   n <- length(idx)
   out <- rep(FALSE, n)
   if (n < 40) return(out)
@@ -1145,7 +1146,9 @@ gate_k2_high <- function(mat, idx, markers, min_sep = 0.15) {
   med <- tapply(sc[ok], km$cluster, median, na.rm = TRUE)
   if (length(med) < 2 || diff(range(as.numeric(med))) < min_sep) return(out)
   hi <- as.integer(names(med)[which.max(med)])
-  out[ok] <- km$cluster == hi
+  hit <- km$cluster == hi
+  if (mean(hit) > max_frac) return(out)
+  out[ok] <- hit
   out
 }
 
@@ -1207,15 +1210,15 @@ sequential_t_subsets <- function(mat, idx, line) {
   labs
 }
 
-# P2 Naive 内：CD80/CD86 → Activated；剩余 IgD vs IgM → Naive / Atypical
+# P2 Naive 内：只用 CD80/CD86 圈少数 Activated（不要用 CD40）；剩余 IgD vs IgM → Naive / Atypical
 sequential_b_naive <- function(mat, idx) {
   n <- length(idx)
   if (n == 0) return(character(0))
   out <- rep("Naive_B", n)
   remain <- rep(TRUE, n)
-  take_high <- function(markers, label, min_sep, beat = NULL, margin = 0.2) {
+  take_high <- function(markers, label, min_sep, beat = NULL, margin = 0.25, max_frac = 1) {
     if (!any(remain)) return(invisible())
-    hi <- gate_k2_high(mat, idx[remain], markers, min_sep)
+    hi <- gate_k2_high(mat, idx[remain], markers, min_sep, max_frac = max_frac)
     if (!any(hi)) return(invisible())
     pos <- which(remain)
     if (length(beat)) {
@@ -1227,7 +1230,7 @@ sequential_b_naive <- function(mat, idx) {
     out[pos[hi]] <<- label
     remain[pos[hi]] <<- FALSE
   }
-  take_high(c("CD80", "CD86", "CD40"), "Activated_B", 0.15, beat = c("IgD", "IgM"), margin = 0.05)
+  take_high(c("CD80", "CD86"), "Activated_B", 0.5, beat = "IgD", margin = 0.25, max_frac = 0.35)
   if (any(remain)) {
     hi <- gate_k2_high(mat, idx[remain], "IgM", 0.2)
     pos <- which(remain)
@@ -1245,8 +1248,8 @@ sequential_b_naive <- function(mat, idx) {
   out
 }
 
-# P2 Memory 内一层层圈：Plasma（BLIMP 必须真能分开）→ Switched → Activated → IgM memory / Memory
-# 默认剩余是 Memory，不是 Plasma。多数派不得打成 Plasma（核背景常见）。
+# P2 Memory 内：Plasma（BLIMP 少数）→ 少数 CD80/CD86 Activated 岛 → Switched → IgM memory
+# 默认剩余是 Memory。CD40 不当激活；Activated 不得在分型前吞掉 Switched/IgM。
 sequential_b_memory <- function(mat, idx) {
   n <- length(idx)
   if (n == 0) return(character(0))
@@ -1254,9 +1257,8 @@ sequential_b_memory <- function(mat, idx) {
   remain <- rep(TRUE, n)
   take_high <- function(markers, label, min_sep, beat = NULL, margin = 0.2, max_frac = 1) {
     if (!any(remain)) return(invisible())
-    hi <- gate_k2_high(mat, idx[remain], markers, min_sep)
+    hi <- gate_k2_high(mat, idx[remain], markers, min_sep, max_frac = max_frac)
     if (!any(hi)) return(invisible())
-    if (mean(hi) > max_frac) return(invisible())
     pos <- which(remain)
     if (length(beat)) {
       hi_idx <- idx[remain][hi]
@@ -1268,8 +1270,8 @@ sequential_b_memory <- function(mat, idx) {
     remain[pos[hi]] <<- FALSE
   }
   take_high("BLIMP-1", "Plasma", 0.4, beat = c("IgD", "IgM"), margin = 0.4, max_frac = 0.4)
-  take_high("IgG", "Switched_B", 0.15, beat = c("IgD", "IgM"), margin = 0.1)
-  take_high(c("CD80", "CD86"), "Activated_B", 0.15, beat = c("IgD", "IgM", "IgG"), margin = 0.05)
+  take_high(c("CD80", "CD86"), "Activated_B", 0.5, beat = c("IgD", "IgM", "IgG"), margin = 0.25, max_frac = 0.35)
+  take_high("IgG", "Switched_B", 0.15, beat = c("IgD", "IgM"), margin = 0.05)
   if (any(remain)) {
     hi <- gate_k2_high(mat, idx[remain], "IgM", 0.15)
     pos <- which(remain)
