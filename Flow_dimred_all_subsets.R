@@ -4,7 +4,7 @@
 #
 # P1/P2/P3 抗体不同，禁止拼成一张表达矩阵再 UMAP/tSNE。
 # 本脚本在三个 panel 已经圈完亚群之后，只汇总各管内频率，做一个
-# 「所有亚群」的 T vs T6 比较。百分数是该 panel 管子里的比例，
+# 「所有亚群」的 H vs EV 比较。百分数是该 panel 管子里的比例，
 # 不是同一群细胞，也不能加总成全血组成。
 #
 # 细亚群以对应 panel 为准：
@@ -123,15 +123,19 @@ plot_all_stacked <- function(freq, title) {
 }
 
 plot_all_heatmap <- function(stats_df, title) {
+  g1 <- flow_ctrl_group
+  g2 <- flow_trt_group
+  m1 <- stats_df[[paste0("mean_", g1)]]
+  m2 <- stats_df[[paste0("mean_", g2)]]
   long <- rbind(
     data.frame(subset_label = stats_df$subset_label, panel = stats_df$panel,
-               group = "T", percent = stats_df$mean_T, stringsAsFactors = FALSE),
+               group = g1, percent = m1, stringsAsFactors = FALSE),
     data.frame(subset_label = stats_df$subset_label, panel = stats_df$panel,
-               group = "T6", percent = stats_df$mean_T6, stringsAsFactors = FALSE)
+               group = g2, percent = m2, stringsAsFactors = FALSE)
   )
-  ord <- stats_df$subset_label[order(stats_df$panel, -pmax(stats_df$mean_T, stats_df$mean_T6))]
+  ord <- stats_df$subset_label[order(stats_df$panel, -pmax(m1, m2))]
   long$subset_label <- factor(long$subset_label, levels = rev(unique(ord)))
-  long$group <- factor(long$group, levels = c("T", "T6"))
+  long$group <- factor(long$group, levels = flow_group_levels)
   ggplot2::ggplot(long, ggplot2::aes(x = group, y = subset_label, fill = percent)) +
     ggplot2::geom_tile(color = "white") +
     ggplot2::facet_grid(panel ~ ., scales = "free_y", space = "free_y") +
@@ -142,17 +146,19 @@ plot_all_heatmap <- function(stats_df, title) {
 }
 
 plot_all_lollipop <- function(stats_df, title) {
-  d <- stats_df[order(stats_df$delta_T6_minus_T), ]
+  delta_col <- paste0("delta_", flow_trt_group, "_minus_", flow_ctrl_group)
+  d <- stats_df[order(stats_df[[delta_col]]), ]
   d$subset_label <- factor(d$subset_label, levels = d$subset_label)
-  ggplot2::ggplot(d, ggplot2::aes(x = delta_T6_minus_T, y = subset_label, color = panel)) +
+  d$delta <- d[[delta_col]]
+  ggplot2::ggplot(d, ggplot2::aes(x = delta, y = subset_label, color = panel)) +
     ggplot2::geom_vline(xintercept = 0, colour = "grey70") +
-    ggplot2::geom_segment(ggplot2::aes(x = 0, xend = delta_T6_minus_T,
+    ggplot2::geom_segment(ggplot2::aes(x = 0, xend = delta,
                                        y = subset_label, yend = subset_label),
                           colour = "grey75") +
     ggplot2::geom_point(size = 2.4) +
     theme_dr() +
     ggplot2::theme(axis.text.y = ggplot2::element_text(size = 8)) +
-    ggplot2::labs(title = title, x = "T6 - T (percentage points)", y = NULL)
+    ggplot2::labs(title = title, x = paste0(flow_trt_group, " - ", flow_ctrl_group, " (percentage points)"), y = NULL)
 }
 
 export_all_subsets_analysis <- function(result_dir) {
@@ -190,12 +196,12 @@ export_all_subsets_analysis <- function(result_dir) {
   )
   writeLines(note, file.path(out_dir, "ALL_SUBSETS_NOTE.txt"))
   utils::write.csv(freq, file.path(out_dir, "all_subsets_frequency_by_sample.csv"), row.names = FALSE)
-  utils::write.csv(stats, file.path(out_dir, "all_subsets_T6_vs_T_stats.csv"), row.names = FALSE)
+  utils::write.csv(stats, file.path(out_dir, "all_subsets_H_vs_EV_stats.csv"), row.names = FALSE)
 
   n_lab <- length(unique(freq$subset_label))
   w_facet <- max(12, 1.1 * n_lab / 2)
-  save_gg(plot_all_freq_facet(freq, "All subsets (within-panel %)  T vs T6"),
-          file.path(out_dir, "all_subsets_frequency_T6_vs_T"),
+  save_gg(plot_all_freq_facet(freq, "All subsets (within-panel %)  EV vs H"),
+          file.path(out_dir, "all_subsets_frequency_H_vs_EV"),
           width = w_facet, height = 5.8)
   save_gg(plot_all_stacked(freq, "Within-panel composition (sums to 100% per panel)"),
           file.path(out_dir, "all_subsets_composition_stacked"),
@@ -205,14 +211,14 @@ export_all_subsets_analysis <- function(result_dir) {
   stats_f <- stats[stats$role == "focus", , drop = FALSE]
   if (nrow(focus) > 0) {
     save_gg(plot_all_freq_facet(focus, "Focus subsets only  (P1 T/NK, P2 B, P3 myeloid)"),
-            file.path(out_dir, "all_subsets_focus_frequency_T6_vs_T"),
+            file.path(out_dir, "all_subsets_focus_frequency_H_vs_EV"),
             width = max(11, 1.15 * length(unique(focus$subset_label)) / 2), height = 5.8)
   }
   if (nrow(stats_f) > 0) {
     save_gg(plot_all_heatmap(stats_f, "Focus subset mean %  (within panel)"),
             file.path(out_dir, "all_subsets_focus_mean_heatmap"),
             width = 6.5, height = max(6, 0.28 * nrow(stats_f) + 2))
-    save_gg(plot_all_lollipop(stats_f, "Focus subsets  T6 minus T"),
+    save_gg(plot_all_lollipop(stats_f, "Focus subsets  H minus EV"),
             file.path(out_dir, "all_subsets_focus_delta_lollipop"),
             width = 8.5, height = max(6, 0.28 * nrow(stats_f) + 2))
   }

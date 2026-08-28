@@ -27,46 +27,46 @@ mk_cells <- function(sample, group, lineage, n) {
 }
 
 p1 <- rbind(
-  mk_cells("T-1", "T", "CD4_naive", 80),
-  mk_cells("T-1", "T", "B", 20),
-  mk_cells("T-2", "T", "CD4_naive", 70),
-  mk_cells("T-2", "T", "B", 30),
-  mk_cells("T-3", "T", "CD4_naive", 75),
-  mk_cells("T-3", "T", "B", 25),
-  mk_cells("T6-1", "T6", "CD4_naive", 40),
-  mk_cells("T6-1", "T6", "B", 60),
-  mk_cells("T6-2", "T6", "CD4_naive", 45),
-  mk_cells("T6-2", "T6", "B", 55),
-  mk_cells("T6-3", "T6", "CD4_naive", 50),
-  mk_cells("T6-3", "T6", "B", 50)
+  mk_cells("EV1", "EV", "CD4_naive", 80),
+  mk_cells("EV1", "EV", "B", 20),
+  mk_cells("EV2", "EV", "CD4_naive", 70),
+  mk_cells("EV2", "EV", "B", 30),
+  mk_cells("EV3", "EV", "CD4_naive", 75),
+  mk_cells("EV3", "EV", "B", 25),
+  mk_cells("H1", "H", "CD4_naive", 40),
+  mk_cells("H1", "H", "B", 60),
+  mk_cells("H2", "H", "CD4_naive", 45),
+  mk_cells("H2", "H", "B", 55),
+  mk_cells("H3", "H", "CD4_naive", 50),
+  mk_cells("H3", "H", "B", 50)
 )
 p2 <- rbind(
-  mk_cells("T-1", "T", "Naive_B", 90),
-  mk_cells("T-1", "T", "Plasma", 10),
-  mk_cells("T-2", "T", "Naive_B", 85),
-  mk_cells("T-2", "T", "Plasma", 15),
-  mk_cells("T-3", "T", "Naive_B", 88),
-  mk_cells("T-3", "T", "Plasma", 12),
-  mk_cells("T6-1", "T6", "Naive_B", 50),
-  mk_cells("T6-1", "T6", "Plasma", 50),
-  mk_cells("T6-2", "T6", "Naive_B", 55),
-  mk_cells("T6-2", "T6", "Plasma", 45),
-  mk_cells("T6-3", "T6", "Naive_B", 60),
-  mk_cells("T6-3", "T6", "Plasma", 40)
+  mk_cells("EV1", "EV", "Naive_B", 90),
+  mk_cells("EV1", "EV", "Plasma", 10),
+  mk_cells("EV2", "EV", "Naive_B", 85),
+  mk_cells("EV2", "EV", "Plasma", 15),
+  mk_cells("EV3", "EV", "Naive_B", 88),
+  mk_cells("EV3", "EV", "Plasma", 12),
+  mk_cells("H1", "H", "Naive_B", 50),
+  mk_cells("H1", "H", "Plasma", 50),
+  mk_cells("H2", "H", "Naive_B", 55),
+  mk_cells("H2", "H", "Plasma", 45),
+  mk_cells("H3", "H", "Naive_B", 60),
+  mk_cells("H3", "H", "Plasma", 40)
 )
 p3 <- rbind(
-  mk_cells("T-1", "T", "Neutrophil", 70),
-  mk_cells("T-1", "T", "M1_like_Mac", 30),
-  mk_cells("T-2", "T", "Neutrophil", 65),
-  mk_cells("T-2", "T", "M1_like_Mac", 35),
-  mk_cells("T-3", "T", "Neutrophil", 68),
-  mk_cells("T-3", "T", "M1_like_Mac", 32),
-  mk_cells("T6-1", "T6", "Neutrophil", 40),
-  mk_cells("T6-1", "T6", "M1_like_Mac", 60),
-  mk_cells("T6-2", "T6", "Neutrophil", 42),
-  mk_cells("T6-2", "T6", "M1_like_Mac", 58),
-  mk_cells("T6-3", "T6", "Neutrophil", 38),
-  mk_cells("T6-3", "T6", "M1_like_Mac", 62)
+  mk_cells("EV1", "EV", "Neutrophil", 70),
+  mk_cells("EV1", "EV", "M1_like_Mac", 30),
+  mk_cells("EV2", "EV", "Neutrophil", 65),
+  mk_cells("EV2", "EV", "M1_like_Mac", 35),
+  mk_cells("EV3", "EV", "Neutrophil", 68),
+  mk_cells("EV3", "EV", "M1_like_Mac", 32),
+  mk_cells("H1", "H", "Neutrophil", 40),
+  mk_cells("H1", "H", "M1_like_Mac", 60),
+  mk_cells("H2", "H", "Neutrophil", 42),
+  mk_cells("H2", "H", "M1_like_Mac", 58),
+  mk_cells("H3", "H", "Neutrophil", 38),
+  mk_cells("H3", "H", "M1_like_Mac", 62)
 )
 
 freq <- collect_all_subset_frequencies(list(P1 = p1, P2 = p2, P3 = p3))
@@ -88,7 +88,7 @@ p3n <- freq[freq$panel == "P3" & freq$lineage == "Neutrophil", ]
 if (!nrow(p3n) || !all(p3n$role == "focus")) fail("P3 neutrophil should be focus")
 
 st <- all_subset_stats(freq)
-if (!"delta_T6_minus_T" %in% names(st)) fail("stats missing delta")
+if (!"delta_H_minus_EV" %in% names(st)) fail("stats missing delta_H_minus_EV")
 if (length(unique(st$panel)) < 3) fail("stats should cover three panels")
 
 td <- tempfile("flow_all_subsets")
@@ -103,8 +103,8 @@ if (is.null(res) || !dir.exists(file.path(td, "all_subsets"))) fail("export did 
 need_files <- c(
   "ALL_SUBSETS_NOTE.txt",
   "all_subsets_frequency_by_sample.csv",
-  "all_subsets_T6_vs_T_stats.csv",
-  "all_subsets_frequency_T6_vs_T.pdf",
+  "all_subsets_H_vs_EV_stats.csv",
+  "all_subsets_frequency_H_vs_EV.pdf",
   "all_subsets_focus_delta_lollipop.pdf"
 )
 miss <- need_files[!file.exists(file.path(td, "all_subsets", need_files))]

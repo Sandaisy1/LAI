@@ -50,8 +50,8 @@ if (!is.finite(pt_n) || !is.finite(pt_e) || pt_e <= pt_n) {
 td <- tempfile("flow_traj")
 dir.create(file.path(td, "P1"), recursive = TRUE)
 df <- data.frame(
-  sample = rep(rep(c("T-1", "T-2", "T-3", "T6-1", "T6-2", "T6-3"), each = 45), 1),
-  group = rep(rep(c("T", "T", "T", "T6", "T6", "T6"), each = 45), 1),
+  sample = rep(rep(c("EV1", "EV2", "EV3", "H1", "H2", "H3"), each = 45), 1),
+  group = rep(rep(c("EV", "EV", "EV", "H", "H", "H"), each = 45), 1),
   lineage = cl,
   UMAP1 = xy2[, 1],
   UMAP2 = xy2[, 2],
@@ -64,7 +64,7 @@ export_panel_trajectories(td, "P1")
 need <- c(
   "TRAJECTORY_NOTE.txt",
   "P1_CD4_trajectory.pdf",
-  "P1_CD4_trajectory_T_vs_T6.pdf",
+  "P1_CD4_trajectory_H_vs_EV.pdf",
   "P1_CD4_pseudotime.csv"
 )
 miss <- need[!file.exists(file.path(td, "P1", "trajectory", need))]

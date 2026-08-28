@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# 流式降维：T6 vs T（P1 T/NK，P2 B，P3 髓系）
+# 流式降维：H vs EV（P1 T/NK，P2 B，P3 髓系）
 # 输入：E:/R/flow J-LJY WJZ ZZX 下的 *_unmixed.fcs（不要用 raw）
-# 每个 panel 单独联合 UMAP/tSNE，导出 PDF+PNG，并比较 T6 vs T 细胞频率
+# 每个 panel 单独联合 UMAP/tSNE，导出 PDF+PNG，并比较 H vs EV 细胞频率
 #
 # 用法：
 #   setwd("E:/R/flow J-LJY WJZ ZZX")
@@ -162,19 +162,24 @@ asinh_cofactor <- 150
 seed_value <- 42
 
 # -----------------------------------------------------------------------------
-# 2. 文件名：先 T6 再 T
+# 2. 文件名：EV1–3 与 H1–3（先匹配 EV，避免被单字母 H 误伤）
 # -----------------------------------------------------------------------------
+flow_ctrl_group <- "EV"
+flow_trt_group <- "H"
+flow_group_levels <- c("EV", "H")
+
 parse_fcs_filename <- function(path) {
   b <- basename(path)
-  m <- regexec("^(T6|T)-([123])_(P[123])_(unmixed|raw)\\.fcs$", b, ignore.case = TRUE)
+  m <- regexec("^(EV|H)[-_]?([123])_(P[123])_(unmixed|raw)\\.fcs$", b, ignore.case = TRUE)
   hit <- regmatches(b, m)[[1]]
   if (length(hit) < 5) return(NULL)
+  grp <- toupper(hit[2])
   list(
     file = b,
     path = path,
-    group = toupper(hit[2]),
+    group = grp,
     replicate = hit[3],
-    sample = paste0(toupper(hit[2]), "-", hit[3]),
+    sample = paste0(grp, hit[3]),
     panel = toupper(hit[4]),
     kind = tolower(hit[5])
   )
@@ -266,6 +271,11 @@ load_panel_map <- function() {
 panel_map <- load_panel_map()
 if (!is.null(panel_map$qc$asinh_cofactor)) {
   asinh_cofactor <- as.numeric(panel_map$qc$asinh_cofactor)
+}
+if (!is.null(panel_map$groups) && length(panel_map$groups) >= 2) {
+  flow_ctrl_group <- as.character(panel_map$groups[[1]])
+  flow_trt_group <- as.character(panel_map$groups[[2]])
+  flow_group_levels <- c(flow_ctrl_group, flow_trt_group)
 }
 
 norm_id <- function(x) {
@@ -495,7 +505,7 @@ extract_marker_mat <- function(exprs, map, markers) {
   mat
 }
 
-# 演示数据：可区分的免疫亚群，T6 改变部分亚群比例（仅用于缺 FCS 时出图）
+# 演示数据：可区分的免疫亚群，H 改变部分亚群比例（仅用于缺 FCS 时出图）
 rnorm_pop <- function(n, means, sds) {
   m <- matrix(NA_real_, n, length(means))
   colnames(m) <- names(means)
@@ -575,8 +585,9 @@ demo_means_p3 <- function() {
 }
 
 demo_props <- function(panel_id, group) {
+  ctrl <- identical(as.character(group), flow_ctrl_group)
   if (panel_id == "P1") {
-    if (group == "T") {
+    if (ctrl) {
       return(c(CD4_naive = 0.14, CD4_TCM = 0.07, CD4_TEM = 0.07, Treg = 0.05, CD4_act = 0.05,
                CD8_naive = 0.09, CD8_TCM = 0.06, CD8_TEM = 0.07, CD8_eff = 0.05, CD8_exh = 0.04,
                NK = 0.12, NKT = 0.04, B = 0.09, Myeloid = 0.06))
@@ -586,10 +597,10 @@ demo_props <- function(panel_id, group) {
              NK = 0.12, NKT = 0.05, B = 0.08, Myeloid = 0.05))
   }
   if (panel_id == "P2") {
-    if (group == "T") return(c(Naive_B = 0.38, IgM_memory = 0.10, Memory_B = 0.14, Switched_B = 0.10, Activated_B = 0.16, Plasma = 0.12))
+    if (ctrl) return(c(Naive_B = 0.38, IgM_memory = 0.10, Memory_B = 0.14, Switched_B = 0.10, Activated_B = 0.16, Plasma = 0.12))
     return(c(Naive_B = 0.22, IgM_memory = 0.10, Memory_B = 0.12, Switched_B = 0.18, Activated_B = 0.20, Plasma = 0.18))
   }
-  if (group == "T") {
+  if (ctrl) {
     return(c(Neutrophil = 0.18, Mono_Ly6Chi = 0.12, Mono_Ly6Clo = 0.08, Macrophage = 0.12, M1_like = 0.06, M2_like = 0.06, DC = 0.12, cDC1 = 0.08, Eosinophil = 0.10, Basophil = 0.08))
   }
   c(Neutrophil = 0.12, Mono_Ly6Chi = 0.08, Mono_Ly6Clo = 0.07, Macrophage = 0.10, M1_like = 0.06, M2_like = 0.14, DC = 0.14, cDC1 = 0.09, Eosinophil = 0.12, Basophil = 0.08)
@@ -1313,7 +1324,8 @@ theme_dr <- function() {
     )
 }
 
-pal_group <- c(T = "#4C78A8", T6 = "#E45756")
+pal_group <- setNames(c("#1A1A1A", "#E31A1C"), flow_group_levels)
+pal_group_shape <- setNames(c(16, 15), flow_group_levels)
 
 # P1 主图高对比色；P2/P3 亚群也从这套取色，不要做成全紫/全橙
 pal_p1_hues <- c(
@@ -1441,10 +1453,10 @@ theme_split_dr <- function() {
     )
 }
 
-# 主图：左 T、右 T6；颜色=细亚群；不要虚线
+# 主图：左 EV、右 H；颜色=细亚群；不要虚线
 plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title) {
   plot_df <- df
-  plot_df$group <- factor(plot_df$group, levels = c("T", "T6"))
+  plot_df$group <- factor(plot_df$group, levels = flow_group_levels)
   plot_df$celltype <- celltype_label(plot_df$lineage, panel_id)
   levs <- unique(plot_df$celltype)
   plot_df$celltype <- factor(plot_df$celltype, levels = levs)
@@ -1493,6 +1505,7 @@ plot_marker_embedding <- function(df, x, y, marker, title) {
 }
 
 plot_density_split <- function(df, x, y, title) {
+  df$group <- factor(df$group, levels = flow_group_levels)
   ggplot2::ggplot(df, ggplot2::aes(x = .data[[x]], y = .data[[y]])) +
     ggplot2::stat_density_2d_filled(contour_var = "ndensity", bins = 12) +
     ggplot2::facet_wrap(~group, ncol = 2) +
@@ -1555,24 +1568,335 @@ plot_freq_bar <- function(sum_df, title) {
     ggplot2::labs(title = title, x = NULL, y = "Mean % of cells")
 }
 
+fluorochrome_of <- function(panel_id, marker) {
+  items <- panel_markers(panel_id)
+  hit <- vapply(items, function(it) identical(it$marker, marker), logical(1))
+  if (!any(hit)) return(NA_character_)
+  as.character(items[[which(hit)[1]]]$fluorochrome)
+}
+
+axis_fl_label <- function(panel_id, marker) {
+  fl <- fluorochrome_of(panel_id, marker)
+  if (is.na(fl) || !nzchar(fl)) return(marker)
+  paste0(marker, "-", fl)
+}
+
+p_to_star <- function(p) {
+  if (!is.finite(p)) return("ns")
+  if (p < 0.001) return("***")
+  if (p < 0.01) return("**")
+  if (p < 0.05) return("*")
+  "ns"
+}
+
+parent_mask <- function(cells, parent) {
+  n <- nrow(cells)
+  if (n < 1) return(logical(0))
+  cl <- if ("cluster_lineage" %in% names(cells)) as.character(cells$cluster_lineage) else rep("", n)
+  lin <- as.character(cells$lineage)
+  cd4 <- cl == "CD4" | grepl("^CD4_", lin) | lin == "Treg"
+  cd8 <- cl == "CD8" | grepl("^CD8_", lin)
+  switch(as.character(parent),
+    all = rep(TRUE, n),
+    CD3 = cd4 | cd8 | lin %in% c("T", "NKT") | cl %in% c("T", "NKT"),
+    CD4 = cd4,
+    CD8 = cd8,
+    Myeloid = cl == "Myeloid" | lin %in% c(
+      "Neutrophil", "Eosinophil", "Basophil_mast", "Basophil", "Macrophage",
+      "M1_like_Mac", "M2_like_Mac", "DC", "cDC1_CD103", "Mono_Ly6Chi", "Mono_Ly6Clo", "Myeloid"
+    ),
+    Macrophage = lin %in% c("Macrophage", "M1_like_Mac", "M2_like_Mac"),
+    Memory_B = cl == "Memory_B" | lin %in% c("Memory_B", "IgM_memory", "Switched_B", "Plasma", "Activated_B"),
+    Naive_B = cl == "Naive_B" | lin %in% c("Naive_B", "Atypical_B"),
+    rep(TRUE, n)
+  )
+}
+
+subset_hit_mask <- function(cells, spec) {
+  lin <- as.character(cells$lineage)
+  if (isTRUE(spec$use_major) && "cluster_lineage" %in% names(cells)) {
+    return(as.character(cells$cluster_lineage) == spec$lineage)
+  }
+  lin == spec$lineage
+}
+
+subset_plot_specs <- function(panel_id) {
+  mk <- function(lineage, x, y, parent, ylab, use_major = FALSE) {
+    list(lineage = lineage, x = x, y = y, parent = parent, ylab = ylab, use_major = use_major)
+  }
+  if (identical(panel_id, "P1")) {
+    return(list(
+      mk("NK", "CD3", "NK1.1", "all", "NK cell (%)"),
+      mk("NKT", "CD3", "NK1.1", "all", "NKT (%)"),
+      mk("B", "CD19", "CD3", "all", "B cell (%)"),
+      mk("Myeloid", "CD11B", "CD3", "all", "Myeloid (%)"),
+      mk("CD4", "CD8", "CD4", "CD3", "CD4+ T cell in CD3+ (%)", TRUE),
+      mk("CD8", "CD8", "CD4", "CD3", "CD8+ T cell in CD3+ (%)", TRUE),
+      mk("CD4_naive", "CD62L", "CD44", "CD4", "CD4 naive in CD4+ (%)"),
+      mk("CD4_TCM", "CD62L", "CD44", "CD4", "CD4 TCM in CD4+ (%)"),
+      mk("CD4_TEM", "CD62L", "CD44", "CD4", "CD4 TEM in CD4+ (%)"),
+      mk("CD4_activated", "CD69", "TNF-a", "CD4", "CD4 activated in CD4+ (%)"),
+      mk("Treg", "CD25", "CD4", "CD4", "Treg in CD4+ (%)"),
+      mk("CD8_naive", "CD62L", "CD44", "CD8", "CD8 naive in CD8+ (%)"),
+      mk("CD8_TCM", "CD62L", "CD44", "CD8", "CD8 TCM in CD8+ (%)"),
+      mk("CD8_TEM", "CD62L", "CD44", "CD8", "CD8 TEM in CD8+ (%)"),
+      mk("CD8_effector", "GZMB", "Perforin", "CD8", "CD8 effector in CD8+ (%)"),
+      mk("CD8_exhausted", "LAG-3", "TIM-3", "CD8", "CD8 exhausted in CD8+ (%)")
+    ))
+  }
+  if (identical(panel_id, "P2")) {
+    return(list(
+      mk("Naive_B", "IgD", "CD27", "all", "Naive B (%)"),
+      mk("Atypical_B", "IgM", "IgD", "Naive_B", "Atypical B in naive (%)"),
+      mk("Memory_B", "IgD", "CD27", "all", "Memory B (%)"),
+      mk("IgM_memory", "IgM", "IgD", "Memory_B", "IgM memory in memory B (%)"),
+      mk("Switched_B", "IgG", "IgD", "Memory_B", "Switched B in memory B (%)"),
+      mk("Activated_B", "CD80", "CD86", "all", "Activated B (%)"),
+      mk("Plasma", "BLIMP-1", "IgD", "Memory_B", "Plasma in memory B (%)")
+    ))
+  }
+  list(
+    mk("T", "CD3", "NK1.1", "all", "T cell (%)"),
+    mk("B", "CD19", "CD3", "all", "B cell (%)"),
+    mk("NK", "CD3", "NK1.1", "all", "NK cell (%)"),
+    mk("Neutrophil", "LY6G", "LY6C", "Myeloid", "Neutrophil in myeloid (%)"),
+    mk("Eosinophil", "Siglec-F", "LY6G", "Myeloid", "Eosinophil in myeloid (%)"),
+    mk("Basophil_mast", "FceRI", "CD200R3", "Myeloid", "Basophil in myeloid (%)"),
+    mk("Macrophage", "F4/80", "CD11C", "Myeloid", "Macrophage in myeloid (%)"),
+    mk("M1_like_Mac", "iNOS", "CD206", "Macrophage", "M1-like Mac in macrophages (%)"),
+    mk("M2_like_Mac", "CD206", "ARG-1", "Macrophage", "M2-like Mac in macrophages (%)"),
+    mk("DC", "CD11C", "F4/80", "Myeloid", "DC in myeloid (%)"),
+    mk("cDC1_CD103", "CD103", "CD11C", "Myeloid", "CD103 DC in myeloid (%)"),
+    mk("Mono_Ly6Chi", "LY6C", "CD11B", "Myeloid", "Ly6C hi mono in myeloid (%)"),
+    mk("Mono_Ly6Clo", "LY6C", "CD11B", "Myeloid", "Ly6C lo mono in myeloid (%)")
+  )
+}
+
+subset_sample_percent <- function(cells, spec) {
+  par <- parent_mask(cells, spec$parent)
+  hit <- subset_hit_mask(cells, spec)
+  smp <- unique(as.character(cells$sample))
+  rows <- lapply(smp, function(s) {
+    keep_s <- as.character(cells$sample) == s
+    n_par <- sum(keep_s & par)
+    n_hit <- sum(keep_s & par & hit)
+    grp <- as.character(cells$group[keep_s][1])
+    data.frame(
+      sample = s, group = grp,
+      n_parent = n_par, n_subset = n_hit,
+      percent = if (n_par > 0) 100 * n_hit / n_par else NA_real_,
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, rows)
+}
+
+gate_rect_from_xy <- function(x, y) {
+  ok <- is.finite(x) & is.finite(y)
+  if (sum(ok) < 8) {
+    return(list(
+      xmin = if (any(ok)) min(x[ok]) else 0, xmax = if (any(ok)) max(x[ok]) else 1,
+      ymin = if (any(ok)) min(y[ok]) else 0, ymax = if (any(ok)) max(y[ok]) else 1
+    ))
+  }
+  list(
+    xmin = as.numeric(stats::quantile(x[ok], 0.08, names = FALSE)),
+    xmax = as.numeric(stats::quantile(x[ok], 0.95, names = FALSE)),
+    ymin = as.numeric(stats::quantile(y[ok], 0.08, names = FALSE)),
+    ymax = as.numeric(stats::quantile(y[ok], 0.95, names = FALSE))
+  )
+}
+
+plot_subset_stat_bar <- function(sample_df, ylab, pval) {
+  sample_df <- sample_df[is.finite(sample_df$percent), , drop = FALSE]
+  sample_df$group <- factor(as.character(sample_df$group), levels = flow_group_levels)
+  glev <- flow_group_levels
+  means <- data.frame(
+    group = factor(glev, levels = glev),
+    mean = vapply(glev, function(g) mean(sample_df$percent[as.character(sample_df$group) == g], na.rm = TRUE), numeric(1)),
+    sd = vapply(glev, function(g) {
+      v <- sample_df$percent[as.character(sample_df$group) == g]
+      if (length(v) < 2) 0 else stats::sd(v)
+    }, numeric(1)),
+    stringsAsFactors = FALSE
+  )
+  means$mean[!is.finite(means$mean)] <- 0
+  means$sd[!is.finite(means$sd)] <- 0
+  y_top <- max(c(sample_df$percent, means$mean + means$sd), na.rm = TRUE)
+  if (!is.finite(y_top) || y_top <= 0) y_top <- 1
+  star <- p_to_star(pval)
+  ggplot2::ggplot() +
+    ggplot2::geom_col(
+      data = means, ggplot2::aes(x = group, y = mean, fill = group),
+      width = 0.55, color = NA
+    ) +
+    ggplot2::geom_errorbar(
+      data = means, ggplot2::aes(x = group, ymin = pmax(0, mean - sd), ymax = mean + sd),
+      width = 0.16, linewidth = 0.45
+    ) +
+    ggplot2::geom_point(
+      data = sample_df,
+      ggplot2::aes(x = group, y = percent, color = group, shape = group),
+      size = 2.6, stroke = 0.4,
+      position = ggplot2::position_jitter(width = 0.07, height = 0, seed = 1)
+    ) +
+    ggplot2::annotate("segment", x = 1, xend = 2, y = y_top * 1.08, yend = y_top * 1.08, linewidth = 0.4) +
+    ggplot2::annotate("text", x = 1.5, y = y_top * 1.14, label = star, fontface = "bold", size = 4.2) +
+    ggplot2::scale_fill_manual(values = pal_group, drop = FALSE) +
+    ggplot2::scale_color_manual(values = pal_group, drop = FALSE) +
+    ggplot2::scale_shape_manual(values = pal_group_shape, drop = FALSE) +
+    ggplot2::scale_y_continuous(expand = ggplot2::expansion(mult = c(0, 0.22))) +
+    ggplot2::coord_cartesian(ylim = c(0, y_top * 1.28)) +
+    ggplot2::theme_classic(base_size = 12) +
+    ggplot2::theme(
+      legend.position = "none",
+      axis.title.x = ggplot2::element_blank(),
+      plot.title = ggplot2::element_blank()
+    ) +
+    ggplot2::labs(y = ylab)
+}
+
+plot_subset_contour <- function(df, x, y, color, xlab, ylab, pct, gate) {
+  d <- df[is.finite(df[[x]]) & is.finite(df[[y]]), c(x, y), drop = FALSE]
+  if (nrow(d) > 3500) {
+    set.seed(if (exists("seed_value")) seed_value else 42)
+    d <- d[sample.int(nrow(d), 3500), , drop = FALSE]
+  }
+  p <- ggplot2::ggplot(d, ggplot2::aes(x = .data[[x]], y = .data[[y]]))
+  if (nrow(d) >= 30) {
+    p <- p + ggplot2::stat_density_2d(
+      contour_var = "ndensity", bins = 9, color = color, linewidth = 0.42
+    )
+  } else {
+    p <- p + ggplot2::geom_point(size = 0.35, alpha = 0.5, color = color, stroke = 0)
+  }
+  p +
+    ggplot2::annotate(
+      "rect", xmin = gate$xmin, xmax = gate$xmax, ymin = gate$ymin, ymax = gate$ymax,
+      color = color, fill = NA, linewidth = 0.55
+    ) +
+    ggplot2::annotate(
+      "text", x = gate$xmax, y = gate$ymax,
+      label = sprintf("%.2f%%", pct), hjust = 1.08, vjust = -0.35,
+      color = color, fontface = "bold", size = 3.4
+    ) +
+    ggplot2::theme_classic(base_size = 11) +
+    ggplot2::theme(plot.title = ggplot2::element_blank()) +
+    ggplot2::labs(x = xlab, y = ylab)
+}
+
+save_subset_figure <- function(bar, c_ctrl, c_trt, path_stub) {
+  dir.create(dirname(path_stub), recursive = TRUE, showWarnings = FALSE)
+  draw_one <- function() {
+    grid::grid.newpage()
+    lay <- grid::grid.layout(2, 2, heights = grid::unit(c(1.05, 1.45), "null"))
+    grid::pushViewport(grid::viewport(layout = lay))
+    print(bar, vp = grid::viewport(layout.pos.row = 1, layout.pos.col = 1:2), newpage = FALSE)
+    print(c_ctrl, vp = grid::viewport(layout.pos.row = 2, layout.pos.col = 1), newpage = FALSE)
+    print(c_trt, vp = grid::viewport(layout.pos.row = 2, layout.pos.col = 2), newpage = FALSE)
+  }
+  tryCatch({
+    grDevices::pdf(paste0(path_stub, ".pdf"), width = 6.6, height = 7.2)
+    draw_one()
+    grDevices::dev.off()
+  }, error = function(e) log_msg("subset pdf failed: ", e$message))
+  tryCatch({
+    grDevices::png(paste0(path_stub, ".png"), width = 6.6, height = 7.2, units = "in", res = 300)
+    draw_one()
+    grDevices::dev.off()
+  }, error = function(e) log_msg("subset png failed: ", e$message))
+}
+
+export_subset_gate_figures <- function(cells, panel_id, out_dir) {
+  specs <- subset_plot_specs(panel_id)
+  sub_dir <- file.path(out_dir, "subset_stats")
+  dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
+  stat_rows <- list()
+  for (spec in specs) {
+    if (!all(c(spec$x, spec$y) %in% names(cells))) next
+    par <- parent_mask(cells, spec$parent)
+    hit <- subset_hit_mask(cells, spec)
+    if (sum(par) < 20 || sum(par & hit) < 8) next
+    samp <- subset_sample_percent(cells, spec)
+    if (is.null(samp) || nrow(samp) < 2) next
+    ctrl_v <- samp$percent[as.character(samp$group) == flow_ctrl_group]
+    trt_v <- samp$percent[as.character(samp$group) == flow_trt_group]
+    pv <- if (length(ctrl_v) >= 2 && length(trt_v) >= 2) {
+      tryCatch(stats::t.test(trt_v, ctrl_v)$p.value, error = function(e) NA_real_)
+    } else {
+      NA_real_
+    }
+    lab <- if (isTRUE(spec$use_major)) {
+      celltype_label(spec$lineage, panel_id)
+    } else {
+      celltype_label(spec$lineage, panel_id)
+    }
+    ylab <- if (!is.null(spec$ylab) && nzchar(spec$ylab)) spec$ylab else paste0(lab, " (%)")
+    bar <- plot_subset_stat_bar(samp, ylab, pv)
+    xy_hit <- cells[par & hit, , drop = FALSE]
+    gate <- gate_rect_from_xy(xy_hit[[spec$x]], xy_hit[[spec$y]])
+    xlab <- axis_fl_label(panel_id, spec$x)
+    yfl <- axis_fl_label(panel_id, spec$y)
+    pct_of <- function(g) {
+      v <- samp$percent[as.character(samp$group) == g]
+      if (!length(v) || all(!is.finite(v))) return(0)
+      mean(v, na.rm = TRUE)
+    }
+    d_ctrl <- cells[par & as.character(cells$group) == flow_ctrl_group, , drop = FALSE]
+    d_trt <- cells[par & as.character(cells$group) == flow_trt_group, , drop = FALSE]
+    if (nrow(d_ctrl) < 8 || nrow(d_trt) < 8) next
+    col_ctrl <- unname(pal_group[flow_ctrl_group])
+    col_trt <- unname(pal_group[flow_trt_group])
+    if (is.na(col_ctrl)) col_ctrl <- "#1A1A1A"
+    if (is.na(col_trt)) col_trt <- "#E31A1C"
+    c_ctrl <- plot_subset_contour(d_ctrl, spec$x, spec$y, col_ctrl, xlab, yfl, pct_of(flow_ctrl_group), gate)
+    c_trt <- plot_subset_contour(d_trt, spec$x, spec$y, col_trt, xlab, yfl, pct_of(flow_trt_group), gate)
+    stub <- paste0(panel_id, "_", gsub("[^A-Za-z0-9]+", "_", spec$lineage), "_H_vs_EV")
+    save_subset_figure(bar, c_ctrl, c_trt, file.path(sub_dir, stub))
+    utils::write.csv(samp, file.path(sub_dir, paste0(stub, "_by_sample.csv")), row.names = FALSE)
+    stat_rows[[length(stat_rows) + 1]] <- data.frame(
+      panel = panel_id,
+      subset = spec$lineage,
+      celltype = lab,
+      parent = spec$parent,
+      n_EV = length(ctrl_v),
+      n_H = length(trt_v),
+      mean_EV = mean(ctrl_v, na.rm = TRUE),
+      mean_H = mean(trt_v, na.rm = TRUE),
+      sd_EV = stats::sd(ctrl_v),
+      sd_H = stats::sd(trt_v),
+      delta_H_minus_EV = mean(trt_v, na.rm = TRUE) - mean(ctrl_v, na.rm = TRUE),
+      p_value = pv,
+      ylab = ylab,
+      stringsAsFactors = FALSE
+    )
+  }
+  if (length(stat_rows)) {
+    st <- do.call(rbind, stat_rows)
+    st$padj <- if (all(is.na(st$p_value))) NA_real_ else p.adjust(st$p_value, method = "BH")
+    utils::write.csv(st, file.path(sub_dir, paste0(panel_id, "_subset_H_vs_EV_stats.csv")), row.names = FALSE)
+  }
+  log_msg(panel_id, " subset stat+contour figures: ", sub_dir)
+  invisible(TRUE)
+}
+
 export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, umap_is_pca = FALSE, tsne_is_pca = FALSE) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   marker_dir <- file.path(out_dir, "markers")
   dir.create(marker_dir, showWarnings = FALSE)
   umap_lab <- if (umap_is_pca) "PCA (UMAP fallback)" else "UMAP"
   tsne_lab <- if (tsne_is_pca) "PCA (tSNE fallback)" else "tSNE"
-  tag <- paste0(panel_id, " T6 vs T")
+  tag <- paste0(panel_id, " H vs EV")
+  split_ttl <- paste0(panel_id, "  EV | H")
 
   save_gg(
-    plot_split_lineage(cells, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2",
-                       paste0(panel_id, "  T | T6")),
-    file.path(out_dir, paste0(panel_id, "_T_vs_T6_tSNE_lineage_split")),
+    plot_split_lineage(cells, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2", split_ttl),
+    file.path(out_dir, paste0(panel_id, "_H_vs_EV_tSNE_lineage_split")),
     width = 12.4, height = 5.6
   )
   save_gg(
-    plot_split_lineage(cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
-                       paste0(panel_id, "  T | T6")),
-    file.path(out_dir, paste0(panel_id, "_T_vs_T6_UMAP_lineage_split")),
+    plot_split_lineage(cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2", split_ttl),
+    file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split")),
     width = 12.4, height = 5.6
   )
 
@@ -1584,8 +1908,8 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
           file.path(out_dir, paste0(panel_id, "_UMAP_by_cluster")), width = 8)
   save_gg(plot_embedding(cells, "UMAP1", "UMAP2", "lineage", paste(tag, "-", umap_lab, "by lineage")),
           file.path(out_dir, paste0(panel_id, "_UMAP_by_lineage")), width = 8)
-  save_gg(plot_density_split(cells, "UMAP1", "UMAP2", paste(tag, "-", umap_lab, "density T vs T6")),
-          file.path(out_dir, paste0(panel_id, "_UMAP_density_T_vs_T6")), width = 10, height = 5)
+  save_gg(plot_density_split(cells, "UMAP1", "UMAP2", paste(tag, "-", umap_lab, "density H vs EV")),
+          file.path(out_dir, paste0(panel_id, "_UMAP_density_H_vs_EV")), width = 10, height = 5)
 
   save_gg(plot_embedding(cells, "tSNE1", "tSNE2", "group", paste(tag, "-", tsne_lab, "by group")),
           file.path(out_dir, paste0(panel_id, "_tSNE_by_group")))
@@ -1595,8 +1919,8 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
           file.path(out_dir, paste0(panel_id, "_tSNE_by_cluster")), width = 8)
   save_gg(plot_embedding(cells, "tSNE1", "tSNE2", "lineage", paste(tag, "-", tsne_lab, "by lineage")),
           file.path(out_dir, paste0(panel_id, "_tSNE_by_lineage")), width = 8)
-  save_gg(plot_density_split(cells, "tSNE1", "tSNE2", paste(tag, "-", tsne_lab, "density T vs T6")),
-          file.path(out_dir, paste0(panel_id, "_tSNE_density_T_vs_T6")), width = 10, height = 5)
+  save_gg(plot_density_split(cells, "tSNE1", "tSNE2", paste(tag, "-", tsne_lab, "density H vs EV")),
+          file.path(out_dir, paste0(panel_id, "_tSNE_density_H_vs_EV")), width = 10, height = 5)
 
   dr_cols <- colnames(med)
   for (mk in dr_cols) {
@@ -1611,13 +1935,13 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
 
   freq_df$cluster <- factor(freq_df$cluster, levels = annot$cluster)
   save_gg(plot_freq_box(freq_df, paste(tag, "cluster frequency")),
-          file.path(out_dir, paste0(panel_id, "_cluster_frequency_T6_vs_T")),
+          file.path(out_dir, paste0(panel_id, "_cluster_frequency_H_vs_EV")),
           width = max(8, 0.7 * length(unique(freq_df$cluster)) + 2), height = 5.5)
 
   lin_freq <- lineage_frequencies(cells)
   names(lin_freq)[names(lin_freq) == "lineage"] <- "cluster"
   save_gg(plot_freq_box(lin_freq, paste(tag, "lineage frequency")),
-          file.path(out_dir, paste0(panel_id, "_lineage_frequency_T6_vs_T")),
+          file.path(out_dir, paste0(panel_id, "_lineage_frequency_H_vs_EV")),
           width = max(7, 0.8 * length(unique(lin_freq$cluster)) + 2), height = 5.5)
 
   mean_df <- aggregate(percent ~ group + cluster, data = freq_df, FUN = mean)
@@ -1634,16 +1958,17 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     title <- cowplot::ggdraw() +
       cowplot::draw_label(paste(tag, "dimensionality reduction overview"), fontface = "bold", size = 14)
     overview <- cowplot::plot_grid(title, overview, ncol = 1, rel_heights = c(0.08, 1))
-    save_gg(overview, file.path(out_dir, paste0(panel_id, "_T6_vs_T_dimred_overview")),
+    save_gg(overview, file.path(out_dir, paste0(panel_id, "_H_vs_EV_dimred_overview")),
             width = 16, height = 5.8)
   }
+  export_subset_gate_figures(cells, panel_id, out_dir)
   invisible(TRUE)
 }
 
 # -----------------------------------------------------------------------------
-# 8. 频率统计 T6 vs T
+# 8. 频率统计 H vs EV
 # -----------------------------------------------------------------------------
-# "T" 单独成列时 read.csv 会变成 TRUE
+# 旧表里的 "T" 单独成列时 read.csv 会变成 TRUE
 read_embed_csv <- function(path) {
   df <- utils::read.csv(path, check.names = FALSE, stringsAsFactors = FALSE)
   chr <- intersect(c("sample", "group", "cluster", "cluster_lineage", "lineage"), names(df))
@@ -1690,31 +2015,41 @@ lineage_frequencies <- function(cells) {
 
 compare_group_freq <- function(freq_df, id_col = "cluster") {
   ids <- unique(as.character(freq_df[[id_col]]))
+  g_ctrl <- flow_ctrl_group
+  g_trt <- flow_trt_group
   rows <- lapply(ids, function(id) {
     sub <- freq_df[as.character(freq_df[[id_col]]) == id, ]
-    t_vals <- sub$percent[sub$group == "T"]
-    t6_vals <- sub$percent[sub$group == "T6"]
-    if (length(t_vals) < 2 || length(t6_vals) < 2) {
+    ctrl_vals <- sub$percent[as.character(sub$group) == g_ctrl]
+    trt_vals <- sub$percent[as.character(sub$group) == g_trt]
+    if (length(ctrl_vals) < 2 || length(trt_vals) < 2) {
       pv <- NA_real_
     } else {
-      pv <- tryCatch(t.test(t6_vals, t_vals)$p.value, error = function(e) NA_real_)
+      pv <- tryCatch(t.test(trt_vals, ctrl_vals)$p.value, error = function(e) NA_real_)
     }
-    data.frame(
+    row <- data.frame(
       id = id,
-      n_T = length(t_vals),
-      n_T6 = length(t6_vals),
-      mean_T = mean(t_vals),
-      mean_T6 = mean(t6_vals),
-      sd_T = sd(t_vals),
-      sd_T6 = sd(t6_vals),
-      delta_T6_minus_T = mean(t6_vals) - mean(t_vals),
+      n_ctrl = length(ctrl_vals),
+      n_trt = length(trt_vals),
+      mean_ctrl = mean(ctrl_vals),
+      mean_trt = mean(trt_vals),
+      sd_ctrl = sd(ctrl_vals),
+      sd_trt = sd(trt_vals),
+      delta_trt_minus_ctrl = mean(trt_vals) - mean(ctrl_vals),
       p_value = pv,
       stringsAsFactors = FALSE
     )
+    names(row) <- c(
+      id_col,
+      paste0("n_", g_ctrl), paste0("n_", g_trt),
+      paste0("mean_", g_ctrl), paste0("mean_", g_trt),
+      paste0("sd_", g_ctrl), paste0("sd_", g_trt),
+      paste0("delta_", g_trt, "_minus_", g_ctrl),
+      "p_value"
+    )
+    row
   })
   out <- do.call(rbind, rows)
   out$padj <- if (all(is.na(out$p_value))) NA_real_ else p.adjust(out$p_value, method = "BH")
-  names(out)[1] <- id_col
   out[order(out$p_value, na.last = TRUE), ]
 }
 
@@ -1736,8 +2071,8 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
 
   if (use_demo) {
     log_msg(panel_id, " : DEMO synthetic cells (not real FCS)")
-    samples <- expand.grid(group = c("T", "T6"), replicate = 1:3, stringsAsFactors = FALSE)
-    samples$sample <- paste0(samples$group, "-", samples$replicate)
+    samples <- expand.grid(group = flow_group_levels, replicate = 1:3, stringsAsFactors = FALSE)
+    samples$sample <- paste0(samples$group, samples$replicate)
     for (i in seq_len(nrow(samples))) {
       set.seed(seed_value + i + as.integer(factor(panel_id)) * 10)
       d <- make_demo_sample(panel_id, samples$group[i], samples$sample[i], min(n_cap, 2500))
@@ -1832,7 +2167,7 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
 
   cells <- data.frame(
     sample = smp,
-    group = factor(grp, levels = c("T", "T6")),
+    group = factor(grp, levels = flow_group_levels),
     cluster = cl,
     UMAP1 = umap[, 1],
     UMAP2 = umap[, 2],
@@ -1867,8 +2202,8 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   utils::write.csv(cbind(cluster = rownames(med), as.data.frame(med)),
                    file.path(out_dir, paste0(panel_id, "_cluster_median_markers.csv")), row.names = FALSE)
   utils::write.csv(freq_df, file.path(out_dir, paste0(panel_id, "_cluster_frequency_by_sample.csv")), row.names = FALSE)
-  utils::write.csv(stats_cl, file.path(out_dir, paste0(panel_id, "_cluster_T6_vs_T_stats.csv")), row.names = FALSE)
-  utils::write.csv(stats_lin, file.path(out_dir, paste0(panel_id, "_lineage_T6_vs_T_stats.csv")), row.names = FALSE)
+  utils::write.csv(stats_cl, file.path(out_dir, paste0(panel_id, "_cluster_H_vs_EV_stats.csv")), row.names = FALSE)
+  utils::write.csv(stats_lin, file.path(out_dir, paste0(panel_id, "_lineage_H_vs_EV_stats.csv")), row.names = FALSE)
   if (!is.null(dat$map)) {
     utils::write.csv(dat$map, file.path(out_dir, paste0(panel_id, "_channel_map.csv")), row.names = FALSE)
   }
@@ -1900,14 +2235,14 @@ if (nrow(file_tab) == 0) {
     use_demo <- TRUE
   } else {
     log_msg("No *_unmixed.fcs in ", project_dir)
-    log_msg("Put T/T6 P1-P3 unmixed files in ", flow_primary_data_dir, ", or set FLOW_DEMO=1 to export demo plots")
+    log_msg("Put EV/H P1-P3 unmixed files in ", flow_primary_data_dir, ", or set FLOW_DEMO=1 to export demo plots")
     use_demo <- TRUE
     log_msg("Auto-fallback to DEMO so the script can still export figure templates")
   }
 } else {
   log_msg("Found unmixed files:\n", paste(file_tab$file, collapse = "\n"))
-  if (any(file_tab$group == "T" & grepl("^T6", file_tab$file))) {
-    stop("Filename parser classified a T6 file as T; refusing to continue")
+  if (any(file_tab$group == "H" & grepl("^EV", file_tab$file, ignore.case = TRUE))) {
+    stop("Filename parser classified an EV file as H; refusing to continue")
   }
   ensure_flowcore()
 }
@@ -1929,7 +2264,7 @@ for (pn in panels) {
   )
 }
 
-sum_path <- file.path(result_dir, "T6_vs_T_lineage_stats_all_panels.csv")
+sum_path <- file.path(result_dir, "H_vs_EV_lineage_stats_all_panels.csv")
 lin_rows <- lapply(names(summaries), function(pn) {
   x <- summaries[[pn]]
   if (is.null(x) || is.null(x$stats_lineage)) return(NULL)

@@ -17,7 +17,7 @@ expect <- function(got, want, tag) {
 cytek_p1 <- c(
   "FSC-A", "SSC-A", "FVS450-A", "V500-A", "BUV496-A", "BUV805-A", "RB744-A",
   "BV750-A", "RB670-A", "RY586-A", "RB705-A", "BV711-A", "PE-A", "BV605-A",
-  "BV650-A", "BUV661-A", "BV421-A", "BV786-A", "R718-A", "APC-Cy7-A",
+  "BV650-A", "BUV661-A", "BV421-A", "BV786-A", "AF700-A", "APC-Cy7-A",
   "RY703-A", "RB613-A", "PE-EF610-A", "APC-A", "BUV737-A", "PE-Cy7-A", "FITC-A"
 )
 desc_blank <- rep("", length(cytek_p1))
@@ -32,13 +32,15 @@ expect(map$channel[map$marker == "CD8b"], "BV711-A", "CD8b<-BV711-A")
 expect(map$channel[map$marker == "NKp46"], "PE-A", "NKp46<-PE-A")
 expect(map$channel[map$marker == "CD11B"], "APC-Cy7-A", "CD11B<-APC-Cy7-A")
 expect(map$channel[map$marker == "L/D"], "FVS450-A", "LD<-FVS450-A")
-expect(map$channel[map$marker == "NK1.1"], "R718-A", "P1 NK1.1<-R718-A")
+expect(map$channel[map$marker == "NK1.1"], "AF700-A", "P1 NK1.1<-AF700-A")
 
-# 新表 P1 NK1.1 写 AF700，与 R718 同一 ~700 nm 通道
-cytek_p1_af700 <- cytek_p1
-cytek_p1_af700[cytek_p1_af700 == "R718-A"] <- "AF700-A"
-map_af <- match_channels(cytek_p1_af700, desc_blank, "P1")
-expect(map_af$channel[map_af$marker == "NK1.1"], "AF700-A", "P1 NK1.1<-AF700-A")
+# NK1.1 只认 AF700，不得把 R718-A 配上去
+cytek_p1_r718 <- cytek_p1
+cytek_p1_r718[cytek_p1_r718 == "AF700-A"] <- "R718-A"
+map_r718 <- match_channels(cytek_p1_r718, desc_blank, "P1")
+if (!is.na(map_r718$channel[map_r718$marker == "NK1.1"])) {
+  fail("P1 NK1.1 must not match R718-A")
+}
 
 # 标志物写在 name 里、荧光素写在 desc
 map2 <- match_channels(
@@ -80,13 +82,34 @@ if (!is.na(map_p2$channel[map_p2$marker == "CD80"]) &&
   fail("P2 CD80 must not still match BUV496")
 }
 
-# P3 配色不变：CD80 仍是 BUV496，NK1.1 仍是 R718
+# P3 与 P2 同步：CD80=APC，NK1.1 只认 AF700
 cytek_p3 <- c(
   "FSC-A", "SSC-A", "FVS450-A", "V500-A", "BUV805-A", "RB705-A", "RB670-A",
-  "BUV496-A", "APC-Cy7-A", "BV750-A", "R718-A", "BUV737-A", "BV605-A"
+  "APC-A", "APC-Cy7-A", "BV750-A", "AF700-A", "BUV737-A", "BV605-A", "BUV496-A"
 )
 map_p3 <- match_channels(cytek_p3, rep("", length(cytek_p3)), "P3")
-expect(map_p3$channel[map_p3$marker == "CD80"], "BUV496-A", "P3 CD80 stays BUV496-A")
-expect(map_p3$channel[map_p3$marker == "NK1.1"], "R718-A", "P3 NK1.1 stays R718-A")
+expect(map_p3$channel[map_p3$marker == "CD80"], "APC-A", "P3 CD80<-APC-A")
+expect(map_p3$channel[map_p3$marker == "NK1.1"], "AF700-A", "P3 NK1.1<-AF700-A")
+if (!is.na(map_p3$channel[map_p3$marker == "CD80"]) &&
+    identical(map_p3$channel[map_p3$marker == "CD80"], "BUV496-A")) {
+  fail("P3 CD80 must not still match BUV496")
+}
+cytek_p3_r718 <- cytek_p3
+cytek_p3_r718[cytek_p3_r718 == "AF700-A"] <- "R718-A"
+map_p3_r718 <- match_channels(cytek_p3_r718, rep("", length(cytek_p3_r718)), "P3")
+if (!is.na(map_p3_r718$channel[map_p3_r718$marker == "NK1.1"])) {
+  fail("P3 NK1.1 must not match R718-A")
+}
+
+# 文件名 EV1 / H-1
+ev <- parse_fcs_filename("EV1_P1_unmixed.fcs")
+if (is.null(ev) || !identical(ev$group, "EV") || !identical(ev$sample, "EV1")) {
+  fail("EV1_P1_unmixed.fcs should parse as group EV sample EV1")
+}
+hh <- parse_fcs_filename("H-3_P2_unmixed.fcs")
+if (is.null(hh) || !identical(hh$group, "H") || !identical(hh$sample, "H3")) {
+  fail("H-3_P2_unmixed.fcs should parse as group H sample H3")
+}
+if (!is.null(parse_fcs_filename("T6-1_P1_unmixed.fcs"))) fail("legacy T6 filename must not parse")
 
 cat("OK: Cytek channel matching\n")

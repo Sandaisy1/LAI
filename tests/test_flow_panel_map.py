@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate flow panel map and T vs T6 filename parsing (stdlib only)."""
+"""Validate flow panel map and EV vs H filename parsing (stdlib only)."""
 from __future__ import annotations
 
 import json
@@ -10,14 +10,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MAP_PATH = ROOT / "flow_panel_map.json"
 
-FILENAME_RE = re.compile(r"^(T6|T)-([123])_(P[123])_(unmixed|raw)\.fcs$", re.IGNORECASE)
+FILENAME_RE = re.compile(r"^(EV|H)[-_]?([123])_(P[123])_(unmixed|raw)\.fcs$", re.IGNORECASE)
 
 
 def parse_fcs_filename(name: str) -> dict | None:
     m = FILENAME_RE.match(Path(name).name)
     if not m:
         return None
-    return {"group": m.group(1).upper().replace("T6", "T6"), "rep": m.group(2), "panel": m.group(3).upper(), "kind": m.group(4).lower()}
+    return {
+        "group": m.group(1).upper(),
+        "rep": m.group(2),
+        "panel": m.group(3).upper(),
+        "kind": m.group(4).lower(),
+    }
 
 
 def main() -> int:
@@ -34,12 +39,11 @@ def main() -> int:
         if names[0] != "L/D" or names[1] != "CD45":
             errors.append(f"{panel} must start with L/D then CD45")
 
-    # T6 must not parse as T
     cases = {
-        "T-1_P1_unmixed.fcs": ("T", "1", "P1", "unmixed"),
-        "T6-3_P2_unmixed.fcs": ("T6", "3", "P2", "unmixed"),
-        "T-2_P3_raw.fcs": ("T", "2", "P3", "raw"),
-        "T6-1_P3_unmixed.fcs": ("T6", "1", "P3", "unmixed"),
+        "EV-1_P1_unmixed.fcs": ("EV", "1", "P1", "unmixed"),
+        "EV1_P2_unmixed.fcs": ("EV", "1", "P2", "unmixed"),
+        "H3_P3_unmixed.fcs": ("H", "3", "P3", "unmixed"),
+        "H-2_P1_raw.fcs": ("H", "2", "P1", "raw"),
     }
     for fname, expected in cases.items():
         parsed = parse_fcs_filename(fname)
@@ -50,42 +54,45 @@ def main() -> int:
         if got != expected:
             errors.append(f"{fname} -> {got}, expected {expected}")
 
-    assert parse_fcs_filename("T6-1_P1_unmixed.fcs")["group"] != "T"
+    if parse_fcs_filename("T-1_P1_unmixed.fcs") is not None:
+        errors.append("legacy T-1 must not parse as EV/H")
+    if parse_fcs_filename("T6-1_P1_unmixed.fcs") is not None:
+        errors.append("legacy T6-1 must not parse as EV/H")
     if parse_fcs_filename("bad.fcs") is not None:
         errors.append("non-matching name should be None")
-    if parse_fcs_filename("T-1_P1_unmixed.fcs")["group"] == "T6":
-        errors.append("T-1 must stay group T")
+    if parse_fcs_filename("EV1_P1_unmixed.fcs")["group"] == "H":
+        errors.append("EV1 must stay group EV")
 
+    if data.get("groups") != ["EV", "H"]:
+        errors.append(f"groups should be [EV, H], got {data.get('groups')}")
+    if data.get("comparison") != "H_vs_EV":
+        errors.append(f"comparison should be H_vs_EV, got {data.get('comparison')}")
     if data.get("data_dir") is None or "flow J-LJY WJZ ZZX" not in str(data.get("data_dir")):
         errors.append("data_dir should be E:/R/flow J-LJY WJZ ZZX")
-    if "AF700" not in data["fluorochrome_aliases"]["R718"]:
-        errors.append("R718 aliases must include AF700 (same ~700 nm channel)")
+
+    af700 = data["fluorochrome_aliases"].get("AF700", [])
     if "AF700" not in data["fluorochrome_aliases"]:
-        errors.append("fluorochrome_aliases must have AF700 so Panel 1 NK1.1 matches AF700-A")
-    elif "R718" not in data["fluorochrome_aliases"]["AF700"]:
-        errors.append("AF700 aliases must include R718 so older Cytek R718-A still matches")
+        errors.append("fluorochrome_aliases must have AF700")
+    if any(x in af700 for x in ("R718", "APCR700", "APC-R700")):
+        errors.append("AF700 aliases must not include R718; NK1.1 only matches AF700")
     p1_nk = next(m["fluorochrome"] for m in data["panels"]["P1"]["markers"] if m["marker"] == "NK1.1")
     if p1_nk != "AF700":
-        errors.append(f"P1 NK1.1 should be AF700 (new sheet), got {p1_nk}")
+        errors.append(f"P1 NK1.1 should be AF700, got {p1_nk}")
     p3_nk = next(m["fluorochrome"] for m in data["panels"]["P3"]["markers"] if m["marker"] == "NK1.1")
-    if p3_nk != "R718":
-        errors.append(f"P3 NK1.1 stays R718, got {p3_nk}")
+    if p3_nk != "AF700":
+        errors.append(f"P3 NK1.1 should be AF700, got {p3_nk}")
     p2_cd80 = next(m["fluorochrome"] for m in data["panels"]["P2"]["markers"] if m["marker"] == "CD80")
     if p2_cd80 != "APC":
-        errors.append(f"P2 CD80 should be APC (new sheet), got {p2_cd80}")
+        errors.append(f"P2 CD80 should be APC, got {p2_cd80}")
     p3_cd80 = next(m["fluorochrome"] for m in data["panels"]["P3"]["markers"] if m["marker"] == "CD80")
-    if p3_cd80 != "BUV496":
-        errors.append(f"P3 CD80 stays BUV496, got {p3_cd80}")
+    if p3_cd80 != "APC":
+        errors.append(f"P3 CD80 should be APC (synced with P2), got {p3_cd80}")
     p1_tnf = next(m["fluorochrome"] for m in data["panels"]["P1"]["markers"] if m["marker"] == "TNF-a")
     if p1_tnf != "APC":
-        errors.append("P1 TNF-a stays APC; P2 CD80 APC is a different tube")
+        errors.append("P1 TNF-a stays APC; P2/P3 CD80 APC are different tubes")
 
-    # Windows 隐藏扩展名时，记事本另存为会变成 .json.txt
     if parse_fcs_filename("flow_panel_map.json.txt") is not None:
         errors.append("json.txt is not an FCS name")
-    txt_alias = "flow_panel_map.json.txt"
-    if not txt_alias.startswith("flow_panel_map"):
-        errors.append("txt alias should still be the panel map")
 
     if errors:
         print("FAIL")

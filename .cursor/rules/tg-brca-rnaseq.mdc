@@ -7,7 +7,7 @@ alwaysApply: true
 # TG BRCA RNA-seq：显著性与变化倍数分析
 
 写或改本仓库 **RNA-seq** 分析时必须按本规则。输入是 Cuffdiff，不是 Excel，也不是 FCS。
-流式 T vs T6（P1/P2/P3）走 `Flow_dimred_pipeline.R` 与 `flow-cytometry-dimred` 规则，不要把本流程套到流式数据。
+流式 H vs EV（P1/P2/P3）走 `Flow_dimred_pipeline.R` 与 `flow-cytometry-dimred` 规则，不要把本流程套到流式数据。
 
 ## 数据
 

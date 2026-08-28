@@ -315,7 +315,7 @@ plot_trajectory_tree <- function(df, fit, panel_id, title, facet_group = FALSE) 
   levs <- unique(plot_df$celltype)
   plot_df$celltype <- factor(plot_df$celltype, levels = levs)
   if ("group" %in% names(plot_df)) {
-    plot_df$group <- factor(plot_df$group, levels = c("T", "T6"))
+    plot_df$group <- factor(plot_df$group, levels = flow_group_levels)
   }
   pal <- celltype_colors(levels(plot_df$celltype))
   sk <- if (length(fit$curves)) {
@@ -421,12 +421,12 @@ export_one_major_trajectory <- function(cells, panel_id, major, out_dir) {
   save_gg(plot_trajectory_tree(sub, fit, panel_id, ttl, facet_group = FALSE),
           file.path(out_dir, paste0(tag, "_trajectory")),
           width = 7.2, height = 6.4)
-  save_gg(plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  T | T6"), facet_group = TRUE),
-          file.path(out_dir, paste0(tag, "_trajectory_T_vs_T6")),
+  save_gg(plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  EV | H"), facet_group = TRUE),
+          file.path(out_dir, paste0(tag, "_trajectory_H_vs_EV")),
           width = 11.6, height = 5.8)
   if (any(is.finite(sub$pseudotime))) {
-    save_gg(plot_pseudotime_group(sub, paste0(panel_id, "  ", major, "  pseudotime T vs T6")),
-            file.path(out_dir, paste0(tag, "_pseudotime_T_vs_T6")),
+    save_gg(plot_pseudotime_group(sub, paste0(panel_id, "  ", major, "  pseudotime H vs EV")),
+            file.path(out_dir, paste0(tag, "_pseudotime_H_vs_EV")),
             width = 5.2, height = 4.6)
   }
   log_msg(panel_id, " ", major, " trajectory (", fit$method, ", root=", root,

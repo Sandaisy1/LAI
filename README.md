@@ -76,9 +76,9 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 
 看专项结果请先看比较目录下的 `Focused_cytoskeleton_mito/`（全基因 GSEA），不要只看 topN 的 ORA。若专项分析仍不显著，说明这些通路在本数据里没有协同变化。
 
-## 流式降维（T6 vs T，P1 / P2 / P3）
+## 流式降维（H vs EV，P1 / P2 / P3）
 
-小鼠流式在 `E:/R/flow J-LJY WJZ ZZX`，只用 `*_unmixed.fcs`。三个 panel **分开**做 UMAP/tSNE，比较 T（T-1/2/3）与 T6（T6-1/2/3）。
+小鼠流式在 `E:/R/flow J-LJY WJZ ZZX`，只用 `*_unmixed.fcs`。三个 panel **分开**做 UMAP/tSNE，比较 EV（EV1/2/3）与 H（H1/2/3）。
 
 ```r
 setwd("E:/R/flow J-LJY WJZ ZZX")
@@ -86,17 +86,20 @@ setwd("E:/R/flow J-LJY WJZ ZZX")
 source("Flow_dimred_pipeline.R")
 ```
 
+文件名：`EV1_P1_unmixed.fcs`、`H-2_P3_unmixed.fcs` 这种都可以（组别与重复号之间的 `-`/`_` 可有可无）。
+
 若 Windows 把 json 显示成“文本文档”，真实文件名多半是 `flow_panel_map.json.txt`。关掉“隐藏已知文件类型的扩展名”后改名为 `flow_panel_map.json`；新版脚本两种名字都能读。
 
 每个 panel 的图在 `results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
 
-- `*_T_vs_T6_tSNE_lineage_split`：**主图**，左 T、右 T6。P1/P2/P3 都是先圈大类再分亚群；无虚线；共用 P1 配色
-- `*_UMAP_by_group` / `*_tSNE_by_group`：T vs T6
+- `*_H_vs_EV_tSNE_lineage_split`：**主图**，左 EV、右 H。P1/P2/P3 都是先圈大类再分亚群；无虚线；共用 P1 配色
+- `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
+- `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图（均值、误差棒、各重复的点、显著性），下为 2D 等高线（门框 + 百分数）
 - `markers/`：各通道在 UMAP 上的着色
-- `*_cluster_marker_heatmap`、`*_cluster_frequency_T6_vs_T`、`*_T6_vs_T_dimred_overview`
+- `*_cluster_marker_heatmap`、`*_cluster_frequency_H_vs_EV`、`*_H_vs_EV_dimred_overview`
 
-三个 panel 的抗体不同，**不能**拼成一张矩阵做联合 UMAP。`Flow_dimred_all_subsets.R` 在各自圈完亚群后，把频率汇总到 `results_flow/all_subsets/`（T vs T6 柱状图、堆叠组成、热图、T6−T 差值）。百分数是该 panel 管子里的比例，P1 的 B/髓系、P3 的 T/B/NK 只是 dump。主流程跑完会自动出这份总览；也可单独 `source("Flow_dimred_all_subsets.R")`。
+三个 panel 的抗体不同，**不能**拼成一张矩阵做联合 UMAP。`Flow_dimred_all_subsets.R` 在各自圈完亚群后，把频率汇总到 `results_flow/all_subsets/`（H vs EV 柱状图、堆叠组成、热图、H−EV 差值）。百分数是该 panel 管子里的比例，P1 的 B/髓系、P3 的 T/B/NK 只是 dump。主流程跑完会自动出这份总览；也可单独 `source("Flow_dimred_all_subsets.R")`。
 
 每个 panel 的每一大类另出细胞轨迹（类似 Monocle 骨架图）：`Flow_dimred_trajectory.R` → `results_flow/P1/trajectory/` 等。P1 画 CD4、CD8；P2 画 B；P3 画髓系。坐标是该类内的 Component 1/2，点按细亚群着色，黑线是分支骨架。根节点按惯例是 naive T/B 或 Ly6C hi 单核。也可单独 `source("Flow_dimred_trajectory.R")`。
 
