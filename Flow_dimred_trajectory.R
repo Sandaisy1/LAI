@@ -337,25 +337,27 @@ plot_trajectory_tree <- function(df, fit, panel_id, title, facet_group = FALSE) 
       stringsAsFactors = FALSE
     )
   }
-  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = Component1, y = Component2, color = celltype)) +
-    ggplot2::geom_point(size = if (facet_group) 0.5 else 0.55, alpha = 0.8, stroke = 0)
+  # 先画细骨架，再画更大的点，避免黑线压过细胞、显得圈小线粗
+  pt_size <- if (facet_group) 1.15 else 1.35
+  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = Component1, y = Component2, color = celltype))
   if (!is.null(sk) && nrow(sk)) {
     p <- p + ggplot2::geom_path(
       data = sk, ggplot2::aes(x = x, y = y, group = curve),
-      color = "black", linewidth = 0.85, inherit.aes = FALSE
+      color = "black", linewidth = 0.32, lineend = "round", inherit.aes = FALSE
     )
   }
+  p <- p + ggplot2::geom_point(size = pt_size, alpha = 0.82, stroke = 0)
   if (!is.null(arr) && nrow(arr)) {
     p <- p + ggplot2::geom_segment(
       data = arr, ggplot2::aes(x = x, y = y, xend = xend, yend = yend),
-      arrow = grid::arrow(length = grid::unit(0.11, "inches"), type = "closed"),
-      color = "black", linewidth = 0.45, inherit.aes = FALSE
+      arrow = grid::arrow(length = grid::unit(0.07, "inches"), type = "closed"),
+      color = "black", linewidth = 0.22, inherit.aes = FALSE
     )
   }
   if (!is.null(lab) && nrow(lab)) {
     p <- p + ggplot2::geom_text(
       data = lab, ggplot2::aes(x = Component1, y = Component2, label = label),
-      color = "black", fontface = "bold", size = 3.3, vjust = -1.1,
+      color = "black", fontface = "bold", size = 4.2, vjust = -1.05,
       inherit.aes = FALSE
     )
   }
@@ -364,16 +366,19 @@ plot_trajectory_tree <- function(df, fit, panel_id, title, facet_group = FALSE) 
   }
   p +
     ggplot2::scale_color_manual(values = pal, drop = FALSE) +
-    ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(size = 3, alpha = 1), nrow = 2)) +
+    ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(size = 4.2, alpha = 1), nrow = 2)) +
     ggplot2::coord_equal() +
-    ggplot2::theme_classic(base_size = 13) +
+    ggplot2::theme_classic(base_size = 15) +
     ggplot2::theme(
       legend.position = "top",
       legend.title = ggplot2::element_blank(),
+      legend.text = ggplot2::element_text(size = 12),
       strip.background = ggplot2::element_blank(),
-      strip.text = ggplot2::element_text(face = "bold", size = 14),
+      strip.text = ggplot2::element_text(face = "bold", size = 16),
+      axis.title = ggplot2::element_text(size = 14),
+      axis.text = ggplot2::element_text(size = 12),
       panel.grid = ggplot2::element_blank(),
-      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5)
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 16)
     ) +
     ggplot2::labs(title = title, x = "Component 1", y = "Component 2", color = NULL)
 }
@@ -420,10 +425,10 @@ export_one_major_trajectory <- function(cells, panel_id, major, out_dir) {
                 celltype_label(root, panel_id), ")")
   save_gg(plot_trajectory_tree(sub, fit, panel_id, ttl, facet_group = FALSE),
           file.path(out_dir, paste0(tag, "_trajectory")),
-          width = 7.2, height = 6.4)
+          width = 8.2, height = 7.2)
   save_gg(plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  EV | H"), facet_group = TRUE),
           file.path(out_dir, paste0(tag, "_trajectory_H_vs_EV")),
-          width = 11.6, height = 5.8)
+          width = 13.2, height = 6.6)
   if (any(is.finite(sub$pseudotime))) {
     save_gg(plot_pseudotime_group(sub, paste0(panel_id, "  ", major, "  pseudotime H vs EV")),
             file.path(out_dir, paste0(tag, "_pseudotime_H_vs_EV")),

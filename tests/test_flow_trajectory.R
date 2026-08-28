@@ -47,6 +47,18 @@ if (!is.finite(pt_n) || !is.finite(pt_e) || pt_e <= pt_n) {
   fail(sprintf("pseudotime should increase naive -> TEM (naive=%s TEM=%s)", pt_n, pt_e))
 }
 
+df_plot <- data.frame(lineage = cl, stringsAsFactors = FALSE)
+p_tr <- plot_trajectory_tree(df_plot, fit, "P1", "size check", facet_group = FALSE)
+pt_size <- NA_real_
+path_lw <- NA_real_
+for (ly in p_tr$layers) {
+  if (inherits(ly$geom, "GeomPoint") && !is.null(ly$aes_params$size)) pt_size <- ly$aes_params$size
+  if (inherits(ly$geom, "GeomPath") && !is.null(ly$aes_params$linewidth)) path_lw <- ly$aes_params$linewidth
+}
+if (!is.finite(pt_size) || pt_size < 1.1) fail(sprintf("trajectory points too small: %s", pt_size))
+if (!is.finite(path_lw) || path_lw > 0.45) fail(sprintf("trajectory skeleton too thick: %s", path_lw))
+if (!(path_lw < 0.45 * pt_size)) fail("skeleton must stay thinner than the cell points")
+
 td <- tempfile("flow_traj")
 dir.create(file.path(td, "P1"), recursive = TRUE)
 df <- data.frame(
