@@ -94,6 +94,14 @@ stub <- file.path(td, "subset_stats", "P1_NK_H_vs_EV")
 if (!file.exists(paste0(stub, ".pdf")) || !file.exists(paste0(stub, ".png"))) {
   fail("NK subset figure pdf/png missing")
 }
+export_per_sample_gating_figures(cells, "P1", td)
+ev1_dir <- file.path(td, "gating", "EV1")
+if (!dir.exists(ev1_dir)) fail("per-sample gating folder missing for EV1")
+ev1_png <- list.files(ev1_dir, pattern = "\\.png$")
+if (!length(ev1_png)) fail("each sample should get complete 2D gating plots")
+if (!file.exists(file.path(td, "gating", "P1_per_sample_gate_cuts.csv"))) {
+  fail("per-sample gate cut table missing")
+}
 if (!file.exists(file.path(td, "subset_stats", "P1_subset_H_vs_EV_stats.csv"))) {
   fail("combined subset stats csv missing")
 }

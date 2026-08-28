@@ -127,6 +127,24 @@ if (sum(labs_q[seq_len(n_q)] == "CD4_naive") < 40) fail("quadrant must call CD62
 if (sum(labs_q[seq_len(n_q) + n_q] == "CD4_TCM") < 40) fail("quadrant must call CD62L+ CD44+ TCM")
 if (sum(labs_q[seq_len(n_q) + 2 * n_q] == "CD4_TEM") < 40) fail("quadrant must call CD62L- CD44+ TEM")
 
+set.seed(13)
+mat_dn <- cbind(
+  CD62L = rnorm(90, 0.32, 0.1),
+  CD44 = rnorm(90, 0.28, 0.1)
+)
+labs_dn <- split_memory_3(mat_dn, seq_len(nrow(mat_dn)), "CD4")
+if (mean(labs_dn == "CD4_TEM") < 0.85) {
+  fail("CD62L- CD44- double-negative cells must be assigned TEM, not left ungated")
+}
+
+set.seed(21)
+smear <- c(rnorm(420, 0.48, 0.16), 1.15 + stats::rexp(55, rate = 0.9))
+cut_sm <- axis_pos_cut(smear)
+if (!is.finite(cut_sm) || cut_sm < 0.85 || cut_sm > 2.5) {
+  fail(sprintf("blob+smear cut should sit at the right edge of the origin mass, got %s", cut_sm))
+}
+if (mean(smear >= cut_sm) > 0.35) fail("smear cut must not slice the origin blob in half")
+
 set.seed(10)
 mat_s <- rbind(
   cbind(CD3 = rnorm(50, 3.1, 0.12), CD4 = rnorm(50, 3.0, 0.12), CD8 = rnorm(50, 0.2, 0.1),
@@ -143,5 +161,16 @@ nv <- Filter(function(s) identical(s$lineage, "CD4_naive"), subset_plot_specs("P
 if (!length(nv) || !identical(nv[[1]]$gate, "quad")) fail("CD4 naive subset figure should use a quadrant gate")
 qr <- quad_gate_rect(c(0, 7), c(0, 6), 2, 1.2, TRUE, FALSE)
 if (qr$xmin < 1.9 || qr$ymin > 0.05 || qr$ymax > 1.25) fail("naive quadrant should be CD62L-high CD44-low")
+tem <- Filter(function(s) identical(s$lineage, "CD4_TEM"), subset_plot_specs("P1"))
+if (!length(tem) || !identical(tem[[1]]$gate, "half_x")) fail("CD4 TEM figure should use the full CD62L- half, including DN")
+tr <- complete_gate_rect(c(0, 7), c(0, 6), 2, 1.2, FALSE, NA)
+if (tr$xmax > 2.05 || tr$ymin > 0.05 || tr$ymax < 5.5) {
+  fail("TEM gate must cover the origin blob and the CD44+ left half, not a 10-90% hit box")
+}
+set.seed(14)
+gx <- c(rnorm(200, 0.45, 0.12), rnorm(40, 3.2, 0.18))
+gy <- c(rnorm(200, 0.40, 0.12), rnorm(40, 0.45, 0.12))
+g_naive <- complete_gate_for(gx, gy, nv[[1]], c(0, 7), c(0, 6))
+if ((g_naive$xmax - g_naive$xmin) < 3) fail("naive gate must span to the axis max, not a quantile box of hit cells")
 
 cat("OK: P1 T/NK subset labels\n")

@@ -95,7 +95,8 @@ source("Flow_dimred_pipeline.R")
 - `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split`：**主图**，左 EV、右 H，按大类分区（CD4/CD8/NK 各一块），点按细亚群着色；无虚线；共用 P1 配色。原来叠在一起的联合 UMAP 在 `*_lineage_split_joint` 和 `*_UMAP_by_lineage`
 - `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
-- `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图；下为 FlowJo 风格 2D 图。CD62L/CD44、CD4/CD8、IgD/CD27 等画**完整象限十字门**，不是只框 10–90% 的小矩形。圈门按**每个样品**单独做完同一套逻辑。
+- `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图；下为 FlowJo 风格 2D 图。门是铺到坐标轴的完整象限/半平面（CD62L/CD44 标四个象限），EV 与 H **各自切阈值**。不是只框 10–90% 命中细胞的小矩形。
+- `gating/<样品>/`：**每个 FCS 单独**的完整圈门图 + `*_per_sample_gate_cuts.csv`。圈门按每个样品单独做完同一套逻辑。
 - `markers/`：各通道在 UMAP 上的着色
 - `*_cluster_marker_heatmap`、`*_cluster_frequency_H_vs_EV`、`*_H_vs_EV_dimred_overview`
 

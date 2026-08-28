@@ -1130,12 +1130,17 @@ marker_score <- function(mat, idx, markers) {
 }
 
 # 一维阳性阈值：优先抓住主峰右侧的尾巴（naive CD62L、CD44），
-# 不要把原点一团 50/50 切开冒充双峰。
+# 不要把原点一团 50/50 切开，也不要用全体 q80 在主团里切一条缝冒充阳性门。
 axis_pos_cut <- function(v, min_sep = 0.55, min_pos_frac = 0.02, max_pos_frac = 0.92) {
   v <- as.numeric(v)
   v <- v[is.finite(v)]
   if (!length(v)) return(0)
   if (length(v) < 20) return(as.numeric(stats::median(v)))
+  accept <- function(cut) {
+    if (!is.finite(cut)) return(FALSE)
+    fr <- mean(v >= cut)
+    is.finite(fr) && fr >= min_pos_frac && fr <= max_pos_frac
+  }
   xs <- scale(as.matrix(v))
   xs[!is.finite(xs)] <- 0
   set.seed(if (exists("seed_value")) seed_value else 42)
@@ -1160,29 +1165,52 @@ axis_pos_cut <- function(v, min_sep = 0.55, min_pos_frac = 0.02, max_pos_frac = 
   d <- tryCatch(stats::density(v, n = 512, adjust = 1.15), error = function(e) NULL)
   if (!is.null(d) && length(d$y) > 10) {
     i0 <- which.max(d$y)
-    if (i0 < length(d$y) - 8) {
-      y <- d$y
-      for (i in seq.int(i0 + 2L, length(y) - 2L)) {
-        if (y[i] <= y[i - 1L] && y[i] <= y[i + 1L] && y[i] < y[i0] * 0.5) {
-          cut <- d$x[i]
-          fr <- mean(v >= cut)
-          if (fr >= min_pos_frac && fr <= max_pos_frac) return(unname(cut))
+    y <- d$y
+    x <- d$x
+    peak <- y[i0]
+    if (i0 < length(y) - 10) {
+      i_sec <- NA_integer_
+      for (i in seq.int(i0 + 6L, length(y) - 3L)) {
+        if (x[i] - x[i0] < min_sep * 0.6) next
+        if (y[i] >= y[i - 1L] && y[i] >= y[i + 1L] && y[i] > peak * 0.06) {
+          mid_min <- min(y[i0:i])
+          if (is.finite(mid_min) && mid_min < min(peak, y[i]) * 0.5) {
+            i_sec <- i
+            break
+          }
+        }
+      }
+      if (is.finite(i_sec)) {
+        i_val <- i0 + which.min(y[i0:i_sec]) - 1L
+        cut <- x[i_val]
+        if (accept(cut)) return(unname(cut))
+      }
+      i_edge <- NA_integer_
+      for (i in seq.int(i0 + 1L, length(y))) {
+        if (y[i] <= peak * 0.12) {
+          i_edge <- i
           break
+        }
+      }
+      if (is.finite(i_edge)) {
+        cut <- x[i_edge]
+        q98 <- as.numeric(stats::quantile(v, 0.98, names = FALSE))
+        if (is.finite(q98) && (q98 - cut) >= min_sep * 0.7 && accept(cut)) {
+          return(unname(cut))
         }
       }
     }
   }
   q05 <- as.numeric(stats::quantile(v, 0.05, names = FALSE))
   q50 <- as.numeric(stats::quantile(v, 0.50, names = FALSE))
-  q80 <- as.numeric(stats::quantile(v, 0.80, names = FALSE))
   q95 <- as.numeric(stats::quantile(v, 0.95, names = FALSE))
   spread <- q95 - q05
   if (is.finite(spread) && spread < min_sep * 1.2) {
     if (is.finite(q50) && q50 >= 1.2) return(unname(min(q05, q50 - min_sep)))
     return(unname(max(q95, q50 + min_sep)))
   }
-  if (is.finite(q95 - q50) && (q95 - q50) >= min_sep) return(q80)
-  as.numeric(stats::quantile(v, 0.85, names = FALSE))
+  # 切不到独立阳性群时把门放在云团上方，整群阴性；不要用 q80 横切主团
+  unname(max(q95, q50 + min_sep))
 }
 
 # 一层：k=2 圈出该标志高的一群；两群分不开、或高群占了多数则整层跳过
@@ -2014,25 +2042,25 @@ subset_plot_specs <- function(panel_id) {
       mk("CD8", "CD8", "CD4", "CD3", "CD8+ T cell in CD3+ (%)", TRUE, gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("CD4_naive", "CD62L", "CD44", "CD4", "CD4 naive in CD4+ (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("CD4_TCM", "CD62L", "CD44", "CD4", "CD4 TCM in CD4+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
-      mk("CD4_TEM", "CD62L", "CD44", "CD4", "CD4 TEM in CD4+ (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
-      mk("CD4_activated", "CD69", "TNF-a", "CD4", "CD4 activated in CD4+ (%)"),
-      mk("Treg", "CD25", "CD4", "CD4", "Treg in CD4+ (%)"),
+      mk("CD4_TEM", "CD62L", "CD44", "CD4", "CD4 TEM in CD4+ (%)", gate = "half_x", x_hi = FALSE),
+      mk("CD4_activated", "CD69", "TNF-a", "CD4", "CD4 activated in CD4+ (%)", gate = "hi_hi"),
+      mk("Treg", "CD25", "CD4", "CD4", "Treg in CD4+ (%)", gate = "hi_x", x_hi = TRUE),
       mk("CD8_naive", "CD62L", "CD44", "CD8", "CD8 naive in CD8+ (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("CD8_TCM", "CD62L", "CD44", "CD8", "CD8 TCM in CD8+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
-      mk("CD8_TEM", "CD62L", "CD44", "CD8", "CD8 TEM in CD8+ (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
-      mk("CD8_effector", "GZMB", "Perforin", "CD8", "CD8 effector in CD8+ (%)"),
-      mk("CD8_exhausted", "LAG-3", "TIM-3", "CD8", "CD8 exhausted in CD8+ (%)")
+      mk("CD8_TEM", "CD62L", "CD44", "CD8", "CD8 TEM in CD8+ (%)", gate = "half_x", x_hi = FALSE),
+      mk("CD8_effector", "GZMB", "Perforin", "CD8", "CD8 effector in CD8+ (%)", gate = "hi_hi"),
+      mk("CD8_exhausted", "LAG-3", "TIM-3", "CD8", "CD8 exhausted in CD8+ (%)", gate = "hi_hi")
     ))
   }
   if (identical(panel_id, "P2")) {
     return(list(
       mk("Naive_B", "IgD", "CD27", "all", "Naive B (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
-      mk("Atypical_B", "IgM", "IgD", "Naive_B", "Atypical B in naive (%)"),
+      mk("Atypical_B", "IgM", "IgD", "Naive_B", "Atypical B in naive (%)", gate = "hi_x", x_hi = TRUE),
       mk("Memory_B", "IgD", "CD27", "all", "Memory B (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
-      mk("IgM_memory", "IgM", "IgD", "Memory_B", "IgM memory in memory B (%)"),
-      mk("Switched_B", "IgG", "IgD", "Memory_B", "Switched B in memory B (%)"),
-      mk("Activated_B", "CD80", "CD86", "all", "Activated B (%)"),
-      mk("Plasma", "BLIMP-1", "IgD", "Memory_B", "Plasma in memory B (%)")
+      mk("IgM_memory", "IgM", "IgD", "Memory_B", "IgM memory in memory B (%)", gate = "hi_x", x_hi = TRUE),
+      mk("Switched_B", "IgG", "IgD", "Memory_B", "Switched B in memory B (%)", gate = "hi_x", x_hi = TRUE),
+      mk("Activated_B", "CD80", "CD86", "all", "Activated B (%)", gate = "hi_hi"),
+      mk("Plasma", "BLIMP-1", "IgD", "Memory_B", "Plasma in memory B (%)", gate = "hi_x", x_hi = TRUE)
     ))
   }
   list(
@@ -2040,13 +2068,13 @@ subset_plot_specs <- function(panel_id) {
     mk("B", "CD19", "CD3", "all", "B cell (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
     mk("NK", "CD3", "NK1.1", "all", "NK cell (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
     mk("Neutrophil", "LY6G", "LY6C", "Myeloid", "Neutrophil in myeloid (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
-    mk("Eosinophil", "Siglec-F", "LY6G", "Myeloid", "Eosinophil in myeloid (%)"),
-    mk("Basophil_mast", "FceRI", "CD200R3", "Myeloid", "Basophil in myeloid (%)"),
+    mk("Eosinophil", "Siglec-F", "LY6G", "Myeloid", "Eosinophil in myeloid (%)", gate = "hi_x", x_hi = TRUE),
+    mk("Basophil_mast", "FceRI", "CD200R3", "Myeloid", "Basophil in myeloid (%)", gate = "hi_hi"),
     mk("Macrophage", "F4/80", "CD11C", "Myeloid", "Macrophage in myeloid (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
-    mk("M1_like_Mac", "iNOS", "CD206", "Macrophage", "M1-like Mac in macrophages (%)"),
-    mk("M2_like_Mac", "CD206", "ARG-1", "Macrophage", "M2-like Mac in macrophages (%)"),
+    mk("M1_like_Mac", "iNOS", "CD206", "Macrophage", "M1-like Mac in macrophages (%)", gate = "hi_x", x_hi = TRUE),
+    mk("M2_like_Mac", "CD206", "ARG-1", "Macrophage", "M2-like Mac in macrophages (%)", gate = "hi_hi"),
     mk("DC", "CD11C", "F4/80", "Myeloid", "DC in myeloid (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
-    mk("cDC1_CD103", "CD103", "CD11C", "Myeloid", "CD103 DC in myeloid (%)"),
+    mk("cDC1_CD103", "CD103", "CD11C", "Myeloid", "CD103 DC in myeloid (%)", gate = "hi_x", x_hi = TRUE),
     mk("Mono_Ly6Chi", "LY6C", "CD11B", "Myeloid", "Ly6C hi mono in myeloid (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
     mk("Mono_Ly6Clo", "LY6C", "CD11B", "Myeloid", "Ly6C lo mono in myeloid (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE)
   )
@@ -2071,33 +2099,76 @@ subset_sample_percent <- function(cells, spec) {
   do.call(rbind, rows)
 }
 
-gate_rect_from_xy <- function(x, y) {
-  ok <- is.finite(x) & is.finite(y)
-  if (sum(ok) < 8) {
-    return(list(
-      xmin = if (any(ok)) min(x[ok]) else 0, xmax = if (any(ok)) max(x[ok]) else 1,
-      ymin = if (any(ok)) min(y[ok]) else 0, ymax = if (any(ok)) max(y[ok]) else 1,
-      xcut = NA_real_, ycut = NA_real_
-    ))
-  }
+# 完整区域门：铺到坐标轴，不要用命中细胞的 10–90% 分位数小框。
+# x_hi/y_hi: TRUE=阳性侧, FALSE=阴性侧, NA=该轴整段都要（半平面门，如 TEM=CD62L-）。
+complete_gate_rect <- function(xlim, ylim, xcut, ycut, x_hi, y_hi) {
+  xmin <- xlim[1]
+  xmax <- xlim[2]
+  ymin <- ylim[1]
+  ymax <- ylim[2]
+  if (isTRUE(x_hi)) xmin <- xcut
+  if (identical(x_hi, FALSE)) xmax <- xcut
+  if (isTRUE(y_hi)) ymin <- ycut
+  if (identical(y_hi, FALSE)) ymax <- ycut
   list(
-    xmin = as.numeric(stats::quantile(x[ok], 0.10, names = FALSE)),
-    xmax = as.numeric(stats::quantile(x[ok], 0.90, names = FALSE)),
-    ymin = as.numeric(stats::quantile(y[ok], 0.10, names = FALSE)),
-    ymax = as.numeric(stats::quantile(y[ok], 0.90, names = FALSE)),
-    xcut = NA_real_, ycut = NA_real_
+    xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
+    xcut = xcut, ycut = ycut
   )
 }
 
 quad_gate_rect <- function(xlim, ylim, xcut, ycut, x_hi, y_hi) {
-  list(
-    xmin = if (isTRUE(x_hi)) xcut else xlim[1],
-    xmax = if (isTRUE(x_hi)) xlim[2] else xcut,
-    ymin = if (isTRUE(y_hi)) ycut else ylim[1],
-    ymax = if (isTRUE(y_hi)) ylim[2] else ycut,
-    xcut = xcut,
-    ycut = ycut
+  complete_gate_rect(xlim, ylim, xcut, ycut, x_hi, y_hi)
+}
+
+complete_gate_for <- function(x, y, spec, xlim, ylim) {
+  xcut <- axis_pos_cut(x)
+  ycut <- axis_pos_cut(y)
+  kind <- spec$gate
+  x_hi <- spec$x_hi
+  y_hi <- spec$y_hi
+  if (identical(kind, "half_x")) {
+    y_hi <- NA
+    if (length(x_hi) != 1L || is.na(x_hi)) x_hi <- FALSE
+  } else if (identical(kind, "half_y")) {
+    x_hi <- NA
+    if (length(y_hi) != 1L || is.na(y_hi)) y_hi <- TRUE
+  } else if (identical(kind, "hi_x")) {
+    y_hi <- NA
+    if (length(x_hi) != 1L || is.na(x_hi)) x_hi <- TRUE
+  } else if (identical(kind, "hi_y")) {
+    x_hi <- NA
+    if (length(y_hi) != 1L || is.na(y_hi)) y_hi <- TRUE
+  } else if (identical(kind, "hi_hi") || identical(kind, "box") || is.null(kind)) {
+    if (length(x_hi) != 1L || is.na(x_hi)) x_hi <- TRUE
+    if (length(y_hi) != 1L || is.na(y_hi)) y_hi <- TRUE
+  }
+  complete_gate_rect(xlim, ylim, xcut, ycut, x_hi, y_hi)
+}
+
+is_cd62_cd44_spec <- function(spec) {
+  grepl("CD62L", spec$x, ignore.case = TRUE) && grepl("CD44", spec$y, ignore.case = TRUE)
+}
+
+quadrant_pct_labels <- function(x, y, xcut, ycut, xlim, ylim) {
+  ok <- is.finite(x) & is.finite(y)
+  n <- sum(ok)
+  if (!n || !is.finite(xcut) || !is.finite(ycut)) return(NULL)
+  xx <- x[ok]
+  yy <- y[ok]
+  quads <- list(
+    list(lab = "naive", hit = xx >= xcut & yy < ycut, px = (xcut + xlim[2]) / 2, py = (ylim[1] + ycut) / 2),
+    list(lab = "TCM", hit = xx >= xcut & yy >= ycut, px = (xcut + xlim[2]) / 2, py = (ycut + ylim[2]) / 2),
+    list(lab = "TEM", hit = xx < xcut & yy >= ycut, px = (xlim[1] + xcut) / 2, py = (ycut + ylim[2]) / 2),
+    list(lab = "DN", hit = xx < xcut & yy < ycut, px = (xlim[1] + xcut) / 2, py = (ylim[1] + ycut) / 2)
   )
+  rows <- lapply(quads, function(q) {
+    data.frame(
+      x = q$px, y = q$py,
+      label = sprintf("%s\n%.1f%%", q$lab, 100 * mean(q$hit)),
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, rows)
 }
 
 plot_subset_stat_bar <- function(sample_df, ylab, pval) {
@@ -2150,7 +2221,8 @@ plot_subset_stat_bar <- function(sample_df, ylab, pval) {
 }
 
 plot_subset_contour <- function(df, x, y, color, xlab, ylab, pct, gate,
-                                xlim = NULL, ylim = NULL) {
+                                xlim = NULL, ylim = NULL, quad_labs = NULL,
+                                highlight = TRUE) {
   d <- df[is.finite(df[[x]]) & is.finite(df[[y]]), c(x, y), drop = FALSE]
   names(d) <- c("x", "y")
   if (nrow(d) > 4000) {
@@ -2194,16 +2266,27 @@ plot_subset_contour <- function(df, x, y, color, xlab, ylab, pct, gate,
                                y = gate$ycut, yend = gate$ycut,
                                color = color, linewidth = 0.35, linetype = "dashed")
   }
-  p +
-    ggplot2::annotate(
+  if (isTRUE(highlight) && is.finite(gate$xmin) && is.finite(gate$xmax) &&
+      is.finite(gate$ymin) && is.finite(gate$ymax)) {
+    p <- p + ggplot2::annotate(
       "rect", xmin = gate$xmin, xmax = gate$xmax, ymin = gate$ymin, ymax = gate$ymax,
       color = color, fill = NA, linewidth = 0.55
-    ) +
-    ggplot2::annotate(
-      "text", x = gate$xmax, y = gate$ymax,
+    )
+  }
+  if (!is.null(quad_labs) && nrow(quad_labs)) {
+    p <- p + ggplot2::geom_text(
+      data = quad_labs, ggplot2::aes(x = x, y = y, label = label),
+      inherit.aes = FALSE, color = color, fontface = "bold", size = 2.7, lineheight = 0.92
+    )
+  } else if (is.finite(pct)) {
+    p <- p + ggplot2::annotate(
+      "text", x = if (is.finite(gate$xmax)) gate$xmax else xlim[2],
+      y = if (is.finite(gate$ymax)) gate$ymax else ylim[2],
       label = sprintf("%.2f%%", pct), hjust = 1.08, vjust = -0.35,
       color = color, fontface = "bold", size = 3.4
-    ) +
+    )
+  }
+  p +
     ggplot2::coord_cartesian(xlim = xlim, ylim = ylim, expand = FALSE, clip = "off") +
     ggplot2::theme_classic(base_size = 11) +
     ggplot2::theme(
@@ -2268,16 +2351,11 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
     d_ctrl <- cells[par & as.character(cells$group) == flow_ctrl_group, , drop = FALSE]
     d_trt <- cells[par & as.character(cells$group) == flow_trt_group, , drop = FALSE]
     if (nrow(d_ctrl) < 8 || nrow(d_trt) < 8) next
-    xy_hit <- cells[par & hit, , drop = FALSE]
     xlim <- finite_axis_lim(c(d_ctrl[[spec$x]], d_trt[[spec$x]]))
     ylim <- finite_axis_lim(c(d_ctrl[[spec$y]], d_trt[[spec$y]]))
-    if (identical(spec$gate, "quad") && length(spec$x_hi) && !is.na(spec$x_hi)) {
-      xcut <- axis_pos_cut(c(d_ctrl[[spec$x]], d_trt[[spec$x]]))
-      ycut <- axis_pos_cut(c(d_ctrl[[spec$y]], d_trt[[spec$y]]))
-      gate <- quad_gate_rect(xlim, ylim, xcut, ycut, spec$x_hi, spec$y_hi)
-    } else {
-      gate <- gate_rect_from_xy(xy_hit[[spec$x]], xy_hit[[spec$y]])
-    }
+    # EV、H 各自用本组细胞切完整门，不要六个样品共用一条线，也不要框命中细胞的分位数小盒
+    gate_ctrl <- complete_gate_for(d_ctrl[[spec$x]], d_ctrl[[spec$y]], spec, xlim, ylim)
+    gate_trt <- complete_gate_for(d_trt[[spec$x]], d_trt[[spec$y]], spec, xlim, ylim)
     xlab <- axis_fl_label(panel_id, spec$x)
     yfl <- axis_fl_label(panel_id, spec$y)
     pct_of <- function(g) {
@@ -2289,10 +2367,34 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
     col_trt <- unname(pal_group[flow_trt_group])
     if (is.na(col_ctrl)) col_ctrl <- "#1A1A1A"
     if (is.na(col_trt)) col_trt <- "#E31A1C"
-    xlim <- finite_axis_lim(c(d_ctrl[[spec$x]], d_trt[[spec$x]], gate$xmin, gate$xmax, gate$xcut))
-    ylim <- finite_axis_lim(c(d_ctrl[[spec$y]], d_trt[[spec$y]], gate$ymin, gate$ymax, gate$ycut))
-    c_ctrl <- plot_subset_contour(d_ctrl, spec$x, spec$y, col_ctrl, xlab, yfl, pct_of(flow_ctrl_group), gate, xlim, ylim)
-    c_trt <- plot_subset_contour(d_trt, spec$x, spec$y, col_trt, xlab, yfl, pct_of(flow_trt_group), gate, xlim, ylim)
+    xlim <- finite_axis_lim(c(
+      d_ctrl[[spec$x]], d_trt[[spec$x]],
+      gate_ctrl$xmin, gate_ctrl$xmax, gate_ctrl$xcut,
+      gate_trt$xmin, gate_trt$xmax, gate_trt$xcut
+    ))
+    ylim <- finite_axis_lim(c(
+      d_ctrl[[spec$y]], d_trt[[spec$y]],
+      gate_ctrl$ymin, gate_ctrl$ymax, gate_ctrl$ycut,
+      gate_trt$ymin, gate_trt$ymax, gate_trt$ycut
+    ))
+    labs_ctrl <- if (is_cd62_cd44_spec(spec)) {
+      quadrant_pct_labels(d_ctrl[[spec$x]], d_ctrl[[spec$y]], gate_ctrl$xcut, gate_ctrl$ycut, xlim, ylim)
+    } else {
+      NULL
+    }
+    labs_trt <- if (is_cd62_cd44_spec(spec)) {
+      quadrant_pct_labels(d_trt[[spec$x]], d_trt[[spec$y]], gate_trt$xcut, gate_trt$ycut, xlim, ylim)
+    } else {
+      NULL
+    }
+    c_ctrl <- plot_subset_contour(
+      d_ctrl, spec$x, spec$y, col_ctrl, xlab, yfl, pct_of(flow_ctrl_group),
+      gate_ctrl, xlim, ylim, labs_ctrl
+    )
+    c_trt <- plot_subset_contour(
+      d_trt, spec$x, spec$y, col_trt, xlab, yfl, pct_of(flow_trt_group),
+      gate_trt, xlim, ylim, labs_trt
+    )
     stub <- paste0(panel_id, "_", gsub("[^A-Za-z0-9]+", "_", spec$lineage), "_H_vs_EV")
     save_subset_figure(bar, c_ctrl, c_trt, file.path(sub_dir, stub))
     utils::write.csv(samp, file.path(sub_dir, paste0(stub, "_by_sample.csv")), row.names = FALSE)
@@ -2319,6 +2421,90 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
     utils::write.csv(st, file.path(sub_dir, paste0(panel_id, "_subset_H_vs_EV_stats.csv")), row.names = FALSE)
   }
   log_msg(panel_id, " subset stat+contour figures: ", sub_dir)
+  invisible(TRUE)
+}
+
+save_gating_plot <- function(plot, path_stub, width = 4.6, height = 4.4) {
+  dir.create(dirname(path_stub), recursive = TRUE, showWarnings = FALSE)
+  tryCatch({
+    grDevices::pdf(paste0(path_stub, ".pdf"), width = width, height = height)
+    print(plot)
+    grDevices::dev.off()
+  }, error = function(e) log_msg("gating pdf failed: ", e$message))
+  tryCatch({
+    grDevices::png(paste0(path_stub, ".png"), width = width, height = height, units = "in", res = 300)
+    print(plot)
+    grDevices::dev.off()
+  }, error = function(e) log_msg("gating png failed: ", e$message))
+}
+
+# 每个 FCS 单独出完整 2D 门：十字线铺满坐标轴，CD62L/CD44 标四个象限，不要 10–90% 小框
+export_per_sample_gating_figures <- function(cells, panel_id, out_dir) {
+  specs <- subset_plot_specs(panel_id)
+  key <- vapply(specs, function(s) paste(s$parent, s$x, s$y, sep = "\t"), character(1))
+  views <- specs[!duplicated(key)]
+  gate_dir <- file.path(out_dir, "gating")
+  dir.create(gate_dir, recursive = TRUE, showWarnings = FALSE)
+  smp <- unique(as.character(cells$sample))
+  cut_rows <- list()
+  for (s in smp) {
+    keep_s <- as.character(cells$sample) == s
+    grp <- as.character(cells$group[keep_s][1])
+    col <- unname(pal_group[grp])
+    if (is.na(col) || !nzchar(col)) col <- if (identical(grp, flow_trt_group)) "#E31A1C" else "#1A1A1A"
+    s_dir <- file.path(gate_dir, s)
+    dir.create(s_dir, recursive = TRUE, showWarnings = FALSE)
+    for (spec in views) {
+      if (!all(c(spec$x, spec$y) %in% names(cells))) next
+      par <- parent_mask(cells, spec$parent)
+      par[is.na(par)] <- FALSE
+      d <- cells[keep_s & par, , drop = FALSE]
+      if (nrow(d) < 20) next
+      xlim <- finite_axis_lim(d[[spec$x]])
+      ylim <- finite_axis_lim(d[[spec$y]])
+      gate <- complete_gate_for(d[[spec$x]], d[[spec$y]], spec, xlim, ylim)
+      xlim <- finite_axis_lim(c(d[[spec$x]], gate$xmin, gate$xmax, gate$xcut))
+      ylim <- finite_axis_lim(c(d[[spec$y]], gate$ymin, gate$ymax, gate$ycut))
+      gate <- complete_gate_for(d[[spec$x]], d[[spec$y]], spec, xlim, ylim)
+      qlabs <- quadrant_pct_labels(d[[spec$x]], d[[spec$y]], gate$xcut, gate$ycut, xlim, ylim)
+      show_quads <- is_cd62_cd44_spec(spec) || identical(spec$gate, "quad")
+      xlab <- axis_fl_label(panel_id, spec$x)
+      ylab <- axis_fl_label(panel_id, spec$y)
+      pct <- if (isTRUE(spec$use_major) && "cluster_lineage" %in% names(d)) {
+        100 * mean(as.character(d$cluster_lineage) == spec$lineage, na.rm = TRUE)
+      } else if ("lineage" %in% names(d)) {
+        100 * mean(as.character(d$lineage) == spec$lineage, na.rm = TRUE)
+      } else {
+        NA_real_
+      }
+      p <- plot_subset_contour(
+        d, spec$x, spec$y, col, xlab, ylab, pct, gate, xlim, ylim,
+        quad_labs = if (show_quads) qlabs else NULL,
+        highlight = !show_quads
+      )
+      stub <- paste0(
+        panel_id, "_", s, "_",
+        gsub("[^A-Za-z0-9]+", "_", paste(spec$parent, spec$x, spec$y, sep = "_"))
+      )
+      save_gating_plot(p, file.path(s_dir, stub))
+      cut_rows[[length(cut_rows) + 1]] <- data.frame(
+        panel = panel_id, sample = s, group = grp,
+        parent = spec$parent, marker_x = spec$x, marker_y = spec$y,
+        xcut = gate$xcut, ycut = gate$ycut,
+        xmin = gate$xmin, xmax = gate$xmax, ymin = gate$ymin, ymax = gate$ymax,
+        n_parent = nrow(d),
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  if (length(cut_rows)) {
+    utils::write.csv(
+      do.call(rbind, cut_rows),
+      file.path(gate_dir, paste0(panel_id, "_per_sample_gate_cuts.csv")),
+      row.names = FALSE
+    )
+  }
+  log_msg(panel_id, " per-sample complete gates: ", gate_dir)
   invisible(TRUE)
 }
 
@@ -2412,6 +2598,10 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
   tryCatch(
     export_subset_gate_figures(cells, panel_id, out_dir),
     error = function(e) log_msg(panel_id, " subset stat+contour figures failed: ", e$message)
+  )
+  tryCatch(
+    export_per_sample_gating_figures(cells, panel_id, out_dir),
+    error = function(e) log_msg(panel_id, " per-sample gating figures failed: ", e$message)
   )
   invisible(TRUE)
 }
