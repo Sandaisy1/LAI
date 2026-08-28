@@ -11,7 +11,7 @@
 # 状态连续体，不是发育起源的证明。
 #
 # 用法：
-#   setwd("E:/R/flow J")
+#   setwd("E:/R/flow J-LJY WJZ ZZX")
 #   source("Flow_dimred_pipeline.R")       # 降维后自动调用
 #   source("Flow_dimred_trajectory.R")     # 只重出轨迹
 #

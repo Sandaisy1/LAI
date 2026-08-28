@@ -56,11 +56,26 @@ def main() -> int:
     if parse_fcs_filename("T-1_P1_unmixed.fcs")["group"] == "T6":
         errors.append("T-1 must stay group T")
 
+    if data.get("data_dir") is None or "flow J-LJY WJZ ZZX" not in str(data.get("data_dir")):
+        errors.append("data_dir should be E:/R/flow J-LJY WJZ ZZX")
     if "AF700" not in data["fluorochrome_aliases"]["R718"]:
-        errors.append("R718 aliases must include AF700 (Panel 1 NK1.1 naming)")
+        errors.append("R718 aliases must include AF700 (same ~700 nm channel)")
+    if "AF700" not in data["fluorochrome_aliases"]:
+        errors.append("fluorochrome_aliases must have AF700 so Panel 1 NK1.1 matches AF700-A")
+    elif "R718" not in data["fluorochrome_aliases"]["AF700"]:
+        errors.append("AF700 aliases must include R718 so older Cytek R718-A still matches")
+    p1_nk = next(m["fluorochrome"] for m in data["panels"]["P1"]["markers"] if m["marker"] == "NK1.1")
+    if p1_nk != "AF700":
+        errors.append(f"P1 NK1.1 should be AF700 (new sheet), got {p1_nk}")
+    p3_nk = next(m["fluorochrome"] for m in data["panels"]["P3"]["markers"] if m["marker"] == "NK1.1")
+    if p3_nk != "R718":
+        errors.append(f"P3 NK1.1 stays R718, got {p3_nk}")
     p2_cd80 = next(m["fluorochrome"] for m in data["panels"]["P2"]["markers"] if m["marker"] == "CD80")
     if p2_cd80 != "APC":
         errors.append(f"P2 CD80 should be APC (new sheet), got {p2_cd80}")
+    p3_cd80 = next(m["fluorochrome"] for m in data["panels"]["P3"]["markers"] if m["marker"] == "CD80")
+    if p3_cd80 != "BUV496":
+        errors.append(f"P3 CD80 stays BUV496, got {p3_cd80}")
     p1_tnf = next(m["fluorochrome"] for m in data["panels"]["P1"]["markers"] if m["marker"] == "TNF-a")
     if p1_tnf != "APC":
         errors.append("P1 TNF-a stays APC; P2 CD80 APC is a different tube")

@@ -32,6 +32,13 @@ expect(map$channel[map$marker == "CD8b"], "BV711-A", "CD8b<-BV711-A")
 expect(map$channel[map$marker == "NKp46"], "PE-A", "NKp46<-PE-A")
 expect(map$channel[map$marker == "CD11B"], "APC-Cy7-A", "CD11B<-APC-Cy7-A")
 expect(map$channel[map$marker == "L/D"], "FVS450-A", "LD<-FVS450-A")
+expect(map$channel[map$marker == "NK1.1"], "R718-A", "P1 NK1.1<-R718-A")
+
+# 新表 P1 NK1.1 写 AF700，与 R718 同一 ~700 nm 通道
+cytek_p1_af700 <- cytek_p1
+cytek_p1_af700[cytek_p1_af700 == "R718-A"] <- "AF700-A"
+map_af <- match_channels(cytek_p1_af700, desc_blank, "P1")
+expect(map_af$channel[map_af$marker == "NK1.1"], "AF700-A", "P1 NK1.1<-AF700-A")
 
 # 标志物写在 name 里、荧光素写在 desc
 map2 <- match_channels(
@@ -72,5 +79,14 @@ if (!is.na(map_p2$channel[map_p2$marker == "CD80"]) &&
     identical(map_p2$channel[map_p2$marker == "CD80"], "BUV496-A")) {
   fail("P2 CD80 must not still match BUV496")
 }
+
+# P3 配色不变：CD80 仍是 BUV496，NK1.1 仍是 R718
+cytek_p3 <- c(
+  "FSC-A", "SSC-A", "FVS450-A", "V500-A", "BUV805-A", "RB705-A", "RB670-A",
+  "BUV496-A", "APC-Cy7-A", "BV750-A", "R718-A", "BUV737-A", "BV605-A"
+)
+map_p3 <- match_channels(cytek_p3, rep("", length(cytek_p3)), "P3")
+expect(map_p3$channel[map_p3$marker == "CD80"], "BUV496-A", "P3 CD80 stays BUV496-A")
+expect(map_p3$channel[map_p3$marker == "NK1.1"], "R718-A", "P3 NK1.1 stays R718-A")
 
 cat("OK: Cytek channel matching\n")

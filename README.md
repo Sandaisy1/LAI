@@ -78,10 +78,10 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 
 ## 流式降维（T6 vs T，P1 / P2 / P3）
 
-小鼠流式在 `E:/R/flow J`，只用 `*_unmixed.fcs`。三个 panel **分开**做 UMAP/tSNE，比较 T（T-1/2/3）与 T6（T6-1/2/3）。
+小鼠流式在 `E:/R/flow J-LJY WJZ ZZX`，只用 `*_unmixed.fcs`。三个 panel **分开**做 UMAP/tSNE，比较 T（T-1/2/3）与 T6（T6-1/2/3）。
 
 ```r
-setwd("E:/R/flow J")
+setwd("E:/R/flow J-LJY WJZ ZZX")
 # 把 Flow_dimred_pipeline.R、Flow_dimred_all_subsets.R、Flow_dimred_trajectory.R 与 flow_panel_map.json 放在该目录（或仓库根）
 source("Flow_dimred_pipeline.R")
 ```

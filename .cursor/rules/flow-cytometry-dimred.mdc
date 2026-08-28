@@ -10,7 +10,7 @@ alwaysApply: false
 
 ## 数据
 
-- 目录：`E:/R/flow J`（脚本与结果同目录；缺失则回退仓库根 / `flow_J`）
+- 目录：`E:/R/flow J-LJY WJZ ZZX`（脚本与结果同目录；缺失则回退 `E:/R/flow J` / 仓库根 / `flow_J`）
 - 只用 `*_unmixed.fcs`，不要拿 raw 做降维
 - 文件名：`{T|T6}-{1|2|3}_P{1|2|3}_unmixed.fcs`；**先匹配 T6 再匹配 T**，禁止把 `T6-1` 当成 T
 - 六个样品独立保留：`T-1` `T-2` `T-3` `T6-1` `T6-2` `T6-3`

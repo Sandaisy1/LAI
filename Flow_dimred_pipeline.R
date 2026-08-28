@@ -1,11 +1,11 @@
 #!/usr/bin/env Rscript
 # =============================================================================
 # 流式降维：T6 vs T（P1 T/NK，P2 B，P3 髓系）
-# 输入：E:/R/flow J 下的 *_unmixed.fcs（不要用 raw）
+# 输入：E:/R/flow J-LJY WJZ ZZX 下的 *_unmixed.fcs（不要用 raw）
 # 每个 panel 单独联合 UMAP/tSNE，导出 PDF+PNG，并比较 T6 vs T 细胞频率
 #
 # 用法：
-#   setwd("E:/R/flow J")
+#   setwd("E:/R/flow J-LJY WJZ ZZX")
 #   source("Flow_dimred_pipeline.R")
 # 三个 panel 跑完后会自动汇总全亚群频率，并按大类画轨迹：
 #   source("Flow_dimred_all_subsets.R")   # 也可单独重出 results_flow/all_subsets/
@@ -103,14 +103,29 @@ get_script_dir <- function() {
 
 script_dir <- get_script_dir()
 
+# 读写目录：新数据夹优先；旧 E:/R/flow J 仅作回退
+flow_primary_data_dir <- "E:/R/flow J-LJY WJZ ZZX"
+flow_legacy_data_dir <- "E:/R/flow J"
+
 resolve_flow_dir <- function() {
   env_dir <- Sys.getenv("FLOW_DIR", unset = "")
-  candidates <- c(
+  preferred <- c(
     env_dir,
-    "E:/R/flow J",
+    flow_primary_data_dir,
+    "E:\\R\\flow J-LJY WJZ ZZX"
+  )
+  preferred <- unique(preferred[nzchar(preferred)])
+  for (d in preferred) {
+    if (dir.exists(d)) {
+      return(normalizePath(d, winslash = "/", mustWork = FALSE))
+    }
+  }
+  candidates <- c(
+    flow_legacy_data_dir,
     "E:\\R\\flow J",
     file.path(script_dir, "flow_J"),
     file.path(script_dir, "flow J"),
+    file.path(script_dir, "flow J-LJY WJZ ZZX"),
     script_dir,
     getwd()
   )
@@ -122,8 +137,8 @@ resolve_flow_dir <- function() {
       return(normalizePath(d, winslash = "/", mustWork = FALSE))
     }
   }
-  if (dir.exists("E:/R/flow J")) {
-    return(normalizePath("E:/R/flow J", winslash = "/", mustWork = FALSE))
+  if (dir.exists(flow_legacy_data_dir)) {
+    return(normalizePath(flow_legacy_data_dir, winslash = "/", mustWork = FALSE))
   }
   normalizePath(script_dir, winslash = "/", mustWork = FALSE)
 }
@@ -194,7 +209,9 @@ panel_map_search_dirs <- function() {
     getwd(),
     script_dir,
     project_dir,
-    "E:/R/flow J",
+    flow_primary_data_dir,
+    "E:\\R\\flow J-LJY WJZ ZZX",
+    flow_legacy_data_dir,
     "E:\\R\\flow J",
     Sys.getenv("FLOW_DIR", unset = "")
   )
@@ -1883,7 +1900,7 @@ if (nrow(file_tab) == 0) {
     use_demo <- TRUE
   } else {
     log_msg("No *_unmixed.fcs in ", project_dir)
-    log_msg("Put T/T6 P1-P3 unmixed files in E:/R/flow J, or set FLOW_DEMO=1 to export demo plots")
+    log_msg("Put T/T6 P1-P3 unmixed files in ", flow_primary_data_dir, ", or set FLOW_DEMO=1 to export demo plots")
     use_demo <- TRUE
     log_msg("Auto-fallback to DEMO so the script can still export figure templates")
   }
