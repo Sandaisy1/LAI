@@ -1529,22 +1529,162 @@ theme_split_dr <- function() {
     )
 }
 
-# 主图：左 EV、右 H；颜色=细亚群；不要虚线
-plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title) {
+plot_feature_cols <- function(df) {
+  meta <- c("sample", "group", "cluster", "cluster_lineage", "lineage", "true_lineage",
+            "UMAP1", "UMAP2", "tSNE1", "tSNE2", "sep1", "sep2", "major_plot")
+  num <- names(df)[vapply(df, is.numeric, logical(1))]
+  setdiff(num, meta)
+}
+
+plot_major_id <- function(df, panel_id) {
+  n <- nrow(df)
+  if ("cluster_lineage" %in% names(df)) {
+    maj <- as.character(df$cluster_lineage)
+  } else {
+    maj <- as.character(df$lineage)
+  }
+  maj[is.na(maj) | !nzchar(maj)] <- "other"
+  if (identical(panel_id, "P1")) {
+    maj[maj %in% c("T")] <- "CD4"
+  }
+  maj
+}
+
+scale_xy_unit <- function(xy) {
+  xy <- as.matrix(xy)
+  if (ncol(xy) < 2) stop("need 2 columns")
+  xy[!is.finite(xy)] <- 0
+  for (j in 1:2) {
+    r <- range(xy[, j], na.rm = TRUE)
+    if (!is.finite(diff(r)) || diff(r) < 1e-8) {
+      xy[, j] <- 0.5
+    } else {
+      xy[, j] <- (xy[, j] - r[1]) / diff(r)
+    }
+  }
+  xy
+}
+
+local_major_xy <- function(sub, x_col, y_col) {
+  feat <- plot_feature_cols(sub)
+  if (length(feat) >= 2 && nrow(sub) >= 8) {
+    mat <- as.matrix(sub[, feat, drop = FALSE])
+    mat[!is.finite(mat)] <- 0
+    pr <- tryCatch(stats::prcomp(mat, center = TRUE, scale. = TRUE), error = function(e) NULL)
+    if (is.null(pr)) {
+      pr <- tryCatch(stats::prcomp(mat, center = TRUE, scale. = FALSE), error = function(e) NULL)
+    }
+    if (!is.null(pr) && ncol(pr$x) >= 2) {
+      return(scale_xy_unit(pr$x[, 1:2, drop = FALSE]))
+    }
+  }
+  if (all(c(x_col, y_col) %in% names(sub))) {
+    return(scale_xy_unit(as.matrix(sub[, c(x_col, y_col)])))
+  }
+  cbind(rep(0.5, nrow(sub)), rep(0.5, nrow(sub)))
+}
+
+# 绘图分区：各大类各占一块，块内用该类自己的 PCA。不改门控、不改联合 UMAP。
+separate_major_plot_coords <- function(df, panel_id, x_col = "UMAP1", y_col = "UMAP2") {
+  n <- nrow(df)
+  out1 <- rep(NA_real_, n)
+  out2 <- rep(NA_real_, n)
+  boxes <- data.frame(major = character(0), xmin = numeric(0), xmax = numeric(0),
+                      ymin = numeric(0), ymax = numeric(0),
+                      labx = numeric(0), laby = numeric(0), stringsAsFactors = FALSE)
+  maj <- plot_major_id(df, panel_id)
+  maj[maj %in% c("dump", "")] <- "other"
+  prefer <- c("CD4", "CD8", "NK", "NKT", "Naive_B", "Memory_B", "B", "Myeloid", "T")
+  majors <- unique(maj)
+  n_other <- sum(maj %in% c("other", "dump", ""))
+  majors <- majors[!majors %in% c("other", "dump", "")]
+  majors <- c(intersect(prefer, majors), setdiff(majors, prefer))
+  if (n_other >= 20L) majors <- c(majors, "other")
+  if (!length(majors)) {
+    return(list(sep1 = as.numeric(df[[x_col]]), sep2 = as.numeric(df[[y_col]]), boxes = boxes, major = maj))
+  }
+  ncol <- if (length(majors) <= 2) length(majors) else if (length(majors) <= 4) 2L else 3L
+  nrow_g <- as.integer(ceiling(length(majors) / ncol))
+  gap <- 1.22
+  for (i in seq_along(majors)) {
+    m <- majors[i]
+    hit <- which(maj == m)
+    if (!length(hit)) next
+    xy <- local_major_xy(df[hit, , drop = FALSE], x_col, y_col)
+    col <- (i - 1L) %% ncol
+    row <- (i - 1L) %/% ncol
+    gx <- col * gap
+    gy <- (nrow_g - 1L - row) * gap
+    out1[hit] <- gx + xy[, 1] * 0.92
+    out2[hit] <- gy + xy[, 2] * 0.92
+    boxes <- rbind(boxes, data.frame(
+      major = m, xmin = gx - 0.04, xmax = gx + 0.96, ymin = gy - 0.04, ymax = gy + 0.96,
+      labx = gx + 0.46, laby = gy + 1.02, stringsAsFactors = FALSE
+    ))
+  }
+  leftover <- which(!is.finite(out1) | !is.finite(out2))
+  if (length(leftover)) {
+    out1[leftover] <- NA_real_
+    out2[leftover] <- NA_real_
+  }
+  list(sep1 = out1, sep2 = out2, boxes = boxes, major = maj)
+}
+
+# 主图：左 EV、右 H；颜色=细亚群；按大类分区，不要虚线凸包
+plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title, separate_majors = TRUE) {
   plot_df <- df
   plot_df$group <- factor(plot_df$group, levels = flow_group_levels)
   plot_df$celltype <- celltype_label(plot_df$lineage, panel_id)
   levs <- unique(plot_df$celltype)
   plot_df$celltype <- factor(plot_df$celltype, levels = levs)
   pal <- celltype_colors(levels(plot_df$celltype))
-  ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype)) +
-    ggplot2::geom_point(size = 0.45, alpha = 0.85, stroke = 0) +
+  boxes <- NULL
+  x_use <- x
+  y_use <- y
+  xlab_use <- xlab
+  ylab_use <- ylab
+  if (isTRUE(separate_majors)) {
+    lay <- separate_major_plot_coords(plot_df, panel_id, x, y)
+    plot_df$sep1 <- lay$sep1
+    plot_df$sep2 <- lay$sep2
+    x_use <- "sep1"
+    y_use <- "sep2"
+    xlab_use <- NULL
+    ylab_use <- NULL
+    boxes <- lay$boxes
+    if (nrow(boxes)) {
+      boxes$lab <- celltype_label(boxes$major, panel_id)
+    }
+  }
+  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x_use]], y = .data[[y_use]], color = celltype))
+  if (!is.null(boxes) && nrow(boxes)) {
+    p <- p + ggplot2::geom_rect(
+      data = boxes,
+      ggplot2::aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+      inherit.aes = FALSE, fill = NA, color = "grey80", linewidth = 0.35
+    )
+  }
+  p <- p +
+    ggplot2::geom_point(size = 0.42, alpha = 0.88, stroke = 0) +
     ggplot2::facet_wrap(~group, ncol = 2) +
-    ggplot2::coord_equal() +
     ggplot2::scale_color_manual(values = pal, drop = FALSE) +
     ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(size = 3.2, alpha = 1))) +
-    ggplot2::labs(title = title, x = xlab, y = ylab, color = NULL) +
-    theme_split_dr()
+    ggplot2::labs(title = title, x = xlab_use, y = ylab_use, color = NULL)
+  if (!is.null(boxes) && nrow(boxes)) {
+    p <- p + ggplot2::geom_text(
+      data = boxes, ggplot2::aes(x = labx, y = laby, label = lab),
+      inherit.aes = FALSE, color = "grey25", fontface = "bold", size = 3.3, vjust = 0
+    )
+  }
+  p +
+    ggplot2::coord_equal(clip = "off") +
+    theme_split_dr() +
+    ggplot2::theme(
+      axis.text = ggplot2::element_blank(),
+      axis.ticks = ggplot2::element_blank(),
+      axis.line = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(8, 8, 8, 8)
+    )
 }
 
 plot_embedding <- function(df, x, y, color_col, title, point_size = 0.35) {
@@ -2089,11 +2229,17 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
   save_gg(
     plot_split_lineage(cells, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2", split_ttl),
     file.path(out_dir, paste0(panel_id, "_H_vs_EV_tSNE_lineage_split")),
-    width = 12.4, height = 5.6
+    width = 12.8, height = 8.2
   )
   save_gg(
     plot_split_lineage(cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2", split_ttl),
     file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split")),
+    width = 12.8, height = 8.2
+  )
+  save_gg(
+    plot_split_lineage(cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
+                       paste0(split_ttl, "  (joint UMAP)"), separate_majors = FALSE),
+    file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split_joint")),
     width = 12.4, height = 5.6
   )
 

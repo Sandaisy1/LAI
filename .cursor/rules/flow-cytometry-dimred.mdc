@@ -34,7 +34,7 @@ alwaysApply: false
 
 比较只有 **H vs EV**（三 vs 三）。联合 UMAP/tSNE，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
 
-每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 EV、右 H，点按**细亚群**着色，不要虚线凸包。主图 `*_H_vs_EV_tSNE_lineage_split`。
+每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 EV、右 H，点按**细亚群**着色，不要虚线凸包。主图 `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split` **按大类分区**（CD4、CD8、NK… 各一块，块内用该类 PCA），避免所有 T 亚群叠在联合 UMAP 的同一团里。联合 UMAP 仍出 `*_UMAP_by_lineage` 和 `*_lineage_split_joint`，不要为了好看去改门控或按标签重训 UMAP。
 
 **每个亚群**还要出一组论文风格图（`subset_stats/`）：上方 EV（黑）vs H（红）柱状图（均值、**SD** 误差棒、每个重复的白心点、显著性 `ns/*/**/*** `；ns 时标出 P 值）。n=3 时柱高看起来不同也会 ns，不要为了出星号改检验。下方 2D 图按 FlowJo：**概率等高线 + 最外圈以外的 outliers**，EV/H 共用坐标轴、同一门框和百分数。不要只用 ggplot `stat_density_2d(ndensity)`（那是峰值等高线，看起来不像文章里的流式图）。
 

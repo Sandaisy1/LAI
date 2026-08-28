@@ -92,7 +92,7 @@ source("Flow_dimred_pipeline.R")
 
 每个 panel 的图在 `results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
 
-- `*_H_vs_EV_tSNE_lineage_split`：**主图**，左 EV、右 H。P1/P2/P3 都是先圈大类再分亚群；无虚线；共用 P1 配色
+- `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split`：**主图**，左 EV、右 H，按大类分区（CD4/CD8/NK 各一块），点按细亚群着色；无虚线；共用 P1 配色。原来叠在一起的联合 UMAP 在 `*_lineage_split_joint` 和 `*_UMAP_by_lineage`
 - `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图（均值、SD 误差棒、各重复的白心点；ns 时标 P 值），下为 FlowJo 风格 2D 图（概率等高线 + outliers + 门框 + 百分数）

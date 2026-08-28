@@ -88,4 +88,25 @@ need8 <- c("CD8_effector", "CD8_naive", "CD8_TEM")
 miss8 <- setdiff(need8, cd8_labs)
 if (length(miss8)) fail(sprintf("CD8 missing %s (got %s)", paste(miss8, collapse = ","), paste(cd8_labs, collapse = ",")))
 
+set.seed(4)
+n <- 80
+df_mix <- data.frame(
+  group = rep(c("EV", "H"), each = n),
+  cluster_lineage = rep(rep(c("CD4", "NK"), each = n / 2), 2),
+  lineage = rep(rep(c("CD4_naive", "NK"), each = n / 2), 2),
+  UMAP1 = c(rnorm(n, 0, 0.2), rnorm(n, 0.05, 0.2)),
+  UMAP2 = c(rnorm(n, 0, 0.2), rnorm(n, 0.05, 0.2)),
+  CD3 = c(rnorm(n / 2, 3, 0.1), rnorm(n / 2, 0.2, 0.1), rnorm(n / 2, 3, 0.1), rnorm(n / 2, 0.2, 0.1)),
+  `NK1.1` = c(rnorm(n / 2, 0.2, 0.1), rnorm(n / 2, 3, 0.1), rnorm(n / 2, 0.2, 0.1), rnorm(n / 2, 3, 0.1)),
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+lay <- separate_major_plot_coords(df_mix, "P1")
+if (abs(mean(lay$sep1[df_mix$cluster_lineage == "CD4"], na.rm = TRUE) -
+        mean(lay$sep1[df_mix$cluster_lineage == "NK"], na.rm = TRUE)) < 0.4) {
+  fail("CD4 and NK should occupy different plot regions even if joint UMAP overlaps")
+}
+p_sep <- plot_split_lineage(df_mix, "UMAP1", "UMAP2", "P1", "UMAP-1", "UMAP-2", "sep")
+if (!("sep1" %in% names(p_sep$data))) fail("split plot should use separated coordinates")
+
 cat("OK: P1 T/NK subset labels\n")
