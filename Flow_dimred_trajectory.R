@@ -126,24 +126,29 @@ mst_edges_from_points <- function(xy) {
   in_tree <- rep(FALSE, n)
   in_tree[1] <- TRUE
   edges <- matrix(NA_integer_, n - 1L, 2L)
+  n_e <- 0L
   for (e in seq_len(n - 1L)) {
     best <- Inf
     a <- b <- NA_integer_
     ii <- which(in_tree)
     jj <- which(!in_tree)
+    if (!length(jj)) break
     for (i in ii) {
       for (j in jj) {
-        if (d[i, j] < best) {
+        if (is.finite(d[i, j]) && d[i, j] < best) {
           best <- d[i, j]
           a <- i
           b <- j
         }
       }
     }
+    if (!is.finite(best) || is.na(a) || is.na(b)) break
     in_tree[b] <- TRUE
-    edges[e, ] <- c(a, b)
+    n_e <- n_e + 1L
+    edges[n_e, ] <- c(a, b)
   }
-  edges
+  if (n_e < 1L) return(matrix(integer(0), ncol = 2))
+  edges[seq_len(n_e), , drop = FALSE]
 }
 
 smooth_edge_curve <- function(xy, idx_a, idx_b, nout = 50) {
@@ -235,13 +240,23 @@ fit_lineage_trajectory <- function(xy, cluster, start) {
   if (missing(start) || is.null(start) || !start %in% labs) {
     start <- names(sort(table(cl), decreasing = TRUE))[1]
   }
+  xy[!is.finite(xy)] <- 0
   sl <- try_slingshot_fit(xy, cl, start)
   cents <- t(vapply(labs, function(L) {
-    colMeans(xy[cl == L, , drop = FALSE])
+    colMeans(xy[cl == L, , drop = FALSE], na.rm = TRUE)
   }, numeric(2)))
   rownames(cents) <- labs
+  ok_c <- is.finite(cents[, 1]) & is.finite(cents[, 2])
+  if (sum(ok_c) < 2) return(NULL)
+  if (!all(ok_c)) {
+    labs <- labs[ok_c]
+    cents <- cents[ok_c, , drop = FALSE]
+    if (!start %in% labs) start <- labs[1]
+  }
   edges <- mst_edges_from_points(cents)
-  gp <- graph_parent(edges, nrow(cents), match(start, labs))
+  root_i <- match(start, labs)
+  if (is.na(root_i)) root_i <- 1L
+  gp <- graph_parent(edges, nrow(cents), root_i)
   curves <- list()
   if (is.null(sl)) {
     for (e in seq_len(nrow(edges))) {
@@ -392,10 +407,19 @@ plot_pseudotime_group <- function(df, title) {
 }
 
 export_one_major_trajectory <- function(cells, panel_id, major, out_dir) {
-  sub <- cells[as.character(cells$major) == major, , drop = FALSE]
-  n_lin <- length(unique(sub$lineage))
+  keep <- !is.na(cells$major) & as.character(cells$major) == as.character(major)
+  keep[is.na(keep)] <- FALSE
+  sub <- cells[keep, , drop = FALSE]
+  lin <- as.character(sub$lineage)
+  lin <- lin[!is.na(lin) & nzchar(lin)]
+  n_lin <- length(unique(lin))
   if (nrow(sub) < 80 || n_lin < 2) {
-    log_msg(panel_id, " ", major, ": skip trajectory (n=", nrow(sub), ", subsets=", n_lin, ")")
+    why <- if (n_lin < 2) {
+      "only 1 subset, no tree to draw (NK/NKT are a single population)"
+    } else {
+      "too few cells (need n>=80)"
+    }
+    log_msg(panel_id, " ", major, ": skip trajectory (", why, "; n=", nrow(sub), ", subsets=", n_lin, ")")
     return(invisible(NULL))
   }
   cap <- 4000L
@@ -462,7 +486,7 @@ export_panel_trajectories <- function(result_dir, panel_id) {
     "This is not proof of developmental origin. Neutrophils on the myeloid tree are a branch, not derived from monocytes.",
     paste("Method: slingshot if installed, otherwise MST of subset centroids + smooth curves.")
   ), file.path(out_dir, "TRAJECTORY_NOTE.txt"))
-  majors <- setdiff(unique(cells$major), c("dump", "", NA))
+  majors <- setdiff(unique(as.character(cells$major)), c("dump", "", NA, "other"))
   for (mj in majors) {
     tryCatch(
       export_one_major_trajectory(cells, panel_id, mj, out_dir),

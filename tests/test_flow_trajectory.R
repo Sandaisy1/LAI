@@ -32,6 +32,11 @@ xy <- rbind(
 ed <- mst_edges_from_points(xy[c(1, 41, 81), , drop = FALSE])
 if (nrow(ed) != 2) fail(sprintf("MST should have 2 edges, got %s", nrow(ed)))
 
+d_na <- matrix(c(0, NA, NA, 0), 2, 2)
+ed_na <- tryCatch(mst_edges_from_points(d_na), error = function(e) e)
+if (inherits(ed_na, "error")) fail(sprintf("NA distances crashed MST: %s", ed_na$message))
+if (!is.matrix(ed_na) || nrow(ed_na) != 0) fail("NA distances should yield no MST edges")
+
 set.seed(7)
 blob <- function(n, mx, my) cbind(rnorm(n, mx, 0.22), rnorm(n, my, 0.22))
 xy2 <- rbind(blob(90, 0, 0), blob(90, 3, 0.15), blob(90, 5.8, 1.4))
@@ -91,6 +96,24 @@ utils::write.csv(df3, file.path(td, "P3", "P3_cell_embeddings.csv"), row.names =
 export_panel_trajectories(td, "P3")
 if (file.exists(file.path(td, "P3", "trajectory", "P3_dump_trajectory.pdf"))) {
   fail("dump lineage should not get a trajectory plot")
+}
+
+# NK is one population: skip is expected, not a crash.
+df_nk <- data.frame(
+  sample = rep(c("EV1", "EV2", "EV3", "H1", "H2", "H3"), each = 90),
+  group = rep(c("EV", "EV", "EV", "H", "H", "H"), each = 90),
+  lineage = "NK",
+  UMAP1 = rnorm(540),
+  UMAP2 = rnorm(540),
+  cluster_lineage = "NK",
+  stringsAsFactors = FALSE
+)
+utils::write.csv(df_nk, file.path(td, "P1", "P1_cell_embeddings.csv"), row.names = FALSE)
+skip_msg <- paste(capture.output(export_panel_trajectories(td, "P1")), collapse = "\n")
+if (!grepl("skip trajectory", skip_msg)) fail("NK should log skip trajectory")
+if (!grepl("only 1 subset", skip_msg)) fail("NK skip should say only 1 subset")
+if (file.exists(file.path(td, "P1", "trajectory", "P1_NK_trajectory.pdf"))) {
+  fail("single-subset NK should not write a trajectory tree")
 }
 
 unlink(td, recursive = TRUE)

@@ -101,7 +101,7 @@ source("Flow_dimred_pipeline.R")
 
 三个 panel 的抗体不同，**不能**拼成一张矩阵做联合 UMAP。`Flow_dimred_all_subsets.R` 在各自圈完亚群后，把频率汇总到 `results_flow/all_subsets/`（H vs EV 柱状图、堆叠组成、热图、H−EV 差值）。百分数是该 panel 管子里的比例，P1 的 B/髓系、P3 的 T/B/NK 只是 dump。主流程跑完会自动出这份总览；也可单独 `source("Flow_dimred_all_subsets.R")`。
 
-每个 panel 的每一大类另出细胞轨迹（类似 Monocle 骨架图）：`Flow_dimred_trajectory.R` → `results_flow/P1/trajectory/` 等。P1 画 CD4、CD8；P2 画 B；P3 画髓系。坐标是该类内的 Component 1/2，点按细亚群着色，黑线是分支骨架。根节点按惯例是 naive T/B 或 Ly6C hi 单核。也可单独 `source("Flow_dimred_trajectory.R")`。
+每个 panel 的每一大类另出细胞轨迹（类似 Monocle 骨架图）：`Flow_dimred_trajectory.R` → `results_flow/P1/trajectory/` 等。P1 画 CD4、CD8；P2 画 B；P3 画髓系。坐标是该类内的 Component 1/2，点按细亚群着色，黑线是分支骨架。根节点按惯例是 naive T/B 或 Ly6C hi 单核。也可单独 `source("Flow_dimred_trajectory.R")`。日志里 `skip trajectory (... subsets= 1)` 表示该大类只有一个亚群（常见于 P1 NK/NKT），画不出树，不是分析失败。
 
 无 FCS 时可 `Sys.setenv(FLOW_DEMO = "1")` 导出演示图，不能当正式结果。
 

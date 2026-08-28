@@ -1668,9 +1668,11 @@ parent_mask <- function(cells, parent) {
   if (n < 1) return(logical(0))
   cl <- if ("cluster_lineage" %in% names(cells)) as.character(cells$cluster_lineage) else rep("", n)
   lin <- as.character(cells$lineage)
+  cl[is.na(cl)] <- ""
+  lin[is.na(lin)] <- ""
   cd4 <- cl == "CD4" | grepl("^CD4_", lin) | lin == "Treg"
   cd8 <- cl == "CD8" | grepl("^CD8_", lin)
-  switch(as.character(parent),
+  out <- switch(as.character(parent),
     all = rep(TRUE, n),
     CD3 = cd4 | cd8 | lin %in% c("T", "NKT") | cl %in% c("T", "NKT"),
     CD4 = cd4,
@@ -1684,12 +1686,17 @@ parent_mask <- function(cells, parent) {
     Naive_B = cl == "Naive_B" | lin %in% c("Naive_B", "Atypical_B"),
     rep(TRUE, n)
   )
+  out[is.na(out)] <- FALSE
+  out
 }
 
 subset_hit_mask <- function(cells, spec) {
   lin <- as.character(cells$lineage)
+  lin[is.na(lin)] <- ""
   if (isTRUE(spec$use_major) && "cluster_lineage" %in% names(cells)) {
-    return(as.character(cells$cluster_lineage) == spec$lineage)
+    cl <- as.character(cells$cluster_lineage)
+    cl[is.na(cl)] <- ""
+    return(cl == spec$lineage)
   }
   lin == spec$lineage
 }
@@ -1890,7 +1897,11 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
     if (!all(c(spec$x, spec$y) %in% names(cells))) next
     par <- parent_mask(cells, spec$parent)
     hit <- subset_hit_mask(cells, spec)
-    if (sum(par) < 20 || sum(par & hit) < 8) next
+    par[is.na(par)] <- FALSE
+    hit[is.na(hit)] <- FALSE
+    n_par <- sum(par)
+    n_hit <- sum(par & hit)
+    if (!is.finite(n_par) || !is.finite(n_hit) || n_par < 20 || n_hit < 8) next
     samp <- subset_sample_percent(cells, spec)
     if (is.null(samp) || nrow(samp) < 2) next
     ctrl_v <- samp$percent[as.character(samp$group) == flow_ctrl_group]
@@ -2035,7 +2046,10 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     save_gg(overview, file.path(out_dir, paste0(panel_id, "_H_vs_EV_dimred_overview")),
             width = 16, height = 5.8)
   }
-  export_subset_gate_figures(cells, panel_id, out_dir)
+  tryCatch(
+    export_subset_gate_figures(cells, panel_id, out_dir),
+    error = function(e) log_msg(panel_id, " subset stat+contour figures failed: ", e$message)
+  )
   invisible(TRUE)
 }
 

@@ -16,6 +16,7 @@ alwaysApply: false
 - 六个样品独立保留：`EV1` `EV2` `EV3` `H1` `H2` `H3`
 - 三个 panel **分开分析、分开出图**，禁止把 P1/P2/P3 拼成一张表达矩阵。全亚群总览只汇总各 panel 已圈好的**管内频率**（`Flow_dimred_all_subsets.R` → `results_flow/all_subsets/`），百分数不能跨 panel 加总，也不能拿去再做联合 UMAP
 - 细胞轨迹（`Flow_dimred_trajectory.R`）按 **panel × 大类** 单独做：P1 的 CD4/CD8，P2 的 B，P3 的髓系。类内 PCA 当 Component 1/2，骨架用 slingshot（若已装）或亚群中心 MST。根节点按惯例取 naive / Naive B / Ly6C hi 单核。轨迹是标志物状态连续体，不要当成发育起源证明。出图：细胞点要够大、黑色分支骨架要细，先画线再画点，不要圈很小、线很粗
+- **`skip trajectory (... subsets= 1)` 不是失败。** 树至少要 2 个亚群节点。P1 的 NK/NKT 门控后经常整群只有一个标签，日志会写 `only 1 subset, no tree to draw`。真正要看的是 P1 CD4/CD8、P2 B、P3 Myeloid。`Panel Px failed: missing value where TRUE/FALSE needed` 才是 bug：`parent_mask` / `if (sum(par) < 20)` 遇到 NA 会炸；比较必须把 NA 收成 FALSE，subset 图失败不得炸掉整块 panel
 - 物种：小鼠（NK1.1、F4/80、I-A/I-E、Ly6C/G、Siglec-F、Sca-1）
 - 荧光素→标志物以 `flow_panel_map.json` / `Flow_dimred_pipeline.R` 为准。Cytek unmixed 通道名常是 `BUV496-A`、`APC-Cy7-A`（带 Area 后缀）或 `CD45 V500`；匹配时要去掉 `-A/-H/-W`、按 token 认标志物/荧光素，不要要求整串 equal。对不上时必须把 `$PnN`/`$PnS` 打进日志，不要只报「没有匹配到任何分析通道」
 - **NK1.1 抗体是 AF700**，Cytek unmixed 通道名经常仍是 `R718-A` / `APC-R700-A`（同一 ~700 nm 检测器），两种都要配上，不能只认字面 `AF700-A`

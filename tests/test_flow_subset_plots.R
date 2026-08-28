@@ -18,6 +18,25 @@ nk <- Filter(function(s) identical(s$lineage, "NK"), specs)
 if (!length(nk)) fail("P1 specs missing NK")
 if (!identical(nk[[1]]$x, "CD3") || !identical(nk[[1]]$y, "NK1.1")) fail("NK contour should be CD3 vs NK1.1")
 
+cells_na <- data.frame(
+  lineage = c("Neutrophil", NA_character_, "T", "cDC1_CD103"),
+  cluster_lineage = c("Myeloid", NA_character_, "T", "Myeloid"),
+  stringsAsFactors = FALSE
+)
+pm_na <- parent_mask(cells_na, "Myeloid")
+hm_na <- subset_hit_mask(cells_na, list(lineage = "Neutrophil", use_major = FALSE))
+if (anyNA(pm_na) || anyNA(hm_na)) fail("NA lineage must not leak into parent/hit masks")
+if (!identical(pm_na, c(TRUE, FALSE, FALSE, TRUE))) fail("parent_mask NA row should be FALSE")
+if (!identical(hm_na, c(TRUE, FALSE, FALSE, FALSE))) fail("subset_hit_mask NA row should be FALSE")
+ok_if <- tryCatch({
+  par <- pm_na
+  hit <- hm_na
+  par[is.na(par)] <- FALSE
+  hit[is.na(hit)] <- FALSE
+  if (sum(par) < 20 || sum(par & hit) < 8) TRUE else TRUE
+}, error = function(e) FALSE)
+if (!isTRUE(ok_if)) fail("NA masks must not crash if (sum(par) < 20)")
+
 set.seed(3)
 mk <- function(sample, group, lineage, n, cd3, nk11) {
   data.frame(
@@ -61,6 +80,18 @@ if (!"NK" %in% st$subset) fail("NK not in subset stats")
 if (st$mean_H[st$subset == "NK"] >= st$mean_EV[st$subset == "NK"]) {
   fail("H NK frequency should be lower than EV in this synthetic set")
 }
+
+cells_na_plot <- cells
+cells_na_plot$cluster_lineage[1] <- NA_character_
+cells_na_plot$lineage[2] <- NA_character_
+ok_na <- tryCatch({
+  export_subset_gate_figures(cells_na_plot, "P1", file.path(tempdir(), "flow_subset_na"))
+  TRUE
+}, error = function(e) {
+  cat("NA subset export crashed:", e$message, "\n")
+  FALSE
+})
+if (!isTRUE(ok_na)) fail("NA cluster_lineage must not abort subset figures")
 
 unlink(td, recursive = TRUE)
 cat("OK: subset stat+contour figures\n")
