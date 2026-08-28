@@ -83,7 +83,7 @@
         {"marker": "CD45", "fluorochrome": "V500", "compartment": "surface"},
         {"marker": "CD19", "fluorochrome": "BV750", "compartment": "surface"},
         {"marker": "CD27", "fluorochrome": "BV605", "compartment": "surface"},
-        {"marker": "CD80", "fluorochrome": "BUV496", "compartment": "surface", "aliases": ["B7-1", "B71"]},
+        {"marker": "CD80", "fluorochrome": "APC", "compartment": "surface", "aliases": ["B7-1", "B71"]},
         {"marker": "CD86", "fluorochrome": "RB670", "compartment": "surface", "aliases": ["B7-2", "B72"]},
         {"marker": "IgG", "fluorochrome": "RB613", "compartment": "surface", "aliases": ["IGG"]},
         {"marker": "IgM", "fluorochrome": "RB780", "compartment": "surface", "aliases": ["IGM"]},

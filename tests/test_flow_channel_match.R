@@ -59,4 +59,18 @@ if (any(!is.na(map4$channel_index))) fail("detector-only names should not match 
 if (!("BUV496" %in% fcs_tokens("BUV496-A"))) fail("fcs_tokens must strip -A")
 if ("CD8" %in% fcs_tokens("CD8b-A")) fail("CD8 must not be a token of CD8b-A")
 
+# P2 新表：CD80 从 BUV496 改到 APC（与 P1 的 TNF-a 同色但不同管子）
+cytek_p2 <- c(
+  "FSC-A", "SSC-A", "FVS450-A", "V500-A", "BV750-A", "BV605-A", "APC-A",
+  "RB670-A", "RB613-A", "RB780-A", "RB705-A", "FITC-A", "PE-A"
+)
+map_p2 <- match_channels(cytek_p2, rep("", length(cytek_p2)), "P2")
+expect(map_p2$channel[map_p2$marker == "CD80"], "APC-A", "P2 CD80<-APC-A")
+expect(map_p2$channel[map_p2$marker == "CD86"], "RB670-A", "P2 CD86<-RB670-A")
+expect(map_p2$channel[map_p2$marker == "IgD"], "FITC-A", "P2 IgD<-FITC-A")
+if (!is.na(map_p2$channel[map_p2$marker == "CD80"]) &&
+    identical(map_p2$channel[map_p2$marker == "CD80"], "BUV496-A")) {
+  fail("P2 CD80 must not still match BUV496")
+}
+
 cat("OK: Cytek channel matching\n")

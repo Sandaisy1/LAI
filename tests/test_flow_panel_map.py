@@ -58,6 +58,12 @@ def main() -> int:
 
     if "AF700" not in data["fluorochrome_aliases"]["R718"]:
         errors.append("R718 aliases must include AF700 (Panel 1 NK1.1 naming)")
+    p2_cd80 = next(m["fluorochrome"] for m in data["panels"]["P2"]["markers"] if m["marker"] == "CD80")
+    if p2_cd80 != "APC":
+        errors.append(f"P2 CD80 should be APC (new sheet), got {p2_cd80}")
+    p1_tnf = next(m["fluorochrome"] for m in data["panels"]["P1"]["markers"] if m["marker"] == "TNF-a")
+    if p1_tnf != "APC":
+        errors.append("P1 TNF-a stays APC; P2 CD80 APC is a different tube")
 
     # Windows 隐藏扩展名时，记事本另存为会变成 .json.txt
     if parse_fcs_filename("flow_panel_map.json.txt") is not None:
