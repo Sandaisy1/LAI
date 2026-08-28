@@ -109,4 +109,39 @@ if (abs(mean(lay$sep1[df_mix$cluster_lineage == "CD4"], na.rm = TRUE) -
 p_sep <- plot_split_lineage(df_mix, "UMAP1", "UMAP2", "P1", "UMAP-1", "UMAP-2", "sep")
 if (!("sep1" %in% names(p_sep$data))) fail("split plot should use separated coordinates")
 
+set.seed(8)
+tail_v <- c(rnorm(220, 0.45, 0.12), rnorm(50, 3.1, 0.2))
+cut_t <- axis_pos_cut(tail_v)
+if (!is.finite(cut_t) || cut_t < 1.0 || cut_t > 2.6) {
+  fail(sprintf("CD62L-like tail cut should sit between the origin blob and the tail, got %s", cut_t))
+}
+
+set.seed(9)
+n_q <- 60
+mat_q <- cbind(
+  CD62L = c(rnorm(n_q, 3.2, 0.15), rnorm(n_q, 2.9, 0.15), rnorm(n_q, 0.35, 0.12)),
+  CD44 = c(rnorm(n_q, 0.35, 0.12), rnorm(n_q, 2.9, 0.15), rnorm(n_q, 3.1, 0.15))
+)
+labs_q <- split_memory_3(mat_q, seq_len(nrow(mat_q)), "CD4")
+if (sum(labs_q[seq_len(n_q)] == "CD4_naive") < 40) fail("quadrant must call CD62L+ CD44- naive")
+if (sum(labs_q[seq_len(n_q) + n_q] == "CD4_TCM") < 40) fail("quadrant must call CD62L+ CD44+ TCM")
+if (sum(labs_q[seq_len(n_q) + 2 * n_q] == "CD4_TEM") < 40) fail("quadrant must call CD62L- CD44+ TEM")
+
+set.seed(10)
+mat_s <- rbind(
+  cbind(CD3 = rnorm(50, 3.1, 0.12), CD4 = rnorm(50, 3.0, 0.12), CD8 = rnorm(50, 0.2, 0.1),
+        CD62L = rnorm(50, 3.2, 0.12), CD44 = rnorm(50, 0.3, 0.1), CD19 = 0.2, CD11B = 0.2, `NK1.1` = 0.2),
+  cbind(CD3 = rnorm(50, 3.1, 0.12), CD4 = rnorm(50, 3.0, 0.12), CD8 = rnorm(50, 0.2, 0.1),
+        CD62L = rnorm(50, 0.3, 0.1), CD44 = rnorm(50, 3.1, 0.12), CD19 = 0.2, CD11B = 0.2, `NK1.1` = 0.2)
+)
+colnames(mat_s)[colnames(mat_s) == "NK1.1"] <- "NK1.1"
+hs <- hierarchical_gate_by_sample(mat_s, rep(c("EV1", "EV2"), each = 50), "P1")
+if (mean(hs$subset[1:50] == "CD4_naive") < 0.6) fail("sample EV1 should be gated naive on its own")
+if (mean(hs$subset[51:100] == "CD4_TEM") < 0.6) fail("sample EV2 should be gated TEM on its own")
+
+nv <- Filter(function(s) identical(s$lineage, "CD4_naive"), subset_plot_specs("P1"))
+if (!length(nv) || !identical(nv[[1]]$gate, "quad")) fail("CD4 naive subset figure should use a quadrant gate")
+qr <- quad_gate_rect(c(0, 7), c(0, 6), 2, 1.2, TRUE, FALSE)
+if (qr$xmin < 1.9 || qr$ymin > 0.05 || qr$ymax > 1.25) fail("naive quadrant should be CD62L-high CD44-low")
+
 cat("OK: P1 T/NK subset labels\n")

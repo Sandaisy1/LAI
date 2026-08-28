@@ -1129,6 +1129,62 @@ marker_score <- function(mat, idx, markers) {
   })
 }
 
+# 一维阳性阈值：优先抓住主峰右侧的尾巴（naive CD62L、CD44），
+# 不要把原点一团 50/50 切开冒充双峰。
+axis_pos_cut <- function(v, min_sep = 0.55, min_pos_frac = 0.02, max_pos_frac = 0.92) {
+  v <- as.numeric(v)
+  v <- v[is.finite(v)]
+  if (!length(v)) return(0)
+  if (length(v) < 20) return(as.numeric(stats::median(v)))
+  xs <- scale(as.matrix(v))
+  xs[!is.finite(xs)] <- 0
+  set.seed(if (exists("seed_value")) seed_value else 42)
+  km <- tryCatch(
+    stats::kmeans(xs, centers = 2, nstart = 10, iter.max = 200, algorithm = "Lloyd"),
+    error = function(e) NULL
+  )
+  if (!is.null(km) && length(unique(km$cluster)) == 2) {
+    med <- tapply(v, km$cluster, median, na.rm = TRUE)
+    hi <- as.integer(names(med)[which.max(med)])
+    lo <- as.integer(names(med)[which.min(med)])
+    frac <- mean(km$cluster == hi)
+    q_hi <- as.numeric(stats::quantile(v[km$cluster == hi], 0.20, names = FALSE))
+    q_lo <- as.numeric(stats::quantile(v[km$cluster == lo], 0.80, names = FALSE))
+    sep_ok <- is.finite(med[as.character(hi)]) && is.finite(med[as.character(lo)]) &&
+      (unname(med[as.character(hi)] - med[as.character(lo)]) >= min_sep) &&
+      is.finite(q_hi) && is.finite(q_lo) && q_hi >= q_lo + 0.08
+    if (sep_ok && frac >= min_pos_frac && frac <= max_pos_frac) {
+      return(unname((med[as.character(hi)] + med[as.character(lo)]) / 2))
+    }
+  }
+  d <- tryCatch(stats::density(v, n = 512, adjust = 1.15), error = function(e) NULL)
+  if (!is.null(d) && length(d$y) > 10) {
+    i0 <- which.max(d$y)
+    if (i0 < length(d$y) - 8) {
+      y <- d$y
+      for (i in seq.int(i0 + 2L, length(y) - 2L)) {
+        if (y[i] <= y[i - 1L] && y[i] <= y[i + 1L] && y[i] < y[i0] * 0.5) {
+          cut <- d$x[i]
+          fr <- mean(v >= cut)
+          if (fr >= min_pos_frac && fr <= max_pos_frac) return(unname(cut))
+          break
+        }
+      }
+    }
+  }
+  q05 <- as.numeric(stats::quantile(v, 0.05, names = FALSE))
+  q50 <- as.numeric(stats::quantile(v, 0.50, names = FALSE))
+  q80 <- as.numeric(stats::quantile(v, 0.80, names = FALSE))
+  q95 <- as.numeric(stats::quantile(v, 0.95, names = FALSE))
+  spread <- q95 - q05
+  if (is.finite(spread) && spread < min_sep * 1.2) {
+    if (is.finite(q50) && q50 >= 1.2) return(unname(min(q05, q50 - min_sep)))
+    return(unname(max(q95, q50 + min_sep)))
+  }
+  if (is.finite(q95 - q50) && (q95 - q50) >= min_sep) return(q80)
+  as.numeric(stats::quantile(v, 0.85, names = FALSE))
+}
+
 # 一层：k=2 圈出该标志高的一群；两群分不开、或高群占了多数则整层跳过
 gate_k2_high <- function(mat, idx, markers, min_sep = 0.15, max_frac = 1) {
   n <- length(idx)
@@ -1152,38 +1208,28 @@ gate_k2_high <- function(mat, idx, markers, min_sep = 0.15, max_frac = 1) {
   out
 }
 
-# 一层：只用 CD62L vs CD44，k=3 按 (CD62L-CD44) 高→低标 naive / TCM / TEM
+# CD62L vs CD44 完整象限：naive (62L+44-) / TCM (62L+44+) / TEM (62L-44+ 及双阴)
 split_memory_3 <- function(mat, idx, prefix) {
   n <- length(idx)
-  fallback <- paste0(prefix, "_TEM")
   if (n == 0) return(character(0))
-  mk <- intersect(c("CD62L", "CD44"), colnames(mat))
-  if (n < 30 || length(mk) < 2) {
-    cd62 <- median(colv(mat, "CD62L")[idx], na.rm = TRUE)
-    cd44 <- median(colv(mat, "CD44")[idx], na.rm = TRUE)
-    return(rep(mem_from_cd62_cd44(cd62, cd44, prefix), n))
+  cd62 <- colv(mat, "CD62L")[idx]
+  cd44 <- colv(mat, "CD44")[idx]
+  if (n < 8 || !any(is.finite(cd62)) || !any(is.finite(cd44))) {
+    return(rep(mem_from_cd62_cd44(
+      stats::median(cd62, na.rm = TRUE),
+      stats::median(cd44, na.rm = TRUE),
+      prefix
+    ), n))
   }
-  x <- mat[idx, mk, drop = FALSE]
-  xs <- scale(x)
-  xs[!is.finite(xs)] <- 0
-  k_use <- if (n >= 90) 3L else 2L
-  set.seed(seed_value)
-  km <- tryCatch(stats::kmeans(xs, centers = k_use, nstart = 10, iter.max = 250, algorithm = "Lloyd"),
-                 error = function(e) NULL)
-  if (is.null(km)) return(rep(fallback, n))
-  cl <- sort(unique(km$cluster))
-  delta <- vapply(cl, function(ci) {
-    hit <- km$cluster == ci
-    median(x[hit, "CD62L"], na.rm = TRUE) - median(x[hit, "CD44"], na.rm = TRUE)
-  }, numeric(1))
-  ord <- cl[order(delta, decreasing = TRUE)]
-  map <- setNames(rep(fallback, length(ord)), as.character(ord))
-  map[as.character(ord[1])] <- paste0(prefix, "_naive")
-  map[as.character(ord[length(ord)])] <- paste0(prefix, "_TEM")
-  if (length(ord) == 3) map[as.character(ord[2])] <- paste0(prefix, "_TCM")
-  labs <- unname(map[as.character(km$cluster)])
-  labs[is.na(labs) | !nzchar(labs)] <- fallback
-  labs
+  cut62 <- axis_pos_cut(cd62)
+  cut44 <- axis_pos_cut(cd44)
+  hi62 <- is.finite(cd62) & cd62 >= cut62
+  hi44 <- is.finite(cd44) & cd44 >= cut44
+  out <- rep(paste0(prefix, "_TEM"), n)
+  out[hi62 & !hi44] <- paste0(prefix, "_naive")
+  out[hi62 & hi44] <- paste0(prefix, "_TCM")
+  out[!hi62 & hi44] <- paste0(prefix, "_TEM")
+  out
 }
 
 sequential_t_subsets <- function(mat, idx, line) {
@@ -1377,6 +1423,31 @@ hierarchical_gate <- function(mat, panel_id) {
     subset[im] <- sequential_myeloid(mat, im)
   }
   subset[is.na(subset) | !nzchar(subset)] <- major[is.na(subset) | !nzchar(subset)]
+  list(major = major, subset = subset)
+}
+
+# 每个样品单独走同一套分层门，避免六个文件共用一个阈值把某管圈不完
+hierarchical_gate_by_sample <- function(mat, samples, panel_id) {
+  mat <- as.matrix(mat)
+  n <- nrow(mat)
+  samples <- as.character(samples)
+  if (length(samples) != n) stop("samples length must match rows")
+  major <- rep(NA_character_, n)
+  subset <- rep(NA_character_, n)
+  smp <- unique(samples)
+  for (s in smp) {
+    ii <- which(samples == s)
+    if (length(ii) < 30) next
+    h <- hierarchical_gate(mat[ii, , drop = FALSE], panel_id)
+    major[ii] <- h$major
+    subset[ii] <- h$subset
+  }
+  leftover <- which(is.na(major) | !nzchar(major))
+  if (length(leftover)) {
+    h <- hierarchical_gate(mat, panel_id)
+    major[leftover] <- h$major[leftover]
+    subset[leftover] <- h$subset[leftover]
+  }
   list(major = major, subset = subset)
 }
 
@@ -1928,34 +1999,36 @@ subset_hit_mask <- function(cells, spec) {
 }
 
 subset_plot_specs <- function(panel_id) {
-  mk <- function(lineage, x, y, parent, ylab, use_major = FALSE) {
-    list(lineage = lineage, x = x, y = y, parent = parent, ylab = ylab, use_major = use_major)
+  mk <- function(lineage, x, y, parent, ylab, use_major = FALSE,
+                 gate = "box", x_hi = NA, y_hi = NA) {
+    list(lineage = lineage, x = x, y = y, parent = parent, ylab = ylab,
+         use_major = use_major, gate = gate, x_hi = x_hi, y_hi = y_hi)
   }
   if (identical(panel_id, "P1")) {
     return(list(
-      mk("NK", "CD3", "NK1.1", "all", "NK cell (%)"),
-      mk("NKT", "CD3", "NK1.1", "all", "NKT (%)"),
-      mk("B", "CD19", "CD3", "all", "B cell (%)"),
-      mk("Myeloid", "CD11B", "CD3", "all", "Myeloid (%)"),
-      mk("CD4", "CD8", "CD4", "CD3", "CD4+ T cell in CD3+ (%)", TRUE),
-      mk("CD8", "CD8", "CD4", "CD3", "CD8+ T cell in CD3+ (%)", TRUE),
-      mk("CD4_naive", "CD62L", "CD44", "CD4", "CD4 naive in CD4+ (%)"),
-      mk("CD4_TCM", "CD62L", "CD44", "CD4", "CD4 TCM in CD4+ (%)"),
-      mk("CD4_TEM", "CD62L", "CD44", "CD4", "CD4 TEM in CD4+ (%)"),
+      mk("NK", "CD3", "NK1.1", "all", "NK cell (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
+      mk("NKT", "CD3", "NK1.1", "all", "NKT (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("B", "CD19", "CD3", "all", "B cell (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
+      mk("Myeloid", "CD11B", "CD3", "all", "Myeloid (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
+      mk("CD4", "CD8", "CD4", "CD3", "CD4+ T cell in CD3+ (%)", TRUE, gate = "quad", x_hi = FALSE, y_hi = TRUE),
+      mk("CD8", "CD8", "CD4", "CD3", "CD8+ T cell in CD3+ (%)", TRUE, gate = "quad", x_hi = TRUE, y_hi = FALSE),
+      mk("CD4_naive", "CD62L", "CD44", "CD4", "CD4 naive in CD4+ (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
+      mk("CD4_TCM", "CD62L", "CD44", "CD4", "CD4 TCM in CD4+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("CD4_TEM", "CD62L", "CD44", "CD4", "CD4 TEM in CD4+ (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
       mk("CD4_activated", "CD69", "TNF-a", "CD4", "CD4 activated in CD4+ (%)"),
       mk("Treg", "CD25", "CD4", "CD4", "Treg in CD4+ (%)"),
-      mk("CD8_naive", "CD62L", "CD44", "CD8", "CD8 naive in CD8+ (%)"),
-      mk("CD8_TCM", "CD62L", "CD44", "CD8", "CD8 TCM in CD8+ (%)"),
-      mk("CD8_TEM", "CD62L", "CD44", "CD8", "CD8 TEM in CD8+ (%)"),
+      mk("CD8_naive", "CD62L", "CD44", "CD8", "CD8 naive in CD8+ (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
+      mk("CD8_TCM", "CD62L", "CD44", "CD8", "CD8 TCM in CD8+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("CD8_TEM", "CD62L", "CD44", "CD8", "CD8 TEM in CD8+ (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
       mk("CD8_effector", "GZMB", "Perforin", "CD8", "CD8 effector in CD8+ (%)"),
       mk("CD8_exhausted", "LAG-3", "TIM-3", "CD8", "CD8 exhausted in CD8+ (%)")
     ))
   }
   if (identical(panel_id, "P2")) {
     return(list(
-      mk("Naive_B", "IgD", "CD27", "all", "Naive B (%)"),
+      mk("Naive_B", "IgD", "CD27", "all", "Naive B (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("Atypical_B", "IgM", "IgD", "Naive_B", "Atypical B in naive (%)"),
-      mk("Memory_B", "IgD", "CD27", "all", "Memory B (%)"),
+      mk("Memory_B", "IgD", "CD27", "all", "Memory B (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
       mk("IgM_memory", "IgM", "IgD", "Memory_B", "IgM memory in memory B (%)"),
       mk("Switched_B", "IgG", "IgD", "Memory_B", "Switched B in memory B (%)"),
       mk("Activated_B", "CD80", "CD86", "all", "Activated B (%)"),
@@ -1963,19 +2036,19 @@ subset_plot_specs <- function(panel_id) {
     ))
   }
   list(
-    mk("T", "CD3", "NK1.1", "all", "T cell (%)"),
-    mk("B", "CD19", "CD3", "all", "B cell (%)"),
-    mk("NK", "CD3", "NK1.1", "all", "NK cell (%)"),
-    mk("Neutrophil", "LY6G", "LY6C", "Myeloid", "Neutrophil in myeloid (%)"),
+    mk("T", "CD3", "NK1.1", "all", "T cell (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
+    mk("B", "CD19", "CD3", "all", "B cell (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
+    mk("NK", "CD3", "NK1.1", "all", "NK cell (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
+    mk("Neutrophil", "LY6G", "LY6C", "Myeloid", "Neutrophil in myeloid (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
     mk("Eosinophil", "Siglec-F", "LY6G", "Myeloid", "Eosinophil in myeloid (%)"),
     mk("Basophil_mast", "FceRI", "CD200R3", "Myeloid", "Basophil in myeloid (%)"),
-    mk("Macrophage", "F4/80", "CD11C", "Myeloid", "Macrophage in myeloid (%)"),
+    mk("Macrophage", "F4/80", "CD11C", "Myeloid", "Macrophage in myeloid (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
     mk("M1_like_Mac", "iNOS", "CD206", "Macrophage", "M1-like Mac in macrophages (%)"),
     mk("M2_like_Mac", "CD206", "ARG-1", "Macrophage", "M2-like Mac in macrophages (%)"),
-    mk("DC", "CD11C", "F4/80", "Myeloid", "DC in myeloid (%)"),
+    mk("DC", "CD11C", "F4/80", "Myeloid", "DC in myeloid (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
     mk("cDC1_CD103", "CD103", "CD11C", "Myeloid", "CD103 DC in myeloid (%)"),
-    mk("Mono_Ly6Chi", "LY6C", "CD11B", "Myeloid", "Ly6C hi mono in myeloid (%)"),
-    mk("Mono_Ly6Clo", "LY6C", "CD11B", "Myeloid", "Ly6C lo mono in myeloid (%)")
+    mk("Mono_Ly6Chi", "LY6C", "CD11B", "Myeloid", "Ly6C hi mono in myeloid (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+    mk("Mono_Ly6Clo", "LY6C", "CD11B", "Myeloid", "Ly6C lo mono in myeloid (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE)
   )
 }
 
@@ -2003,14 +2076,27 @@ gate_rect_from_xy <- function(x, y) {
   if (sum(ok) < 8) {
     return(list(
       xmin = if (any(ok)) min(x[ok]) else 0, xmax = if (any(ok)) max(x[ok]) else 1,
-      ymin = if (any(ok)) min(y[ok]) else 0, ymax = if (any(ok)) max(y[ok]) else 1
+      ymin = if (any(ok)) min(y[ok]) else 0, ymax = if (any(ok)) max(y[ok]) else 1,
+      xcut = NA_real_, ycut = NA_real_
     ))
   }
   list(
     xmin = as.numeric(stats::quantile(x[ok], 0.10, names = FALSE)),
     xmax = as.numeric(stats::quantile(x[ok], 0.90, names = FALSE)),
     ymin = as.numeric(stats::quantile(y[ok], 0.10, names = FALSE)),
-    ymax = as.numeric(stats::quantile(y[ok], 0.90, names = FALSE))
+    ymax = as.numeric(stats::quantile(y[ok], 0.90, names = FALSE)),
+    xcut = NA_real_, ycut = NA_real_
+  )
+}
+
+quad_gate_rect <- function(xlim, ylim, xcut, ycut, x_hi, y_hi) {
+  list(
+    xmin = if (isTRUE(x_hi)) xcut else xlim[1],
+    xmax = if (isTRUE(x_hi)) xlim[2] else xcut,
+    ymin = if (isTRUE(y_hi)) ycut else ylim[1],
+    ymax = if (isTRUE(y_hi)) ylim[2] else ycut,
+    xcut = xcut,
+    ycut = ycut
   )
 }
 
@@ -2071,8 +2157,9 @@ plot_subset_contour <- function(df, x, y, color, xlab, ylab, pct, gate,
     set.seed(if (exists("seed_value")) seed_value else 42)
     d <- d[sample.int(nrow(d), 4000), , drop = FALSE]
   }
-  if (is.null(xlim)) xlim <- finite_axis_lim(c(d$x, gate$xmin, gate$xmax))
-  if (is.null(ylim)) ylim <- finite_axis_lim(c(d$y, gate$ymin, gate$ymax))
+  extra <- c(gate$xmin, gate$xmax, gate$ymin, gate$ymax, gate$xcut, gate$ycut)
+  if (is.null(xlim)) xlim <- finite_axis_lim(c(d$x, extra))
+  if (is.null(ylim)) ylim <- finite_axis_lim(c(d$y, extra))
   p <- ggplot2::ggplot()
   pc <- if (nrow(d) >= 40) flow_prob_contour(d$x, d$y) else NULL
   if (!is.null(pc) && length(pc$levels) >= 2 && nrow(pc$grid) > 10) {
@@ -2096,6 +2183,16 @@ plot_subset_contour <- function(df, x, y, color, xlab, ylab, pct, gate,
       data = d, ggplot2::aes(x = x, y = y),
       size = 0.28, alpha = 0.35, color = color, stroke = 0
     )
+  }
+  if (!is.null(gate$xcut) && length(gate$xcut) && is.finite(gate$xcut[1])) {
+    p <- p + ggplot2::annotate("segment", x = gate$xcut, xend = gate$xcut,
+                               y = ylim[1], yend = ylim[2],
+                               color = color, linewidth = 0.35, linetype = "dashed")
+  }
+  if (!is.null(gate$ycut) && length(gate$ycut) && is.finite(gate$ycut[1])) {
+    p <- p + ggplot2::annotate("segment", x = xlim[1], xend = xlim[2],
+                               y = gate$ycut, yend = gate$ycut,
+                               color = color, linewidth = 0.35, linetype = "dashed")
   }
   p +
     ggplot2::annotate(
@@ -2168,8 +2265,19 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
     }
     ylab <- if (!is.null(spec$ylab) && nzchar(spec$ylab)) spec$ylab else paste0(lab, " (%)")
     bar <- plot_subset_stat_bar(samp, ylab, pv)
+    d_ctrl <- cells[par & as.character(cells$group) == flow_ctrl_group, , drop = FALSE]
+    d_trt <- cells[par & as.character(cells$group) == flow_trt_group, , drop = FALSE]
+    if (nrow(d_ctrl) < 8 || nrow(d_trt) < 8) next
     xy_hit <- cells[par & hit, , drop = FALSE]
-    gate <- gate_rect_from_xy(xy_hit[[spec$x]], xy_hit[[spec$y]])
+    xlim <- finite_axis_lim(c(d_ctrl[[spec$x]], d_trt[[spec$x]]))
+    ylim <- finite_axis_lim(c(d_ctrl[[spec$y]], d_trt[[spec$y]]))
+    if (identical(spec$gate, "quad") && length(spec$x_hi) && !is.na(spec$x_hi)) {
+      xcut <- axis_pos_cut(c(d_ctrl[[spec$x]], d_trt[[spec$x]]))
+      ycut <- axis_pos_cut(c(d_ctrl[[spec$y]], d_trt[[spec$y]]))
+      gate <- quad_gate_rect(xlim, ylim, xcut, ycut, spec$x_hi, spec$y_hi)
+    } else {
+      gate <- gate_rect_from_xy(xy_hit[[spec$x]], xy_hit[[spec$y]])
+    }
     xlab <- axis_fl_label(panel_id, spec$x)
     yfl <- axis_fl_label(panel_id, spec$y)
     pct_of <- function(g) {
@@ -2177,15 +2285,12 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
       if (!length(v) || all(!is.finite(v))) return(0)
       mean(v, na.rm = TRUE)
     }
-    d_ctrl <- cells[par & as.character(cells$group) == flow_ctrl_group, , drop = FALSE]
-    d_trt <- cells[par & as.character(cells$group) == flow_trt_group, , drop = FALSE]
-    if (nrow(d_ctrl) < 8 || nrow(d_trt) < 8) next
     col_ctrl <- unname(pal_group[flow_ctrl_group])
     col_trt <- unname(pal_group[flow_trt_group])
     if (is.na(col_ctrl)) col_ctrl <- "#1A1A1A"
     if (is.na(col_trt)) col_trt <- "#E31A1C"
-    xlim <- finite_axis_lim(c(d_ctrl[[spec$x]], d_trt[[spec$x]], gate$xmin, gate$xmax))
-    ylim <- finite_axis_lim(c(d_ctrl[[spec$y]], d_trt[[spec$y]], gate$ymin, gate$ymax))
+    xlim <- finite_axis_lim(c(d_ctrl[[spec$x]], d_trt[[spec$x]], gate$xmin, gate$xmax, gate$xcut))
+    ylim <- finite_axis_lim(c(d_ctrl[[spec$y]], d_trt[[spec$y]], gate$ymin, gate$ymax, gate$ycut))
     c_ctrl <- plot_subset_contour(d_ctrl, spec$x, spec$y, col_ctrl, xlab, yfl, pct_of(flow_ctrl_group), gate, xlim, ylim)
     c_trt <- plot_subset_contour(d_trt, spec$x, spec$y, col_trt, xlab, yfl, pct_of(flow_trt_group), gate, xlim, ylim)
     stub <- paste0(panel_id, "_", gsub("[^A-Za-z0-9]+", "_", spec$lineage), "_H_vs_EV")
@@ -2538,13 +2643,18 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
 
   annot <- annotate_clusters(med, panel_id)
   log_msg(panel_id, " cluster labels: ", paste(paste(annot$cluster, annot$lineage, sep = "="), collapse = ", "))
-  hier <- hierarchical_gate(as.matrix(mat_raw), panel_id)
+  hier <- hierarchical_gate_by_sample(as.matrix(mat_raw), smp, panel_id)
   cells$cluster_lineage <- hier$major
   cells$lineage <- hier$subset
   maj_n <- sort(table(hier$major), decreasing = TRUE)
   lin_n <- sort(table(hier$subset), decreasing = TRUE)
   log_msg(panel_id, " layer1 major: ", paste(paste(names(maj_n), as.integer(maj_n), sep = "="), collapse = ", "))
   log_msg(panel_id, " layer2 subset: ", paste(paste(names(lin_n), as.integer(lin_n), sep = "="), collapse = ", "))
+  for (s in unique(as.character(smp))) {
+    ss <- cells$lineage[as.character(cells$sample) == s]
+    tab <- sort(table(ss), decreasing = TRUE)
+    log_msg(panel_id, " ", s, " subsets: ", paste(paste(names(tab), as.integer(tab), sep = "="), collapse = ", "))
+  }
   if (use_demo) cells$true_lineage <- true_lin
 
   freq_df <- cluster_frequencies(cells)
