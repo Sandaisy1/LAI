@@ -70,8 +70,11 @@ m2 <- rbind(
   bp("Activated_B", 80), bp("IgM_memory", 80), bp("Memory_B", 80)
 )
 h2 <- hierarchical_gate(m2, "P2")
-if (!all(h2$major %in% c("Naive_B", "Memory_B"))) {
-  fail(sprintf("P2 layer1 should be Naive/Memory only (no BLIMP), got %s", paste(unique(h2$major), collapse = ",")))
+if (!all(h2$major %in% c("Naive_B", "Memory_B", "other"))) {
+  fail(sprintf("P2 layer1 should be Naive/Memory (no BLIMP), got %s", paste(unique(h2$major), collapse = ",")))
+}
+if (any(h2$major %in% c("Plasma"))) {
+  fail("P2 layer1 must not use BLIMP to call Plasma")
 }
 need2 <- c("Naive_B", "Plasma", "Switched_B", "Activated_B", "IgM_memory", "Memory_B")
 miss2 <- setdiff(need2, unique(h2$subset))

@@ -10,7 +10,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MAP_PATH = ROOT / "flow_panel_map.json"
 
-FILENAME_RE = re.compile(r"^(EV|H)[-_]?([123])_(P[123])_(unmixed|raw)\.fcs$", re.IGNORECASE)
+FILENAME_RE = re.compile(
+    r"^(EV|H)[-_ ]?([123])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\.fcs$",
+    re.IGNORECASE,
+)
 
 
 def parse_fcs_filename(name: str) -> dict | None:
@@ -20,7 +23,7 @@ def parse_fcs_filename(name: str) -> dict | None:
     return {
         "group": m.group(1).upper(),
         "rep": m.group(2),
-        "panel": m.group(3).upper(),
+        "panel": "P" + m.group(3),
         "kind": m.group(4).lower(),
     }
 
@@ -43,7 +46,8 @@ def main() -> int:
         "EV-1_P1_unmixed.fcs": ("EV", "1", "P1", "unmixed"),
         "EV1_P2_unmixed.fcs": ("EV", "1", "P2", "unmixed"),
         "H3_P3_unmixed.fcs": ("H", "3", "P3", "unmixed"),
-        "H-2_P1_raw.fcs": ("H", "2", "P1", "raw"),
+        "EV1-P3_unmixed.fcs": ("EV", "1", "P3", "unmixed"),
+        "EV1_Panel3_unmixed.fcs": ("EV", "1", "P3", "unmixed"),
     }
     for fname, expected in cases.items():
         parsed = parse_fcs_filename(fname)
@@ -73,8 +77,8 @@ def main() -> int:
     af700 = data["fluorochrome_aliases"].get("AF700", [])
     if "AF700" not in data["fluorochrome_aliases"]:
         errors.append("fluorochrome_aliases must have AF700")
-    if any(x in af700 for x in ("R718", "APCR700", "APC-R700")):
-        errors.append("AF700 aliases must not include R718; NK1.1 only matches AF700")
+    if "R718" not in af700:
+        errors.append("AF700 aliases must include R718 (Cytek detector name for the same ~700 nm channel)")
     p1_nk = next(m["fluorochrome"] for m in data["panels"]["P1"]["markers"] if m["marker"] == "NK1.1")
     if p1_nk != "AF700":
         errors.append(f"P1 NK1.1 should be AF700, got {p1_nk}")

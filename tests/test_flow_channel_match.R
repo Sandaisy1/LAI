@@ -34,13 +34,11 @@ expect(map$channel[map$marker == "CD11B"], "APC-Cy7-A", "CD11B<-APC-Cy7-A")
 expect(map$channel[map$marker == "L/D"], "FVS450-A", "LD<-FVS450-A")
 expect(map$channel[map$marker == "NK1.1"], "AF700-A", "P1 NK1.1<-AF700-A")
 
-# NK1.1 只认 AF700，不得把 R718-A 配上去
+# 抗体写 AF700，Cytek unmixed 常把同一检测器导出成 R718-A
 cytek_p1_r718 <- cytek_p1
 cytek_p1_r718[cytek_p1_r718 == "AF700-A"] <- "R718-A"
 map_r718 <- match_channels(cytek_p1_r718, desc_blank, "P1")
-if (!is.na(map_r718$channel[map_r718$marker == "NK1.1"])) {
-  fail("P1 NK1.1 must not match R718-A")
-}
+expect(map_r718$channel[map_r718$marker == "NK1.1"], "R718-A", "P1 NK1.1<-R718-A")
 
 # 标志物写在 name 里、荧光素写在 desc
 map2 <- match_channels(
@@ -97,9 +95,7 @@ if (!is.na(map_p3$channel[map_p3$marker == "CD80"]) &&
 cytek_p3_r718 <- cytek_p3
 cytek_p3_r718[cytek_p3_r718 == "AF700-A"] <- "R718-A"
 map_p3_r718 <- match_channels(cytek_p3_r718, rep("", length(cytek_p3_r718)), "P3")
-if (!is.na(map_p3_r718$channel[map_p3_r718$marker == "NK1.1"])) {
-  fail("P3 NK1.1 must not match R718-A")
-}
+expect(map_p3_r718$channel[map_p3_r718$marker == "NK1.1"], "R718-A", "P3 NK1.1<-R718-A")
 
 # 文件名 EV1 / H-1
 ev <- parse_fcs_filename("EV1_P1_unmixed.fcs")
@@ -110,6 +106,9 @@ hh <- parse_fcs_filename("H-3_P2_unmixed.fcs")
 if (is.null(hh) || !identical(hh$group, "H") || !identical(hh$sample, "H3")) {
   fail("H-3_P2_unmixed.fcs should parse as group H sample H3")
 }
-if (!is.null(parse_fcs_filename("T6-1_P1_unmixed.fcs"))) fail("legacy T6 filename must not parse")
+p3 <- parse_fcs_filename("EV1-P3_unmixed.fcs")
+if (is.null(p3) || !identical(p3$panel, "P3") || !identical(p3$sample, "EV1")) {
+  fail("EV1-P3_unmixed.fcs should parse as panel P3 sample EV1")
+}
 
 cat("OK: Cytek channel matching\n")

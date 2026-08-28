@@ -18,7 +18,7 @@ alwaysApply: false
 - 细胞轨迹（`Flow_dimred_trajectory.R`）按 **panel × 大类** 单独做：P1 的 CD4/CD8，P2 的 B，P3 的髓系。类内 PCA 当 Component 1/2，骨架用 slingshot（若已装）或亚群中心 MST。根节点按惯例取 naive / Naive B / Ly6C hi 单核。轨迹是标志物状态连续体，不要当成发育起源证明。出图：细胞点要够大、黑色分支骨架要细，先画线再画点，不要圈很小、线很粗
 - 物种：小鼠（NK1.1、F4/80、I-A/I-E、Ly6C/G、Siglec-F、Sca-1）
 - 荧光素→标志物以 `flow_panel_map.json` / `Flow_dimred_pipeline.R` 为准。Cytek unmixed 通道名常是 `BUV496-A`、`APC-Cy7-A`（带 Area 后缀）或 `CD45 V500`；匹配时要去掉 `-A/-H/-W`、按 token 认标志物/荧光素，不要要求整串 equal。对不上时必须把 `$PnN`/`$PnS` 打进日志，不要只报「没有匹配到任何分析通道」
-- **NK1.1 只认 AF700**（`AF700-A` / Alexa Fluor 700），不要把 `R718-A` 配到 NK1.1。P2/P3 的 CD80 是 APC
+- **NK1.1 抗体是 AF700**，Cytek unmixed 通道名经常仍是 `R718-A` / `APC-R700-A`（同一 ~700 nm 检测器），两种都要配上，不能只认字面 `AF700-A`
 - Windows 若把 json 存成“文本文档”，真实名常是 `flow_panel_map.json.txt`：脚本要认这个名字，不要只找 `.json`
 
 ## 预处理（每个 panel 六个样品一起做一次，再降维）
@@ -38,7 +38,7 @@ alwaysApply: false
 **每个亚群**还要出一组论文风格图（`subset_stats/`）：上方 EV（黑）vs H（红）柱状图（均值、误差棒、每个重复的点、显著性 `ns/*/**/***`），下方对应 2D 等高线图（黑/红轮廓 + 门框 + 百分数）。
 
 - P1：**先圈大类**（B / 髓系 / NK / NKT / **CD4** / **CD8**）。T 细胞一律判到 CD4 或 CD8，不要输出 T TEM。CD4 内再一层层圈：CD25→Treg，CD69/TNF-a→activated，剩余只用 CD62L vs CD44 分成 naive/TCM/TEM。CD8 内：LAG-3/TIM-3→exhausted，GZMB/Perforin→effector，剩余 naive/TCM/TEM。
-- P2：**先圈大类**（只用 IgD vs CD27 → Naive / Memory；**不要把 BLIMP-1 放进第 1 层**，核背景会把几乎所有细胞打成 Plasma）。Memory 内再一层层圈：BLIMP-1（两群分得开、高于 IgD、且不是多数派才叫 Plasma）→ IgG→Switched → CD80/CD86→Activated → 剩余 IgM→IgM memory / Memory。Naive 内：CD80/CD86→Activated，剩余 IgD vs IgM → Naive / Atypical。默认剩余是 Naive/Memory，不是 Plasma。
+- P2：**先圈大类**（IgD vs CD27 的 **两个团互相比较** CD27−IgD，CD27 相对更高的一团是 Memory；**不要**要求同一细胞 CD27 绝对值压过 IgD，IgD 背景会把全部打成 Naive）。**不要把 BLIMP-1 放进第 1 层**。Memory 内再一层层圈：BLIMP-1（两群分得开、高于 IgD、且不是多数派才叫 Plasma）→ IgG→Switched → CD80/CD86→Activated → 剩余 IgM→IgM memory / Memory。Naive 内：CD80/CD86→Activated，剩余 IgD vs IgM → Naive / Atypical。默认剩余是 Naive/Memory，不是 Plasma。
 - P3：**先圈大类**（CD3/CD19/NK1.1 vs 髓系）。髓系内**一层层圈**，不要把 Ly6G/Siglec-F/F4/80/CD11c/Ly6C 丢进一次 kmeans 比大小：Ly6G→中性粒（Ly6C 中阳仍是中性粒），Siglec-F→嗜酸（不用 CCR3），FceRI/CD200R3→嗜碱，F4/80（须高于 CD11c，不用 MHCII 抢赢）→巨噬，CD103→CD103 DC，CD11c→DC，剩余 Ly6C hi/lo 单核。巨噬圈定后再用 iNOS→M1、CD206/ARG-1→M2；不用 IL-10/TGF-b/TNF-a/CD86 当极化。
 - 类内 kmeans 只跑该层标志。不要全局 kmeans 后整团贴一个名字，也不要按 rank 在 UMAP 上撒点
 - **P1/P2/P3 共用 P1 那套高对比色**（红/紫/蓝/米/酒红/金/绿/橙）。禁止 P2 全紫、P3 全橙。组别色：EV 黑、H 红

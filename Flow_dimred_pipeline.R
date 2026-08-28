@@ -170,7 +170,11 @@ flow_group_levels <- c("EV", "H")
 
 parse_fcs_filename <- function(path) {
   b <- basename(path)
-  m <- regexec("^(EV|H)[-_]?([123])_(P[123])_(unmixed|raw)\\.fcs$", b, ignore.case = TRUE)
+  # EV1_P3 / EV1-P3 / EV-1_P3 / EV1_Panel3 / EV1_P03
+  m <- regexec(
+    "^(EV|H)[-_ ]?([123])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$",
+    b, ignore.case = TRUE
+  )
   hit <- regmatches(b, m)[[1]]
   if (length(hit) < 5) return(NULL)
   grp <- toupper(hit[2])
@@ -180,13 +184,17 @@ parse_fcs_filename <- function(path) {
     group = grp,
     replicate = hit[3],
     sample = paste0(grp, hit[3]),
-    panel = toupper(hit[4]),
+    panel = paste0("P", hit[4]),
     kind = tolower(hit[5])
   )
 }
 
 list_unmixed_files <- function(root) {
-  files <- list.files(root, pattern = "(?i)_unmixed\\.fcs$", full.names = TRUE)
+  grab <- function(rec) {
+    list.files(root, pattern = "(?i)unmixed\\.fcs$", full.names = TRUE, recursive = rec)
+  }
+  files <- unique(c(grab(FALSE), grab(TRUE)))
+  files <- files[!grepl("(^|\\\\|/)results_flow(\\\\|/|$)", files, ignore.case = TRUE)]
   meta <- lapply(files, parse_fcs_filename)
   ok <- !vapply(meta, is.null, logical(1))
   if (any(!ok) && length(files) > 0) {
@@ -200,6 +208,7 @@ list_unmixed_files <- function(root) {
     )
   })
   df <- do.call(rbind, rows)
+  df <- df[!duplicated(df$path), , drop = FALSE]
   df <- df[order(df$panel, df$group, df$replicate), ]
   rownames(df) <- NULL
   df
@@ -461,7 +470,12 @@ read_fcs_expr <- function(path, panel_id) {
     )
   }
   miss <- map$marker[is.na(map$channel_index)]
-  if (length(miss) > 0) log_msg("Unmatched markers: ", paste(miss, collapse = ", "))
+  if (length(miss) > 0) {
+    log_msg("Unmatched markers: ", paste(miss, collapse = ", "))
+    if ("NK1.1" %in% miss) {
+      log_msg("NK1.1 is AF700 on the sheet; Cytek unmixed often names that detector R718-A / APC-R700-A. Both should match.")
+    }
+  }
   list(exprs = exprs, names = nms, desc = desc, map = map)
 }
 
@@ -979,14 +993,74 @@ label_myeloid_subset <- function(v) {
   "Mono_Ly6Clo"
 }
 
+# P2 第 1 层：比较两个团的 CD27−IgD，不要要求同一细胞 CD27 绝对值压过 IgD
+# （IgD 背景高时两个团都是 IgD>CD27，旧规则会把全部打成 Naive B）
+gate_p2_major <- function(mat) {
+  mat <- as.matrix(mat)
+  n <- nrow(mat)
+  out <- rep("Naive_B", n)
+  if (n < 40) return(out)
+  b <- rep(TRUE, n)
+  if ("CD19" %in% colnames(mat)) {
+    b_hi <- gate_k2_high(mat, seq_len(n), "CD19", 0.12)
+    if (any(b_hi) && mean(b_hi) > 0.08 && mean(b_hi) < 0.97) {
+      lo_med <- median(colv(mat, "CD19")[!b_hi], na.rm = TRUE)
+      hi_med <- median(colv(mat, "CD19")[b_hi], na.rm = TRUE)
+      if (is.finite(lo_med) && is.finite(hi_med) && hi_med > lo_med + 1.0 && lo_med < 0.9) {
+        b <- b_hi
+        out[!b] <- "other"
+      }
+    }
+  }
+  ib <- which(b)
+  if (length(ib) < 40) return(out)
+  mk <- intersect(c("IgD", "CD27"), colnames(mat))
+  if (!length(mk)) return(out)
+  if (length(ib) >= 40 && length(mk) >= 1) {
+    x <- mat[ib, mk, drop = FALSE]
+    xs <- scale(x)
+    xs[!is.finite(xs)] <- 0
+    set.seed(seed_value)
+    km <- tryCatch(
+      stats::kmeans(xs, centers = 2, nstart = 10, iter.max = 250, algorithm = "Lloyd"),
+      error = function(e) NULL
+    )
+    if (!is.null(km) && length(unique(km$cluster)) == 2) {
+      sc <- vapply(sort(unique(km$cluster)), function(ci) {
+        hit <- km$cluster == ci
+        cd27 <- if ("CD27" %in% mk) median(x[hit, "CD27"], na.rm = TRUE) else -Inf
+        igd <- if ("IgD" %in% mk) median(x[hit, "IgD"], na.rm = TRUE) else 0
+        if (!is.finite(cd27)) cd27 <- -Inf
+        if (!is.finite(igd)) igd <- 0
+        cd27 - igd
+      }, numeric(1))
+      if (diff(range(sc)) >= 0.08) {
+        mem_cl <- sort(unique(km$cluster))[which.max(sc)]
+        out[ib] <- ifelse(km$cluster == mem_cl, "Memory_B", "Naive_B")
+        return(out)
+      }
+    }
+  }
+  mem <- gate_k2_high(mat, ib, "CD27", 0.12)
+  if (any(mem)) {
+    out[ib[mem]] <- "Memory_B"
+    out[ib[!mem]] <- "Naive_B"
+    return(out)
+  }
+  igd_hi <- gate_k2_high(mat, ib, "IgD", 0.12)
+  if (any(igd_hi) && mean(igd_hi) < 0.95) {
+    out[ib[igd_hi]] <- "Naive_B"
+    out[ib[!igd_hi]] <- "Memory_B"
+  }
+  out
+}
+
 # 第 1 层：只用谱系抗体圈大类（P1 T/NK，P2 B 的 Naive/Memory，P3 淋巴 vs 髓系）
 gate_major_lineage <- function(mat, panel_id) {
   mat <- as.matrix(mat)
   n <- nrow(mat)
   if (panel_id == "P2") {
-    return(split_within_parent(
-      mat, seq_len(n), c("IgD", "CD27"), 2, label_b_major, "Naive_B"
-    ))
+    return(gate_p2_major(mat))
   }
   cd3 <- colv(mat, "CD3")
   cd4 <- colv(mat, "CD4")
@@ -1153,7 +1227,7 @@ sequential_b_naive <- function(mat, idx) {
     out[pos[hi]] <<- label
     remain[pos[hi]] <<- FALSE
   }
-  take_high(c("CD80", "CD86", "CD40"), "Activated_B", 0.2, beat = c("IgD", "IgM"), margin = 0.2)
+  take_high(c("CD80", "CD86", "CD40"), "Activated_B", 0.15, beat = c("IgD", "IgM"), margin = 0.05)
   if (any(remain)) {
     hi <- gate_k2_high(mat, idx[remain], "IgM", 0.2)
     pos <- which(remain)
@@ -1194,8 +1268,8 @@ sequential_b_memory <- function(mat, idx) {
     remain[pos[hi]] <<- FALSE
   }
   take_high("BLIMP-1", "Plasma", 0.4, beat = c("IgD", "IgM"), margin = 0.4, max_frac = 0.4)
-  take_high("IgG", "Switched_B", 0.2, beat = c("IgD", "IgM"), margin = 0.2)
-  take_high(c("CD80", "CD86"), "Activated_B", 0.2, beat = c("IgD", "IgM", "IgG"), margin = 0.2)
+  take_high("IgG", "Switched_B", 0.15, beat = c("IgD", "IgM"), margin = 0.1)
+  take_high(c("CD80", "CD86"), "Activated_B", 0.15, beat = c("IgD", "IgM", "IgG"), margin = 0.05)
   if (any(remain)) {
     hi <- gate_k2_high(mat, idx[remain], "IgM", 0.15)
     pos <- which(remain)
@@ -2084,7 +2158,7 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
   } else {
     sub <- file_tab[file_tab$panel == panel_id, ]
     if (nrow(sub) == 0) {
-      log_msg(panel_id, " : no unmixed files")
+      log_msg(panel_id, " : no unmixed files (need EV1_", panel_id, "_unmixed.fcs / H1_", panel_id, "_unmixed.fcs)")
       return(NULL)
     }
     for (i in seq_len(nrow(sub))) {
@@ -2146,6 +2220,14 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   }
   feat <- setdiff(feat, exclude_dr)
   mat_raw <- dat$transformed[, feat, drop = FALSE]
+  na_frac <- colMeans(!is.finite(as.matrix(mat_raw)))
+  drop_mk <- names(na_frac)[is.finite(na_frac) & na_frac > 0.2]
+  if (length(drop_mk)) {
+    log_msg(panel_id, " dropping unmatched/empty markers from DR (do not drop all cells): ",
+            paste(drop_mk, collapse = ", "))
+    feat <- setdiff(feat, drop_mk)
+    mat_raw <- dat$transformed[, feat, drop = FALSE]
+  }
   ok_row <- rowSums(!is.finite(as.matrix(mat_raw))) == 0
   mat_raw <- mat_raw[ok_row, , drop = FALSE]
   grp <- dat$group[ok_row]
@@ -2241,6 +2323,13 @@ if (nrow(file_tab) == 0) {
   }
 } else {
   log_msg("Found unmixed files:\n", paste(file_tab$file, collapse = "\n"))
+  for (pn in c("P1", "P2", "P3")) {
+    n_pn <- if (nrow(file_tab)) sum(file_tab$panel == pn) else 0L
+    log_msg(pn, " files parsed: ", n_pn)
+    if (n_pn == 0) {
+      log_msg(pn, " missing. Put files named like EV1_", pn, "_unmixed.fcs or EV1-", pn, "_unmixed.fcs in ", project_dir)
+    }
+  }
   if (any(file_tab$group == "H" & grepl("^EV", file_tab$file, ignore.case = TRUE))) {
     stop("Filename parser classified an EV file as H; refusing to continue")
   }
