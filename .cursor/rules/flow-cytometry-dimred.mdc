@@ -12,8 +12,8 @@ alwaysApply: false
 
 - 目录：`E:/R/flow J-LJY WJZ ZZX`（脚本与结果同目录；缺失则回退 `E:/R/flow J` / 仓库根 / `flow_J`）
 - 只用 `*_unmixed.fcs`，不要拿 raw 做降维
-- 文件名：`{EV|H}[-_]?{1|2|3}_P{1|2|3}_unmixed.fcs`（`EV1_P1_unmixed.fcs` 或 `EV-1_P1_unmixed.fcs` 均可）；**先匹配 EV 再匹配 H**
-- 六个样品独立保留：`EV1` `EV2` `EV3` `H1` `H2` `H3`
+- 文件名：`ZZX_EV1-1_P1_unmixed.fcs` / `EV1-1_P1_unmixed.fcs`（`ZZX_` 可有可无；生物学重复 1/2/3，技术重复 `-1`/`-2`）。旧名 `EV1_P1_unmixed.fcs` 仍可用。**先匹配 EV 再匹配 H**
+- 样品：`ZZX_EV` = EV1/EV2/EV3，每管两个技术重复 `EV1-1` `EV1-2`；`ZZX_H` = H1/H2/H3，同样 `H1-1` `H1-2`。圈门按 **FCS 管（技术重复）** 单独做；H vs EV 统计先把两个技术重复平均，再按 **n=3 生物学重复** 做 t 检验，不要把 6 个技术管当成 n=6
 - 三个 panel **分开分析、分开出图**，禁止把 P1/P2/P3 拼成一张表达矩阵。全亚群总览只汇总各 panel 已圈好的**管内频率**（`Flow_dimred_all_subsets.R` → `results_flow/all_subsets/`），百分数不能跨 panel 加总，也不能拿去再做联合 UMAP
 - 细胞轨迹（`Flow_dimred_trajectory.R`）按 **panel × 大类** 单独做：P1 的 CD4/CD8，P2 的 B，P3 的髓系。类内 PCA 当 Component 1/2，骨架用 slingshot（若已装）或亚群中心 MST。根节点按惯例取 naive / Naive B / Ly6C hi 单核。轨迹是标志物状态连续体，不要当成发育起源证明。出图：细胞点要够大、黑色分支骨架要细，先画线再画点，不要圈很小、线很粗
 - **`skip trajectory (... subsets= 1)` 不是失败。** 树至少要 2 个亚群节点。P1 的 NK/NKT 门控后经常整群只有一个标签，日志会写 `only 1 subset, no tree to draw`。真正要看的是 P1 CD4/CD8、P2 B、P3 Myeloid。`Panel Px failed: missing value where TRUE/FALSE needed` 才是 bug：`parent_mask` / `if (sum(par) < 20)` 遇到 NA 会炸；比较必须把 NA 收成 FALSE，subset 图失败不得炸掉整块 panel
@@ -32,9 +32,9 @@ alwaysApply: false
 
 ## 比较与出图（每 panel 必须单独出）
 
-比较只有 **H vs EV**（三 vs 三）。联合 UMAP/tSNE，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
+比较只有 **H vs EV**（三个生物学重复 vs 三个；技术重复先平均）。联合 UMAP/tSNE 仍用全部细胞，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
 
-每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 EV、右 H，点按**细亚群**着色，不要虚线凸包。主图 `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split` **按大类分区**（CD4、CD8、NK… 各一块，块内用该类 PCA），避免所有 T 亚群叠在联合 UMAP 的同一团里。联合 UMAP 仍出 `*_UMAP_by_lineage` 和 `*_lineage_split_joint`，不要为了好看去改门控或按标签重训 UMAP。
+每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 EV、右 H。主图 `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split` **按细胞亚群分区**，每块画该亚群的**填充密度区域**，不要把每个细胞画成散点，也不要虚线凸包。联合散点图仍出 `*_UMAP_by_lineage` 和 `*_lineage_split_joint`。
 
 **圈门必须每个样品单独走完同一套逻辑**（`hierarchical_gate_by_sample`），不要六个 FCS 共用一个 kmeans 阈值。CD62L/CD44 用完整象限：naive = 62L+44−，TCM = 双阳，TEM = **整个 CD62L− 半平面**（CD44+ 与原点双阴都算 TEM，不要只框 10–20% 的小矩形）。阳性阈值要切在原点主团右侧（抓住 CD62L/CD44 尾巴），不要用全体 q80 把主团切开。每个 FCS 另出 `gating/<样品>/`：2D 十字门铺满坐标轴，CD62L/CD44 标四个象限百分数。subset 图的 EV、H 也各自按本组细胞切完整门，禁止用命中细胞的 10–90% 分位数小框。
 

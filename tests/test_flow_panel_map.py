@@ -10,21 +10,40 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MAP_PATH = ROOT / "flow_panel_map.json"
 
-FILENAME_RE = re.compile(
-    r"^(EV|H)[-_ ]?([123])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\.fcs$",
+FILENAME_RE_TECH = re.compile(
+    r"^(?:ZZX[_-]?)?(EV|H)[-_ ]?([123])[-_ ]([12])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\.fcs$",
+    re.IGNORECASE,
+)
+FILENAME_RE_BIO = re.compile(
+    r"^(?:ZZX[_-]?)?(EV|H)[-_ ]?([123])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\.fcs$",
     re.IGNORECASE,
 )
 
 
 def parse_fcs_filename(name: str) -> dict | None:
-    m = FILENAME_RE.match(Path(name).name)
+    b = Path(name).name
+    m = FILENAME_RE_TECH.match(b)
+    if m:
+        return {
+            "group": m.group(1).upper(),
+            "rep": m.group(2),
+            "tech": m.group(3),
+            "panel": "P" + m.group(4),
+            "kind": m.group(5).lower(),
+            "sample": f"{m.group(1).upper()}{m.group(2)}-{m.group(3)}",
+            "bio_sample": f"{m.group(1).upper()}{m.group(2)}",
+        }
+    m = FILENAME_RE_BIO.match(b)
     if not m:
         return None
     return {
         "group": m.group(1).upper(),
         "rep": m.group(2),
+        "tech": None,
         "panel": "P" + m.group(3),
         "kind": m.group(4).lower(),
+        "sample": f"{m.group(1).upper()}{m.group(2)}",
+        "bio_sample": f"{m.group(1).upper()}{m.group(2)}",
     }
 
 
@@ -48,6 +67,10 @@ def main() -> int:
         "H3_P3_unmixed.fcs": ("H", "3", "P3", "unmixed"),
         "EV1-P3_unmixed.fcs": ("EV", "1", "P3", "unmixed"),
         "EV1_Panel3_unmixed.fcs": ("EV", "1", "P3", "unmixed"),
+        "ZZX_EV1-1_P1_unmixed.fcs": ("EV", "1", "P1", "unmixed"),
+        "ZZX_H2-2_P3_unmixed.fcs": ("H", "2", "P3", "unmixed"),
+        "EV1-2_P1_unmixed.fcs": ("EV", "1", "P1", "unmixed"),
+        "H1-1_P2_unmixed.fcs": ("H", "1", "P2", "unmixed"),
     }
     for fname, expected in cases.items():
         parsed = parse_fcs_filename(fname)
@@ -66,6 +89,14 @@ def main() -> int:
         errors.append("non-matching name should be None")
     if parse_fcs_filename("EV1_P1_unmixed.fcs")["group"] == "H":
         errors.append("EV1 must stay group EV")
+    zzx = parse_fcs_filename("ZZX_EV1-1_P1_unmixed.fcs")
+    if zzx is None or zzx["group"] != "EV" or zzx["sample"] != "EV1-1" or zzx["bio_sample"] != "EV1":
+        errors.append("ZZX_EV1-1 must parse as EV tech EV1-1 / bio EV1")
+    zzx_h = parse_fcs_filename("ZZX_H3-2_P2_unmixed.fcs")
+    if zzx_h is None or zzx_h["group"] != "H" or zzx_h["sample"] != "H3-2":
+        errors.append("ZZX_H3-2 must parse as H tech H3-2")
+    if parse_fcs_filename("ZZX_EV1-1_P1_unmixed.fcs")["group"] == "H":
+        errors.append("ZZX_EV must not be classified as H")
 
     if data.get("groups") != ["EV", "H"]:
         errors.append(f"groups should be [EV, H], got {data.get('groups')}")

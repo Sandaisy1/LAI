@@ -63,7 +63,8 @@ read_panel_embeddings <- function(result_dir, panel_id) {
   df <- read_embed_csv(p)
   need <- c("sample", "group", "lineage")
   if (!all(need %in% names(df))) return(NULL)
-  df[, need, drop = FALSE]
+  keep <- unique(c(need, "bio_sample", "tech_rep"))
+  df[, intersect(keep, names(df)), drop = FALSE]
 }
 
 collect_all_subset_frequencies <- function(cells_by_panel) {

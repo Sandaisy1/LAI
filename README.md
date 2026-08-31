@@ -78,7 +78,7 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 
 ## 流式降维（H vs EV，P1 / P2 / P3）
 
-小鼠流式在 `E:/R/flow J-LJY WJZ ZZX`，只用 `*_unmixed.fcs`。三个 panel **分开**做 UMAP/tSNE，比较 EV（EV1/2/3）与 H（H1/2/3）。
+小鼠流式在 `E:/R/flow J-LJY WJZ ZZX`，只用 `*_unmixed.fcs`。三个 panel **分开**做 UMAP/tSNE，比较 **ZZX_EV**（EV1/2/3，每管两个技术重复 EV1-1/EV1-2）与 **ZZX_H**（H1/2/3，H1-1/H1-2）。统计按生物学重复 n=3，两个技术重复先平均。
 
 ```r
 setwd("E:/R/flow J-LJY WJZ ZZX")
@@ -86,13 +86,13 @@ setwd("E:/R/flow J-LJY WJZ ZZX")
 source("Flow_dimred_pipeline.R")
 ```
 
-文件名：`EV1_P1_unmixed.fcs`、`H-2_P3_unmixed.fcs` 这种都可以（组别与重复号之间的 `-`/`_` 可有可无）。
+文件名：`ZZX_EV1-1_P1_unmixed.fcs`、`EV1-2_P3_unmixed.fcs`、`H-1-1_P2_unmixed.fcs` 都可以（`ZZX_` 可有可无）。旧名 `EV1_P1_unmixed.fcs`（无技术重复号）仍能解析。文件夹名 `ZZX_EV` / `ZZX_H` 也可用来认组别。
 
 若 Windows 把 json 显示成“文本文档”，真实文件名多半是 `flow_panel_map.json.txt`。关掉“隐藏已知文件类型的扩展名”后改名为 `flow_panel_map.json`；新版脚本两种名字都能读。
 
 每个 panel 的图在 `results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
 
-- `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split`：**主图**，左 EV、右 H，按大类分区（CD4/CD8/NK 各一块），点按细亚群着色；无虚线；共用 P1 配色。原来叠在一起的联合 UMAP 在 `*_lineage_split_joint` 和 `*_UMAP_by_lineage`
+- `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split`：**主图**，左 EV、右 H，**每个亚群一块填充区域**（不是每个细胞一个点）；无虚线；共用 P1 配色。原来叠在一起的联合散点在 `*_lineage_split_joint` 和 `*_UMAP_by_lineage`
 - `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图；下为 FlowJo 风格 2D 图。门是铺到坐标轴的完整象限/半平面（CD62L/CD44 标四个象限），EV 与 H **各自切阈值**。不是只框 10–90% 命中细胞的小矩形。

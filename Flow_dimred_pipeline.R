@@ -2,7 +2,9 @@
 # =============================================================================
 # 流式降维：H vs EV（P1 T/NK，P2 B，P3 髓系）
 # 输入：E:/R/flow J-LJY WJZ ZZX 下的 *_unmixed.fcs（不要用 raw）
+# 样品：ZZX_EV（EV1/2/3 × 技术重复 -1/-2）与 ZZX_H（H1/2/3 × -1/-2）
 # 每个 panel 单独联合 UMAP/tSNE，导出 PDF+PNG，并比较 H vs EV 细胞频率
+# 主图按亚群分区画填充区域，不是每个细胞一个点
 #
 # 用法：
 #   setwd("E:/R/flow J-LJY WJZ ZZX")
@@ -162,30 +164,83 @@ asinh_cofactor <- 150
 seed_value <- 42
 
 # -----------------------------------------------------------------------------
-# 2. 文件名：EV1–3 与 H1–3（先匹配 EV，避免被单字母 H 误伤）
+# 2. 文件名：ZZX_EV / ZZX_H
+#    生物学重复 EV1/2/3 与 H1/2/3；每个生物学重复两个技术重复 EV1-1、EV1-2
+#    先匹配 EV，避免被单字母 H 误伤
 # -----------------------------------------------------------------------------
 flow_ctrl_group <- "EV"
 flow_trt_group <- "H"
 flow_group_levels <- c("EV", "H")
+flow_cohort <- "ZZX"
+
+# 带技术重复的名字优先，避免把 EV1-1_P1 的 “1” 当成 panel
+flow_re_tech <- "^(?:ZZX[_-]?)?(EV|H)[-_ ]?([123])[-_ ]([12])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$"
+flow_re_bio <- "^(?:ZZX[_-]?)?(EV|H)[-_ ]?([123])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$"
+flow_re_folder_tech <- "^([123])[-_ ]([12])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$"
+
+group_from_path <- function(path) {
+  parts <- unlist(strsplit(gsub("\\\\", "/", as.character(path)), "/"))
+  parts <- toupper(gsub("[^A-Za-z0-9]", "", parts))
+  parts <- parts[nzchar(parts)]
+  for (p in rev(parts)) {
+    if (identical(p, "ZZXEV")) return("EV")
+    if (identical(p, "ZZXH")) return("H")
+  }
+  NA_character_
+}
 
 parse_fcs_filename <- function(path) {
   b <- basename(path)
-  # EV1_P3 / EV1-P3 / EV-1_P3 / EV1_Panel3 / EV1_P03
-  m <- regexec(
-    "^(EV|H)[-_ ]?([123])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$",
-    b, ignore.case = TRUE
-  )
+  grp <- NA_character_
+  bio <- NA_character_
+  tech <- NA_character_
+  panel_n <- NA_character_
+  kind <- NA_character_
+  m <- regexec(flow_re_tech, b, ignore.case = TRUE)
   hit <- regmatches(b, m)[[1]]
-  if (length(hit) < 5) return(NULL)
-  grp <- toupper(hit[2])
+  if (length(hit) >= 6) {
+    grp <- toupper(hit[2])
+    bio <- hit[3]
+    tech <- hit[4]
+    panel_n <- hit[5]
+    kind <- tolower(hit[6])
+  } else {
+    m <- regexec(flow_re_bio, b, ignore.case = TRUE)
+    hit <- regmatches(b, m)[[1]]
+    if (length(hit) >= 5) {
+      grp <- toupper(hit[2])
+      bio <- hit[3]
+      panel_n <- hit[4]
+      kind <- tolower(hit[5])
+    } else {
+      m <- regexec(flow_re_folder_tech, b, ignore.case = TRUE)
+      hit <- regmatches(b, m)[[1]]
+      if (length(hit) >= 5) {
+        grp <- group_from_path(path)
+        bio <- hit[2]
+        tech <- hit[3]
+        panel_n <- hit[4]
+        kind <- tolower(hit[5])
+      }
+    }
+  }
+  if (is.na(grp) || !nzchar(grp) || is.na(bio) || !nzchar(bio) ||
+      is.na(panel_n) || !nzchar(panel_n)) {
+    return(NULL)
+  }
+  bio_sample <- paste0(grp, bio)
+  sample <- if (!is.na(tech) && nzchar(tech)) paste0(bio_sample, "-", tech) else bio_sample
   list(
     file = b,
     path = path,
+    cohort = flow_cohort,
     group = grp,
-    replicate = hit[3],
-    sample = paste0(grp, hit[3]),
-    panel = paste0("P", hit[4]),
-    kind = tolower(hit[5])
+    replicate = bio,
+    tech_rep = if (!is.na(tech) && nzchar(tech)) tech else NA_character_,
+    bio_sample = bio_sample,
+    sample = sample,
+    panel = paste0("P", panel_n),
+    kind = kind
   )
 }
 
@@ -203,15 +258,49 @@ list_unmixed_files <- function(root) {
   if (!any(ok)) return(data.frame())
   rows <- lapply(meta[ok], function(x) {
     data.frame(
-      file = x$file, path = x$path, group = x$group, replicate = x$replicate,
-      sample = x$sample, panel = x$panel, kind = x$kind, stringsAsFactors = FALSE
+      file = x$file, path = x$path, cohort = x$cohort, group = x$group,
+      replicate = x$replicate, tech_rep = x$tech_rep,
+      bio_sample = x$bio_sample, sample = x$sample,
+      panel = x$panel, kind = x$kind, stringsAsFactors = FALSE
     )
   })
   df <- do.call(rbind, rows)
   df <- df[!duplicated(df$path), , drop = FALSE]
-  df <- df[order(df$panel, df$group, df$replicate), ]
+  tech_ord <- ifelse(is.na(df$tech_rep) | !nzchar(df$tech_rep), "0", df$tech_rep)
+  df <- df[order(df$panel, df$group, df$replicate, tech_ord), ]
   rownames(df) <- NULL
   df
+}
+
+ensure_bio_sample <- function(df) {
+  if (is.null(df) || !nrow(df)) return(df)
+  if (!"bio_sample" %in% names(df) || all(is.na(df$bio_sample) | !nzchar(as.character(df$bio_sample)))) {
+    df$bio_sample <- as.character(df$sample)
+  }
+  df$bio_sample <- as.character(df$bio_sample)
+  df
+}
+
+# 技术重复先在生物学重复内平均，H vs EV 的 n 是 3 vs 3，不要把 EV1-1/EV1-2 当成两个生物学 n
+aggregate_freq_by_bio <- function(freq_df, id_col) {
+  freq_df <- ensure_bio_sample(freq_df)
+  if (!id_col %in% names(freq_df)) stop("aggregate_freq_by_bio: missing ", id_col)
+  keep <- unique(c("bio_sample", "group", id_col, "percent"))
+  keep <- intersect(keep, names(freq_df))
+  d <- freq_df[, keep, drop = FALSE]
+  d <- d[is.finite(d$percent), , drop = FALSE]
+  if (!nrow(d)) return(d)
+  fmla <- stats::as.formula(paste("percent ~ bio_sample + group +", id_col))
+  aggregate(fmla, data = d, FUN = mean, na.rm = TRUE)
+}
+
+bio_percent_table <- function(samp) {
+  s2 <- ensure_bio_sample(samp)
+  s2 <- s2[is.finite(s2$percent), , drop = FALSE]
+  if (!nrow(s2)) return(s2)
+  out <- aggregate(percent ~ bio_sample + group, data = s2, FUN = mean, na.rm = TRUE)
+  out$sample <- out$bio_sample
+  out
 }
 
 # -----------------------------------------------------------------------------
@@ -1630,6 +1719,7 @@ theme_split_dr <- function() {
 
 plot_feature_cols <- function(df) {
   meta <- c("sample", "group", "cluster", "cluster_lineage", "lineage", "true_lineage",
+            "bio_sample", "tech_rep",
             "UMAP1", "UMAP2", "tSNE1", "tSNE2", "sep1", "sep2", "major_plot")
   num <- names(df)[vapply(df, is.numeric, logical(1))]
   setdiff(num, meta)
@@ -1729,7 +1819,105 @@ separate_major_plot_coords <- function(df, panel_id, x_col = "UMAP1", y_col = "U
   list(sep1 = out1, sep2 = out2, boxes = boxes, major = maj)
 }
 
-# 主图：左 EV、右 H；颜色=细亚群；按大类分区，不要虚线凸包
+# 绘图分区：每个细亚群各占一块（区域），不要把所有细胞叠在同一张 tSNE 上当散点
+separate_region_plot_coords <- function(df, panel_id, x_col = "UMAP1", y_col = "UMAP2") {
+  n <- nrow(df)
+  out1 <- rep(NA_real_, n)
+  out2 <- rep(NA_real_, n)
+  boxes <- data.frame(region = character(0), xmin = numeric(0), xmax = numeric(0),
+                      ymin = numeric(0), ymax = numeric(0),
+                      labx = numeric(0), laby = numeric(0), stringsAsFactors = FALSE)
+  lin <- as.character(df$lineage)
+  lin[is.na(lin) | !nzchar(lin)] <- "other"
+  maj <- plot_major_id(df, panel_id)
+  prefer_maj <- c("CD4", "CD8", "NK", "NKT", "Naive_B", "Memory_B", "B", "Myeloid", "T")
+  regions <- unique(lin)
+  regions <- regions[regions != "other" | sum(lin == "other") >= 20L]
+  maj_of <- tapply(maj, lin, function(v) names(sort(table(v), decreasing = TRUE))[1])
+  ord_maj <- match(unname(maj_of[regions]), prefer_maj)
+  ord_maj[is.na(ord_maj)] <- length(prefer_maj) + 1L
+  regions <- regions[order(ord_maj, regions)]
+  if (!length(regions)) {
+    return(list(sep1 = as.numeric(df[[x_col]]), sep2 = as.numeric(df[[y_col]]), boxes = boxes, region = lin))
+  }
+  ncol <- if (length(regions) <= 3) length(regions) else if (length(regions) <= 8) 4L else 5L
+  nrow_g <- as.integer(ceiling(length(regions) / ncol))
+  gap <- 1.18
+  for (i in seq_along(regions)) {
+    r <- regions[i]
+    hit <- which(lin == r)
+    if (!length(hit)) next
+    xy <- local_major_xy(df[hit, , drop = FALSE], x_col, y_col)
+    col <- (i - 1L) %% ncol
+    row <- (i - 1L) %/% ncol
+    gx <- col * gap
+    gy <- (nrow_g - 1L - row) * gap
+    out1[hit] <- gx + xy[, 1] * 0.86
+    out2[hit] <- gy + xy[, 2] * 0.86
+    boxes <- rbind(boxes, data.frame(
+      region = r, xmin = gx - 0.04, xmax = gx + 0.92, ymin = gy - 0.04, ymax = gy + 0.92,
+      labx = gx + 0.44, laby = gy + 0.98, stringsAsFactors = FALSE
+    ))
+  }
+  leftover <- which(!is.finite(out1) | !is.finite(out2))
+  if (length(leftover)) {
+    out1[leftover] <- NA_real_
+    out2[leftover] <- NA_real_
+  }
+  list(sep1 = out1, sep2 = out2, boxes = boxes, region = lin)
+}
+
+# 一个亚群一块填充区域（密度岛或椭圆），不是每个细胞一个点
+region_fill_polygon <- function(x, y, celltype, group) {
+  ok <- is.finite(x) & is.finite(y)
+  x <- as.numeric(x)[ok]
+  y <- as.numeric(y)[ok]
+  if (length(x) < 8) return(NULL)
+  poly <- NULL
+  pc <- flow_prob_contour(x, y, probs = c(0.55, 0.82))
+  if (length(pc$levels) >= 1 && nrow(pc$grid) > 10) {
+    xs <- sort(unique(pc$grid$x))
+    ys <- sort(unique(pc$grid$y))
+    z <- matrix(pc$grid$z, nrow = length(xs), ncol = length(ys))
+    lev <- min(pc$levels)
+    cls <- tryCatch(
+      grDevices::contourLines(xs, ys, z, levels = lev),
+      error = function(e) NULL
+    )
+    if (length(cls)) {
+      lens <- vapply(cls, function(p) length(p$x), integer(1))
+      best <- cls[[which.max(lens)]]
+      if (length(best$x) >= 4) {
+        poly <- data.frame(
+          x = best$x, y = best$y,
+          celltype = celltype, group = group,
+          piece = paste(group, celltype, sep = ":"),
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+  if (is.null(poly)) {
+    mu <- c(mean(x), mean(y))
+    s <- stats::cov(cbind(x, y))
+    if (!all(is.finite(s)) || abs(det(s)) < 1e-10) {
+      s <- diag(c(stats::sd(x), stats::sd(y))^2 + 1e-4, 2)
+    }
+    eg <- tryCatch(eigen(s), error = function(e) NULL)
+    if (is.null(eg)) return(NULL)
+    t <- seq(0, 2 * pi, length.out = 72)
+    xy <- cbind(cos(t), sin(t)) %*% diag(sqrt(pmax(eg$values, 1e-6)) * 1.7) %*% t(eg$vectors)
+    poly <- data.frame(
+      x = mu[1] + xy[, 1], y = mu[2] + xy[, 2],
+      celltype = celltype, group = group,
+      piece = paste(group, celltype, sep = ":"),
+      stringsAsFactors = FALSE
+    )
+  }
+  poly
+}
+
+# 主图：左 EV、右 H；各大类/细亚群分区；画填充区域，不要每个细胞一个点，不要虚线凸包
 plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title, separate_majors = TRUE) {
   plot_df <- df
   plot_df$group <- factor(plot_df$group, levels = flow_group_levels)
@@ -1743,7 +1931,7 @@ plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title, separate_m
   xlab_use <- xlab
   ylab_use <- ylab
   if (isTRUE(separate_majors)) {
-    lay <- separate_major_plot_coords(plot_df, panel_id, x, y)
+    lay <- separate_region_plot_coords(plot_df, panel_id, x, y)
     plot_df$sep1 <- lay$sep1
     plot_df$sep2 <- lay$sep2
     x_use <- "sep1"
@@ -1752,27 +1940,58 @@ plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title, separate_m
     ylab_use <- NULL
     boxes <- lay$boxes
     if (nrow(boxes)) {
-      boxes$lab <- celltype_label(boxes$major, panel_id)
+      boxes$lab <- celltype_label(boxes$region, panel_id)
     }
   }
-  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x_use]], y = .data[[y_use]], color = celltype))
+  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x_use]], y = .data[[y_use]]))
   if (!is.null(boxes) && nrow(boxes)) {
     p <- p + ggplot2::geom_rect(
       data = boxes,
       ggplot2::aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-      inherit.aes = FALSE, fill = NA, color = "grey80", linewidth = 0.35
+      inherit.aes = FALSE, fill = "grey98", color = "grey80", linewidth = 0.35
+    )
+  }
+  if (isTRUE(separate_majors)) {
+    poly_rows <- list()
+    for (g in levels(plot_df$group)) {
+      dg <- plot_df[as.character(plot_df$group) == g & is.finite(plot_df[[x_use]]) &
+                      is.finite(plot_df[[y_use]]), , drop = FALSE]
+      for (ct in levels(plot_df$celltype)) {
+        sub <- dg[as.character(dg$celltype) == ct, , drop = FALSE]
+        if (nrow(sub) < 8) next
+        poly <- region_fill_polygon(sub[[x_use]], sub[[y_use]], ct, g)
+        if (!is.null(poly)) poly_rows[[length(poly_rows) + 1]] <- poly
+      }
+    }
+    if (length(poly_rows)) {
+      polys <- do.call(rbind, poly_rows)
+      polys$celltype <- factor(polys$celltype, levels = levels(plot_df$celltype))
+      polys$group <- factor(polys$group, levels = flow_group_levels)
+      p <- p + ggplot2::geom_polygon(
+        data = polys,
+        ggplot2::aes(x = x, y = y, fill = celltype, group = piece),
+        inherit.aes = FALSE, color = NA, alpha = 0.92
+      )
+    }
+  } else {
+    p <- p + ggplot2::geom_point(
+      ggplot2::aes(color = celltype), size = 0.42, alpha = 0.88, stroke = 0
     )
   }
   p <- p +
-    ggplot2::geom_point(size = 0.42, alpha = 0.88, stroke = 0) +
     ggplot2::facet_wrap(~group, ncol = 2) +
-    ggplot2::scale_color_manual(values = pal, drop = FALSE) +
-    ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(size = 3.2, alpha = 1))) +
-    ggplot2::labs(title = title, x = xlab_use, y = ylab_use, color = NULL)
+    ggplot2::labs(title = title, x = xlab_use, y = ylab_use, fill = NULL, color = NULL)
+  if (isTRUE(separate_majors)) {
+    p <- p + ggplot2::scale_fill_manual(values = pal, drop = FALSE) +
+      ggplot2::guides(fill = ggplot2::guide_legend(override.aes = list(alpha = 1)))
+  } else {
+    p <- p + ggplot2::scale_color_manual(values = pal, drop = FALSE) +
+      ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(size = 3.2, alpha = 1)))
+  }
   if (!is.null(boxes) && nrow(boxes)) {
     p <- p + ggplot2::geom_text(
       data = boxes, ggplot2::aes(x = labx, y = laby, label = lab),
-      inherit.aes = FALSE, color = "grey25", fontface = "bold", size = 3.3, vjust = 0
+      inherit.aes = FALSE, color = "grey25", fontface = "bold", size = 2.8, vjust = 0
     )
   }
   p +
@@ -2089,8 +2308,11 @@ subset_sample_percent <- function(cells, spec) {
     n_par <- sum(keep_s & par)
     n_hit <- sum(keep_s & par & hit)
     grp <- as.character(cells$group[keep_s][1])
+    bio <- if ("bio_sample" %in% names(cells)) as.character(cells$bio_sample[keep_s][1]) else s
+    if (is.na(bio) || !nzchar(bio)) bio <- s
+    tech <- if ("tech_rep" %in% names(cells)) as.character(cells$tech_rep[keep_s][1]) else NA_character_
     data.frame(
-      sample = s, group = grp,
+      sample = s, bio_sample = bio, tech_rep = tech, group = grp,
       n_parent = n_par, n_subset = n_hit,
       percent = if (n_par > 0) 100 * n_hit / n_par else NA_real_,
       stringsAsFactors = FALSE
@@ -2334,8 +2556,10 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
     if (!is.finite(n_par) || !is.finite(n_hit) || n_par < 20 || n_hit < 8) next
     samp <- subset_sample_percent(cells, spec)
     if (is.null(samp) || nrow(samp) < 2) next
-    ctrl_v <- samp$percent[as.character(samp$group) == flow_ctrl_group]
-    trt_v <- samp$percent[as.character(samp$group) == flow_trt_group]
+    samp_bio <- bio_percent_table(samp)
+    if (is.null(samp_bio) || nrow(samp_bio) < 2) next
+    ctrl_v <- samp_bio$percent[as.character(samp_bio$group) == flow_ctrl_group]
+    trt_v <- samp_bio$percent[as.character(samp_bio$group) == flow_trt_group]
     pv <- if (length(ctrl_v) >= 2 && length(trt_v) >= 2) {
       tryCatch(stats::t.test(trt_v, ctrl_v)$p.value, error = function(e) NA_real_)
     } else {
@@ -2347,7 +2571,7 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
       celltype_label(spec$lineage, panel_id)
     }
     ylab <- if (!is.null(spec$ylab) && nzchar(spec$ylab)) spec$ylab else paste0(lab, " (%)")
-    bar <- plot_subset_stat_bar(samp, ylab, pv)
+    bar <- plot_subset_stat_bar(samp_bio, ylab, pv)
     d_ctrl <- cells[par & as.character(cells$group) == flow_ctrl_group, , drop = FALSE]
     d_trt <- cells[par & as.character(cells$group) == flow_trt_group, , drop = FALSE]
     if (nrow(d_ctrl) < 8 || nrow(d_trt) < 8) next
@@ -2359,7 +2583,7 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
     xlab <- axis_fl_label(panel_id, spec$x)
     yfl <- axis_fl_label(panel_id, spec$y)
     pct_of <- function(g) {
-      v <- samp$percent[as.character(samp$group) == g]
+      v <- samp_bio$percent[as.character(samp_bio$group) == g]
       if (!length(v) || all(!is.finite(v))) return(0)
       mean(v, na.rm = TRUE)
     }
@@ -2398,6 +2622,7 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
     stub <- paste0(panel_id, "_", gsub("[^A-Za-z0-9]+", "_", spec$lineage), "_H_vs_EV")
     save_subset_figure(bar, c_ctrl, c_trt, file.path(sub_dir, stub))
     utils::write.csv(samp, file.path(sub_dir, paste0(stub, "_by_sample.csv")), row.names = FALSE)
+    utils::write.csv(samp_bio, file.path(sub_dir, paste0(stub, "_by_bio.csv")), row.names = FALSE)
     stat_rows[[length(stat_rows) + 1]] <- data.frame(
       panel = panel_id,
       subset = spec$lineage,
@@ -2568,15 +2793,17 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
                        file.path(out_dir, paste0(panel_id, "_cluster_marker_heatmap")))
 
   freq_df$cluster <- factor(freq_df$cluster, levels = annot$cluster)
-  save_gg(plot_freq_box(freq_df, paste(tag, "cluster frequency")),
+  freq_bio <- aggregate_freq_by_bio(freq_df, "cluster")
+  save_gg(plot_freq_box(freq_bio, paste(tag, "cluster frequency (bio-rep mean of tech)")),
           file.path(out_dir, paste0(panel_id, "_cluster_frequency_H_vs_EV")),
           width = max(8, 0.7 * length(unique(freq_df$cluster)) + 2), height = 5.5)
 
   lin_freq <- lineage_frequencies(cells)
-  names(lin_freq)[names(lin_freq) == "lineage"] <- "cluster"
-  save_gg(plot_freq_box(lin_freq, paste(tag, "lineage frequency")),
+  lin_bio <- aggregate_freq_by_bio(lin_freq, "lineage")
+  names(lin_bio)[names(lin_bio) == "lineage"] <- "cluster"
+  save_gg(plot_freq_box(lin_bio, paste(tag, "lineage frequency (bio-rep mean of tech)")),
           file.path(out_dir, paste0(panel_id, "_lineage_frequency_H_vs_EV")),
-          width = max(7, 0.8 * length(unique(lin_freq$cluster)) + 2), height = 5.5)
+          width = max(7, 0.8 * length(unique(lin_bio$cluster)) + 2), height = 5.5)
 
   mean_df <- aggregate(percent ~ group + cluster, data = freq_df, FUN = mean)
   names(mean_df)[names(mean_df) == "percent"] <- "mean_percent"
@@ -2587,7 +2814,7 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
   if (has_pkg("cowplot")) {
     p1 <- plot_embedding(cells, "UMAP1", "UMAP2", "group", "Group")
     p2 <- plot_embedding(cells, "UMAP1", "UMAP2", "lineage", "Lineage")
-    p3 <- plot_freq_box(lin_freq, "Lineage %")
+    p3 <- plot_freq_box(lin_bio, "Lineage %")
     overview <- cowplot::plot_grid(p1, p2, p3, ncol = 3, rel_widths = c(1, 1.1, 1.2))
     title <- cowplot::ggdraw() +
       cowplot::draw_label(paste(tag, "dimensionality reduction overview"), fontface = "bold", size = 14)
@@ -2612,7 +2839,8 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
 # 旧表里的 "T" 单独成列时 read.csv 会变成 TRUE
 read_embed_csv <- function(path) {
   df <- utils::read.csv(path, check.names = FALSE, stringsAsFactors = FALSE)
-  chr <- intersect(c("sample", "group", "cluster", "cluster_lineage", "lineage"), names(df))
+  chr <- intersect(c("sample", "group", "cluster", "cluster_lineage", "lineage",
+                     "bio_sample", "tech_rep"), names(df))
   for (cn in chr) {
     v <- as.character(df[[cn]])
     v[v %in% c("TRUE", "True")] <- "T"
@@ -2625,7 +2853,8 @@ read_embed_csv <- function(path) {
 cluster_frequencies <- function(cells) {
   tab <- as.data.frame(table(sample = cells$sample, cluster = cells$cluster), stringsAsFactors = FALSE)
   names(tab)[3] <- "n"
-  smp_group <- unique(cells[, c("sample", "group")])
+  meta_cols <- intersect(c("sample", "group", "bio_sample", "tech_rep"), names(cells))
+  smp_group <- unique(cells[, meta_cols, drop = FALSE])
   tab <- merge(tab, smp_group, by = "sample")
   tot <- aggregate(n ~ sample, data = tab, FUN = sum)
   names(tot)[2] <- "total"
@@ -2645,7 +2874,8 @@ cluster_frequencies <- function(cells) {
 lineage_frequencies <- function(cells) {
   tab <- as.data.frame(table(sample = cells$sample, lineage = cells$lineage), stringsAsFactors = FALSE)
   names(tab)[3] <- "n"
-  smp_group <- unique(cells[, c("sample", "group")])
+  meta_cols <- intersect(c("sample", "group", "bio_sample", "tech_rep"), names(cells))
+  smp_group <- unique(cells[, meta_cols, drop = FALSE])
   tab <- merge(tab, smp_group, by = "sample")
   tot <- aggregate(n ~ sample, data = tab, FUN = sum)
   names(tot)[2] <- "total"
@@ -2655,6 +2885,7 @@ lineage_frequencies <- function(cells) {
 }
 
 compare_group_freq <- function(freq_df, id_col = "cluster") {
+  freq_df <- aggregate_freq_by_bio(freq_df, id_col)
   ids <- unique(as.character(freq_df[[id_col]]))
   g_ctrl <- flow_ctrl_group
   g_trt <- flow_trt_group
@@ -2707,29 +2938,37 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
   all_expr <- list()
   meta_group <- character()
   meta_sample <- character()
+  meta_bio <- character()
+  meta_tech <- character()
   meta_true <- character()
   map_used <- NULL
 
   if (use_demo) {
     log_msg(panel_id, " : DEMO synthetic cells (not real FCS)")
-    samples <- expand.grid(group = flow_group_levels, replicate = 1:3, stringsAsFactors = FALSE)
-    samples$sample <- paste0(samples$group, samples$replicate)
+    samples <- expand.grid(
+      group = flow_group_levels, replicate = 1:3, tech = 1:2,
+      stringsAsFactors = FALSE
+    )
+    samples$bio_sample <- paste0(samples$group, samples$replicate)
+    samples$sample <- paste0(samples$bio_sample, "-", samples$tech)
     for (i in seq_len(nrow(samples))) {
       set.seed(seed_value + i + as.integer(factor(panel_id)) * 10)
       d <- make_demo_sample(panel_id, samples$group[i], samples$sample[i], min(n_cap, 2500))
       all_expr[[i]] <- d$expr[, c("CD45", "L/D", markers), drop = FALSE]
       meta_group <- c(meta_group, rep(samples$group[i], nrow(d$expr)))
       meta_sample <- c(meta_sample, rep(samples$sample[i], nrow(d$expr)))
+      meta_bio <- c(meta_bio, rep(samples$bio_sample[i], nrow(d$expr)))
+      meta_tech <- c(meta_tech, rep(as.character(samples$tech[i]), nrow(d$expr)))
       meta_true <- c(meta_true, d$true_lineage)
     }
   } else {
     sub <- file_tab[file_tab$panel == panel_id, ]
     if (nrow(sub) == 0) {
-      log_msg(panel_id, " : no unmixed files (need EV1_", panel_id, "_unmixed.fcs / H1_", panel_id, "_unmixed.fcs)")
+      log_msg(panel_id, " : no unmixed files (need ZZX_EV1-1_", panel_id, "_unmixed.fcs / EV1-1_", panel_id, "_unmixed.fcs)")
       return(NULL)
     }
     for (i in seq_len(nrow(sub))) {
-      log_msg("Read ", sub$file[i])
+      log_msg("Read ", sub$file[i], "  sample=", sub$sample[i], " bio=", sub$bio_sample[i])
       rec <- read_fcs_expr(sub$path[i], panel_id)
       keep <- qc_filter_matrix(rec$exprs, rec$names, rec$map)
       exprs <- rec$exprs[keep, , drop = FALSE]
@@ -2749,8 +2988,12 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
       }
       mat <- mat[, c("CD45", "L/D", markers), drop = FALSE]
       all_expr[[length(all_expr) + 1]] <- mat
+      bio <- if ("bio_sample" %in% names(sub)) as.character(sub$bio_sample[i]) else as.character(sub$sample[i])
+      tech <- if ("tech_rep" %in% names(sub)) as.character(sub$tech_rep[i]) else NA_character_
       meta_group <- c(meta_group, rep(sub$group[i], nrow(mat)))
       meta_sample <- c(meta_sample, rep(sub$sample[i], nrow(mat)))
+      meta_bio <- c(meta_bio, rep(bio, nrow(mat)))
+      meta_tech <- c(meta_tech, rep(tech, nrow(mat)))
       if (is.null(map_used)) map_used <- rec$map
     }
   }
@@ -2763,6 +3006,8 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
     transformed = tr,
     group = meta_group,
     sample = meta_sample,
+    bio_sample = meta_bio,
+    tech_rep = meta_tech,
     true_lineage = if (length(meta_true)) meta_true else rep(NA_character_, nrow(tr)),
     markers = markers,
     map = map_used
@@ -2799,6 +3044,16 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   mat_raw <- mat_raw[ok_row, , drop = FALSE]
   grp <- dat$group[ok_row]
   smp <- dat$sample[ok_row]
+  bio <- if (!is.null(dat$bio_sample) && length(dat$bio_sample) >= length(ok_row)) {
+    dat$bio_sample[ok_row]
+  } else {
+    smp
+  }
+  tech <- if (!is.null(dat$tech_rep) && length(dat$tech_rep) >= length(ok_row)) {
+    dat$tech_rep[ok_row]
+  } else {
+    rep(NA_character_, length(smp))
+  }
   true_lin <- dat$true_lineage[ok_row]
   mat <- scale_markers(mat_raw)
 
@@ -2816,6 +3071,8 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
 
   cells <- data.frame(
     sample = smp,
+    bio_sample = bio,
+    tech_rep = tech,
     group = factor(grp, levels = flow_group_levels),
     cluster = cl,
     UMAP1 = umap[, 1],
@@ -2856,12 +3113,14 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   utils::write.csv(cbind(cluster = rownames(med), as.data.frame(med)),
                    file.path(out_dir, paste0(panel_id, "_cluster_median_markers.csv")), row.names = FALSE)
   utils::write.csv(freq_df, file.path(out_dir, paste0(panel_id, "_cluster_frequency_by_sample.csv")), row.names = FALSE)
+  utils::write.csv(aggregate_freq_by_bio(freq_df, "cluster"),
+                   file.path(out_dir, paste0(panel_id, "_cluster_frequency_by_bio.csv")), row.names = FALSE)
   utils::write.csv(stats_cl, file.path(out_dir, paste0(panel_id, "_cluster_H_vs_EV_stats.csv")), row.names = FALSE)
   utils::write.csv(stats_lin, file.path(out_dir, paste0(panel_id, "_lineage_H_vs_EV_stats.csv")), row.names = FALSE)
   if (!is.null(dat$map)) {
     utils::write.csv(dat$map, file.path(out_dir, paste0(panel_id, "_channel_map.csv")), row.names = FALSE)
   }
-  embed_cols <- c("sample", "group", "cluster", "cluster_lineage", "lineage",
+  embed_cols <- c("sample", "bio_sample", "tech_rep", "group", "cluster", "cluster_lineage", "lineage",
                   "UMAP1", "UMAP2", "tSNE1", "tSNE2")
   extra_cols <- setdiff(names(cells), c(embed_cols, "true_lineage"))
   embed_out <- cells[, intersect(c(embed_cols, extra_cols), names(cells)), drop = FALSE]
@@ -2889,7 +3148,7 @@ if (nrow(file_tab) == 0) {
     use_demo <- TRUE
   } else {
     log_msg("No *_unmixed.fcs in ", project_dir)
-    log_msg("Put EV/H P1-P3 unmixed files in ", flow_primary_data_dir, ", or set FLOW_DEMO=1 to export demo plots")
+    log_msg("Put ZZX_EV / ZZX_H unmixed files (EV1-1, EV1-2, …) in ", flow_primary_data_dir, ", or set FLOW_DEMO=1 to export demo plots")
     use_demo <- TRUE
     log_msg("Auto-fallback to DEMO so the script can still export figure templates")
   }
@@ -2899,11 +3158,11 @@ if (nrow(file_tab) == 0) {
     n_pn <- if (nrow(file_tab)) sum(file_tab$panel == pn) else 0L
     log_msg(pn, " files parsed: ", n_pn)
     if (n_pn == 0) {
-      log_msg(pn, " missing. Put files named like EV1_", pn, "_unmixed.fcs or EV1-", pn, "_unmixed.fcs in ", project_dir)
+      log_msg(pn, " missing. Put files named like ZZX_EV1-1_", pn, "_unmixed.fcs or EV1-1_", pn, "_unmixed.fcs")
     }
   }
-  if (any(file_tab$group == "H" & grepl("^EV", file_tab$file, ignore.case = TRUE))) {
-    stop("Filename parser classified an EV file as H; refusing to continue")
+  if (any(file_tab$group == "H" & grepl("(^|[_-])EV", file_tab$file, ignore.case = TRUE))) {
+    stop("Filename parser classified an EV/ZZX_EV file as H; refusing to continue")
   }
   ensure_flowcore()
 }

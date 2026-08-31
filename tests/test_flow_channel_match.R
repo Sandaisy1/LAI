@@ -97,7 +97,7 @@ cytek_p3_r718[cytek_p3_r718 == "AF700-A"] <- "R718-A"
 map_p3_r718 <- match_channels(cytek_p3_r718, rep("", length(cytek_p3_r718)), "P3")
 expect(map_p3_r718$channel[map_p3_r718$marker == "NK1.1"], "R718-A", "P3 NK1.1<-R718-A")
 
-# 文件名 EV1 / H-1
+# 文件名 EV1 / H-1 / ZZX_EV1-1
 ev <- parse_fcs_filename("EV1_P1_unmixed.fcs")
 if (is.null(ev) || !identical(ev$group, "EV") || !identical(ev$sample, "EV1")) {
   fail("EV1_P1_unmixed.fcs should parse as group EV sample EV1")
@@ -109,6 +109,36 @@ if (is.null(hh) || !identical(hh$group, "H") || !identical(hh$sample, "H3")) {
 p3 <- parse_fcs_filename("EV1-P3_unmixed.fcs")
 if (is.null(p3) || !identical(p3$panel, "P3") || !identical(p3$sample, "EV1")) {
   fail("EV1-P3_unmixed.fcs should parse as panel P3 sample EV1")
+}
+zzx <- parse_fcs_filename("ZZX_EV1-1_P1_unmixed.fcs")
+if (is.null(zzx) || !identical(zzx$group, "EV") || !identical(zzx$sample, "EV1-1") ||
+    !identical(zzx$bio_sample, "EV1") || !identical(zzx$tech_rep, "1")) {
+  fail("ZZX_EV1-1_P1_unmixed.fcs should be EV tech EV1-1 / bio EV1")
+}
+zzxh <- parse_fcs_filename("ZZX_H2-2_P3_unmixed.fcs")
+if (is.null(zzxh) || !identical(zzxh$group, "H") || !identical(zzxh$sample, "H2-2") ||
+    !identical(zzxh$bio_sample, "H2")) {
+  fail("ZZX_H2-2_P3_unmixed.fcs should be H tech H2-2 / bio H2")
+}
+if (!is.null(parse_fcs_filename("ZZX_EV1-1_P1_unmixed.fcs")) &&
+    identical(parse_fcs_filename("ZZX_EV1-1_P1_unmixed.fcs")$group, "H")) {
+  fail("ZZX_EV must not parse as H")
+}
+
+freq_tech <- data.frame(
+  sample = c("EV1-1", "EV1-2", "EV2-1", "EV2-2", "EV3-1", "EV3-2",
+             "H1-1", "H1-2", "H2-1", "H2-2", "H3-1", "H3-2"),
+  bio_sample = c("EV1", "EV1", "EV2", "EV2", "EV3", "EV3",
+                 "H1", "H1", "H2", "H2", "H3", "H3"),
+  group = c(rep("EV", 6), rep("H", 6)),
+  lineage = "NK",
+  percent = c(10, 12, 11, 9, 10, 10, 4, 6, 5, 5, 5, 7),
+  stringsAsFactors = FALSE
+)
+st_bio <- compare_group_freq(freq_tech, "lineage")
+if (!identical(as.integer(st_bio$n_EV[1]), 3L) || !identical(as.integer(st_bio$n_H[1]), 3L)) {
+  fail(sprintf("tech replicates must average to n=3 bio, got n_EV=%s n_H=%s",
+               st_bio$n_EV[1], st_bio$n_H[1]))
 }
 
 cat("OK: Cytek channel matching\n")

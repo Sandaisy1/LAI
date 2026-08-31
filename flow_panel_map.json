@@ -2,9 +2,11 @@
   "species": "mouse",
   "data_dir": "E:/R/flow J-LJY WJZ ZZX",
   "file_glob": "*_unmixed.fcs",
-  "filename_regex": "^(EV|H)[-_]?([123])_(P[123])_unmixed\\.fcs$",
+  "filename_regex": "^(?:ZZX[_-]?)?(EV|H)[-_]?([123])(?:[-_]([12]))?[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$",
   "groups": ["EV", "H"],
   "replicates": ["1", "2", "3"],
+  "tech_replicates": ["1", "2"],
+  "cohort": "ZZX",
   "comparison": "H_vs_EV",
   "qc": {
     "viability_marker": "L/D",
