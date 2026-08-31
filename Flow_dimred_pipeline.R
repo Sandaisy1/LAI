@@ -4,7 +4,8 @@
 # 输入：E:/R/fuction of cell 下的 *_unmixed.fcs（不要用 raw）
 # 样品：ZZX_EV（EV1/2/3 × 技术重复 -1/-2）与 ZZX_H（H1/2/3 × -1/-2）
 # 每个 panel 单独联合 UMAP/tSNE，导出 PDF+PNG，并比较 H vs EV 细胞频率
-# 主图：左 EV、右 H，共用同一套 tSNE 坐标，点按细胞类型着色（图1）
+# 主图（图1，不是图2）：左 EV、右 H，共用同一套联合 tSNE，
+# 每个面板里所有细胞类型叠在一起着色成岛。不要把每种细胞拆成小格子。
 #
 # 用法：
 #   setwd("E:/R/fuction of cell")
@@ -1726,6 +1727,7 @@ theme_split_dr <- function() {
         linewidth = 0.6,
         arrow = grid::arrow(type = "open", length = grid::unit(0.12, "inches"))
       ),
+      panel.border = ggplot2::element_blank(),
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5)
     )
 }
@@ -1738,219 +1740,41 @@ plot_feature_cols <- function(df) {
   setdiff(num, meta)
 }
 
-plot_major_id <- function(df, panel_id) {
-  n <- nrow(df)
-  if ("cluster_lineage" %in% names(df)) {
-    maj <- as.character(df$cluster_lineage)
-  } else {
-    maj <- as.character(df$lineage)
+# 主图（图1）：左 EV、右 H。全体细胞先做一次联合 tSNE/UMAP，再按组别切开。
+# 每个面板里所有细胞类型叠在同一套坐标上，点着色成岛（像论文 WT|KO）。
+# 不要把每种细胞拆成小格子，也不要画填充 blob（那是图2）。
+# 旧参数 separate_majors 已废弃，传入也会被忽略。
+plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title, ...) {
+  if (!x %in% names(df) || !y %in% names(df)) {
+    stop("plot_split_lineage needs shared embedding columns ", x, " and ", y)
   }
-  maj[is.na(maj) | !nzchar(maj)] <- "other"
-  if (identical(panel_id, "P1")) {
-    maj[maj %in% c("T")] <- "CD4"
-  }
-  maj
-}
-
-scale_xy_unit <- function(xy) {
-  xy <- as.matrix(xy)
-  if (ncol(xy) < 2) stop("need 2 columns")
-  xy[!is.finite(xy)] <- 0
-  for (j in 1:2) {
-    r <- range(xy[, j], na.rm = TRUE)
-    if (!is.finite(diff(r)) || diff(r) < 1e-8) {
-      xy[, j] <- 0.5
-    } else {
-      xy[, j] <- (xy[, j] - r[1]) / diff(r)
-    }
-  }
-  xy
-}
-
-local_major_xy <- function(sub, x_col, y_col) {
-  feat <- plot_feature_cols(sub)
-  if (length(feat) >= 2 && nrow(sub) >= 8) {
-    mat <- as.matrix(sub[, feat, drop = FALSE])
-    mat[!is.finite(mat)] <- 0
-    pr <- tryCatch(stats::prcomp(mat, center = TRUE, scale. = TRUE), error = function(e) NULL)
-    if (is.null(pr)) {
-      pr <- tryCatch(stats::prcomp(mat, center = TRUE, scale. = FALSE), error = function(e) NULL)
-    }
-    if (!is.null(pr) && ncol(pr$x) >= 2) {
-      return(scale_xy_unit(pr$x[, 1:2, drop = FALSE]))
-    }
-  }
-  if (all(c(x_col, y_col) %in% names(sub))) {
-    return(scale_xy_unit(as.matrix(sub[, c(x_col, y_col)])))
-  }
-  cbind(rep(0.5, nrow(sub)), rep(0.5, nrow(sub)))
-}
-
-# 绘图分区：各大类各占一块，块内用该类自己的 PCA。不改门控、不改联合 UMAP。
-separate_major_plot_coords <- function(df, panel_id, x_col = "UMAP1", y_col = "UMAP2") {
-  n <- nrow(df)
-  out1 <- rep(NA_real_, n)
-  out2 <- rep(NA_real_, n)
-  boxes <- data.frame(major = character(0), xmin = numeric(0), xmax = numeric(0),
-                      ymin = numeric(0), ymax = numeric(0),
-                      labx = numeric(0), laby = numeric(0), stringsAsFactors = FALSE)
-  maj <- plot_major_id(df, panel_id)
-  maj[maj %in% c("dump", "")] <- "other"
-  prefer <- c("CD4", "CD8", "NK", "NKT", "Naive_B", "Memory_B", "B", "Myeloid", "T")
-  majors <- unique(maj)
-  n_other <- sum(maj %in% c("other", "dump", ""))
-  majors <- majors[!majors %in% c("other", "dump", "")]
-  majors <- c(intersect(prefer, majors), setdiff(majors, prefer))
-  if (n_other >= 20L) majors <- c(majors, "other")
-  if (!length(majors)) {
-    return(list(sep1 = as.numeric(df[[x_col]]), sep2 = as.numeric(df[[y_col]]), boxes = boxes, major = maj))
-  }
-  ncol <- if (length(majors) <= 2) length(majors) else if (length(majors) <= 4) 2L else 3L
-  nrow_g <- as.integer(ceiling(length(majors) / ncol))
-  gap <- 1.22
-  for (i in seq_along(majors)) {
-    m <- majors[i]
-    hit <- which(maj == m)
-    if (!length(hit)) next
-    xy <- local_major_xy(df[hit, , drop = FALSE], x_col, y_col)
-    col <- (i - 1L) %% ncol
-    row <- (i - 1L) %/% ncol
-    gx <- col * gap
-    gy <- (nrow_g - 1L - row) * gap
-    out1[hit] <- gx + xy[, 1] * 0.92
-    out2[hit] <- gy + xy[, 2] * 0.92
-    boxes <- rbind(boxes, data.frame(
-      major = m, xmin = gx - 0.04, xmax = gx + 0.96, ymin = gy - 0.04, ymax = gy + 0.96,
-      labx = gx + 0.46, laby = gy + 1.02, stringsAsFactors = FALSE
-    ))
-  }
-  leftover <- which(!is.finite(out1) | !is.finite(out2))
-  if (length(leftover)) {
-    out1[leftover] <- NA_real_
-    out2[leftover] <- NA_real_
-  }
-  list(sep1 = out1, sep2 = out2, boxes = boxes, major = maj)
-}
-
-# 绘图分区：每个细亚群各占一块（区域），不要把所有细胞叠在同一张 tSNE 上当散点
-separate_region_plot_coords <- function(df, panel_id, x_col = "UMAP1", y_col = "UMAP2") {
-  n <- nrow(df)
-  out1 <- rep(NA_real_, n)
-  out2 <- rep(NA_real_, n)
-  boxes <- data.frame(region = character(0), xmin = numeric(0), xmax = numeric(0),
-                      ymin = numeric(0), ymax = numeric(0),
-                      labx = numeric(0), laby = numeric(0), stringsAsFactors = FALSE)
-  lin <- as.character(df$lineage)
-  lin[is.na(lin) | !nzchar(lin)] <- "other"
-  maj <- plot_major_id(df, panel_id)
-  prefer_maj <- c("CD4", "CD8", "NK", "NKT", "Naive_B", "Memory_B", "B", "Myeloid", "T")
-  regions <- unique(lin)
-  regions <- regions[regions != "other" | sum(lin == "other") >= 20L]
-  maj_of <- tapply(maj, lin, function(v) names(sort(table(v), decreasing = TRUE))[1])
-  ord_maj <- match(unname(maj_of[regions]), prefer_maj)
-  ord_maj[is.na(ord_maj)] <- length(prefer_maj) + 1L
-  regions <- regions[order(ord_maj, regions)]
-  if (!length(regions)) {
-    return(list(sep1 = as.numeric(df[[x_col]]), sep2 = as.numeric(df[[y_col]]), boxes = boxes, region = lin))
-  }
-  ncol <- if (length(regions) <= 3) length(regions) else if (length(regions) <= 8) 4L else 5L
-  nrow_g <- as.integer(ceiling(length(regions) / ncol))
-  gap <- 1.18
-  for (i in seq_along(regions)) {
-    r <- regions[i]
-    hit <- which(lin == r)
-    if (!length(hit)) next
-    xy <- local_major_xy(df[hit, , drop = FALSE], x_col, y_col)
-    col <- (i - 1L) %% ncol
-    row <- (i - 1L) %/% ncol
-    gx <- col * gap
-    gy <- (nrow_g - 1L - row) * gap
-    out1[hit] <- gx + xy[, 1] * 0.86
-    out2[hit] <- gy + xy[, 2] * 0.86
-    boxes <- rbind(boxes, data.frame(
-      region = r, xmin = gx - 0.04, xmax = gx + 0.92, ymin = gy - 0.04, ymax = gy + 0.92,
-      labx = gx + 0.44, laby = gy + 0.98, stringsAsFactors = FALSE
-    ))
-  }
-  leftover <- which(!is.finite(out1) | !is.finite(out2))
-  if (length(leftover)) {
-    out1[leftover] <- NA_real_
-    out2[leftover] <- NA_real_
-  }
-  list(sep1 = out1, sep2 = out2, boxes = boxes, region = lin)
-}
-
-# 一个亚群一块填充区域（密度岛或椭圆），不是每个细胞一个点
-region_fill_polygon <- function(x, y, celltype, group) {
-  ok <- is.finite(x) & is.finite(y)
-  x <- as.numeric(x)[ok]
-  y <- as.numeric(y)[ok]
-  if (length(x) < 8) return(NULL)
-  poly <- NULL
-  pc <- flow_prob_contour(x, y, probs = c(0.55, 0.82))
-  if (length(pc$levels) >= 1 && nrow(pc$grid) > 10) {
-    xs <- sort(unique(pc$grid$x))
-    ys <- sort(unique(pc$grid$y))
-    z <- matrix(pc$grid$z, nrow = length(xs), ncol = length(ys))
-    lev <- min(pc$levels)
-    cls <- tryCatch(
-      grDevices::contourLines(xs, ys, z, levels = lev),
-      error = function(e) NULL
-    )
-    if (length(cls)) {
-      lens <- vapply(cls, function(p) length(p$x), integer(1))
-      best <- cls[[which.max(lens)]]
-      if (length(best$x) >= 4) {
-        poly <- data.frame(
-          x = best$x, y = best$y,
-          celltype = celltype, group = group,
-          piece = paste(group, celltype, sep = ":"),
-          stringsAsFactors = FALSE
-        )
-      }
-    }
-  }
-  if (is.null(poly)) {
-    mu <- c(mean(x), mean(y))
-    s <- stats::cov(cbind(x, y))
-    if (!all(is.finite(s)) || abs(det(s)) < 1e-10) {
-      s <- diag(c(stats::sd(x), stats::sd(y))^2 + 1e-4, 2)
-    }
-    eg <- tryCatch(eigen(s), error = function(e) NULL)
-    if (is.null(eg)) return(NULL)
-    t <- seq(0, 2 * pi, length.out = 72)
-    xy <- cbind(cos(t), sin(t)) %*% diag(sqrt(pmax(eg$values, 1e-6)) * 1.7) %*% t(eg$vectors)
-    poly <- data.frame(
-      x = mu[1] + xy[, 1], y = mu[2] + xy[, 2],
-      celltype = celltype, group = group,
-      piece = paste(group, celltype, sep = ":"),
-      stringsAsFactors = FALSE
-    )
-  }
-  poly
-}
-
-# 主图（图1）：左 EV、右 H，共用同一套 tSNE/UMAP 坐标，点按细胞类型着色。
-# 不要把每个亚群拆成小格子（那是图2）。
-plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title, separate_majors = FALSE) {
   plot_df <- df
   plot_df$group <- factor(plot_df$group, levels = flow_group_levels)
+  keep <- is.finite(plot_df[[x]]) & is.finite(plot_df[[y]]) & !is.na(plot_df$group)
+  plot_df <- plot_df[keep, , drop = FALSE]
   plot_df$celltype <- celltype_label(plot_df$lineage, panel_id)
+  prefer <- names(pal_celltype)
   levs <- unique(plot_df$celltype)
+  levs <- c(intersect(prefer, levs), setdiff(levs, prefer))
   plot_df$celltype <- factor(plot_df$celltype, levels = levs)
-  pal <- celltype_colors(levels(plot_df$celltype))
+  pal <- celltype_colors(levs)
   ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype)) +
-    ggplot2::geom_point(size = 0.48, alpha = 0.9, stroke = 0) +
-    ggplot2::facet_wrap(~group, ncol = 2) +
+    ggplot2::geom_point(size = 0.42, alpha = 0.88, stroke = 0) +
+    ggplot2::facet_wrap(~group, ncol = 2, scales = "fixed") +
     ggplot2::scale_color_manual(values = pal, drop = FALSE) +
-    ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(size = 3.4, alpha = 1))) +
+    ggplot2::guides(color = ggplot2::guide_legend(
+      override.aes = list(size = 3.6, alpha = 1), ncol = 1
+    )) +
     ggplot2::labs(title = title, x = xlab, y = ylab, color = NULL) +
     ggplot2::coord_equal() +
     theme_split_dr() +
     ggplot2::theme(
       axis.text = ggplot2::element_blank(),
       axis.ticks = ggplot2::element_blank(),
-      plot.margin = ggplot2::margin(6, 8, 6, 6)
+      panel.border = ggplot2::element_blank(),
+      panel.spacing = ggplot2::unit(1.15, "lines"),
+      legend.key = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(6, 8, 8, 10)
     )
 }
 
@@ -2690,6 +2514,10 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
   tsne_lab <- if (tsne_is_pca) "PCA (tSNE fallback)" else "tSNE"
   tag <- paste0(panel_id, " H vs EV")
   split_ttl <- paste0(panel_id, "  EV | H")
+  log_msg(
+    panel_id,
+    " main tSNE/UMAP is Figure 1: EV | H on one shared embedding, all cell types overlaid (not per-subset tiles)"
+  )
 
   save_gg(
     plot_split_lineage(cells, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2", split_ttl),

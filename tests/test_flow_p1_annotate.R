@@ -101,11 +101,6 @@ df_mix <- data.frame(
   check.names = FALSE,
   stringsAsFactors = FALSE
 )
-lay <- separate_major_plot_coords(df_mix, "P1")
-if (abs(mean(lay$sep1[df_mix$cluster_lineage == "CD4"], na.rm = TRUE) -
-        mean(lay$sep1[df_mix$cluster_lineage == "NK"], na.rm = TRUE)) < 0.4) {
-  fail("CD4 and NK should occupy different plot regions even if joint UMAP overlaps")
-}
 p_sep <- plot_split_lineage(df_mix, "UMAP1", "UMAP2", "P1", "UMAP-1", "UMAP-2", "sep")
 if (!("UMAP1" %in% names(p_sep$data))) fail("main split plot should use the shared embedding")
 x_lab <- paste(deparse(p_sep$mapping$x), collapse = "")
@@ -120,6 +115,16 @@ for (ly in p_sep$layers) {
 }
 if (!isTRUE(has_pt)) fail("figure-1 tSNE should draw colored cells on a shared embedding")
 if (isTRUE(has_poly)) fail("figure-1 tSNE should not split each subset into its own filled tile")
+built <- ggplot2::ggplot_build(p_sep)
+lay <- built$layout$layout
+if (nrow(lay) != 2L) fail("figure-1 must be two panels (EV | H), not a per-subset grid")
+if (!("group" %in% names(lay))) fail("figure-1 facets by experimental group")
+if ("celltype" %in% names(lay) && length(unique(lay$celltype)) > 1L) {
+  fail("figure-1 must not facet by cell type (that is figure 2)")
+}
+if ("lineage" %in% names(lay) && length(unique(lay$lineage)) > 1L) {
+  fail("figure-1 must not facet by lineage")
+}
 
 set.seed(8)
 tail_v <- c(rnorm(220, 0.45, 0.12), rnorm(50, 3.1, 0.2))
