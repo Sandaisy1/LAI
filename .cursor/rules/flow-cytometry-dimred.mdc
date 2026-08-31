@@ -10,7 +10,7 @@ alwaysApply: false
 
 ## 数据
 
-- 目录：`E:/R/flow J-LJY WJZ ZZX`（脚本与结果同目录；缺失则回退 `E:/R/flow J` / 仓库根 / `flow_J`）
+- 目录：`E:/R/fuction of cell`（脚本、FCS 与 `results_flow/` 同目录；缺失则回退 `E:/R/function of cell` / `E:/R/flow J-LJY WJZ ZZX` / 仓库根）
 - 只用 `*_unmixed.fcs`，不要拿 raw 做降维
 - 文件名：`ZZX_EV1-1_P1_unmixed.fcs` / `EV1-1_P1_unmixed.fcs`（`ZZX_` 可有可无；生物学重复 1/2/3，技术重复 `-1`/`-2`）。旧名 `EV1_P1_unmixed.fcs` 仍可用。**先匹配 EV 再匹配 H**
 - 样品：`ZZX_EV` = EV1/EV2/EV3，每管两个技术重复 `EV1-1` `EV1-2`；`ZZX_H` = H1/H2/H3，同样 `H1-1` `H1-2`。圈门按 **FCS 管（技术重复）** 单独做；H vs EV 统计先把两个技术重复平均，再按 **n=3 生物学重复** 做 t 检验，不要把 6 个技术管当成 n=6

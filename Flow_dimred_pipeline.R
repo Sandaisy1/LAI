@@ -1,13 +1,13 @@
 #!/usr/bin/env Rscript
 # =============================================================================
 # 流式降维：H vs EV（P1 T/NK，P2 B，P3 髓系）
-# 输入：E:/R/flow J-LJY WJZ ZZX 下的 *_unmixed.fcs（不要用 raw）
+# 输入：E:/R/fuction of cell 下的 *_unmixed.fcs（不要用 raw）
 # 样品：ZZX_EV（EV1/2/3 × 技术重复 -1/-2）与 ZZX_H（H1/2/3 × -1/-2）
 # 每个 panel 单独联合 UMAP/tSNE，导出 PDF+PNG，并比较 H vs EV 细胞频率
 # 主图按亚群分区画填充区域，不是每个细胞一个点
 #
 # 用法：
-#   setwd("E:/R/flow J-LJY WJZ ZZX")
+#   setwd("E:/R/fuction of cell")
 #   source("Flow_dimred_pipeline.R")
 # 三个 panel 跑完后会自动汇总全亚群频率，并按大类画轨迹：
 #   source("Flow_dimred_all_subsets.R")   # 也可单独重出 results_flow/all_subsets/
@@ -105,16 +105,19 @@ get_script_dir <- function() {
 
 script_dir <- get_script_dir()
 
-# 读写目录：新数据夹优先；旧 E:/R/flow J 仅作回退
-flow_primary_data_dir <- "E:/R/flow J-LJY WJZ ZZX"
-flow_legacy_data_dir <- "E:/R/flow J"
+# 读写目录：数据与结果都在 E:/R/fuction of cell；旧 flow 目录仅作回退
+flow_primary_data_dir <- "E:/R/fuction of cell"
+flow_legacy_data_dir <- "E:/R/flow J-LJY WJZ ZZX"
+flow_legacy_data_dir2 <- "E:/R/flow J"
 
 resolve_flow_dir <- function() {
   env_dir <- Sys.getenv("FLOW_DIR", unset = "")
   preferred <- c(
     env_dir,
     flow_primary_data_dir,
-    "E:\\R\\flow J-LJY WJZ ZZX"
+    "E:\\R\\fuction of cell",
+    "E:/R/function of cell",
+    "E:\\R\\function of cell"
   )
   preferred <- unique(preferred[nzchar(preferred)])
   for (d in preferred) {
@@ -124,7 +127,11 @@ resolve_flow_dir <- function() {
   }
   candidates <- c(
     flow_legacy_data_dir,
+    "E:\\R\\flow J-LJY WJZ ZZX",
+    flow_legacy_data_dir2,
     "E:\\R\\flow J",
+    file.path(script_dir, "fuction of cell"),
+    file.path(script_dir, "function of cell"),
     file.path(script_dir, "flow_J"),
     file.path(script_dir, "flow J"),
     file.path(script_dir, "flow J-LJY WJZ ZZX"),
@@ -134,13 +141,16 @@ resolve_flow_dir <- function() {
   candidates <- unique(candidates[nzchar(candidates)])
   for (d in candidates) {
     if (!dir.exists(d)) next
-    hits <- list.files(d, pattern = "(?i)_unmixed\\.fcs$", recursive = FALSE)
+    hits <- list.files(d, pattern = "(?i)_unmixed\\.fcs$", recursive = TRUE)
     if (length(hits) > 0) {
       return(normalizePath(d, winslash = "/", mustWork = FALSE))
     }
   }
   if (dir.exists(flow_legacy_data_dir)) {
     return(normalizePath(flow_legacy_data_dir, winslash = "/", mustWork = FALSE))
+  }
+  if (dir.exists(flow_legacy_data_dir2)) {
+    return(normalizePath(flow_legacy_data_dir2, winslash = "/", mustWork = FALSE))
   }
   normalizePath(script_dir, winslash = "/", mustWork = FALSE)
 }
@@ -313,8 +323,11 @@ panel_map_search_dirs <- function() {
     script_dir,
     project_dir,
     flow_primary_data_dir,
-    "E:\\R\\flow J-LJY WJZ ZZX",
+    "E:\\R\\fuction of cell",
+    "E:/R/function of cell",
     flow_legacy_data_dir,
+    "E:\\R\\flow J-LJY WJZ ZZX",
+    flow_legacy_data_dir2,
     "E:\\R\\flow J",
     Sys.getenv("FLOW_DIR", unset = "")
   )
@@ -3216,7 +3229,7 @@ if (file.exists(traj)) {
   Sys.unsetenv("FLOW_TRAJECTORY_FROM_PIPELINE")
 }
 
-log_msg("Done. Open results_flow/P1, P2, P3 for UMAP/tSNE; all_subsets for frequencies; P*/trajectory for trees.")
+log_msg("Done. Open ", result_dir, " (P1, P2, P3 for UMAP/tSNE; all_subsets for frequencies; P*/trajectory for trees).")
 invisible(summaries)
 
 }

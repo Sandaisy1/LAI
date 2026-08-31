@@ -12,7 +12,7 @@
 # P1 的 B/Myeloid、P3 的 T/B/NK 只是 dump 通道，图里标成 dump。
 #
 # 用法（三个 panel 跑完之后）：
-#   setwd("E:/R/flow J-LJY WJZ ZZX")
+#   setwd("E:/R/fuction of cell")
 #   source("Flow_dimred_pipeline.R")          # 各 panel 降维 + 自动调用本脚本
 #   source("Flow_dimred_all_subsets.R")       # 只重出总览，不重跑 UMAP
 #

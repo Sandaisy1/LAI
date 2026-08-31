@@ -78,10 +78,10 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 
 ## 流式降维（H vs EV，P1 / P2 / P3）
 
-小鼠流式在 `E:/R/flow J-LJY WJZ ZZX`，只用 `*_unmixed.fcs`。三个 panel **分开**做 UMAP/tSNE，比较 **ZZX_EV**（EV1/2/3，每管两个技术重复 EV1-1/EV1-2）与 **ZZX_H**（H1/2/3，H1-1/H1-2）。统计按生物学重复 n=3，两个技术重复先平均。
+小鼠流式在 `E:/R/fuction of cell`，只用 `*_unmixed.fcs`。分析结果写在同一目录的 `results_flow/`。三个 panel **分开**做 UMAP/tSNE，比较 **ZZX_EV**（EV1/2/3，每管两个技术重复 EV1-1/EV1-2）与 **ZZX_H**（H1/2/3，H1-1/H1-2）。统计按生物学重复 n=3，两个技术重复先平均。
 
 ```r
-setwd("E:/R/flow J-LJY WJZ ZZX")
+setwd("E:/R/fuction of cell")
 # 把 Flow_dimred_pipeline.R、Flow_dimred_all_subsets.R、Flow_dimred_trajectory.R 与 flow_panel_map.json 放在该目录（或仓库根）
 source("Flow_dimred_pipeline.R")
 ```
@@ -90,7 +90,7 @@ source("Flow_dimred_pipeline.R")
 
 若 Windows 把 json 显示成“文本文档”，真实文件名多半是 `flow_panel_map.json.txt`。关掉“隐藏已知文件类型的扩展名”后改名为 `flow_panel_map.json`；新版脚本两种名字都能读。
 
-每个 panel 的图在 `results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
+每个 panel 的图在 `E:/R/fuction of cell/results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
 
 - `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split`：**主图**，左 EV、右 H，**每个亚群一块填充区域**（不是每个细胞一个点）；无虚线；共用 P1 配色。原来叠在一起的联合散点在 `*_lineage_split_joint` 和 `*_UMAP_by_lineage`
 - `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H

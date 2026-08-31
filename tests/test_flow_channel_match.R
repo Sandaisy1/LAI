@@ -141,4 +141,8 @@ if (!identical(as.integer(st_bio$n_EV[1]), 3L) || !identical(as.integer(st_bio$n
                st_bio$n_EV[1], st_bio$n_H[1]))
 }
 
+if (!grepl("fuction of cell", flow_primary_data_dir, fixed = TRUE)) {
+  fail("flow data/results dir should be E:/R/fuction of cell")
+}
+
 cat("OK: Cytek channel matching\n")

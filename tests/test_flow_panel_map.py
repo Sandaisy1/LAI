@@ -102,8 +102,8 @@ def main() -> int:
         errors.append(f"groups should be [EV, H], got {data.get('groups')}")
     if data.get("comparison") != "H_vs_EV":
         errors.append(f"comparison should be H_vs_EV, got {data.get('comparison')}")
-    if data.get("data_dir") is None or "flow J-LJY WJZ ZZX" not in str(data.get("data_dir")):
-        errors.append("data_dir should be E:/R/flow J-LJY WJZ ZZX")
+    if data.get("data_dir") is None or "fuction of cell" not in str(data.get("data_dir")):
+        errors.append("data_dir should be E:/R/fuction of cell")
 
     af700 = data["fluorochrome_aliases"].get("AF700", [])
     if "AF700" not in data["fluorochrome_aliases"]:
