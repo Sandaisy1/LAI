@@ -107,21 +107,19 @@ if (abs(mean(lay$sep1[df_mix$cluster_lineage == "CD4"], na.rm = TRUE) -
   fail("CD4 and NK should occupy different plot regions even if joint UMAP overlaps")
 }
 p_sep <- plot_split_lineage(df_mix, "UMAP1", "UMAP2", "P1", "UMAP-1", "UMAP-2", "sep")
-if (!("sep1" %in% names(p_sep$data))) fail("split plot should use separated coordinates")
+if (!("UMAP1" %in% names(p_sep$data))) fail("main split plot should use the shared embedding")
+x_lab <- paste(deparse(p_sep$mapping$x), collapse = "")
+if (grepl("sep1", x_lab, fixed = TRUE)) {
+  fail("main tSNE/UMAP must not tile each subset into a separate box")
+}
 has_poly <- FALSE
 has_pt <- FALSE
 for (ly in p_sep$layers) {
   if (inherits(ly$geom, "GeomPolygon")) has_poly <- TRUE
   if (inherits(ly$geom, "GeomPoint")) has_pt <- TRUE
 }
-if (!isTRUE(has_poly)) fail("main split figure should draw filled cell regions, not only scatter")
-if (isTRUE(has_pt)) fail("main split figure should not draw each cell as a point")
-
-lay_r <- separate_region_plot_coords(df_mix, "P1")
-if (abs(mean(lay_r$sep1[df_mix$lineage == "CD4_naive"], na.rm = TRUE) -
-        mean(lay_r$sep1[df_mix$lineage == "NK"], na.rm = TRUE)) < 0.4) {
-  fail("fine subsets should occupy separate region tiles")
-}
+if (!isTRUE(has_pt)) fail("figure-1 tSNE should draw colored cells on a shared embedding")
+if (isTRUE(has_poly)) fail("figure-1 tSNE should not split each subset into its own filled tile")
 
 set.seed(8)
 tail_v <- c(rnorm(220, 0.45, 0.12), rnorm(50, 3.1, 0.2))

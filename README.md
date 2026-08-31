@@ -92,7 +92,7 @@ source("Flow_dimred_pipeline.R")
 
 每个 panel 的图在 `E:/R/fuction of cell/results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
 
-- `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split`：**主图**，左 EV、右 H，**每个亚群一块填充区域**（不是每个细胞一个点）；无虚线；共用 P1 配色。原来叠在一起的联合散点在 `*_lineage_split_joint` 和 `*_UMAP_by_lineage`
+- `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split`：**主图**（图1），左 EV、右 H，共用同一套坐标，点按细胞类型着色；L 形坐标轴、无刻度。不要把每个亚群拆成小格子。
 - `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图；下为 FlowJo 风格 2D 图。门是铺到坐标轴的完整象限/半平面（CD62L/CD44 标四个象限），EV 与 H **各自切阈值**。不是只框 10–90% 命中细胞的小矩形。

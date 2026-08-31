@@ -34,7 +34,7 @@ alwaysApply: false
 
 比较只有 **H vs EV**（三个生物学重复 vs 三个；技术重复先平均）。联合 UMAP/tSNE 仍用全部细胞，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
 
-每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 EV、右 H。主图 `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split` **按细胞亚群分区**，每块画该亚群的**填充密度区域**，不要把每个细胞画成散点，也不要虚线凸包。联合散点图仍出 `*_UMAP_by_lineage` 和 `*_lineage_split_joint`。
+每个非空 panel 必须导出 PDF+PNG，其中主图是左右分面：左 EV、右 H，**共用同一套 tSNE/UMAP 坐标**，点按细胞类型着色（论文图1：所有亚群画在同一张图上，靠 embedding 自然分成不同岛）。**不要**把每个亚群拆成小格子（图2）。不要虚线凸包。
 
 **圈门必须每个样品单独走完同一套逻辑**（`hierarchical_gate_by_sample`），不要六个 FCS 共用一个 kmeans 阈值。CD62L/CD44 用完整象限：naive = 62L+44−，TCM = 双阳，TEM = **整个 CD62L− 半平面**（CD44+ 与原点双阴都算 TEM，不要只框 10–20% 的小矩形）。阳性阈值要切在原点主团右侧（抓住 CD62L/CD44 尾巴），不要用全体 q80 把主团切开。每个 FCS 另出 `gating/<样品>/`：2D 十字门铺满坐标轴，CD62L/CD44 标四个象限百分数。subset 图的 EV、H 也各自按本组细胞切完整门，禁止用命中细胞的 10–90% 分位数小框。
 
@@ -50,5 +50,7 @@ alwaysApply: false
 # ❌ BAD: 用 raw FCS；把 EV1 解析成 H；三 panel 混降维；只出坐标表不出图
 # ❌ BAD: 把 EV1/EV2/EV3 先平均成一个“EV”再 UMAP
 # ❌ BAD: 只出 UMAP，不出每个亚群的柱状图+等高线
+# ❌ BAD: 把每个亚群拆成小格子再画（图2）
 # ✅ GOOD: 仅 unmixed；P1/P2/P3 各自目录；联合 embedding + 每图 PDF/PNG + subset_stats/
+# ✅ GOOD: 左 EV、右 H，共用 tSNE，点按细胞类型着色（图1）
 ```

@@ -4,7 +4,7 @@
 # 输入：E:/R/fuction of cell 下的 *_unmixed.fcs（不要用 raw）
 # 样品：ZZX_EV（EV1/2/3 × 技术重复 -1/-2）与 ZZX_H（H1/2/3 × -1/-2）
 # 每个 panel 单独联合 UMAP/tSNE，导出 PDF+PNG，并比较 H vs EV 细胞频率
-# 主图按亚群分区画填充区域，不是每个细胞一个点
+# 主图：左 EV、右 H，共用同一套 tSNE 坐标，点按细胞类型着色（图1）
 #
 # 用法：
 #   setwd("E:/R/fuction of cell")
@@ -1930,91 +1930,27 @@ region_fill_polygon <- function(x, y, celltype, group) {
   poly
 }
 
-# 主图：左 EV、右 H；各大类/细亚群分区；画填充区域，不要每个细胞一个点，不要虚线凸包
-plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title, separate_majors = TRUE) {
+# 主图（图1）：左 EV、右 H，共用同一套 tSNE/UMAP 坐标，点按细胞类型着色。
+# 不要把每个亚群拆成小格子（那是图2）。
+plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title, separate_majors = FALSE) {
   plot_df <- df
   plot_df$group <- factor(plot_df$group, levels = flow_group_levels)
   plot_df$celltype <- celltype_label(plot_df$lineage, panel_id)
   levs <- unique(plot_df$celltype)
   plot_df$celltype <- factor(plot_df$celltype, levels = levs)
   pal <- celltype_colors(levels(plot_df$celltype))
-  boxes <- NULL
-  x_use <- x
-  y_use <- y
-  xlab_use <- xlab
-  ylab_use <- ylab
-  if (isTRUE(separate_majors)) {
-    lay <- separate_region_plot_coords(plot_df, panel_id, x, y)
-    plot_df$sep1 <- lay$sep1
-    plot_df$sep2 <- lay$sep2
-    x_use <- "sep1"
-    y_use <- "sep2"
-    xlab_use <- NULL
-    ylab_use <- NULL
-    boxes <- lay$boxes
-    if (nrow(boxes)) {
-      boxes$lab <- celltype_label(boxes$region, panel_id)
-    }
-  }
-  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x_use]], y = .data[[y_use]]))
-  if (!is.null(boxes) && nrow(boxes)) {
-    p <- p + ggplot2::geom_rect(
-      data = boxes,
-      ggplot2::aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-      inherit.aes = FALSE, fill = "grey98", color = "grey80", linewidth = 0.35
-    )
-  }
-  if (isTRUE(separate_majors)) {
-    poly_rows <- list()
-    for (g in levels(plot_df$group)) {
-      dg <- plot_df[as.character(plot_df$group) == g & is.finite(plot_df[[x_use]]) &
-                      is.finite(plot_df[[y_use]]), , drop = FALSE]
-      for (ct in levels(plot_df$celltype)) {
-        sub <- dg[as.character(dg$celltype) == ct, , drop = FALSE]
-        if (nrow(sub) < 8) next
-        poly <- region_fill_polygon(sub[[x_use]], sub[[y_use]], ct, g)
-        if (!is.null(poly)) poly_rows[[length(poly_rows) + 1]] <- poly
-      }
-    }
-    if (length(poly_rows)) {
-      polys <- do.call(rbind, poly_rows)
-      polys$celltype <- factor(polys$celltype, levels = levels(plot_df$celltype))
-      polys$group <- factor(polys$group, levels = flow_group_levels)
-      p <- p + ggplot2::geom_polygon(
-        data = polys,
-        ggplot2::aes(x = x, y = y, fill = celltype, group = piece),
-        inherit.aes = FALSE, color = NA, alpha = 0.92
-      )
-    }
-  } else {
-    p <- p + ggplot2::geom_point(
-      ggplot2::aes(color = celltype), size = 0.42, alpha = 0.88, stroke = 0
-    )
-  }
-  p <- p +
+  ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype)) +
+    ggplot2::geom_point(size = 0.48, alpha = 0.9, stroke = 0) +
     ggplot2::facet_wrap(~group, ncol = 2) +
-    ggplot2::labs(title = title, x = xlab_use, y = ylab_use, fill = NULL, color = NULL)
-  if (isTRUE(separate_majors)) {
-    p <- p + ggplot2::scale_fill_manual(values = pal, drop = FALSE) +
-      ggplot2::guides(fill = ggplot2::guide_legend(override.aes = list(alpha = 1)))
-  } else {
-    p <- p + ggplot2::scale_color_manual(values = pal, drop = FALSE) +
-      ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(size = 3.2, alpha = 1)))
-  }
-  if (!is.null(boxes) && nrow(boxes)) {
-    p <- p + ggplot2::geom_text(
-      data = boxes, ggplot2::aes(x = labx, y = laby, label = lab),
-      inherit.aes = FALSE, color = "grey25", fontface = "bold", size = 2.8, vjust = 0
-    )
-  }
-  p +
-    ggplot2::coord_equal(clip = "off") +
+    ggplot2::scale_color_manual(values = pal, drop = FALSE) +
+    ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(size = 3.4, alpha = 1))) +
+    ggplot2::labs(title = title, x = xlab, y = ylab, color = NULL) +
+    ggplot2::coord_equal() +
     theme_split_dr() +
     ggplot2::theme(
       axis.text = ggplot2::element_blank(),
       axis.ticks = ggplot2::element_blank(),
-      axis.line = ggplot2::element_blank(),
-      plot.margin = ggplot2::margin(8, 8, 8, 8)
+      plot.margin = ggplot2::margin(6, 8, 6, 6)
     )
 }
 
@@ -2758,18 +2694,17 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
   save_gg(
     plot_split_lineage(cells, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2", split_ttl),
     file.path(out_dir, paste0(panel_id, "_H_vs_EV_tSNE_lineage_split")),
-    width = 12.8, height = 8.2
+    width = 11.2, height = 5.4
   )
   save_gg(
     plot_split_lineage(cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2", split_ttl),
     file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split")),
-    width = 12.8, height = 8.2
+    width = 11.2, height = 5.4
   )
   save_gg(
-    plot_split_lineage(cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
-                       paste0(split_ttl, "  (joint UMAP)"), separate_majors = FALSE),
+    plot_split_lineage(cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2", split_ttl),
     file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split_joint")),
-    width = 12.4, height = 5.6
+    width = 11.2, height = 5.4
   )
 
   save_gg(plot_embedding(cells, "UMAP1", "UMAP2", "group", paste(tag, "-", umap_lab, "by group")),
