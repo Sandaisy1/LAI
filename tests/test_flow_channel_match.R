@@ -33,12 +33,24 @@ expect(map$channel[map$marker == "NKp46"], "PE-A", "NKp46<-PE-A")
 expect(map$channel[map$marker == "CD11B"], "APC-Cy7-A", "CD11B<-APC-Cy7-A")
 expect(map$channel[map$marker == "L/D"], "FVS450-A", "LD<-FVS450-A")
 expect(map$channel[map$marker == "NK1.1"], "AF700-A", "P1 NK1.1<-AF700-A")
+expect(map$channel[map$marker == "NKG2D"], "PE-EF610-A", "P1 NKG2D<-PE-EF610-A")
+expect(map$channel[map$marker == "TNF-a"], "APC-A", "P1 TNF-a<-APC-A")
+expect(axis_fl_label("P1", "NKG2D"), "NKG2D-PE-eFluor 610", "P1 NKG2D axis")
+expect(axis_fl_label("P1", "CD11B"), "CD11B-APC-Cy7", "P1 CD11B axis")
+expect(axis_fl_label("P1", "GZMB"), "GZMB-PE-Cy7", "P1 GZMB axis")
+expect(axis_fl_label("P3", "FceRI"), "FceRI-PE-eFluor 610", "P3 FceRI axis")
 
 # 抗体写 AF700，Cytek unmixed 常把同一检测器导出成 R718-A
 cytek_p1_r718 <- cytek_p1
 cytek_p1_r718[cytek_p1_r718 == "AF700-A"] <- "R718-A"
 map_r718 <- match_channels(cytek_p1_r718, desc_blank, "P1")
 expect(map_r718$channel[map_r718$marker == "NK1.1"], "R718-A", "P1 NK1.1<-R718-A")
+
+# 表上写 PE-eFluor™ 610，Cytek 也可能导出这个全名
+cytek_p1_ef <- cytek_p1
+cytek_p1_ef[cytek_p1_ef == "PE-EF610-A"] <- "PE-eFluor 610-A"
+map_ef <- match_channels(cytek_p1_ef, desc_blank, "P1")
+expect(map_ef$channel[map_ef$marker == "NKG2D"], "PE-eFluor 610-A", "P1 NKG2D<-PE-eFluor 610-A")
 
 # 标志物写在 name 里、荧光素写在 desc
 map2 <- match_channels(

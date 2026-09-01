@@ -128,6 +128,20 @@ def main() -> int:
     p1_tnf = next(m["fluorochrome"] for m in data["panels"]["P1"]["markers"] if m["marker"] == "TNF-a")
     if p1_tnf != "APC":
         errors.append("P1 TNF-a stays APC")
+    p1_nkp = next(m["fluorochrome"] for m in data["panels"]["P1"]["markers"] if m["marker"] == "NKp46")
+    if p1_nkp != "PE":
+        errors.append(f"P1 NKp46 should be PE, got {p1_nkp}")
+    p1_nkg2d = next(m["fluorochrome"] for m in data["panels"]["P1"]["markers"] if m["marker"] == "NKG2D")
+    if p1_nkg2d != "PE-EF610":
+        errors.append(f"P1 NKG2D should be PE-EF610, got {p1_nkg2d}")
+    p3_fceri = next(m["fluorochrome"] for m in data["panels"]["P3"]["markers"] if m["marker"] == "FceRI")
+    if p3_fceri != "PE-EF610":
+        errors.append(f"P3 FceRI should be PE-EF610 (PE-eFluor 610), got {p3_fceri}")
+    disp = data.get("fluorochrome_display") or {}
+    if disp.get("PE-EF610") != "PE-eFluor 610":
+        errors.append("fluorochrome_display PE-EF610 should be PE-eFluor 610")
+    if disp.get("APC-CY7") != "APC-Cy7":
+        errors.append("fluorochrome_display APC-CY7 should be APC-Cy7")
 
     if parse_fcs_filename("flow_panel_map.json.txt") is not None:
         errors.append("json.txt is not an FCS name")

@@ -62,6 +62,15 @@ if (!identical(unname(pal_celltype[["Eosinophil"]]), unname(pal_celltype[["CD4 a
   fail("P3 Eosinophil should reuse P1 red, not pumpkin orange")
 }
 if (identical(unname(pal_celltype[["Eosinophil"]]), "#D35400")) fail("old P3 orange still in palette")
+if (identical(unname(pal_celltype[["NK"]]), unname(pal_celltype[["CD4 activated"]]))) {
+  fail("P1 NK must not reuse CD4 activated red on the same tSNE")
+}
+if (identical(unname(pal_celltype[["NK activated"]]), unname(pal_celltype[["CD4 activated"]]))) {
+  fail("NK activated must be a distinct hue from CD4 activated")
+}
+if (identical(unname(pal_celltype[["CD4 NKT"]]), unname(pal_celltype[["CD4 T_CM"]]))) {
+  fail("CD4 NKT must not collide with CD4 T_CM")
+}
 
 set.seed(1)
 p2p <- demo_means_p2()

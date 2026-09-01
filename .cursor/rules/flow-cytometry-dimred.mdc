@@ -18,7 +18,7 @@ alwaysApply: false
 - 细胞轨迹（`Flow_dimred_trajectory.R`）按 **panel × 大类** 单独做：P1 的 CD4/CD8/NK/NKT，P2 的 B，P3 的髓系。类内 PCA 当 Component 1/2，骨架用 slingshot（若已装）或亚群中心 MST。根节点按惯例取 naive / NK immature / Naive B / Ly6C hi 单核。轨迹是标志物状态连续体，不要当成发育起源证明。出图：细胞点要够大、黑色分支骨架要细，先画线再画点，不要圈很小、线很粗
 - **`skip trajectory (... subsets= 1)` 不是失败。** 树至少要 2 个亚群节点。某一大类门控后只有一个标签时，日志会写 `only 1 subset, no tree to draw`。真正要看的是 P1 CD4/CD8（以及拆开后的 NK/NKT）、P2 B、P3 Myeloid。`Panel Px failed: missing value where TRUE/FALSE needed` 才是 bug：`parent_mask` / `if (sum(par) < 20)` 遇到 NA 会炸；比较必须把 NA 收成 FALSE，subset 图失败不得炸掉整块 panel
 - 物种：小鼠（NK1.1、F4/80、I-A/I-E、Ly6C/G、Siglec-F、Sca-1）
-- 荧光素→标志物以 `flow_panel_map.json` / `Flow_dimred_pipeline.R` 为准。Cytek unmixed 通道名常是 `BUV496-A`、`APC-Cy7-A`（带 Area 后缀）或 `CD45 V500`；匹配时要去掉 `-A/-H/-W`、按 token 认标志物/荧光素，不要要求整串 equal。对不上时必须把 `$PnN`/`$PnS` 打进日志，不要只报「没有匹配到任何分析通道」
+- 荧光素→标志物以 `flow_panel_map.json` / `Flow_dimred_pipeline.R` 为准。轴标签写 `标志物-荧光素`（表上的 **PE-eFluor 610**、**APC-Cy7**、**PE-Cy7**）。Cytek unmixed 通道名常是 `BUV496-A`、`APC-Cy7-A`（带 Area 后缀）、`PE-eFluor 610-A` 或 `CD45 V500`；匹配时要去掉 `-A/-H/-W`、按 token 认标志物/荧光素，不要要求整串 equal。对不上时必须把 `$PnN`/`$PnS` 打进日志，不要只报「没有匹配到任何分析通道」
 - **NK1.1 抗体是 AF700**，Cytek unmixed 通道名经常仍是 `R718-A` / `APC-R700-A`（同一 ~700 nm 检测器），两种都要配上，不能只认字面 `AF700-A`
 - Windows 若把 json 存成“文本文档”，真实名常是 `flow_panel_map.json.txt`：脚本要认这个名字，不要只找 `.json`
 
@@ -44,7 +44,7 @@ alwaysApply: false
 - P2：**先清理**（单细胞 → **宽单核** FSC/SSC，不要只圈小淋巴，活化 B / 浆母更大 → FVS450− 活细胞 → CD45+）。再圈 **CD19+** 作为 B 亚群母门。CD19+ 上 **IgD vs CD27 四象限**：Naive = IgD high CD27−；**Unswitched memory** = IgD high CD27+；**Switched memory** = IgD− CD27+；双阴 = Atypical。**不要把 BLIMP-1 放进这一层**，也不要再用 k=2 把 B 只分成 Naive vs Memory。Switched 内：少数 BLIMP+ → **Plasmablast**（CD19+ 或弱阳 / IgD− / CD27+ / BLIMP-1+）；IgG+ 仍是 switched memory。Naive 或 Unswitched 内 IgM 高 → **MZ B**。CD19− 里 IgD− CD27++ BLIMP-1+ → **Plasma**（浆细胞可以是 CD19−，不要只在 CD19+ 里找）。**CD40 / CD80 / CD86 是 Naive、Unswitched、Switched 上的 MFI 或阳性率**，不是新的第 1 层亚群；**不要用 CD40 叫 Activated**（静息 B 也有 CD40）；少数 CD80/CD86 岛才可标 Activated（CD86 早、CD80 晚）。默认剩余是 Naive / Unswitched / Switched，不是 Plasma。
 - P3：**先清理**（单细胞 → FVS450− → CD45+，不要加小淋巴门）。再圈大类：T = **CD3+**；B = **CD3− CD19+**；NK = **CD3− CD19− NK1.1+**；髓系 = **CD3− CD19− NK1.1−**。髓系先按 **CD11B** 分两支，不要一次 kmeans 比大小。**CD11B+**：Ly6G→中性粒（Ly6C 中阳仍是中性粒）；**Siglec-F 且 CCR3**→嗜酸（单阳不算）；**FceRI 且 CD200R3**→肥大细胞；剩余 **F4/80 high** = 组织巨噬，**F4/80 mid/low 且 Ly6C high** = 炎症单核，其余 Ly6C lo。**CD11B−**：CD11C+ 且 MHC-II+ → DC，再 **CD103+ = cDC1**、**CD103− = cDC2**。MHCII+ 巨噬仍在 CD11B+，不能并成 DC。巨噬内 **M1 = iNOS+ ARG-1−**，**M2 = ARG-1+ CD206+ iNOS−**；不用 IL-10/TGF-b/TNF-a/CD86 当极化。**CD40/CD80/CD86** 是 B/DC/巨噬的 MFI，**TNF-a** 是巨噬/DC/T 的读出，都不是新亚群。P3 的 CD80 是 **BUV496**（TNF-a 才是 APC）。
 - 类内 kmeans 只跑该层标志。不要全局 kmeans 后整团贴一个名字，也不要按 rank 在 UMAP 上撒点
-- **P1/P2/P3 共用 P1 那套高对比色**（红/紫/蓝/米/酒红/金/绿/橙）。禁止 P2 全紫、P3 全橙。组别色：EV 黑、H 红
+- **P1/P2/P3 共用 P1 那套高对比色**（红/紫/蓝/米/酒红/金/绿/橙），**同一张 tSNE 上的 NK/NKT 要用品红/琥珀，不要和 CD4 红、CD8 绿撞色**。禁止 P2 全紫、P3 全橙。组别色：EV 黑、H 红
 - P3 **CD80 = BUV496**，**TNF-a = APC**（同一管子不能两个 APC）
 
 ```r

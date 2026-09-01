@@ -1988,7 +1988,8 @@ pal_p1_hues <- c(
   "#E74C3C", "#7B52A5", "#5DADE2", "#E8C87A",
   "#C0392B", "#D4A017", "#27AE60", "#E67E22",
   "#922B21", "#F5CBA7", "#A9DFBF", "#1E8449",
-  "#145A32", "#7D3C98", "#CA6F1E", "#85C1E9"
+  "#145A32", "#7D3C98", "#CA6F1E", "#85C1E9",
+  "#AD1457", "#8E24AA", "#F48FB1", "#FF8F00"
 )
 
 pal_celltype <- c(
@@ -1996,22 +1997,22 @@ pal_celltype <- c(
   "CD4 T_EFF" = "#B03A2E",
   "CD4 effector" = "#B03A2E",
   "CD8 activated" = "#58D68D",
-  "NK T_EFF" = "#7B241C",
-  "NK effector" = "#7B241C",
-  "NK activated" = "#E74C3C",
-  "NK immature" = "#F5B7B1",
-  "NK DP" = "#E59866",
-  "NK mature" = "#922B21",
-  "NK exhausted" = "#6C3483",
+  "NK T_EFF" = "#4A148C",
+  "NK effector" = "#4A148C",
+  "NK activated" = "#FF1744",
+  "NK immature" = "#F48FB1",
+  "NK DP" = "#EC407A",
+  "NK mature" = "#880E4F",
+  "NK exhausted" = "#6A1B9A",
   "B cell" = "#7B52A5",
   "Macrophage" = "#5DADE2",
-  "NKT" = "#E8C87A",
-  "CD4 NKT" = "#F4D03F",
-  "DN NKT" = "#D4AC0D",
-  "NKT activated" = "#F9E79F",
-  "NKT T_EFF" = "#B7950B",
-  "NKT effector" = "#B7950B",
-  "NK" = "#C0392B",
+  "NKT" = "#F9A825",
+  "CD4 NKT" = "#FFD54F",
+  "DN NKT" = "#FF8F00",
+  "NKT activated" = "#FFF59D",
+  "NKT T_EFF" = "#F57F17",
+  "NKT effector" = "#F57F17",
+  "NK" = "#AD1457",
   "T" = "#D4A017",
   "CD8 T_CM" = "#27AE60",
   "CD8 TCM" = "#27AE60",
@@ -2323,6 +2324,16 @@ plot_freq_bar <- function(sum_df, title) {
     ggplot2::labs(title = title, x = NULL, y = "Mean % of cells")
 }
 
+fluorochrome_display <- function(fl) {
+  fl <- as.character(fl)[1]
+  if (!nzchar(fl) || is.na(fl)) return(fl)
+  rec <- panel_map$fluorochrome_display
+  if (!is.null(rec) && !is.null(rec[[fl]]) && nzchar(as.character(rec[[fl]][1]))) {
+    return(as.character(rec[[fl]][1]))
+  }
+  fl
+}
+
 fluorochrome_of <- function(panel_id, marker) {
   items <- panel_markers(panel_id)
   hit <- vapply(items, function(it) identical(it$marker, marker), logical(1))
@@ -2333,7 +2344,7 @@ fluorochrome_of <- function(panel_id, marker) {
 axis_fl_label <- function(panel_id, marker) {
   fl <- fluorochrome_of(panel_id, marker)
   if (is.na(fl) || !nzchar(fl)) return(marker)
-  paste0(marker, "-", fl)
+  paste0(marker, "-", fluorochrome_display(fl))
 }
 
 p_to_star <- function(p) {
