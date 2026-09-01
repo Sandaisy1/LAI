@@ -46,8 +46,10 @@ expect(lab_of(mk(`NK1.1` = 3.2, CD3 = 0.2, CD11B = 0.3)), "NK", "dump-NK")
 # IL-10 / TGF-b 背景不得把巨噬打成 M2
 expect(lab_of(mk(CD11B = 3.0, `F4/80` = 3.2, `IL-10` = 2.8, `TGF-b` = 2.6, CD206 = 0.2, `ARG-1` = 0.2)), "Macrophage", "il10-not-m2")
 
-p2 <- c("Naive B", "Atypical B", "IgM memory B", "Memory B", "Switched B", "Activated B", "Plasma")
+p2 <- c("Naive B", "Atypical B", "Unswitched memory B", "Switched memory B",
+        "MZ B", "Plasmablast", "Activated B", "Plasma")
 p2_cols <- unname(pal_celltype[p2])
+if (anyNA(p2_cols)) fail("P2 display colors missing for new subset names")
 if (length(unique(p2_cols)) < 6) fail("P2 colors collapsed to a purple ramp")
 if (!identical(unname(pal_celltype[["Naive B"]]), unname(pal_celltype[["CD4 naive"]]))) {
   fail("P2 Naive B should reuse P1 CD4 naive hue")
@@ -67,16 +69,20 @@ bp <- function(name, n) {
 }
 m2 <- rbind(
   bp("Naive_B", 100), bp("Plasma", 80), bp("Switched_B", 80),
-  bp("Activated_B", 80), bp("IgM_memory", 80), bp("Memory_B", 80)
+  bp("Activated_B", 80), bp("Unswitched_B", 80), bp("Plasmablast", 80),
+  bp("MZ_B", 80), bp("Atypical_B", 80)
 )
 h2 <- hierarchical_gate(m2, "P2")
-if (!all(h2$major %in% c("Naive_B", "Memory_B", "other"))) {
-  fail(sprintf("P2 layer1 should be Naive/Memory (no BLIMP), got %s", paste(unique(h2$major), collapse = ",")))
+ok_maj <- c("Naive_B", "Unswitched_B", "Switched_B", "Atypical_B", "Plasma", "other")
+if (!all(h2$major %in% ok_maj)) {
+  fail(sprintf("P2 layer1 should be IgD/CD27 quadrants + CD19- Plasma (no BLIMP on CD19+), got %s",
+               paste(unique(h2$major), collapse = ",")))
 }
-if (any(h2$major %in% c("Plasma"))) {
-  fail("P2 layer1 must not use BLIMP to call Plasma")
+cd19_pos <- which(m2[, "CD19"] > 1.5)
+if (any(h2$major[cd19_pos] %in% c("Plasma"))) {
+  fail("P2 layer1 must not use BLIMP to call Plasma on CD19+")
 }
-need2 <- c("Naive_B", "Plasma", "Switched_B", "Activated_B", "IgM_memory", "Memory_B")
+need2 <- c("Naive_B", "Unswitched_B", "Switched_B", "Plasma", "Plasmablast")
 miss2 <- setdiff(need2, unique(h2$subset))
 if (length(miss2)) fail(sprintf("P2 missing subsets: %s; got %s", paste(miss2, collapse = ","), paste(unique(h2$subset), collapse = ",")))
 if (length(unique(h2$subset)) < 5) fail(sprintf("P2 subsets too few: %s", paste(unique(h2$subset), collapse = ",")))

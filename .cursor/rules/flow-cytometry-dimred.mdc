@@ -24,7 +24,7 @@ alwaysApply: false
 
 ## 预处理（每个 panel 六个样品一起做一次，再降维）
 
-1. 去碎片 / 双联体（FSC-A vs FSC-H/W）；P1 再按 FSC/SSC 圈淋巴细胞；L/D(FVS450) 去死；CD45+ 白细胞（后续分析的基础）
+1. 去碎片 / 双联体（FSC-A vs FSC-H/W）；P1 再按 FSC/SSC 圈淋巴细胞，**P2 用更宽的单核门**（活化 B / 浆母更大）；L/D(FVS450) 去死；CD45+ 白细胞（后续分析的基础）
 2. 荧光通道 asinh（流式 cofactor 约 150，不要用 CyTOF 的 5）
 3. L/D 只用于 QC，**不要**作为 UMAP/tSNE 特征；CD45 门控后默认可排除
 4. 按样品等量下采样再联合 embedding，避免大文件主导；频率统计用 QC 后细胞，不要只用 DR 子集冒充频率
@@ -41,7 +41,7 @@ alwaysApply: false
 **每个亚群**还要出一组论文风格图（`subset_stats/`）：上方 EV（黑）vs H（红）柱状图（均值、**SD** 误差棒、每个重复的白心点、显著性 `ns/*/**/*** `；ns 时标出 P 值）。n=3 时柱高看起来不同也会 ns，不要为了出星号改检验。下方 2D 图按 FlowJo：**概率等高线 + 最外圈以外的 outliers**，EV/H 共用坐标轴、同一门框和百分数。不要只用 ggplot `stat_density_2d(ndensity)`（那是峰值等高线，看起来不像文章里的流式图）。
 
 - P1：**先清理**（单细胞 → 淋巴细胞 FSC/SSC → CD45+），再圈大类。T = **CD3+** → **CD4+ CD8−** / **CD4− CD8+**。B = **CD19+**。NK = **CD3− NKp46+**。CD4/CD8 内：naive = CD62L high CD44 low；**T_CM** = CD62L+ CD44+，其中 **T_SCM** = CD27+ CD95+；**T_EM** = 整个 CD62L−，再分 **T_EM early**（CD27+）/ **T_EM late**（CD27−）、**SLEC**（SCA-1+）、**MPEC**（SCA-1 low 且 CD27+）；耗竭在 T_EM 里用 **PD-L1 / LAG-3 / TIM-3** 高（CD4 和 CD8 都做）。**T_EFF** = CD8/NK 的 Perforin+ 或 GZMB+，以及 CD4/CD8 明确的 IFN-γ+ / TNF-α+。早期活化 = **CD69+**（可同时 naive 表型）；剩余 CD25+ CD69− → Treg。
-- P2：**先圈大类**（IgD vs CD27 的 **两个团互相比较** CD27−IgD，CD27 相对更高的一团是 Memory；**不要**要求同一细胞 CD27 绝对值压过 IgD，IgD 背景会把全部打成 Naive）。**不要把 BLIMP-1 放进第 1 层**。Memory 内再一层层圈：BLIMP-1（两群分得开、高于 IgD、且不是多数派才叫 Plasma）→ **少数** CD80/CD86 岛才叫 Activated（**不要用 CD40**，静息 B 也有 CD40；k=2 对单峰 CD80 会把一半吞掉）→ IgG→Switched → 剩余 IgM→IgM memory / Memory。Naive 内同样：只用 CD80/CD86 圈少数 Activated，且必须明显高于 IgD；剩余 IgD vs IgM → Naive / Atypical。默认剩余是 Naive/Memory，不是 Plasma，也不是 Activated。
+- P2：**先清理**（单细胞 → **宽单核** FSC/SSC，不要只圈小淋巴，活化 B / 浆母更大 → FVS450− 活细胞 → CD45+）。再圈 **CD19+** 作为 B 亚群母门。CD19+ 上 **IgD vs CD27 四象限**：Naive = IgD high CD27−；**Unswitched memory** = IgD high CD27+；**Switched memory** = IgD− CD27+；双阴 = Atypical。**不要把 BLIMP-1 放进这一层**，也不要再用 k=2 把 B 只分成 Naive vs Memory。Switched 内：少数 BLIMP+ → **Plasmablast**（CD19+ 或弱阳 / IgD− / CD27+ / BLIMP-1+）；IgG+ 仍是 switched memory。Naive 或 Unswitched 内 IgM 高 → **MZ B**。CD19− 里 IgD− CD27++ BLIMP-1+ → **Plasma**（浆细胞可以是 CD19−，不要只在 CD19+ 里找）。**CD40 / CD80 / CD86 是 Naive、Unswitched、Switched 上的 MFI 或阳性率**，不是新的第 1 层亚群；**不要用 CD40 叫 Activated**（静息 B 也有 CD40）；少数 CD80/CD86 岛才可标 Activated（CD86 早、CD80 晚）。默认剩余是 Naive / Unswitched / Switched，不是 Plasma。
 - P3：**先圈大类**（CD3/CD19/NK1.1 vs 髓系）。髓系内**一层层圈**，不要把 Ly6G/Siglec-F/F4/80/CD11c/Ly6C 丢进一次 kmeans 比大小：Ly6G→中性粒（Ly6C 中阳仍是中性粒），Siglec-F→嗜酸（不用 CCR3），FceRI/CD200R3→嗜碱，F4/80（须高于 CD11c，不用 MHCII 抢赢）→巨噬，CD103→CD103 DC，CD11c→DC，剩余 Ly6C hi/lo 单核。巨噬圈定后再用 iNOS→M1、CD206/ARG-1→M2；不用 IL-10/TGF-b/TNF-a/CD86 当极化。
 - 类内 kmeans 只跑该层标志。不要全局 kmeans 后整团贴一个名字，也不要按 rank 在 UMAP 上撒点
 - **P1/P2/P3 共用 P1 那套高对比色**（红/紫/蓝/米/酒红/金/绿/橙）。禁止 P2 全紫、P3 全橙。组别色：EV 黑、H 红

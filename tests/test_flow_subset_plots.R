@@ -43,6 +43,11 @@ act <- Filter(function(s) identical(s$lineage, "CD4_activated"), specs)
 if (!length(act) || !identical(act[[1]]$x, "CD69") || !identical(act[[1]]$y, "CD25")) {
   fail("CD4 activated contour should be CD69 vs CD25")
 }
+p2s <- subset_plot_specs("P2")
+uns <- Filter(function(s) identical(s$lineage, "Unswitched_B"), p2s)
+if (!length(uns) || !identical(uns[[1]]$x, "IgD") || !identical(uns[[1]]$y, "CD27")) {
+  fail("Unswitched memory contour should be IgD vs CD27")
+}
 
 cells_na <- data.frame(
   lineage = c("Neutrophil", NA_character_, "T", "cDC1_CD103"),

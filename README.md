@@ -96,7 +96,7 @@ source("Flow_dimred_pipeline.R")
 - `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图；下为 FlowJo 风格 2D 图。门是铺到坐标轴的完整象限/半平面（CD62L/CD44 标四个象限），EV 与 H **各自切阈值**。不是只框 10–90% 命中细胞的小矩形。
-- `gating/<样品>/`：**每个 FCS 单独**的完整圈门图 + `*_per_sample_gate_cuts.csv`。圈门按每个样品单独做完同一套逻辑。P1 分层：naive / **T_CM** / **T_SCM**（CD27+ CD95+）/ **T_EM early·late** / **SLEC** / **MPEC** / **T_EFF** / **exhausted**（PD-L1、LAG-3、TIM-3），以及 CD69 活化。
+- `gating/<样品>/`：**每个 FCS 单独**的完整圈门图 + `*_per_sample_gate_cuts.csv`。圈门按每个样品单独做完同一套逻辑。P1 分层：naive / **T_CM** / **T_SCM**（CD27+ CD95+）/ **T_EM early·late** / **SLEC** / **MPEC** / **T_EFF** / **exhausted**（PD-L1、LAG-3、TIM-3），以及 CD69 活化。P2：宽单核门 → CD45+ → CD19+ → IgD vs CD27 的 Naive / Unswitched / Switched；再分 MZ、Plasmablast、Plasma；CD40/CD80/CD86 出 MFI 表，不当第 1 层亚群。
 - `markers/`：各通道在 UMAP 上的着色
 - `*_cluster_marker_heatmap`、`*_cluster_frequency_H_vs_EV`、`*_H_vs_EV_dimred_overview`
 

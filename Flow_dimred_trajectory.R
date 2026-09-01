@@ -4,7 +4,7 @@
 #
 # 不是把 P1/P2/P3 拼成一张矩阵。每个 panel 里按大类单独降维、单独画树：
 #   P1: CD4、CD8（NK/NKT 只有一个亚群则跳过；B/髓系是 dump）
-#   P2: B（Naive / Memory / Switched / Plasma / Activated 一条分化轴）
+#   P2: B（Naive / Unswitched / Switched / MZ / Plasmablast / Plasma）
 #   P3: 髓系（单核→巨噬/DC，中性粒等为旁支）
 #
 # 根节点按惯例：CD4/CD8 naive、Naive B、Ly6C hi 单核。轨迹表示标志物

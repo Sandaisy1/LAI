@@ -607,7 +607,7 @@ qc_cd45_cut <- function(v) {
   as.numeric(stats::quantile(v, 0.08, names = FALSE))
 }
 
-# 清理：单细胞 →（P1）淋巴细胞 FSC/SSC → 活细胞 → CD45+
+# 清理：单细胞 →（P1 小淋巴；P2 宽单核，活化 B / 浆母更大）→ 活细胞 → CD45+
 qc_filter_matrix <- function(exprs, names, map, panel_id = NA) {
   keep <- rep(TRUE, nrow(exprs))
   fsc <- grep("^FSC-A$|^FSC_A$|^FSC\\.A$", names, ignore.case = TRUE)
@@ -632,6 +632,12 @@ qc_filter_matrix <- function(exprs, names, map, panel_id = NA) {
     ss <- exprs[, ssc[1]]
     keep <- keep & ss <= quantile(ss, 0.82, na.rm = TRUE)
     keep <- keep & fs >= quantile(fs, 0.05, na.rm = TRUE) & fs <= quantile(fs, 0.97, na.rm = TRUE)
+  }
+  if (identical(as.character(panel_id), "P2") && length(fsc) && length(ssc)) {
+    fs <- exprs[, fsc[1]]
+    ss <- exprs[, ssc[1]]
+    keep <- keep & ss <= quantile(ss, 0.95, na.rm = TRUE)
+    keep <- keep & fs >= quantile(fs, 0.02, na.rm = TRUE) & fs <= quantile(fs, 0.99, na.rm = TRUE)
   }
   ld_idx <- map$channel_index[map$marker == "L/D"]
   if (length(ld_idx) && !is.na(ld_idx[1])) {
@@ -715,12 +721,14 @@ demo_means_p2 <- function() {
     v
   }
   list(
-    Naive_B = pop(CD19 = 3.2, IgD = 3.0, IgM = 2.6, CD27 = 0.3),
-    IgM_memory = pop(CD19 = 3.1, CD27 = 3.0, IgM = 2.9, IgD = 0.3, IgG = 0.2),
-    Memory_B = pop(CD19 = 3.1, CD27 = 3.0, IgD = 0.3, IgM = 0.3, IgG = 0.3),
-    Switched_B = pop(CD19 = 3.0, IgG = 3.1, CD27 = 2.4, IgD = 0.2, IgM = 0.3),
-    Activated_B = pop(CD19 = 3.0, CD80 = 2.8, CD86 = 3.0, CD40 = 2.6, CD27 = 1.5),
-    Plasma = pop(CD19 = 1.2, `BLIMP-1` = 3.3, CD27 = 2.8, IgD = 0.2)
+    Naive_B = pop(CD19 = 3.2, IgD = 3.0, IgM = 2.4, CD27 = 0.3),
+    Unswitched_B = pop(CD19 = 3.1, IgD = 3.0, CD27 = 3.0, IgM = 2.6, IgG = 0.2),
+    MZ_B = pop(CD19 = 3.1, IgD = 3.0, CD27 = 0.3, IgM = 3.3),
+    Switched_B = pop(CD19 = 3.0, IgG = 3.1, CD27 = 2.6, IgD = 0.2, IgM = 0.3),
+    Plasmablast = pop(CD19 = 2.6, IgD = 0.2, CD27 = 2.8, `BLIMP-1` = 3.2, IgG = 0.4),
+    Plasma = pop(CD19 = 0.3, `BLIMP-1` = 3.3, CD27 = 3.1, IgD = 0.2),
+    Activated_B = pop(CD19 = 3.0, CD80 = 2.8, CD86 = 3.0, CD40 = 2.6, CD27 = 2.4, IgD = 0.3, IgG = 0.3),
+    Atypical_B = pop(CD19 = 3.0, IgD = 0.3, CD27 = 0.3, IgM = 1.6)
   )
 }
 
@@ -764,8 +772,12 @@ demo_props <- function(panel_id, group) {
              NK = 0.10, NKT = 0.04, B = 0.06, Myeloid = 0.04))
   }
   if (panel_id == "P2") {
-    if (ctrl) return(c(Naive_B = 0.38, IgM_memory = 0.10, Memory_B = 0.14, Switched_B = 0.10, Activated_B = 0.16, Plasma = 0.12))
-    return(c(Naive_B = 0.22, IgM_memory = 0.10, Memory_B = 0.12, Switched_B = 0.18, Activated_B = 0.20, Plasma = 0.18))
+    if (ctrl) {
+      return(c(Naive_B = 0.30, Unswitched_B = 0.16, MZ_B = 0.08, Switched_B = 0.14,
+               Plasmablast = 0.05, Plasma = 0.07, Activated_B = 0.08, Atypical_B = 0.12))
+    }
+    return(c(Naive_B = 0.16, Unswitched_B = 0.12, MZ_B = 0.08, Switched_B = 0.20,
+             Plasmablast = 0.10, Plasma = 0.14, Activated_B = 0.10, Atypical_B = 0.10))
   }
   if (ctrl) {
     return(c(Neutrophil = 0.18, Mono_Ly6Chi = 0.12, Mono_Ly6Clo = 0.08, Macrophage = 0.12, M1_like = 0.06, M2_like = 0.06, DC = 0.12, cDC1 = 0.08, Eosinophil = 0.10, Basophil = 0.08))
@@ -945,22 +957,7 @@ annotate_clusters <- function(med, panel_id) {
       return("Myeloid")
     }
     if (panel_id == "P2") {
-      blimp <- nv(i, "BLIMP-1")
-      igd <- nv(i, "IgD")
-      igm <- nv(i, "IgM")
-      igg <- nv(i, "IgG")
-      cd27 <- nv(i, "CD27")
-      act <- max(nv(i, "CD80"), nv(i, "CD86"))
-      if (is.finite(blimp) && blimp > igd + 0.4 && blimp > igm + 0.25) return("Plasma")
-      if (is.finite(igg) && igg > igd + 0.25 && igg > igm + 0.2) return("Switched_B")
-      if (is.finite(act) && act > max(igd, igm, igg) + 0.2) return("Activated_B")
-      if (is.finite(cd27) && cd27 > igd + 0.25) {
-        if (is.finite(igm) && igm > igd + 0.2 && igm >= igg) return("IgM_memory")
-        return("Memory_B")
-      }
-      if (is.finite(igd) && igd >= igm - 0.2) return("Naive_B")
-      if (is.finite(igm) && igm > igd + 0.35) return("Atypical_B")
-      return("Naive_B")
+      return(label_b_subset(setNames(vapply(colnames(med), function(nm) nv(i, nm), numeric(1)), colnames(med))))
     }
     # P3：按定义标志先后判断。中性粒可 Ly6C 中阳，不能输给单核；巨噬可 MHCII+，不能输给 DC。
     # 嗜酸只用 Siglec-F（不用 CCR3）；M1/M2 只用 iNOS / CD206 / ARG-1（不用 IL-10/TGF-b）。
@@ -1089,52 +1086,80 @@ label_t_subset <- function(v) {
 }
 
 label_b_subset <- function(v) {
+  cd19 <- vec_get(v, "CD19")
   blimp <- vec_get(v, "BLIMP-1")
   igd <- vec_get(v, "IgD")
   igm <- vec_get(v, "IgM")
   igg <- vec_get(v, "IgG")
   cd27 <- vec_get(v, "CD27")
   act <- max(vec_get(v, "CD80"), vec_get(v, "CD86"))
-  if (blimp > igd + 0.4 && blimp > igm + 0.25 && blimp >= cd27 - 0.15) return("Plasma")
-  if (igg > igd + 0.2 && igg > igm + 0.15) return("Switched_B")
-  if (act > max(igd, igm, igg) + 0.15) return("Activated_B")
-  if (cd27 > igd + 0.15) {
-    if (igm > igd + 0.1 && igm >= igg) return("IgM_memory")
-    return("Memory_B")
+  igd_hi <- igd >= 1.5
+  cd27_pos <- cd27 >= 1.5
+  # Plasma 只从 CD19- / dim：不要用 BLIMP 把 CD19+ 整团打成浆细胞
+  if (cd19 < 1.0 && blimp >= 2.2 && cd27 >= 2.0 && !igd_hi) return("Plasma")
+  if (igd_hi && !cd27_pos) {
+    if (igm >= 2.8 && igm >= igd - 0.2) return("MZ_B")
+    if (act >= 2.4 && act > igd) return("Activated_B")
+    return("Naive_B")
   }
-  if (igd >= igm - 0.15) return("Naive_B")
-  if (igm > igd + 0.2) return("Atypical_B")
-  "Naive_B"
+  if (igd_hi && cd27_pos) {
+    if (igm >= 2.8 && igm >= igd - 0.2) return("MZ_B")
+    if (act >= 2.4 && act > igd) return("Activated_B")
+    return("Unswitched_B")
+  }
+  if (!igd_hi && cd27_pos) {
+    if (blimp >= 2.5 && cd19 >= 1.0) return("Plasmablast")
+    if (act >= 2.4 && act > max(igd, igm, igg)) return("Activated_B")
+    return("Switched_B")
+  }
+  "Atypical_B"
 }
 
-# P2 第 1 层：只用表面 IgD vs CD27 圈 Naive / Memory。不要把 BLIMP-1 放进这一层，
-# 核染色背景会让几乎所有团都变成 Plasma，后面再也分不出亚群。
+# P2 第 1 层：IgD vs CD27 四象限。不要把 BLIMP-1 放进这一层。
 label_b_major <- function(v) {
+  cd19 <- vec_get(v, "CD19")
+  blimp <- vec_get(v, "BLIMP-1")
   igd <- vec_get(v, "IgD")
   cd27 <- vec_get(v, "CD27")
-  if (cd27 > igd + 0.12) return("Memory_B")
-  "Naive_B"
+  if (cd19 < 1.0 && blimp >= 2.2 && cd27 >= 2.0 && igd < 1.2) return("Plasma")
+  igd_hi <- igd >= 1.5
+  cd27_pos <- cd27 >= 1.5
+  if (igd_hi && !cd27_pos) return("Naive_B")
+  if (igd_hi && cd27_pos) return("Unswitched_B")
+  if (!igd_hi && cd27_pos) return("Switched_B")
+  "Atypical_B"
 }
 
 label_b_naive_subset <- function(v) {
   igd <- vec_get(v, "IgD")
   igm <- vec_get(v, "IgM")
-  # CD40 在静息 B 上也有，不能当 Activated
   act <- max(vec_get(v, "CD80"), vec_get(v, "CD86"))
-  if (act > igd + 0.25) return("Activated_B")
-  if (igm > igd + 0.25) return("Atypical_B")
+  if (igm >= 2.8 && igm >= igd - 0.2) return("MZ_B")
+  if (act > igd + 0.25 && act >= 2.4) return("Activated_B")
   "Naive_B"
 }
 
-label_b_memory_subset <- function(v) {
+label_b_unswitched_subset <- function(v) {
   igd <- vec_get(v, "IgD")
   igm <- vec_get(v, "IgM")
-  igg <- vec_get(v, "IgG")
   act <- max(vec_get(v, "CD80"), vec_get(v, "CD86"))
-  if (igg > igm + 0.15 && igg > igd) return("Switched_B")
-  if (igm > igd + 0.1 && igm >= igg) return("IgM_memory")
-  if (act > max(igd, igm, igg) + 0.25) return("Activated_B")
-  "Memory_B"
+  if (igm >= 2.8 && igm >= igd - 0.2) return("MZ_B")
+  if (act > igd + 0.25 && act >= 2.4) return("Activated_B")
+  "Unswitched_B"
+}
+
+label_b_switched_subset <- function(v) {
+  igd <- vec_get(v, "IgD")
+  blimp <- vec_get(v, "BLIMP-1")
+  act <- max(vec_get(v, "CD80"), vec_get(v, "CD86"))
+  if (blimp >= 2.5 && blimp > igd + 0.3) return("Plasmablast")
+  if (act >= 2.4 && act > igd + 0.25) return("Activated_B")
+  "Switched_B"
+}
+
+# 旧 Memory 大类后备
+label_b_memory_subset <- function(v) {
+  label_b_switched_subset(v)
 }
 
 # P3 第 2 层命名（后备）：先后判断，Ly6C/MHCII 不得把中性粒/巨噬抢走
@@ -1196,8 +1221,35 @@ label_myeloid_subset <- function(v) {
   "Mono_Ly6Clo"
 }
 
-# P2 第 1 层：比较两个团的 CD27−IgD，不要要求同一细胞 CD27 绝对值压过 IgD
-# （IgD 背景高时两个团都是 IgD>CD27，旧规则会把全部打成 Naive B）
+# P2 第 1 层：CD19+ 上 IgD vs CD27 四象限
+#   Naive = IgD high CD27-；Unswitched = IgD high CD27+；Switched = IgD- CD27+；DN = Atypical
+# 不要把 BLIMP-1 放进这一层（核背景会吞掉亚群）。CD19- 里再圈 Plasma。
+p2_pos_mask <- function(v, min_sep = 0.45) {
+  v <- as.numeric(v)
+  n <- length(v)
+  if (!n) return(logical(0))
+  cut <- axis_pos_cut(v, min_sep = min_sep)
+  is.finite(v) & is.finite(cut) & v >= cut
+}
+
+p2_assign_cd19neg_plasma <- function(mat, out) {
+  io <- which(out == "other")
+  if (length(io) < 8 || !"BLIMP-1" %in% colnames(mat)) return(out)
+  bl <- colv(mat, "BLIMP-1")
+  igd <- colv(mat, "IgD")
+  cd27 <- colv(mat, "CD27")
+  # 阈值按全体细胞切，不要只在 CD19- 内部切（整团都是浆细胞时会把门切到云团上方）
+  bl_hi <- p2_pos_mask(bl, 0.4)
+  cd27_hi <- p2_pos_mask(cd27, 0.4)
+  igd_hi <- p2_pos_mask(igd, 0.4)
+  hit <- bl_hi[io] & cd27_hi[io] & !igd_hi[io]
+  if (!any(hit)) {
+    hit <- bl[io] >= 2.0 & cd27[io] >= 2.0 & igd[io] < 1.2
+  }
+  if (any(hit)) out[io[hit]] <- "Plasma"
+  out
+}
+
 gate_p2_major <- function(mat) {
   mat <- as.matrix(mat)
   n <- nrow(mat)
@@ -1216,46 +1268,24 @@ gate_p2_major <- function(mat) {
     }
   }
   ib <- which(b)
-  if (length(ib) < 40) return(out)
-  mk <- intersect(c("IgD", "CD27"), colnames(mat))
-  if (!length(mk)) return(out)
-  if (length(ib) >= 40 && length(mk) >= 1) {
-    x <- mat[ib, mk, drop = FALSE]
-    xs <- scale(x)
-    xs[!is.finite(xs)] <- 0
-    set.seed(seed_value)
-    km <- tryCatch(
-      stats::kmeans(xs, centers = 2, nstart = 10, iter.max = 250, algorithm = "Lloyd"),
-      error = function(e) NULL
-    )
-    if (!is.null(km) && length(unique(km$cluster)) == 2) {
-      sc <- vapply(sort(unique(km$cluster)), function(ci) {
-        hit <- km$cluster == ci
-        cd27 <- if ("CD27" %in% mk) median(x[hit, "CD27"], na.rm = TRUE) else -Inf
-        igd <- if ("IgD" %in% mk) median(x[hit, "IgD"], na.rm = TRUE) else 0
-        if (!is.finite(cd27)) cd27 <- -Inf
-        if (!is.finite(igd)) igd <- 0
-        cd27 - igd
-      }, numeric(1))
-      if (diff(range(sc)) >= 0.08) {
-        mem_cl <- sort(unique(km$cluster))[which.max(sc)]
-        out[ib] <- ifelse(km$cluster == mem_cl, "Memory_B", "Naive_B")
-        return(out)
-      }
-    }
-  }
-  mem <- gate_k2_high(mat, ib, "CD27", 0.12)
-  if (any(mem)) {
-    out[ib[mem]] <- "Memory_B"
+  if (length(ib) >= 40 && all(c("IgD", "CD27") %in% colnames(mat))) {
+    igd <- colv(mat, "IgD")[ib]
+    cd27 <- colv(mat, "CD27")[ib]
+    igd_hi <- p2_pos_mask(igd)
+    cd27_pos <- p2_pos_mask(cd27)
+    igd_hi[!is.finite(igd)] <- FALSE
+    cd27_pos[!is.finite(cd27)] <- FALSE
+    lab <- rep("Atypical_B", length(ib))
+    lab[igd_hi & !cd27_pos] <- "Naive_B"
+    lab[igd_hi & cd27_pos] <- "Unswitched_B"
+    lab[!igd_hi & cd27_pos] <- "Switched_B"
+    out[ib] <- lab
+  } else if (length(ib) >= 40 && "CD27" %in% colnames(mat)) {
+    mem <- p2_pos_mask(colv(mat, "CD27")[ib])
+    out[ib[mem]] <- "Unswitched_B"
     out[ib[!mem]] <- "Naive_B"
-    return(out)
   }
-  igd_hi <- gate_k2_high(mat, ib, "IgD", 0.12)
-  if (any(igd_hi) && mean(igd_hi) < 0.95) {
-    out[ib[igd_hi]] <- "Naive_B"
-    out[ib[!igd_hi]] <- "Memory_B"
-  }
-  out
+  p2_assign_cd19neg_plasma(mat, out)
 }
 
 # P1 NK：文档是 CD3- NKp46+；NKp46 缺失时才退回 NK1.1
@@ -1268,7 +1298,7 @@ p1_nk_score <- function(mat) {
   out
 }
 
-# 第 1 层：只用谱系抗体圈大类（P1 T/NK，P2 B 的 Naive/Memory，P3 淋巴 vs 髓系）
+# 第 1 层：只用谱系抗体圈大类（P1 T/NK，P2 B 的 IgD×CD27，P3 淋巴 vs 髓系）
 gate_major_lineage <- function(mat, panel_id) {
   mat <- as.matrix(mat)
   n <- nrow(mat)
@@ -1543,7 +1573,7 @@ sequential_nk_subsets <- function(mat, idx) {
   labs
 }
 
-# P2 Naive 内：只用 CD80/CD86 圈少数 Activated（不要用 CD40）；剩余 IgD vs IgM → Naive / Atypical
+# P2 Naive 内：IgM 高 → MZ；少数 CD80/CD86 岛 → Activated（不要用 CD40）；剩余 Naive
 sequential_b_naive <- function(mat, idx) {
   n <- length(idx)
   if (n == 0) return(character(0))
@@ -1563,30 +1593,44 @@ sequential_b_naive <- function(mat, idx) {
     out[pos[hi]] <<- label
     remain[pos[hi]] <<- FALSE
   }
+  take_high("IgM", "MZ_B", 0.35, max_frac = 0.55)
   take_high(c("CD80", "CD86"), "Activated_B", 0.5, beat = "IgD", margin = 0.25, max_frac = 0.35)
-  if (any(remain)) {
-    hi <- gate_k2_high(mat, idx[remain], "IgM", 0.2)
-    pos <- which(remain)
-    if (any(hi)) {
-      hi_idx <- idx[remain][hi]
-      igm <- median(colv(mat, "IgM")[hi_idx], na.rm = TRUE)
-      igd <- median(colv(mat, "IgD")[hi_idx], na.rm = TRUE)
-      if (is.finite(igm) && igm > igd + 0.25) {
-        out[pos[hi]] <- "Atypical_B"
-        remain[pos[hi]] <- FALSE
-      }
-    }
-    out[remain] <- "Naive_B"
-  }
+  if (any(remain)) out[remain] <- "Naive_B"
   out
 }
 
-# P2 Memory 内：Plasma（BLIMP 少数）→ 少数 CD80/CD86 Activated 岛 → Switched → IgM memory
-# 默认剩余是 Memory。CD40 不当激活；Activated 不得在分型前吞掉 Switched/IgM。
-sequential_b_memory <- function(mat, idx) {
+# P2 Unswitched（IgD+ CD27+）内：IgM 高 → MZ；少数 CD80/CD86 → Activated
+sequential_b_unswitched <- function(mat, idx) {
   n <- length(idx)
   if (n == 0) return(character(0))
-  out <- rep("Memory_B", n)
+  out <- rep("Unswitched_B", n)
+  remain <- rep(TRUE, n)
+  take_high <- function(markers, label, min_sep, beat = NULL, margin = 0.25, max_frac = 1) {
+    if (!any(remain)) return(invisible())
+    hi <- gate_k2_high(mat, idx[remain], markers, min_sep, max_frac = max_frac)
+    if (!any(hi)) return(invisible())
+    pos <- which(remain)
+    if (length(beat)) {
+      hi_idx <- idx[remain][hi]
+      sc <- median(marker_score(mat, hi_idx, markers), na.rm = TRUE)
+      bt <- max(vapply(beat, function(m) median(colv(mat, m)[hi_idx], na.rm = TRUE), numeric(1)))
+      if (!is.finite(sc) || !is.finite(bt) || sc <= bt + margin) return(invisible())
+    }
+    out[pos[hi]] <<- label
+    remain[pos[hi]] <<- FALSE
+  }
+  take_high("IgM", "MZ_B", 0.35, max_frac = 0.55)
+  take_high(c("CD80", "CD86"), "Activated_B", 0.5, beat = "IgD", margin = 0.25, max_frac = 0.35)
+  if (any(remain)) out[remain] <- "Unswitched_B"
+  out
+}
+
+# P2 Switched（IgD- CD27+）内：BLIMP 少数 → Plasmablast；少数 CD80/CD86 → Activated
+# IgG+ 仍是 Switched memory。CD40 不当激活。
+sequential_b_switched <- function(mat, idx) {
+  n <- length(idx)
+  if (n == 0) return(character(0))
+  out <- rep("Switched_B", n)
   remain <- rep(TRUE, n)
   take_high <- function(markers, label, min_sep, beat = NULL, margin = 0.2, max_frac = 1) {
     if (!any(remain)) return(invisible())
@@ -1602,11 +1646,20 @@ sequential_b_memory <- function(mat, idx) {
     out[pos[hi]] <<- label
     remain[pos[hi]] <<- FALSE
   }
-  take_high("BLIMP-1", "Plasma", 0.4, beat = c("IgD", "IgM"), margin = 0.4, max_frac = 0.4)
+  take_high("BLIMP-1", "Plasmablast", 0.4, beat = "IgD", margin = 0.3, max_frac = 0.55)
   take_high(c("CD80", "CD86"), "Activated_B", 0.5, beat = c("IgD", "IgM", "IgG"), margin = 0.25, max_frac = 0.35)
-  take_high("IgG", "Switched_B", 0.15, beat = c("IgD", "IgM"), margin = 0.05)
+  if (any(remain)) out[remain] <- "Switched_B"
+  out
+}
+
+# 旧 Memory 大类：按 switched 路径拆；IgM 高记 Unswitched
+sequential_b_memory <- function(mat, idx) {
+  n <- length(idx)
+  if (n == 0) return(character(0))
+  out <- sequential_b_switched(mat, idx)
+  remain <- out == "Switched_B"
   if (any(remain)) {
-    hi <- gate_k2_high(mat, idx[remain], "IgM", 0.15)
+    hi <- gate_k2_high(mat, idx[remain], "IgM", 0.15, max_frac = 0.6)
     pos <- which(remain)
     if (any(hi)) {
       hi_idx <- idx[remain][hi]
@@ -1614,11 +1667,9 @@ sequential_b_memory <- function(mat, idx) {
       igd <- median(colv(mat, "IgD")[hi_idx], na.rm = TRUE)
       igg <- median(colv(mat, "IgG")[hi_idx], na.rm = TRUE)
       if (is.finite(igm) && igm > igd + 0.1 && igm >= igg) {
-        out[pos[hi]] <- "IgM_memory"
-        remain[pos[hi]] <- FALSE
+        out[pos[hi]] <- "Unswitched_B"
       }
     }
-    out[remain] <- "Memory_B"
   }
   out
 }
@@ -1705,8 +1756,17 @@ hierarchical_gate <- function(mat, panel_id) {
   } else if (panel_id == "P2") {
     i_n <- which(major == "Naive_B")
     subset[i_n] <- sequential_b_naive(mat, i_n)
+    i_u <- which(major == "Unswitched_B")
+    subset[i_u] <- sequential_b_unswitched(mat, i_u)
+    i_s <- which(major == "Switched_B")
+    subset[i_s] <- sequential_b_switched(mat, i_s)
     i_m <- which(major == "Memory_B")
     subset[i_m] <- sequential_b_memory(mat, i_m)
+    i_a <- which(major == "Atypical_B")
+    if (length(i_a)) {
+      tmp <- sequential_b_naive(mat, i_a)
+      subset[i_a] <- ifelse(tmp == "Activated_B", "Activated_B", "Atypical_B")
+    }
   } else if (panel_id == "P3") {
     im <- which(major == "Myeloid")
     subset[im] <- sequential_myeloid(mat, im)
@@ -1821,8 +1881,12 @@ pal_celltype <- c(
   "Naive B" = "#F5CBA7",
   "Atypical B" = "#E8C87A",
   "IgM memory B" = "#A9DFBF",
+  "Unswitched memory B" = "#A9DFBF",
   "Memory B" = "#27AE60",
   "Switched B" = "#E67E22",
+  "Switched memory B" = "#E67E22",
+  "MZ B" = "#F4D03F",
+  "Plasmablast" = "#B03A2E",
   "Activated B" = "#E74C3C",
   "Plasma" = "#922B21",
   "Eosinophil" = "#E74C3C",
@@ -1842,9 +1906,12 @@ celltype_label <- function(lineage, panel_id) {
     B = "B cell",
     Naive_B = "Naive B",
     Atypical_B = "Atypical B",
-    IgM_memory = "IgM memory B",
+    IgM_memory = "Unswitched memory B",
+    Unswitched_B = "Unswitched memory B",
     Memory_B = "Memory B",
-    Switched_B = "Switched B",
+    Switched_B = "Switched memory B",
+    MZ_B = "MZ B",
+    Plasmablast = "Plasmablast",
     Activated_B = "Activated B",
     Plasma = "Plasma",
     CD4_naive = "CD4 naive",
@@ -2201,8 +2268,17 @@ parent_mask <- function(cells, parent) {
       "M1_like_Mac", "M2_like_Mac", "DC", "cDC1_CD103", "Mono_Ly6Chi", "Mono_Ly6Clo", "Myeloid"
     ),
     Macrophage = lin %in% c("Macrophage", "M1_like_Mac", "M2_like_Mac"),
-    Memory_B = cl == "Memory_B" | lin %in% c("Memory_B", "IgM_memory", "Switched_B", "Plasma", "Activated_B"),
-    Naive_B = cl == "Naive_B" | lin %in% c("Naive_B", "Atypical_B"),
+    CD19 = cl %in% c("Naive_B", "Unswitched_B", "Switched_B", "Atypical_B", "Memory_B") |
+      lin %in% c("Naive_B", "Unswitched_B", "Switched_B", "Atypical_B", "MZ_B",
+                 "Plasmablast", "Activated_B", "IgM_memory", "Memory_B"),
+    Naive_Unswitched = cl %in% c("Naive_B", "Unswitched_B") |
+      lin %in% c("Naive_B", "Unswitched_B", "MZ_B", "IgM_memory"),
+    Unswitched_B = cl == "Unswitched_B" | lin %in% c("Unswitched_B", "IgM_memory"),
+    Switched_B = cl == "Switched_B" | lin %in% c("Switched_B", "Plasmablast"),
+    Memory_B = cl %in% c("Memory_B", "Unswitched_B", "Switched_B") |
+      lin %in% c("Memory_B", "IgM_memory", "Unswitched_B", "Switched_B", "Plasmablast",
+                 "Plasma", "Activated_B", "MZ_B"),
+    Naive_B = cl == "Naive_B" | lin %in% c("Naive_B", "MZ_B"),
     rep(TRUE, n)
   )
   out[is.na(out)] <- FALSE
@@ -2267,13 +2343,14 @@ subset_plot_specs <- function(panel_id) {
   }
   if (identical(panel_id, "P2")) {
     return(list(
-      mk("Naive_B", "IgD", "CD27", "all", "Naive B (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
-      mk("Atypical_B", "IgM", "IgD", "Naive_B", "Atypical B in naive (%)", gate = "hi_x", x_hi = TRUE),
-      mk("Memory_B", "IgD", "CD27", "all", "Memory B (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
-      mk("IgM_memory", "IgM", "IgD", "Memory_B", "IgM memory in memory B (%)", gate = "hi_x", x_hi = TRUE),
-      mk("Switched_B", "IgG", "IgD", "Memory_B", "Switched B in memory B (%)", gate = "hi_x", x_hi = TRUE),
-      mk("Activated_B", "CD80", "CD86", "all", "Activated B (%)", gate = "hi_hi"),
-      mk("Plasma", "BLIMP-1", "IgD", "Memory_B", "Plasma in memory B (%)", gate = "hi_x", x_hi = TRUE)
+      mk("Naive_B", "IgD", "CD27", "CD19", "Naive B in CD19+ (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
+      mk("Unswitched_B", "IgD", "CD27", "CD19", "Unswitched memory B in CD19+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("Switched_B", "IgD", "CD27", "CD19", "Switched memory B in CD19+ (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
+      mk("Atypical_B", "IgD", "CD27", "CD19", "Atypical B in CD19+ (%)", gate = "quad", x_hi = FALSE, y_hi = FALSE),
+      mk("MZ_B", "IgM", "IgD", "Naive_Unswitched", "MZ B in naive/unswitched (%)", gate = "hi_x", x_hi = TRUE),
+      mk("Plasmablast", "BLIMP-1", "CD27", "Switched_B", "Plasmablast in switched (%)", gate = "hi_hi"),
+      mk("Plasma", "BLIMP-1", "CD27", "all", "Plasma (%)", gate = "hi_hi"),
+      mk("Activated_B", "CD86", "CD80", "CD19", "Activated B in CD19+ (%)", gate = "hi_hi")
     ))
   }
   list(
@@ -2727,6 +2804,67 @@ export_per_sample_gating_figures <- function(cells, panel_id, out_dir) {
   invisible(TRUE)
 }
 
+# P2 活化：CD40 / CD80 / CD86 是 Naive / Unswitched / Switched 上的 MFI 与阳性率，不是新亚群
+export_p2_activation_stats <- function(cells, out_dir) {
+  markers <- intersect(c("CD40", "CD80", "CD86"), names(cells))
+  parents <- c("Naive_B", "Unswitched_B", "Switched_B")
+  if (!length(markers) || !"lineage" %in% names(cells)) return(invisible(NULL))
+  maj <- if ("cluster_lineage" %in% names(cells)) {
+    as.character(cells$cluster_lineage)
+  } else {
+    as.character(cells$lineage)
+  }
+  maj[is.na(maj)] <- ""
+  is_b <- maj %in% c(parents, "Atypical_B", "Memory_B")
+  cuts <- lapply(markers, function(mk) {
+    v <- as.numeric(cells[[mk]][is_b])
+    axis_pos_cut(v)
+  })
+  names(cuts) <- markers
+  smp <- unique(as.character(cells$sample))
+  rows <- list()
+  for (s in smp) {
+    ii <- which(as.character(cells$sample) == s)
+    if (!length(ii)) next
+    grp <- as.character(cells$group[ii[1]])
+    bio <- if ("bio_sample" %in% names(cells)) as.character(cells$bio_sample[ii[1]]) else s
+    tech <- if ("tech_rep" %in% names(cells)) as.character(cells$tech_rep[ii[1]]) else NA_character_
+    for (par in parents) {
+      hit <- ii[maj[ii] == par]
+      if (length(hit) < 5) next
+      for (mk in markers) {
+        v <- as.numeric(cells[[mk]][hit])
+        cut <- cuts[[mk]]
+        rows[[length(rows) + 1]] <- data.frame(
+          sample = s, bio_sample = bio, tech_rep = tech, group = grp,
+          parent = par, marker = mk, n_cells = length(hit),
+          MFI = stats::median(v, na.rm = TRUE),
+          pct_positive = 100 * mean(is.finite(v) & is.finite(cut) & v >= cut),
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+  if (!length(rows)) return(invisible(NULL))
+  tab <- do.call(rbind, rows)
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  utils::write.csv(tab, file.path(out_dir, "P2_Bcell_activation_by_sample.csv"), row.names = FALSE)
+  mfi_df <- tab
+  mfi_df$id <- paste(mfi_df$parent, mfi_df$marker, "MFI", sep = "|")
+  mfi_df$percent <- mfi_df$MFI
+  pct_df <- tab
+  pct_df$id <- paste(pct_df$parent, pct_df$marker, "pct_pos", sep = "|")
+  pct_df$percent <- pct_df$pct_positive
+  stats_mfi <- compare_group_freq(mfi_df, "id")
+  stats_pct <- compare_group_freq(pct_df, "id")
+  stats_mfi$metric <- "MFI"
+  stats_pct$metric <- "pct_positive"
+  stats <- rbind(stats_mfi, stats_pct)
+  utils::write.csv(stats, file.path(out_dir, "P2_Bcell_activation_H_vs_EV_stats.csv"), row.names = FALSE)
+  log_msg("P2 CD40/CD80/CD86 MFI and % positivity written (not used as subset labels)")
+  invisible(tab)
+}
+
 export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, umap_is_pca = FALSE, tsne_is_pca = FALSE) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   marker_dir <- file.path(out_dir, "markers")
@@ -2827,6 +2965,12 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     export_per_sample_gating_figures(cells, panel_id, out_dir),
     error = function(e) log_msg(panel_id, " per-sample gating figures failed: ", e$message)
   )
+  if (identical(panel_id, "P2")) {
+    tryCatch(
+      export_p2_activation_stats(cells, out_dir),
+      error = function(e) log_msg(panel_id, " B-cell activation MFI failed: ", e$message)
+    )
+  }
   invisible(TRUE)
 }
 
@@ -3015,6 +3159,9 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   log_msg("==== Panel ", panel_id, " : ", panel_map$panels[[panel_id]]$focus, " ====")
   if (identical(panel_id, "P1")) {
     log_msg("P1 gates: naive / T_CM / T_SCM / T_EM early-late / SLEC / MPEC / T_EFF / exhausted; CD69 activation")
+  }
+  if (identical(panel_id, "P2")) {
+    log_msg("P2 gates: wide mononuclear FSC/SSC; CD19+ IgD vs CD27 Naive/Unswitched/Switched; MZ IgM-high; plasmablast/plasma BLIMP; CD40/CD80/CD86 as MFI not subsets")
   }
   out_dir <- file.path(result_dir, panel_id)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
