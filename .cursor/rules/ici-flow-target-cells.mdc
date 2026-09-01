@@ -53,5 +53,6 @@ alwaysApply: false
 # ❌ BAD: 把 His+ CD45+ 的 T/NK 全部改名为 Target
 # ✅ GOOD: Internation 目录放齐全部 ICI_*（含 ICI_flow_engine.R），单独 source ICI_Flow_dimred_pipeline.R
 # ✅ GOOD: 免疫亚群目录只放 Flow_*，单独 source Flow_dimred_pipeline.R
+# ✅ GOOD: ICI P2 用本表 7 色（CD19/CD27/IgM/IgG/His），按原 P2 思路圈 B；缺 IgD/BLIMP 只跳过该项
 # ✅ GOOD: His+ CD45- = 靶细胞；His+ CD45+ 保留免疫亚群
 ```
