@@ -1,4 +1,4 @@
-# JY：免疫亚群降维（E:/R/fuction of cell-ljy，JY-EVNK vs JY-NNK）
+# JY：免疫亚群降维（E:/R/fuction of cell-ljy，比较 JY-NNK / JY-EVNK）
 # run: Rscript tests/test_jy_flow.R
 Sys.setenv(FLOW_FUNCTIONS_ONLY = "1", JY_FUNCTIONS_ONLY = "1")
 Sys.setenv(JY_FLOW_DIR = tempfile("jy_flow_"))
@@ -39,24 +39,25 @@ if ("His" %in% jy_p1) fail("JY P1 must not gain His (this is not the ICI sheet)"
 if (!("IgD" %in% vapply(jy_json$panels$P2$markers, function(x) x$marker, character(1)))) {
   fail("JY P2 must keep original IgD (immune-subset panel, not ICI 7-color)")
 }
-expect(jy_json$groups[[1]], "EVNK", "JY groups EVNK")
-expect(jy_json$groups[[2]], "NNK", "JY groups NNK")
+expect(jy_json$groups[[1]], "JY-EVNK", "JY groups JY-EVNK")
+expect(jy_json$groups[[2]], "JY-NNK", "JY groups JY-NNK")
 expect(jy_json$data_dir, "E:/R/fuction of cell-ljy", "JY data_dir")
 expect(jy_json$cohort, "JY", "JY cohort")
+expect(jy_json$comparison, "JY_NNK_vs_JY_EVNK", "JY comparison JY-NNK / JY-EVNK")
 
-expect(flow_ctrl_group, "EVNK", "loaded ctrl EVNK")
-expect(flow_trt_group, "NNK", "loaded trt NNK")
-expect(as.character(flow_group_levels), c("EVNK", "NNK"), "group levels")
+expect(flow_ctrl_group, "JY-EVNK", "loaded ctrl JY-EVNK")
+expect(flow_trt_group, "JY-NNK", "loaded trt JY-NNK")
+expect(as.character(flow_group_levels), c("JY-EVNK", "JY-NNK"), "group levels")
 if (!isTRUE(flow_trim_bio_extremes)) {
   fail("JY must drop 1 extreme bio-rep like the immune-subset scheme (n=2)")
 }
 
 # 文件名：EVNK1-1 / NNK1-2 / JY-EVNK；生物学重复 EVNK-1；先匹配 EVNK
 ev <- parse_fcs_filename("EVNK1-1_P1_unmixed.fcs")
-if (is.null(ev) || !identical(ev$group, "EVNK") || !identical(ev$sample, "EVNK1-1") ||
+if (is.null(ev) || !identical(ev$group, "JY-EVNK") || !identical(ev$sample, "EVNK1-1") ||
     !identical(ev$bio_sample, "EVNK-1") || !identical(ev$panel, "P1") ||
     !identical(ev$replicate, "1") || !identical(ev$tech_rep, "1")) {
-  fail(sprintf("EVNK1-1_P1_unmixed.fcs -> EVNK-1 / EVNK1-1 P1, got group=%s sample=%s bio=%s tech=%s panel=%s",
+  fail(sprintf("EVNK1-1_P1_unmixed.fcs -> JY-EVNK / EVNK-1 / EVNK1-1 P1, got group=%s sample=%s bio=%s tech=%s panel=%s",
                if (is.null(ev)) "NULL" else ev$group,
                if (is.null(ev)) "NULL" else ev$sample,
                if (is.null(ev)) "NULL" else ev$bio_sample,
@@ -64,32 +65,32 @@ if (is.null(ev) || !identical(ev$group, "EVNK") || !identical(ev$sample, "EVNK1-
                if (is.null(ev)) "NULL" else ev$panel))
 }
 ev2 <- parse_fcs_filename("JY-EVNK1-2_P2_unmixed.fcs")
-if (is.null(ev2) || !identical(ev2$group, "EVNK") || !identical(ev2$sample, "EVNK1-2") ||
+if (is.null(ev2) || !identical(ev2$group, "JY-EVNK") || !identical(ev2$sample, "EVNK1-2") ||
     !identical(ev2$panel, "P2") || !identical(ev2$tech_rep, "2")) {
-  fail("JY-EVNK1-2_P2_unmixed.fcs should parse as EVNK sample EVNK1-2 P2")
+  fail("JY-EVNK1-2_P2_unmixed.fcs should parse as JY-EVNK sample EVNK1-2 P2")
 }
 nnk <- parse_fcs_filename("NNK-3-1_P3_unmixed.fcs")
-if (is.null(nnk) || !identical(nnk$group, "NNK") || !identical(nnk$sample, "NNK3-1") ||
+if (is.null(nnk) || !identical(nnk$group, "JY-NNK") || !identical(nnk$sample, "NNK3-1") ||
     !identical(nnk$bio_sample, "NNK-3") || !identical(nnk$panel, "P3")) {
-  fail(sprintf("NNK-3-1_P3 must be NNK-3 / NNK3-1 P3, got group=%s sample=%s bio=%s panel=%s",
+  fail(sprintf("NNK-3-1_P3 must be JY-NNK / NNK-3 / NNK3-1 P3, got group=%s sample=%s bio=%s panel=%s",
                if (is.null(nnk)) "NULL" else nnk$group,
                if (is.null(nnk)) "NULL" else nnk$sample,
                if (is.null(nnk)) "NULL" else nnk$bio_sample,
                if (is.null(nnk)) "NULL" else nnk$panel))
 }
 jy_nnk <- parse_fcs_filename("JY-NNK-2-2_P1_unmixed.fcs")
-if (is.null(jy_nnk) || !identical(jy_nnk$group, "NNK") || !identical(jy_nnk$sample, "NNK2-2") ||
+if (is.null(jy_nnk) || !identical(jy_nnk$group, "JY-NNK") || !identical(jy_nnk$sample, "NNK2-2") ||
     !identical(jy_nnk$bio_sample, "NNK-2")) {
-  fail("JY-NNK-2-2_P1_unmixed.fcs should parse as NNK-2 / NNK2-2")
+  fail("JY-NNK-2-2_P1_unmixed.fcs should parse as JY-NNK / NNK-2 / NNK2-2")
 }
 bio_only <- parse_fcs_filename("EVNK-1_P1_unmixed.fcs")
-if (is.null(bio_only) || !identical(bio_only$group, "EVNK") || !identical(bio_only$sample, "EVNK-1") ||
+if (is.null(bio_only) || !identical(bio_only$group, "JY-EVNK") || !identical(bio_only$sample, "EVNK-1") ||
     !identical(bio_only$bio_sample, "EVNK-1") || !is.na(bio_only$tech_rep)) {
-  fail("EVNK-1_P1 (no tech) should be bio EVNK-1 with no tech_rep")
+  fail("EVNK-1_P1 (no tech) should be JY-EVNK / bio EVNK-1 with no tech_rep")
 }
 folder <- parse_fcs_filename("/data/JY-EVNK/1-1_P1_unmixed.fcs")
-if (is.null(folder) || !identical(folder$group, "EVNK") || !identical(folder$sample, "EVNK1-1")) {
-  fail("folder JY-EVNK/1-1_P1_unmixed.fcs should be EVNK1-1")
+if (is.null(folder) || !identical(folder$group, "JY-EVNK") || !identical(folder$sample, "EVNK1-1")) {
+  fail("folder JY-EVNK/1-1_P1_unmixed.fcs should be JY-EVNK / EVNK1-1")
 }
 
 # 不要把原实验 EV/H 或 ICI EV-1 认成本方案
@@ -103,7 +104,11 @@ if (!is.null(parse_fcs_filename("ZZX-EV-1_P1_unmixed.fcs"))) {
   fail("ICI-style ZZX-EV-1_P1 must not parse as JY")
 }
 evnk_as_nnk <- parse_fcs_filename("EVNK1-1_P1_unmixed.fcs")
-if (!identical(evnk_as_nnk$group, "EVNK")) fail("EVNK must not parse as NNK")
+if (!identical(evnk_as_nnk$group, "JY-EVNK")) fail("EVNK must parse as JY-EVNK, not JY-NNK")
+expect(jy_canon_group("NNK"), "JY-NNK", "canon NNK")
+expect(jy_canon_group("JY-EVNK"), "JY-EVNK", "canon JY-EVNK")
+expect(unname(pal_group["JY-EVNK"]), "#1A1A1A", "JY-EVNK black")
+expect(unname(pal_group["JY-NNK"]), "#E31A1C", "JY-NNK red")
 
 # QC 与原免疫亚群一致：CD45+ + P1 淋巴门，不是 ICI 的只去双联体/死细胞
 set.seed(7)

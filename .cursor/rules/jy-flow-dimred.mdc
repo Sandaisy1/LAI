@@ -1,10 +1,10 @@
 ---
-description: JY 免疫亚群降维（JY-EVNK vs JY-NNK，E:/R/fuction of cell-ljy，独立于 Flow_* / ICI_*）
+# JY：免疫细胞亚群降维（比较 JY-NNK / JY-EVNK，E:/R/fuction of cell-ljy，独立于 Flow_* / ICI_*）
 globs: "**/JY_*.{R,r,Rmd,json}"
 alwaysApply: false
 ---
 
-# JY：免疫细胞亚群降维（EVNK vs NNK）
+# JY：免疫细胞亚群降维（JY-NNK / JY-EVNK）
 
 写或改 **JY_*** 流式脚本时按本规则。这是第三套完全独立的实验，分析逻辑与 `E:/R/fuction of cell` 的免疫亚群降维一致，但**不要** `source`、查找或改 `Flow_dimred_pipeline.R` / `flow_panel_map.json` / `ICI_*`。
 
@@ -19,7 +19,7 @@ alwaysApply: false
 
 ## 统计（与原免疫亚群方案相同）
 
-圈门按 **FCS 管（技术重复）** 单独做。NNK vs EVNK 统计：先把两个技术重复平均，再在三个生物学重复里**去掉离中位数更远的那个最大值或最小值**，用剩下 **n=2** 做均值/SD/t 检验。不要把 6 个技术管当成 n=6。tSNE/UMAP 仍用全部细胞。
+圈门按 **FCS 管（技术重复）** 单独做。比较是 **JY-NNK / JY-EVNK**（NNK 为处理、EVNK 为对照）：先把两个技术重复平均，再在三个生物学重复里**去掉离中位数更远的那个最大值或最小值**，用剩下 **n=2** 做均值/SD/t 检验。不要把 6 个技术管当成 n=6。tSNE/UMAP 仍用全部细胞。
 
 不要套用 ICI 的 n=3、不去极端值。
 
@@ -29,8 +29,8 @@ QC、分层、图件与原 `Flow_*` 免疫亚群方案一致：
 
 1. QC：单细胞 →（P1 紧淋巴 / P2 宽单核 / P3 不加淋巴门）→ 活细胞 → **CD45+**（不要用 ICI 那种只去双联体/死细胞、不要求 CD45 的 QC）
 2. 三个 panel 分开降维。图1 `*_major_split` 大类；`*_lineage_split` 全体细亚群；`dimred_by_major/` 类内再降维
-3. 组别色：EVNK 黑、NNK 红
-4. 比较标题和文件名用 **NNK vs EVNK**，不要写成 H vs EV
+3. 组别色：JY-EVNK 黑、JY-NNK 红
+4. 比较标题和文件名用 **JY-NNK / JY-EVNK**（`*_JY_NNK_vs_JY_EVNK_*`），不要写成 H vs EV，也不要只写 NNK vs EVNK
 
 ```r
 # ❌ BAD: source("Flow_dimred_pipeline.R")；去 E:/R/fuction of cell 找原流程

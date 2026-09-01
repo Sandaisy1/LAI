@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# JY：细胞轨迹（JY-EVNK vs JY-NNK）
+# JY：细胞轨迹（比较 JY-NNK / JY-EVNK）
 # 只写本方案 results_flow/P1|P2|P3/trajectory/，不读 fuction of cell 或 Internation。
 # =============================================================================
 
@@ -478,12 +478,12 @@ export_one_major_trajectory <- function(cells, panel_id, major, out_dir) {
   save_split_dr(plot_trajectory_tree(sub, fit, panel_id, ttl, facet_group = FALSE),
                 file.path(out_dir, paste0(tag, "_trajectory")),
                 n_keys, facet = FALSE)
-  save_split_dr(plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  EVNK | NNK"), facet_group = TRUE),
-                file.path(out_dir, paste0(tag, "_trajectory_NNK_vs_EVNK")),
+  save_split_dr(plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  JY-EVNK | JY-NNK"), facet_group = TRUE),
+                file.path(out_dir, paste0(tag, "_trajectory_JY_NNK_vs_JY_EVNK")),
                 n_keys, facet = TRUE)
   if (any(is.finite(sub$pseudotime))) {
-    save_gg(plot_pseudotime_group(sub, paste0(panel_id, "  ", major, "  pseudotime NNK vs EVNK")),
-            file.path(out_dir, paste0(tag, "_pseudotime_NNK_vs_EVNK")),
+    save_gg(plot_pseudotime_group(sub, paste0(panel_id, "  ", major, "  pseudotime JY-NNK / JY-EVNK")),
+            file.path(out_dir, paste0(tag, "_pseudotime_JY_NNK_vs_JY_EVNK")),
             width = 5.2, height = 4.6)
   }
   log_msg(panel_id, " ", major, " trajectory (", fit$method, ", root=", root,
@@ -551,8 +551,8 @@ export_panel_major_trajectory <- function(cells, panel_id, out_dir) {
     n_keys, facet = FALSE
   )
   save_split_dr(
-    plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  EVNK | NNK"), facet_group = TRUE),
-    file.path(out_dir, paste0(panel_id, "_major_trajectory_NNK_vs_EVNK")),
+    plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  JY-EVNK | JY-NNK"), facet_group = TRUE),
+    file.path(out_dir, paste0(panel_id, "_major_trajectory_JY_NNK_vs_JY_EVNK")),
     n_keys, facet = TRUE
   )
   log_msg(panel_id, " major-class trajectory (", fit$method, ", root=", root,

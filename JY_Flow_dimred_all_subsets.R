@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# JY：P1/P2/P3 亚群频率总览（NNK vs EVNK）
+# JY：P1/P2/P3 亚群频率总览（JY-NNK / JY-EVNK）
 # 只汇总本方案 results_flow/，不读 E:/R/fuction of cell 或 Internation。
 # 入口仍是 source("JY_Flow_dimred_pipeline.R")
 # =============================================================================
@@ -211,7 +211,7 @@ export_all_subsets_analysis <- function(result_dir) {
   )
   writeLines(note, file.path(out_dir, "ALL_SUBSETS_NOTE.txt"))
   utils::write.csv(freq, file.path(out_dir, "all_subsets_frequency_by_sample.csv"), row.names = FALSE)
-  utils::write.csv(stats, file.path(out_dir, "all_subsets_NNK_vs_EVNK_stats.csv"), row.names = FALSE)
+  utils::write.csv(stats, file.path(out_dir, "all_subsets_JY_NNK_vs_JY_EVNK_stats.csv"), row.names = FALSE)
   freq_plot <- all_subset_freq_for_plots(freq)
   if (!is.null(freq_plot) && nrow(freq_plot)) {
     utils::write.csv(freq_plot, file.path(out_dir, "all_subsets_frequency_by_bio_trimmed.csv"), row.names = FALSE)
@@ -223,8 +223,8 @@ export_all_subsets_analysis <- function(result_dir) {
 
   n_lab <- length(unique(freq$subset_label))
   w_facet <- max(12, 1.1 * n_lab / 2)
-  save_gg(plot_all_freq_facet(freq_plot, "All subsets (within-panel %)  EVNK vs NNK"),
-          file.path(out_dir, "all_subsets_frequency_NNK_vs_EVNK"),
+  save_gg(plot_all_freq_facet(freq_plot, "All subsets (within-panel %)  JY-NNK / JY-EVNK"),
+          file.path(out_dir, "all_subsets_frequency_JY_NNK_vs_JY_EVNK"),
           width = w_facet, height = 5.8)
   save_gg(plot_all_stacked(freq_plot, "Within-panel composition (mean of remaining bio-reps)"),
           file.path(out_dir, "all_subsets_composition_stacked"),
@@ -234,14 +234,14 @@ export_all_subsets_analysis <- function(result_dir) {
   stats_f <- stats[stats$role == "focus", , drop = FALSE]
   if (nrow(focus) > 0) {
     save_gg(plot_all_freq_facet(focus, "Focus subsets only  (P1 T/NK, P2 B, P3 myeloid)"),
-            file.path(out_dir, "all_subsets_focus_frequency_NNK_vs_EVNK"),
+            file.path(out_dir, "all_subsets_focus_frequency_JY_NNK_vs_JY_EVNK"),
             width = max(11, 1.15 * length(unique(focus$subset_label)) / 2), height = 5.8)
   }
   if (nrow(stats_f) > 0) {
     save_gg(plot_all_heatmap(stats_f, "Focus subset mean %  (within panel)"),
             file.path(out_dir, "all_subsets_focus_mean_heatmap"),
             width = 6.5, height = max(6, 0.28 * nrow(stats_f) + 2))
-    save_gg(plot_all_lollipop(stats_f, "Focus subsets  NNK minus EVNK"),
+    save_gg(plot_all_lollipop(stats_f, "Focus subsets  JY-NNK minus JY-EVNK"),
             file.path(out_dir, "all_subsets_focus_delta_lollipop"),
             width = 8.5, height = max(6, 0.28 * nrow(stats_f) + 2))
   }

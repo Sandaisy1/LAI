@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # =============================================================================
 # JY 免疫细胞亚群降维：函数库（不要单独 source 本文件）
-# 这是 E:/R/fuction of cell-ljy 的 JY-EVNK vs JY-NNK 方案。
+# 这是 E:/R/fuction of cell-ljy 的方案，比较 JY-NNK / JY-EVNK。
 # 圈门、降维、去极端生物学重复与 E:/R/fuction of cell 的免疫亚群分析一致，
 # 但文件、目录、组别完全独立：禁止 source Flow_dimred_pipeline.R 或 ICI_*。
 # 入口：source("JY_Flow_dimred_pipeline.R")
@@ -170,10 +170,26 @@ seed_value <- 42
 #    生物学重复 EVNK-1/2/3 与 NNK-1/2/3；每个生物学重复两个技术重复 EVNK1-1、NNK1-2
 #    必须先匹配 EVNK，再匹配 NNK，避免 EVNK 被拆成 EV 或 NNK
 # -----------------------------------------------------------------------------
-flow_ctrl_group <- "EVNK"
-flow_trt_group <- "NNK"
-flow_group_levels <- c("EVNK", "NNK")
+flow_ctrl_group <- "JY-EVNK"
+flow_trt_group <- "JY-NNK"
+flow_group_levels <- c("JY-EVNK", "JY-NNK")
 flow_cohort <- "JY"
+
+# 比较是 JY-NNK / JY-EVNK（处理 / 对照）。文件名里仍写 EVNK、NNK。
+jy_canon_group <- function(grp) {
+  g <- toupper(gsub("[^A-Za-z0-9]", "", as.character(grp)))
+  if (!nzchar(g) || is.na(g)) return(NA_character_)
+  if (grepl("EVNK", g, fixed = TRUE)) return("JY-EVNK")
+  if (grepl("NNK", g, fixed = TRUE)) return("JY-NNK")
+  NA_character_
+}
+
+jy_short_arm <- function(grp) {
+  g <- jy_canon_group(grp)
+  if (identical(g, "JY-EVNK")) return("EVNK")
+  if (identical(g, "JY-NNK")) return("NNK")
+  NA_character_
+}
 
 # 带技术重复的名字优先，避免把 EVNK1-1_P1 的 “1” 当成 panel
 flow_re_tech <- "^(?:JY[_-]?)?(EVNK|NNK)[-_ ]?([123])[-_ ]([12])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$"
@@ -185,8 +201,8 @@ group_from_path <- function(path) {
   parts <- toupper(gsub("[^A-Za-z0-9]", "", parts))
   parts <- parts[nzchar(parts)]
   for (p in rev(parts)) {
-    if (grepl("EVNK", p, fixed = TRUE)) return("EVNK")
-    if (identical(p, "JYNNK") || identical(p, "NNK") || grepl("NNK", p, fixed = TRUE)) return("NNK")
+    g <- jy_canon_group(p)
+    if (!is.na(g) && nzchar(g)) return(g)
   }
   NA_character_
 }
@@ -230,17 +246,12 @@ parse_fcs_filename <- function(path) {
       is.na(panel_n) || !nzchar(panel_n)) {
     return(NULL)
   }
-  grp <- toupper(grp)
-  if (identical(grp, "EVNK")) {
-    grp <- "EVNK"
-  } else if (identical(grp, "NNK")) {
-    grp <- "NNK"
-  } else {
-    return(NULL)
-  }
-  # 生物学重复写成 EVNK-1；技术管写成 EVNK1-1（与用户命名一致）
-  bio_sample <- paste0(grp, "-", bio)
-  sample <- if (!is.na(tech) && nzchar(tech)) paste0(grp, bio, "-", tech) else bio_sample
+  grp <- jy_canon_group(grp)
+  if (is.na(grp) || !nzchar(grp)) return(NULL)
+  arm <- jy_short_arm(grp)
+  # 组别 JY-EVNK / JY-NNK；生物学重复 EVNK-1；技术管 EVNK1-1
+  bio_sample <- paste0(arm, "-", bio)
+  sample <- if (!is.na(tech) && nzchar(tech)) paste0(arm, bio, "-", tech) else bio_sample
   list(
     file = b,
     path = path,
@@ -2658,18 +2669,18 @@ export_major_subset_dimred <- function(cells, panel_id, out_dir) {
       sub <- embed_class_cells(sub)
       lab <- major_display_label(mj)
       tag <- paste0(panel_id, "_", gsub("[^A-Za-z0-9_-]", "_", mj))
-      ttl <- paste0(panel_id, "  ", lab, "  subsets  EVNK | NNK")
+      ttl <- paste0(panel_id, "  ", lab, "  subsets  JY-EVNK | JY-NNK")
       n_keys <- length(unique(celltype_label(sub$lineage, panel_id)))
       save_split_dr(
         plot_split_lineage(sub, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2",
                            ttl, color_mode = "subset"),
-        file.path(class_dir, paste0(tag, "_tSNE_subset_NNK_vs_EVNK")),
+        file.path(class_dir, paste0(tag, "_tSNE_subset_JY_NNK_vs_JY_EVNK")),
         n_keys
       )
       save_split_dr(
         plot_split_lineage(sub, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
                            ttl, color_mode = "subset"),
-        file.path(class_dir, paste0(tag, "_UMAP_subset_NNK_vs_EVNK")),
+        file.path(class_dir, paste0(tag, "_UMAP_subset_JY_NNK_vs_JY_EVNK")),
         n_keys
       )
       log_msg(panel_id, " ", lab, " subset dimred n=", nrow(sub), " -> ", class_dir)
@@ -3543,7 +3554,7 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
                 d_trt, spec$x, spec$y, col_trt, xlab, yfl, pct_of(flow_trt_group),
                 gate_trt, xlim, ylim, labs_trt
               )
-              stub <- paste0(panel_id, "_", gsub("[^A-Za-z0-9]+", "_", spec$lineage), "_NNK_vs_EVNK")
+              stub <- paste0(panel_id, "_", gsub("[^A-Za-z0-9]+", "_", spec$lineage), "_JY_NNK_vs_JY_EVNK")
               save_subset_figure(bar, c_ctrl, c_trt, file.path(sub_dir, stub))
               utils::write.csv(samp, file.path(sub_dir, paste0(stub, "_by_sample.csv")), row.names = FALSE)
               utils::write.csv(samp_bio, file.path(sub_dir, paste0(stub, "_by_bio.csv")), row.names = FALSE)
@@ -3580,7 +3591,7 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
   if (length(stat_rows)) {
     st <- do.call(rbind, stat_rows)
     st$padj <- if (all(is.na(st$p_value))) NA_real_ else p.adjust(st$p_value, method = "BH")
-    utils::write.csv(st, file.path(sub_dir, paste0(panel_id, "_subset_NNK_vs_EVNK_stats.csv")), row.names = FALSE)
+    utils::write.csv(st, file.path(sub_dir, paste0(panel_id, "_subset_JY_NNK_vs_JY_EVNK_stats.csv")), row.names = FALSE)
   }
   log_msg(panel_id, " subset stat+contour figures: ", sub_dir)
   invisible(TRUE)
@@ -3748,7 +3759,7 @@ export_p1_activation_stats <- function(cells, out_dir) {
   stats_mfi$metric <- "MFI"
   stats_pct$metric <- "pct_positive"
   stats <- rbind(stats_mfi, stats_pct)
-  utils::write.csv(stats, file.path(out_dir, "P1_TNK_activation_NNK_vs_EVNK_stats.csv"), row.names = FALSE)
+  utils::write.csv(stats, file.path(out_dir, "P1_TNK_activation_JY_NNK_vs_JY_EVNK_stats.csv"), row.names = FALSE)
   log_msg("P1 NKG2D/IFN-g/TNF-a/GZMB MFI written (not used as subset labels)")
   invisible(tab)
 }
@@ -3809,7 +3820,7 @@ export_p2_activation_stats <- function(cells, out_dir) {
   stats_mfi$metric <- "MFI"
   stats_pct$metric <- "pct_positive"
   stats <- rbind(stats_mfi, stats_pct)
-  utils::write.csv(stats, file.path(out_dir, "P2_Bcell_activation_NNK_vs_EVNK_stats.csv"), row.names = FALSE)
+  utils::write.csv(stats, file.path(out_dir, "P2_Bcell_activation_JY_NNK_vs_JY_EVNK_stats.csv"), row.names = FALSE)
   log_msg("P2 CD40/CD80/CD86 MFI and % positivity written (not used as subset labels)")
   invisible(tab)
 }
@@ -3879,7 +3890,7 @@ export_p3_activation_stats <- function(cells, out_dir) {
   stats_mfi$metric <- "MFI"
   stats_pct$metric <- "pct_positive"
   stats <- rbind(stats_mfi, stats_pct)
-  utils::write.csv(stats, file.path(out_dir, "P3_APC_activation_NNK_vs_EVNK_stats.csv"), row.names = FALSE)
+  utils::write.csv(stats, file.path(out_dir, "P3_APC_activation_JY_NNK_vs_JY_EVNK_stats.csv"), row.names = FALSE)
   log_msg("P3 CD40/CD80/CD86/TNF-a MFI written (not used as subset labels)")
   invisible(tab)
 }
@@ -3890,8 +3901,8 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
   dir.create(marker_dir, showWarnings = FALSE)
   umap_lab <- if (umap_is_pca) "PCA (UMAP fallback)" else "UMAP"
   tsne_lab <- if (tsne_is_pca) "PCA (tSNE fallback)" else "tSNE"
-  tag <- paste0(panel_id, " NNK vs EVNK")
-  split_ttl <- paste0(panel_id, "  EVNK | NNK")
+  tag <- paste0(panel_id, " JY-NNK / JY-EVNK")
+  split_ttl <- paste0(panel_id, "  JY-EVNK | JY-NNK")
   log_msg(
     panel_id,
     " Figure 1 (*_major_split): all cells by major class; ",
@@ -3912,8 +3923,8 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
     paste0(split_ttl, "  major classes"), color_mode = "major"
   )
-  save_split_dr(p_major_tsne, file.path(out_dir, paste0(panel_id, "_NNK_vs_EVNK_tSNE_major_split")), n_major)
-  save_split_dr(p_major_umap, file.path(out_dir, paste0(panel_id, "_NNK_vs_EVNK_UMAP_major_split")), n_major)
+  save_split_dr(p_major_tsne, file.path(out_dir, paste0(panel_id, "_JY_NNK_vs_JY_EVNK_tSNE_major_split")), n_major)
+  save_split_dr(p_major_umap, file.path(out_dir, paste0(panel_id, "_JY_NNK_vs_JY_EVNK_UMAP_major_split")), n_major)
 
   p_subset_tsne <- plot_split_lineage(
     cells, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2",
@@ -3924,9 +3935,9 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     paste0(split_ttl, "  all subsets"), color_mode = "subset"
   )
   n_subset <- length(unique(as.character(p_subset_tsne$data$celltype)))
-  save_split_dr(p_subset_tsne, file.path(out_dir, paste0(panel_id, "_NNK_vs_EVNK_tSNE_lineage_split")), n_subset)
-  save_split_dr(p_subset_umap, file.path(out_dir, paste0(panel_id, "_NNK_vs_EVNK_UMAP_lineage_split")), n_subset)
-  save_split_dr(p_subset_umap, file.path(out_dir, paste0(panel_id, "_NNK_vs_EVNK_UMAP_lineage_split_joint")), n_subset)
+  save_split_dr(p_subset_tsne, file.path(out_dir, paste0(panel_id, "_JY_NNK_vs_JY_EVNK_tSNE_lineage_split")), n_subset)
+  save_split_dr(p_subset_umap, file.path(out_dir, paste0(panel_id, "_JY_NNK_vs_JY_EVNK_UMAP_lineage_split")), n_subset)
+  save_split_dr(p_subset_umap, file.path(out_dir, paste0(panel_id, "_JY_NNK_vs_JY_EVNK_UMAP_lineage_split_joint")), n_subset)
 
   tryCatch(
     export_major_subset_dimred(cells, panel_id, out_dir),
@@ -3941,8 +3952,8 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
           file.path(out_dir, paste0(panel_id, "_UMAP_by_cluster")), width = 8)
   save_gg(plot_embedding(cells, "UMAP1", "UMAP2", "lineage", paste(tag, "-", umap_lab, "by lineage")),
           file.path(out_dir, paste0(panel_id, "_UMAP_by_lineage")), width = 8)
-  save_gg(plot_density_split(cells, "UMAP1", "UMAP2", paste(tag, "-", umap_lab, "density NNK vs EVNK")),
-          file.path(out_dir, paste0(panel_id, "_UMAP_density_NNK_vs_EVNK")), width = 10, height = 5)
+  save_gg(plot_density_split(cells, "UMAP1", "UMAP2", paste(tag, "-", umap_lab, "density JY-NNK / JY-EVNK")),
+          file.path(out_dir, paste0(panel_id, "_UMAP_density_JY_NNK_vs_JY_EVNK")), width = 10, height = 5)
 
   save_gg(plot_embedding(cells, "tSNE1", "tSNE2", "group", paste(tag, "-", tsne_lab, "by group")),
           file.path(out_dir, paste0(panel_id, "_tSNE_by_group")))
@@ -3952,8 +3963,8 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
           file.path(out_dir, paste0(panel_id, "_tSNE_by_cluster")), width = 8)
   save_gg(plot_embedding(cells, "tSNE1", "tSNE2", "lineage", paste(tag, "-", tsne_lab, "by lineage")),
           file.path(out_dir, paste0(panel_id, "_tSNE_by_lineage")), width = 8)
-  save_gg(plot_density_split(cells, "tSNE1", "tSNE2", paste(tag, "-", tsne_lab, "density NNK vs EVNK")),
-          file.path(out_dir, paste0(panel_id, "_tSNE_density_NNK_vs_EVNK")), width = 10, height = 5)
+  save_gg(plot_density_split(cells, "tSNE1", "tSNE2", paste(tag, "-", tsne_lab, "density JY-NNK / JY-EVNK")),
+          file.path(out_dir, paste0(panel_id, "_tSNE_density_JY_NNK_vs_JY_EVNK")), width = 10, height = 5)
 
   dr_cols <- colnames(med)
   for (mk in dr_cols) {
@@ -3978,7 +3989,7 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     paste(tag, "cluster frequency (bio-rep)")
   }
   save_gg(plot_freq_box(freq_bio, freq_ylab),
-          file.path(out_dir, paste0(panel_id, "_cluster_frequency_NNK_vs_EVNK")),
+          file.path(out_dir, paste0(panel_id, "_cluster_frequency_JY_NNK_vs_JY_EVNK")),
           width = max(8, 0.7 * length(unique(freq_df$cluster)) + 2), height = 5.5)
 
   lin_freq <- lineage_frequencies(cells)
@@ -3990,7 +4001,7 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     paste(tag, "lineage frequency (bio-rep)")
   }
   save_gg(plot_freq_box(lin_bio, lin_ylab),
-          file.path(out_dir, paste0(panel_id, "_lineage_frequency_NNK_vs_EVNK")),
+          file.path(out_dir, paste0(panel_id, "_lineage_frequency_JY_NNK_vs_JY_EVNK")),
           width = max(7, 0.8 * length(unique(lin_bio$cluster)) + 2), height = 5.5)
 
   mean_df <- aggregate(percent ~ group + cluster, data = freq_bio, FUN = mean)
@@ -4007,7 +4018,7 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     title <- cowplot::ggdraw() +
       cowplot::draw_label(paste(tag, "dimensionality reduction overview"), fontface = "bold", size = 14)
     overview <- cowplot::plot_grid(title, overview, ncol = 1, rel_heights = c(0.08, 1))
-    save_gg(overview, file.path(out_dir, paste0(panel_id, "_NNK_vs_EVNK_dimred_overview")),
+    save_gg(overview, file.path(out_dir, paste0(panel_id, "_JY_NNK_vs_JY_EVNK_dimred_overview")),
             width = 16, height = 5.8)
   }
   tryCatch(
@@ -4040,7 +4051,7 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
 }
 
 # -----------------------------------------------------------------------------
-# 8. 频率统计 NNK vs EVNK
+# 8. 频率统计 JY-NNK / JY-EVNK
 # -----------------------------------------------------------------------------
 # 旧表里的 "T" 单独成列时 read.csv 会变成 TRUE
 read_embed_csv <- function(path) {
@@ -4345,9 +4356,9 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   lin_freq <- lineage_frequencies(cells)
   stats_lin <- compare_group_freq(lin_freq, "lineage")
   if (flow_should_trim_bio()) {
-    log_msg(panel_id, " NNK vs EVNK stats: tech reps averaged, then drop 1 extreme bio-rep (max or min) per group; n=2")
+    log_msg(panel_id, " JY-NNK / JY-EVNK stats: tech reps averaged, then drop 1 extreme bio-rep (max or min) per group; n=2")
   } else {
-    log_msg(panel_id, " NNK vs EVNK stats: tech reps averaged to n=3 bio (no extreme dropped)")
+    log_msg(panel_id, " JY-NNK / JY-EVNK stats: tech reps averaged to n=3 bio (no extreme dropped)")
   }
 
   utils::write.csv(annot, file.path(out_dir, paste0(panel_id, "_cluster_annotation.csv")), row.names = FALSE)
@@ -4371,8 +4382,8 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
                        file.path(out_dir, paste0(panel_id, "_dropped_bio_extremes.csv")), row.names = FALSE)
     }
   }
-  utils::write.csv(stats_cl, file.path(out_dir, paste0(panel_id, "_cluster_NNK_vs_EVNK_stats.csv")), row.names = FALSE)
-  utils::write.csv(stats_lin, file.path(out_dir, paste0(panel_id, "_lineage_NNK_vs_EVNK_stats.csv")), row.names = FALSE)
+  utils::write.csv(stats_cl, file.path(out_dir, paste0(panel_id, "_cluster_JY_NNK_vs_JY_EVNK_stats.csv")), row.names = FALSE)
+  utils::write.csv(stats_lin, file.path(out_dir, paste0(panel_id, "_lineage_JY_NNK_vs_JY_EVNK_stats.csv")), row.names = FALSE)
   if (!is.null(dat$map)) {
     utils::write.csv(dat$map, file.path(out_dir, paste0(panel_id, "_channel_map.csv")), row.names = FALSE)
   }

@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# JY：免疫细胞亚群降维（JY-EVNK vs JY-NNK；P1 T/NK，P2 B，P3 髓系）
+# JY：免疫细胞亚群降维（比较 JY-NNK / JY-EVNK；P1 T/NK，P2 B，P3 髓系）
 #
 # 独立于 E:/R/fuction of cell 的 Flow_dimred_pipeline.R，也独立于 ICI_*。
 # 圈门、联合降维、技术重复平均后再去掉 1 个极端生物学重复（n=2）与原免疫亚群方案一致。
@@ -122,9 +122,9 @@ resolve_jy_dir <- function() {
 panel_map <- read_panel_map_file(find_jy_panel_map())
 log_msg("JY panel map: ", find_jy_panel_map())
 if (!is.null(panel_map$qc$asinh_cofactor)) asinh_cofactor <- as.numeric(panel_map$qc$asinh_cofactor)
-flow_ctrl_group <- "EVNK"
-flow_trt_group <- "NNK"
-flow_group_levels <- c("EVNK", "NNK")
+flow_ctrl_group <- "JY-EVNK"
+flow_trt_group <- "JY-NNK"
+flow_group_levels <- c("JY-EVNK", "JY-NNK")
 if (!is.null(panel_map$groups) && length(panel_map$groups) >= 2) {
   flow_ctrl_group <- as.character(panel_map$groups[[1]])
   flow_trt_group <- as.character(panel_map$groups[[2]])
@@ -160,7 +160,7 @@ if (identical(toupper(Sys.getenv("FLOW_FUNCTIONS_ONLY", "0")), "1") ||
 
 log_msg("JY flow dir: ", project_dir)
 log_msg("JY results: ", result_dir)
-log_msg("JY purpose: immune-subset dimred for JY-EVNK vs JY-NNK (same gates as original P1/P2/P3)")
+log_msg("JY purpose: immune-subset dimred, comparison JY-NNK / JY-EVNK (same gates as original P1/P2/P3)")
 log_msg("JY stats: average tech reps, then drop 1 extreme bio-rep (max or min) per group; n=2")
 file_tab <- list_unmixed_files(project_dir)
 use_demo <- demo_flag
@@ -184,8 +184,8 @@ if (nrow(file_tab) == 0) {
       log_msg(pn, " missing. Put files named like JY-EVNK1-1_", pn, "_unmixed.fcs or EVNK1-1_", pn, "_unmixed.fcs")
     }
   }
-  if (any(file_tab$group == "NNK" & grepl("EVNK", file_tab$file, ignore.case = TRUE))) {
-    stop("Filename parser classified an EVNK file as NNK; refusing to continue")
+  if (any(file_tab$group == "JY-NNK" & grepl("EVNK", file_tab$file, ignore.case = TRUE))) {
+    stop("Filename parser classified an EVNK file as JY-NNK; refusing to continue")
   }
   ensure_flowcore()
 }
@@ -207,7 +207,7 @@ for (pn in panels) {
   )
 }
 
-sum_path <- file.path(result_dir, "NNK_vs_EVNK_lineage_stats_all_panels.csv")
+sum_path <- file.path(result_dir, "JY_NNK_vs_JY_EVNK_lineage_stats_all_panels.csv")
 lin_rows <- lapply(names(summaries), function(pn) {
   x <- summaries[[pn]]
   if (is.null(x) || is.null(x$stats_lineage)) return(NULL)

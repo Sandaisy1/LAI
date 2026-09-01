@@ -3,11 +3,11 @@
   "data_dir": "E:/R/fuction of cell-ljy",
   "file_glob": "*_unmixed.fcs",
   "filename_regex": "^(?:JY[_-]?)?(EVNK|NNK)[-_]?([123])(?:[-_]([12]))?[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$",
-  "groups": ["EVNK", "NNK"],
+  "groups": ["JY-EVNK", "JY-NNK"],
   "replicates": ["1", "2", "3"],
   "tech_replicates": ["1", "2"],
   "cohort": "JY",
-  "comparison": "NNK_vs_EVNK",
+  "comparison": "JY_NNK_vs_JY_EVNK",
   "qc": {
     "viability_marker": "L/D",
     "leukocyte_marker": "CD45",
