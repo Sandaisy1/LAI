@@ -680,17 +680,24 @@ demo_means_p1 <- function() {
   }
   list(
     CD4_naive = pop(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD8b = 0.1, CD19 = 0.1, CD62L = 3.2, CD44 = 0.3, CD27 = 2.2),
-    CD4_TCM = pop(CD3 = 3.2, CD4 = 3.0, CD62L = 2.8, CD44 = 2.8, CD27 = 2.4),
-    CD4_TEM = pop(CD3 = 3.2, CD4 = 3.0, CD62L = 0.3, CD44 = 3.1, CD27 = 0.8),
+    CD4_TCM = pop(CD3 = 3.2, CD4 = 3.0, CD62L = 2.8, CD44 = 2.8, CD27 = 2.4, CD95 = 0.3),
+    CD4_TSCM = pop(CD3 = 3.2, CD4 = 3.0, CD62L = 2.8, CD44 = 2.8, CD27 = 3.1, CD95 = 3.0),
+    CD4_TEM = pop(CD3 = 3.2, CD4 = 3.0, CD62L = 0.3, CD44 = 3.1, CD27 = 0.3, `SCA-1` = 0.3),
+    CD4_MPEC = pop(CD3 = 3.2, CD4 = 3.0, CD62L = 0.3, CD44 = 3.1, CD27 = 3.0, `SCA-1` = 0.3),
+    CD4_SLEC = pop(CD3 = 3.2, CD4 = 3.0, CD62L = 0.3, CD44 = 3.1, `SCA-1` = 3.1, CD27 = 0.4),
+    CD4_exh = pop(CD3 = 3.1, CD4 = 3.0, CD62L = 0.3, CD44 = 3.0, `LAG-3` = 3.1, `TIM-3` = 2.9, `PD-L1` = 2.8, CD27 = 0.3),
     Treg = pop(CD3 = 3.1, CD4 = 3.0, CD25 = 3.2, CD69 = 0.4, CD44 = 1.8),
     CD4_act = pop(CD3 = 3.2, CD4 = 3.0, CD25 = 2.8, CD69 = 3.1, CD44 = 0.3, CD62L = 3.2),
     CD4_eff = pop(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.0, `IFN-g` = 3.2, `TNF-a` = 3.0, CD69 = 0.4),
     CD8_naive = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.9, CD4 = 0.1, CD62L = 3.1, CD44 = 0.3),
     CD8_act = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD4 = 0.1, CD62L = 3.1, CD44 = 0.3, CD69 = 3.1, CD25 = 2.8),
-    CD8_TCM = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD62L = 2.7, CD44 = 2.6),
-    CD8_TEM = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 3.0, CD62L = 0.3),
+    CD8_TCM = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD62L = 2.7, CD44 = 2.6, CD27 = 2.2, CD95 = 0.3),
+    CD8_TSCM = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD62L = 2.7, CD44 = 2.6, CD27 = 3.1, CD95 = 3.0),
+    CD8_TEM = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 3.0, CD62L = 0.3, CD27 = 0.3, `SCA-1` = 0.3),
+    CD8_MPEC = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 3.0, CD62L = 0.3, CD27 = 3.0, `SCA-1` = 0.3),
+    CD8_SLEC = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 3.0, CD62L = 0.3, `SCA-1` = 3.1, CD27 = 0.4),
     CD8_eff = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 2.6, GZMB = 3.0, Perforin = 2.8, `IFN-g` = 2.2),
-    CD8_exh = pop(CD3 = 3.0, CD8 = 3.0, CD8b = 2.6, `LAG-3` = 3.1, `TIM-3` = 2.9, `PD-L1` = 2.0, CD44 = 2.8),
+    CD8_exh = pop(CD3 = 3.0, CD8 = 3.0, CD8b = 2.6, `LAG-3` = 3.1, `TIM-3` = 2.9, `PD-L1` = 2.8, CD44 = 2.8, CD62L = 0.3),
     NK = pop(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, NKG2D = 2.6, CD8 = 1.0, GZMB = 2.4, Perforin = 2.2),
     NKT = pop(CD3 = 3.0, `NK1.1` = 2.8, NKp46 = 2.2, CD4 = 1.2, CD44 = 2.4),
     B = pop(CD19 = 3.3, CD3 = 0.1, CD27 = 1.2),
@@ -744,13 +751,17 @@ demo_props <- function(panel_id, group) {
   ctrl <- identical(as.character(group), flow_ctrl_group)
   if (panel_id == "P1") {
     if (ctrl) {
-      return(c(CD4_naive = 0.12, CD4_TCM = 0.06, CD4_TEM = 0.06, Treg = 0.04, CD4_act = 0.05, CD4_eff = 0.04,
-               CD8_naive = 0.08, CD8_act = 0.04, CD8_TCM = 0.05, CD8_TEM = 0.06, CD8_eff = 0.05, CD8_exh = 0.04,
-               NK = 0.12, NKT = 0.04, B = 0.09, Myeloid = 0.06))
+      return(c(CD4_naive = 0.08, CD4_TCM = 0.04, CD4_TSCM = 0.03, CD4_TEM = 0.03, CD4_MPEC = 0.03,
+               CD4_SLEC = 0.03, CD4_exh = 0.03, Treg = 0.03, CD4_act = 0.04, CD4_eff = 0.03,
+               CD8_naive = 0.06, CD8_act = 0.03, CD8_TCM = 0.03, CD8_TSCM = 0.03, CD8_TEM = 0.03,
+               CD8_MPEC = 0.03, CD8_SLEC = 0.03, CD8_eff = 0.04, CD8_exh = 0.04,
+               NK = 0.10, NKT = 0.03, B = 0.07, Myeloid = 0.05))
     }
-    return(c(CD4_naive = 0.06, CD4_TCM = 0.04, CD4_TEM = 0.06, Treg = 0.04, CD4_act = 0.08, CD4_eff = 0.05,
-             CD8_naive = 0.04, CD8_act = 0.05, CD8_TCM = 0.04, CD8_TEM = 0.05, CD8_eff = 0.08, CD8_exh = 0.08,
-             NK = 0.12, NKT = 0.05, B = 0.08, Myeloid = 0.05))
+    return(c(CD4_naive = 0.04, CD4_TCM = 0.03, CD4_TSCM = 0.03, CD4_TEM = 0.03, CD4_MPEC = 0.03,
+             CD4_SLEC = 0.04, CD4_exh = 0.04, Treg = 0.03, CD4_act = 0.06, CD4_eff = 0.04,
+             CD8_naive = 0.03, CD8_act = 0.04, CD8_TCM = 0.03, CD8_TSCM = 0.03, CD8_TEM = 0.03,
+             CD8_MPEC = 0.03, CD8_SLEC = 0.04, CD8_eff = 0.06, CD8_exh = 0.06,
+             NK = 0.10, NKT = 0.04, B = 0.06, Myeloid = 0.04))
   }
   if (panel_id == "P2") {
     if (ctrl) return(c(Naive_B = 0.38, IgM_memory = 0.10, Memory_B = 0.14, Switched_B = 0.10, Activated_B = 0.16, Plasma = 0.12))
@@ -871,14 +882,21 @@ annotate_clusters <- function(med, panel_id) {
     cd11b <- nv(i, "CD11B")
     nk <- max(nv(i, "NK1.1"), nv(i, "NKp46"))
     t_mem <- function(prefix) {
+      row <- setNames(as.list(med[i, ]), colnames(med))
       cd62 <- nv(i, "CD62L")
       cd44 <- nv(i, "CD44")
       if (!is.finite(cd62)) cd62 <- -Inf
       if (!is.finite(cd44)) cd44 <- -Inf
-      if (cd62 > cd44 + 0.3) return(paste0(prefix, "_naive"))
-      if (cd44 > cd62 + 0.3) return(paste0(prefix, "_TEM"))
-      if (is.finite(cd62) || is.finite(cd44)) return(paste0(prefix, "_TCM"))
-      paste0(prefix, "_T")
+      mem <- if (cd62 > cd44 + 0.3) {
+        paste0(prefix, "_naive")
+      } else if (cd44 > cd62 + 0.3) {
+        paste0(prefix, "_TEM")
+      } else if (is.finite(cd62) || is.finite(cd44)) {
+        paste0(prefix, "_TCM")
+      } else {
+        paste0(prefix, "_T")
+      }
+      refine_t_memory_label(row, prefix, mem)
     }
     if (panel_id == "P1") {
       nkp <- nv(i, "NKp46")
@@ -897,19 +915,15 @@ annotate_clusters <- function(med, panel_id) {
         return("NKT")
       }
       if (cd8 > cd4 + 0.15) {
-        exh <- max(nv(i, "LAG-3"), nv(i, "TIM-3"))
         kill <- max(nv(i, "GZMB"), nv(i, "Perforin"))
         cyto <- max(nv(i, "IFN-g"), nv(i, "TNF-a"))
         cd69 <- nv(i, "CD69")
-        cd25 <- nv(i, "CD25")
         cd62 <- nv(i, "CD62L")
         cd44 <- nv(i, "CD44")
-        if (is.finite(exh) && exh > max(kill, cd62) + 0.2 && exh >= cd44 - 0.35) return("CD8_exhausted")
-        if (is.finite(kill) && kill > max(cd62, cd44) + 0.15 && kill > exh) return("CD8_effector")
+        if (is.finite(kill) && kill > max(cd62, cd44) + 0.15) return("CD8_effector")
         if (is.finite(cyto) && cyto >= 2.5 && cyto >= max(cd62, cd44) - 0.15 && cyto > kill) {
           return("CD8_effector")
         }
-        # 早期活化：CD69+（常伴 CD25 高），可以同时是 CD62L+ CD44-
         if (is.finite(cd69) && cd69 >= 2.2) return("CD8_activated")
         return(t_mem("CD8"))
       }
@@ -1016,6 +1030,32 @@ mem_from_cd62_cd44 <- function(cd62, cd44, prefix) {
   paste0(prefix, "_TCM")
 }
 
+# T_CM 里再圈 T_SCM（CD27+ CD95+）；T_EM 再分耗竭 / SLEC / MPEC / 早晚期
+refine_t_memory_label <- function(v, prefix, mem) {
+  if (!length(mem) || !nzchar(mem)) return(mem)
+  cd27 <- vec_get(v, "CD27")
+  cd95 <- vec_get(v, "CD95")
+  sca <- vec_get(v, "SCA-1")
+  exh <- max(vec_get(v, "LAG-3"), vec_get(v, "TIM-3"), vec_get(v, "PD-L1"))
+  if (grepl("_TCM$", mem) && cd27 >= 2.0 && cd95 >= 2.0) {
+    return(paste0(prefix, "_TSCM"))
+  }
+  if (!grepl("_TEM$", mem)) return(mem)
+  if (exh >= 2.2) return(paste0(prefix, "_exhausted"))
+  if (sca >= 2.2) return(paste0(prefix, "_SLEC"))
+  if (cd27 >= 2.0 && sca < 2.2) return(paste0(prefix, "_MPEC"))
+  if (cd27 >= 2.0) return(paste0(prefix, "_TEM_early"))
+  paste0(prefix, "_TEM_late")
+}
+
+tem_family <- function(prefix) {
+  paste0(prefix, c("_TEM", "_TEM_early", "_TEM_late", "_SLEC", "_MPEC", "_exhausted"))
+}
+
+tcm_family <- function(prefix) {
+  paste0(prefix, c("_TCM", "_TSCM"))
+}
+
 # 大类圈定之后，只根据这一层的定义标志给亚群命名
 label_cd4_subset <- function(v) {
   cd25 <- vec_get(v, "CD25")
@@ -1029,21 +1069,19 @@ label_cd4_subset <- function(v) {
   if (cd25 > max(cd69, tnfa, ifng) + 0.15 && cd25 > max(cd62, cd44) - 0.8) return("Treg")
   cyto <- max(ifng, tnfa)
   if (cyto >= 2.5 && cyto >= max(cd62, cd44) - 0.15) return("CD4_effector")
-  mem_from_cd62_cd44(cd62, cd44, "CD4")
+  refine_t_memory_label(v, "CD4", mem_from_cd62_cd44(cd62, cd44, "CD4"))
 }
 
 label_cd8_subset <- function(v) {
-  exh <- max(vec_get(v, "LAG-3"), vec_get(v, "TIM-3"))
   kill <- max(vec_get(v, "GZMB"), vec_get(v, "Perforin"))
   cyto <- max(vec_get(v, "IFN-g"), vec_get(v, "TNF-a"))
   cd69 <- vec_get(v, "CD69")
   cd62 <- vec_get(v, "CD62L")
   cd44 <- vec_get(v, "CD44")
-  if (exh > kill + 0.1 && exh > cd62 + 0.1) return("CD8_exhausted")
-  if (kill > max(cd62, cd44) + 0.1 && kill > exh) return("CD8_effector")
+  if (kill > max(cd62, cd44) + 0.1) return("CD8_effector")
   if (cyto >= 2.5 && cyto >= max(cd62, cd44) - 0.15) return("CD8_effector")
   if (cd69 >= 2.2) return("CD8_activated")
-  mem_from_cd62_cd44(cd62, cd44, "CD8")
+  refine_t_memory_label(v, "CD8", mem_from_cd62_cd44(cd62, cd44, "CD8"))
 }
 
 label_t_subset <- function(v) {
@@ -1436,6 +1474,34 @@ split_memory_3 <- function(mat, idx, prefix) {
   out
 }
 
+refine_memory_subsets <- function(mat, idx, labs, prefix) {
+  n <- length(labs)
+  if (!n) return(labs)
+  i_cm <- which(labs == paste0(prefix, "_TCM"))
+  if (length(i_cm) >= 20 && all(c("CD27", "CD95") %in% colnames(mat))) {
+    hi27 <- gate_k2_high(mat, idx[i_cm], "CD27", 0.15)
+    hi95 <- gate_k2_high(mat, idx[i_cm], "CD95", 0.15)
+    both <- hi27 & hi95
+    if (any(both)) labs[i_cm[both]] <- paste0(prefix, "_TSCM")
+  }
+  i_em <- which(labs == paste0(prefix, "_TEM"))
+  if (!length(i_em)) return(labs)
+  remain <- i_em
+  take_em <- function(markers, label, min_sep) {
+    if (!length(remain)) return(invisible())
+    hi <- gate_k2_high(mat, idx[remain], markers, min_sep)
+    if (!any(hi)) return(invisible())
+    labs[remain[hi]] <<- label
+    remain <<- remain[!hi]
+  }
+  take_em(c("PD-L1", "LAG-3", "TIM-3"), paste0(prefix, "_exhausted"), 0.15)
+  if ("SCA-1" %in% colnames(mat)) take_em("SCA-1", paste0(prefix, "_SLEC"), 0.15)
+  mpec_lab <- if ("SCA-1" %in% colnames(mat)) paste0(prefix, "_MPEC") else paste0(prefix, "_TEM_early")
+  take_em("CD27", mpec_lab, 0.15)
+  if (length(remain)) labs[remain] <- paste0(prefix, "_TEM_late")
+  labs
+}
+
 sequential_t_subsets <- function(mat, idx, line) {
   n <- length(idx)
   if (n == 0) return(character(0))
@@ -1449,18 +1515,17 @@ sequential_t_subsets <- function(mat, idx, line) {
     remain[pos[hi]] <<- FALSE
   }
   if (identical(line, "CD4")) {
-    # 早期活化 CD69+（可同时 naive 表型）；剩余 CD25+ 才是 Treg
     take_high("CD69", "CD4_activated", 0.15)
     take_high("CD25", "Treg", 0.15)
     take_high(c("IFN-g", "TNF-a"), "CD4_effector", 0.25)
-    # 剩余：T_CM = CD62L+ CD44+；T_EM = 整个 CD62L−
     if (any(remain)) labs[remain] <- split_memory_3(mat, idx[remain], "CD4")
+    labs <- refine_memory_subsets(mat, idx, labs, "CD4")
   } else {
-    take_high(c("LAG-3", "TIM-3"), "CD8_exhausted", 0.15)
     take_high(c("GZMB", "Perforin"), "CD8_effector", 0.15)
     take_high(c("IFN-g", "TNF-a"), "CD8_effector", 0.25)
     take_high("CD69", "CD8_activated", 0.15)
     if (any(remain)) labs[remain] <- split_memory_3(mat, idx[remain], "CD8")
+    labs <- refine_memory_subsets(mat, idx, labs, "CD8")
   }
   labs
 }
@@ -1722,6 +1787,17 @@ pal_celltype <- c(
   "CD8 TCM" = "#27AE60",
   "CD4 T_CM" = "#E67E22",
   "CD4 TCM" = "#E67E22",
+  "CD4 T_SCM" = "#D35400",
+  "CD8 T_SCM" = "#1ABC9C",
+  "CD4 T_EM early" = "#E59866",
+  "CD8 T_EM early" = "#52BE80",
+  "CD4 T_EM late" = "#A04000",
+  "CD8 T_EM late" = "#0E6655",
+  "CD4 SLEC" = "#C0392B",
+  "CD8 SLEC" = "#117A65",
+  "CD4 MPEC" = "#F5B041",
+  "CD8 MPEC" = "#82E0AA",
+  "CD4 exhausted" = "#6C3483",
   "Treg" = "#922B21",
   "CD4 naive" = "#F5CBA7",
   "CD8 naive" = "#A9DFBF",
@@ -1773,14 +1849,25 @@ celltype_label <- function(lineage, panel_id) {
     Plasma = "Plasma",
     CD4_naive = "CD4 naive",
     CD4_TCM = "CD4 T_CM",
+    CD4_TSCM = "CD4 T_SCM",
     CD4_TEM = "CD4 T_EM",
+    CD4_TEM_early = "CD4 T_EM early",
+    CD4_TEM_late = "CD4 T_EM late",
+    CD4_SLEC = "CD4 SLEC",
+    CD4_MPEC = "CD4 MPEC",
+    CD4_exhausted = "CD4 exhausted",
     CD4_activated = "CD4 activated",
     CD4_effector = "CD4 T_EFF",
     Treg = "Treg",
     CD4_T = "CD4 T",
     CD8_naive = "CD8 naive",
     CD8_TCM = "CD8 T_CM",
+    CD8_TSCM = "CD8 T_SCM",
     CD8_TEM = "CD8 T_EM",
+    CD8_TEM_early = "CD8 T_EM early",
+    CD8_TEM_late = "CD8 T_EM late",
+    CD8_SLEC = "CD8 SLEC",
+    CD8_MPEC = "CD8 MPEC",
     CD8_activated = "CD8 activated",
     CD8_effector = "CD8 T_EFF",
     CD8_exhausted = "CD8 exhausted",
@@ -2105,6 +2192,10 @@ parent_mask <- function(cells, parent) {
     CD4 = cd4,
     CD8 = cd8,
     NK = nk,
+    CD4_TCM = lin %in% tcm_family("CD4"),
+    CD8_TCM = lin %in% tcm_family("CD8"),
+    CD4_TEM = lin %in% tem_family("CD4"),
+    CD8_TEM = lin %in% tem_family("CD8"),
     Myeloid = cl == "Myeloid" | lin %in% c(
       "Neutrophil", "Eosinophil", "Basophil_mast", "Basophil", "Macrophage",
       "M1_like_Mac", "M2_like_Mac", "DC", "cDC1_CD103", "Mono_Ly6Chi", "Mono_Ly6Clo", "Myeloid"
@@ -2126,7 +2217,12 @@ subset_hit_mask <- function(cells, spec) {
     cl[is.na(cl)] <- ""
     return(cl == spec$lineage)
   }
-  lin == spec$lineage
+  fam <- switch(as.character(spec$lineage),
+    CD4_TEM = tem_family("CD4"),
+    CD8_TEM = tem_family("CD8"),
+    spec$lineage
+  )
+  lin %in% fam
 }
 
 subset_plot_specs <- function(panel_id) {
@@ -2146,16 +2242,27 @@ subset_plot_specs <- function(panel_id) {
       mk("CD8", "CD8", "CD4", "CD3", "CD8+ T cell in CD3+ (%)", TRUE, gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("CD4_naive", "CD62L", "CD44", "CD4", "CD4 naive in CD4+ (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("CD4_TCM", "CD62L", "CD44", "CD4", "CD4 T_CM in CD4+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("CD4_TSCM", "CD27", "CD95", "CD4_TCM", "CD4 T_SCM in T_CM (%)", gate = "hi_hi"),
       mk("CD4_TEM", "CD62L", "CD44", "CD4", "CD4 T_EM in CD4+ (%)", gate = "half_x", x_hi = FALSE),
+      mk("CD4_TEM_early", "CD27", "CD44", "CD4_TEM", "CD4 T_EM early in T_EM (%)", gate = "hi_x", x_hi = TRUE),
+      mk("CD4_TEM_late", "CD27", "CD44", "CD4_TEM", "CD4 T_EM late in T_EM (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
+      mk("CD4_SLEC", "SCA-1", "CD44", "CD4_TEM", "CD4 SLEC in T_EM (%)", gate = "hi_hi"),
+      mk("CD4_MPEC", "SCA-1", "CD27", "CD4_TEM", "CD4 MPEC in T_EM (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
+      mk("CD4_exhausted", "LAG-3", "TIM-3", "CD4_TEM", "CD4 exhausted in T_EM (%)", gate = "hi_hi"),
       mk("CD4_activated", "CD69", "CD25", "CD4", "CD4 activated in CD4+ (%)", gate = "hi_hi"),
       mk("CD4_effector", "IFN-g", "TNF-a", "CD4", "CD4 T_EFF in CD4+ (%)", gate = "hi_hi"),
       mk("Treg", "CD25", "CD4", "CD4", "Treg in CD4+ (%)", gate = "hi_x", x_hi = TRUE),
       mk("CD8_naive", "CD62L", "CD44", "CD8", "CD8 naive in CD8+ (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("CD8_TCM", "CD62L", "CD44", "CD8", "CD8 T_CM in CD8+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("CD8_TSCM", "CD27", "CD95", "CD8_TCM", "CD8 T_SCM in T_CM (%)", gate = "hi_hi"),
       mk("CD8_TEM", "CD62L", "CD44", "CD8", "CD8 T_EM in CD8+ (%)", gate = "half_x", x_hi = FALSE),
+      mk("CD8_TEM_early", "CD27", "CD44", "CD8_TEM", "CD8 T_EM early in T_EM (%)", gate = "hi_x", x_hi = TRUE),
+      mk("CD8_TEM_late", "CD27", "CD44", "CD8_TEM", "CD8 T_EM late in T_EM (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
+      mk("CD8_SLEC", "SCA-1", "CD44", "CD8_TEM", "CD8 SLEC in T_EM (%)", gate = "hi_hi"),
+      mk("CD8_MPEC", "SCA-1", "CD27", "CD8_TEM", "CD8 MPEC in T_EM (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
       mk("CD8_activated", "CD69", "CD25", "CD8", "CD8 activated in CD8+ (%)", gate = "hi_hi"),
       mk("CD8_effector", "GZMB", "Perforin", "CD8", "CD8 T_EFF in CD8+ (%)", gate = "hi_hi"),
-      mk("CD8_exhausted", "LAG-3", "TIM-3", "CD8", "CD8 exhausted in CD8+ (%)", gate = "hi_hi")
+      mk("CD8_exhausted", "LAG-3", "TIM-3", "CD8_TEM", "CD8 exhausted in T_EM (%)", gate = "hi_hi")
     ))
   }
   if (identical(panel_id, "P2")) {
@@ -2907,7 +3014,7 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
 analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   log_msg("==== Panel ", panel_id, " : ", panel_map$panels[[panel_id]]$focus, " ====")
   if (identical(panel_id, "P1")) {
-    log_msg("P1 gates: CD45+ → CD3/CD19/NKp46; CD4/CD8; naive / T_CM / T_EM / T_EFF; CD69/CD25 activation")
+    log_msg("P1 gates: naive / T_CM / T_SCM / T_EM early-late / SLEC / MPEC / T_EFF / exhausted; CD69 activation")
   }
   out_dir <- file.path(result_dir, panel_id)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)

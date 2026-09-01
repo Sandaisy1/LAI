@@ -27,13 +27,20 @@ lab_of <- function(row) {
 
 expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 3.2, CD44 = 0.3)), "CD4_naive", "cd4-naive")
 expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 2.8, CD44 = 2.8)), "CD4_TCM", "cd4-tcm")
-expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.1)), "CD4_TEM", "cd4-tem")
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.1)), "CD4_TEM_late", "cd4-tem-late")
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 2.8, CD44 = 2.8, CD27 = 3.1, CD95 = 3.0)), "CD4_TSCM", "cd4-tscm")
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.1, CD27 = 3.0, `SCA-1` = 0.3)), "CD4_MPEC", "cd4-mpec")
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.1, `SCA-1` = 3.1)), "CD4_SLEC", "cd4-slec")
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.1, `LAG-3` = 3.0, `TIM-3` = 2.8, `PD-L1` = 2.8)), "CD4_exhausted", "cd4-exh")
 expect(celltype_label("CD4_TCM", "P1"), "CD4 T_CM", "label-cd4-tcm")
+expect(celltype_label("CD4_TSCM", "P1"), "CD4 T_SCM", "label-cd4-tscm")
 expect(celltype_label("CD4_TEM", "P1"), "CD4 T_EM", "label-cd4-tem")
 expect(celltype_label("CD4_effector", "P1"), "CD4 T_EFF", "label-cd4-teff")
 expect(celltype_label("CD8_TCM", "P1"), "CD8 T_CM", "label-cd8-tcm")
 expect(celltype_label("CD8_TEM", "P1"), "CD8 T_EM", "label-cd8-tem")
 expect(celltype_label("CD8_effector", "P1"), "CD8 T_EFF", "label-cd8-teff")
+expect(celltype_label("CD8_SLEC", "P1"), "CD8 SLEC", "label-cd8-slec")
+expect(celltype_label("CD4_MPEC", "P1"), "CD4 MPEC", "label-cd4-mpec")
 expect(lab_of(mk(CD3 = 3.1, CD4 = 3.0, CD25 = 3.2, CD69 = 0.4, CD44 = 1.8)), "Treg", "treg")
 expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD69 = 3.1, CD44 = 2.6, CD62L = 0.4, `TNF-a` = 2.4)), "CD4_activated", "cd4-act")
 expect(
@@ -50,7 +57,8 @@ expect(
   "CD8_activated", "cd8-act-naive-phenotype"
 )
 expect(lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD62L = 2.7, CD44 = 2.6)), "CD8_TCM", "cd8-tcm")
-expect(lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 3.0, CD62L = 0.3)), "CD8_TEM", "cd8-tem")
+expect(lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 3.0, CD62L = 0.3)), "CD8_TEM_late", "cd8-tem-late")
+expect(lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD4 = 0.1, CD62L = 2.7, CD44 = 2.6, CD27 = 3.1, CD95 = 3.0)), "CD8_TSCM", "cd8-tscm")
 expect(lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD44 = 2.6, CD62L = 0.4, GZMB = 3.0, Perforin = 2.8)), "CD8_effector", "cd8-eff")
 expect(lab_of(mk(CD3 = 3.0, CD8 = 3.0, `LAG-3` = 3.1, `TIM-3` = 2.9, CD44 = 2.8)), "CD8_exhausted", "cd8-exh")
 expect(lab_of(mk(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, CD8 = 1.0)), "NK", "nk")
@@ -62,11 +70,11 @@ expect(lab_of(mk(CD11B = 3.2, CD3 = 0.1, CD19 = 0.1, CD4 = 0.2)), "Myeloid", "my
 # IFN-g / GZMB 背景不得把 TEM 并成 activated / effector
 expect(
   lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.1, `IFN-g` = 2.0)),
-  "CD4_TEM", "ifng-not-act"
+  "CD4_TEM_late", "ifng-not-act"
 )
 expect(
   lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD4 = 0.1, CD62L = 0.3, CD44 = 3.0, GZMB = 0.8, `IFN-g` = 1.8)),
-  "CD8_TEM", "ifng-not-eff"
+  "CD8_TEM_late", "ifng-not-eff"
 )
 # NK1.1 背景不得把 CD4 标成 NK
 expect(
@@ -84,10 +92,12 @@ bind_pop <- function(name, n) {
   m + matrix(rnorm(n * length(feat), 0, 0.12), n)
 }
 mat <- rbind(
-  bind_pop("CD4_naive", 80), bind_pop("CD4_TCM", 80), bind_pop("CD4_TEM", 80),
-  bind_pop("Treg", 80), bind_pop("CD4_act", 80), bind_pop("CD4_eff", 80),
+  bind_pop("CD4_naive", 80), bind_pop("CD4_TCM", 80), bind_pop("CD4_TSCM", 80),
+  bind_pop("CD4_TEM", 80), bind_pop("CD4_MPEC", 80), bind_pop("CD4_SLEC", 80),
+  bind_pop("Treg", 80), bind_pop("CD4_act", 80), bind_pop("CD4_eff", 80), bind_pop("CD4_exh", 80),
   bind_pop("CD8_naive", 80), bind_pop("CD8_act", 80), bind_pop("CD8_TCM", 80),
-  bind_pop("CD8_TEM", 80), bind_pop("CD8_eff", 80), bind_pop("CD8_exh", 80)
+  bind_pop("CD8_TSCM", 80), bind_pop("CD8_TEM", 80), bind_pop("CD8_MPEC", 80),
+  bind_pop("CD8_SLEC", 80), bind_pop("CD8_eff", 80), bind_pop("CD8_exh", 80)
 )
 h <- hierarchical_gate(mat, "P1")
 if (anyNA(h$subset) || any(!nzchar(h$subset))) fail("hierarchical labels contain NA")
@@ -99,11 +109,13 @@ if (n8 < 300) fail(sprintf("layer1 CD8 too few: %s", n8))
 if (any(h$major == "CD4" & grepl("^CD8", h$subset))) fail("CD4 parent received CD8 subset")
 if (any(h$major == "CD8" & grepl("^CD4|^Treg$", h$subset))) fail("CD8 parent received CD4 subset")
 cd4_labs <- unique(h$subset[h$major == "CD4"])
-need4 <- c("Treg", "CD4_activated", "CD4_effector", "CD4_naive", "CD4_TCM", "CD4_TEM")
+need4 <- c("Treg", "CD4_activated", "CD4_effector", "CD4_naive", "CD4_TCM", "CD4_TSCM",
+           "CD4_MPEC", "CD4_SLEC", "CD4_exhausted")
 miss4 <- setdiff(need4, cd4_labs)
 if (length(miss4)) fail(sprintf("CD4 missing %s (got %s)", paste(miss4, collapse = ","), paste(cd4_labs, collapse = ",")))
 cd8_labs <- unique(h$subset[h$major == "CD8"])
-need8 <- c("CD8_effector", "CD8_activated", "CD8_naive", "CD8_TCM", "CD8_TEM")
+need8 <- c("CD8_effector", "CD8_activated", "CD8_naive", "CD8_TCM", "CD8_TSCM",
+           "CD8_MPEC", "CD8_SLEC", "CD8_exhausted")
 miss8 <- setdiff(need8, cd8_labs)
 if (length(miss8)) fail(sprintf("CD8 missing %s (got %s)", paste(miss8, collapse = ","), paste(cd8_labs, collapse = ",")))
 
@@ -191,7 +203,9 @@ mat_s <- rbind(
 colnames(mat_s)[colnames(mat_s) == "NK1.1"] <- "NK1.1"
 hs <- hierarchical_gate_by_sample(mat_s, rep(c("EV1", "EV2"), each = 50), "P1")
 if (mean(hs$subset[1:50] == "CD4_naive") < 0.6) fail("sample EV1 should be gated naive on its own")
-if (mean(hs$subset[51:100] == "CD4_TEM") < 0.6) fail("sample EV2 should be gated TEM on its own")
+if (mean(hs$subset[51:100] %in% c("CD4_TEM", "CD4_TEM_late")) < 0.6) {
+  fail("sample EV2 should be gated T_EM / T_EM late on its own")
+}
 
 nv <- Filter(function(s) identical(s$lineage, "CD4_naive"), subset_plot_specs("P1"))
 if (!length(nv) || !identical(nv[[1]]$gate, "quad")) fail("CD4 naive subset figure should use a quadrant gate")

@@ -12,6 +12,10 @@ fail <- function(msg) {
 }
 
 if (!identical(infer_major_lineage("P1", "Treg"), "CD4")) fail("Treg should map to CD4")
+if (!identical(infer_major_lineage("P1", "CD4_TSCM"), "CD4")) fail("CD4 T_SCM should map to CD4")
+if (!identical(infer_major_lineage("P1", "CD4_SLEC"), "CD4")) fail("CD4 SLEC should map to CD4")
+if (!identical(infer_major_lineage("P1", "CD8_MPEC"), "CD8")) fail("CD8 MPEC should map to CD8")
+if (!identical(infer_major_lineage("P1", "CD4_exhausted"), "CD4")) fail("CD4 exhausted should map to CD4")
 if (!identical(infer_major_lineage("P1", "CD4_effector"), "CD4")) fail("CD4 effector should map to CD4")
 if (!identical(infer_major_lineage("P1", "CD8_effector"), "CD8")) fail("CD8 effector should map to CD8")
 if (!identical(infer_major_lineage("P1", "CD8_activated"), "CD8")) fail("CD8 activated should map to CD8")
