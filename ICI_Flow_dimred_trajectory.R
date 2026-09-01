@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # =============================================================================
 # Internation cell immune：细胞轨迹
-# 只写本方案 results_flow/P1|P3/trajectory/，不读 fuction of cell。
+# 只写本方案 results_flow/P1|P2|P3/trajectory/，不读 fuction of cell。
 # =============================================================================
 
 load_ici_engine_functions <- function() {
@@ -589,10 +589,10 @@ export_all_panel_trajectories <- function(result_dir) {
       result_dir <- file.path(getwd(), "results_flow")
     }
   }
-  for (pn in c("P1", "P3")) {
+  for (pn in c("P1", "P2", "P3")) {
     export_panel_trajectories(result_dir, pn)
   }
-  log_msg("Trajectories written under results_flow/P1|P3/trajectory/")
+  log_msg("Trajectories written under results_flow/P1|P2|P3/trajectory/")
   invisible(TRUE)
 }
 

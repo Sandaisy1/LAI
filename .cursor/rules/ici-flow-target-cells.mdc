@@ -1,5 +1,5 @@
 ---
-description: Internation cell immune：His+ 靶细胞流式（P1/P3，独立于原 Flow_* 流程）
+description: Internation cell immune：His+ 靶细胞流式（P1/P2/P3，独立于原 Flow_* 流程）
 globs: "**/ICI_*.{R,r,Rmd,json}"
 alwaysApply: false
 ---
@@ -11,17 +11,19 @@ alwaysApply: false
 ## 数据
 
 - 目录：`E:/R/Internation cell immune`（用户拼写就是 Internation）。把下面整套文件放在该目录，与 FCS、`results_flow/` 同目录：`ICI_Flow_dimred_pipeline.R`、`ICI_flow_engine.R`、`ICI_flow_panel_map.json`、`ICI_Flow_dimred_all_subsets.R`、`ICI_Flow_dimred_trajectory.R`
-- 只用 `*_unmixed.fcs`；没有 Panel 2
-- 组别：**ZZX-EV**（EV-1、EV-2、EV-3）vs **ZZX-H**（H-1、H-2、H-3），比较 **H vs EV**，n=3。文件名写成 `EV-1_P1_unmixed.fcs` / `ZZX-H-2_P3_unmixed.fcs`。没有技术重复时样品名就是 `EV-1`，不要再编 `EV1-1`
-- 染色以 `ICI_flow_panel_map.json` 和图 1–3 为准，不要把原实验的耗竭/GZMB/CD27 等通道硬套过来
+- 只用 `*_unmixed.fcs`。染色表是 **P1（T/NK）+ P2（B）+ P3（髓系）**，都带 His-FITC
+- 组别：**ZZX-EV**（EV-1、EV-2、EV-3）vs **ZZX-H**（H-1、H-2、H-3），比较 **H vs EV**，n=3。文件名写成 `EV-1_P1_unmixed.fcs` / `ZZX-H-2_P3_unmixed.fcs` / `ZZX-EV-1_P2_unmixed.fcs`。没有技术重复时样品名就是 `EV-1`，不要再编 `EV1-1`
+- 染色以 `ICI_flow_panel_map.json` 和图 1–3 为准。**不要把原实验 P2 的 IgD / BLIMP-1 / CD40 / CD80 / CD86 硬套进这套 7 色表**
 
 ## 染色（通道必须按这张表）
 
 **P1（14 色）：** L/D FVS450，CD45 V500，CD4 BUV496，CD3 BUV805，CD8 RB744，CD25 RB670，CD69 RY586，NKp46 PE，NK1.1 AF700，CD11B APC-Cy7，CD62L RY703，CD44 RB613，NKG2D PE-eFluor 610，**His FITC**
 
+**P2（7 色，B）：** L/D FVS450，CD45 V500，CD19 BV750，CD27 BV605，**IgG RB613**，**IgM RB780**，**His FITC**。没有 IgD、BLIMP-1、CD40/CD80/CD86。
+
 **P3（20 色）：** L/D FVS450，CD45 V500，CD3 BUV805，CD40 RB705，CD86 RB670，**CD80 BUV496**，CD11B APC-Cy7，CD19 BV750，**NK1.1 R718**，CD11C BUV737，I-A/I-E BV605，CD103 RY703，LY6C RY775，LY6G RB744，F4/80 RB613，CD206 AF647，CCR3 BUV661，Siglec-F BV786，**His FITC**，FceRI PE-eFluor 610
 
-没有的标志物就不要伪造亚群：P1 不做 T_SCM / SLEC / MPEC / exhausted / T_EFF 细胞因子；P3 不做 iNOS M1、不做 CD200R3（肥大细胞只靠 FceRI）。NKG2D 仍只出 MFI。
+没有的标志物就不要伪造亚群：P1 不做 T_SCM / SLEC / MPEC / exhausted / T_EFF 细胞因子；P2 不做 IgD 四象限、浆母/浆细胞（无 BLIMP）、也不做 CD40/CD80/CD86 MFI；P3 不做 iNOS M1、不做 CD200R3（肥大细胞只靠 FceRI）。NKG2D 仍只出 MFI。
 
 ## 圈门（主目的是靶细胞）
 
@@ -30,13 +32,14 @@ alwaysApply: false
 1. QC：**只去双联体和死细胞**。不要要求 CD45+，也不要 P1 紧淋巴 FSC/SSC 门——否则 His+ CD45− 和大体积靶细胞会被丢掉
 2. 活细胞里：**His+ CD45− → `Target`**（图上写 **His+ target**，颜色 `#00ACC1`）
 3. **His+ CD45+ 仍用原来的免疫亚群名**，不要改成 Target；另外统计各亚群内 His+ 比例
-4. 其余 CD45+ 按原 P1/P3 分层，只用本表有的标志物
+4. 其余 CD45+ 按原 P1/P2/P3 分层，只用本表有的标志物
    - P1：T=CD3→CD4/CD8；NK=CD3− NKp46+（在 CD11b 之前）；NKT=CD3+ NKp46+；CD69 活化；CD25 Treg；CD62L/CD44 naive / T_CM / T_EM
+   - P2：宽单核思路；**CD19+ 为 B 母门**；无 IgD 时用 **CD27 × IgM/IgG** 对应原 P2：naive = CD27−；unswitched memory = CD27+ IgG−（多为 IgM+）；switched memory = CD27+ IgG+；naive/unswitched 里 IgM 高 → MZ B。不要伪造 IgD 四象限或 BLIMP 浆细胞
    - P3：CD3/CD19/NK1.1 大类；CD11B± 髓系；嗜酸 = Siglec-F **且** CCR3；肥大 = FceRI；F4/80 high 巨噬；Ly6C hi/lo；CD11C+MHCII+ → cDC1/cDC2；CD206 可标 M2-like
 
 ## 导出
 
-- 免疫亚群图仍走原流程的 `results_flow/P1/`、`P3/`：与免疫亚群方案同一套绘图规则。**`*_major_split`** 按大类着色（CD4 T / CD8 T / NK / NKT / Myeloid，加上 **His+ target**）；**`*_lineage_split`** 是同一套联合 embedding 上**全体细亚群**；细亚群再降维在 `dimred_by_major/`，类内必须高对比色。轨迹同样：先 `P1_major_trajectory`，再各大类亚群树。图注在右侧。
+- 免疫亚群图仍走本方案 `results_flow/P1/`、`P2/`、`P3/`：与免疫亚群方案同一套绘图规则。**`*_major_split`** 按大类着色（CD4 T / CD8 T / NK / NKT / B / Myeloid，加上 **His+ target**）；**`*_lineage_split`** 是同一套联合 embedding 上**全体细亚群**；细亚群再降维在 `dimred_by_major/`，类内必须高对比色。轨迹同样：先各大类树，再各类亚群树。图注在右侧。
 - 每个 panel 出 **免疫细胞注释热图** `*_annotation_heatmap`（标志物 × 已注释亚群；含 His+ target），以及大类版 `*_annotation_heatmap_major`
 - 靶细胞另出 `target_His/`：His+ 占活细胞%、His+ CD45− %、亚群内 His+、H vs EV 统计、tSNE/UMAP（左 EV 右 H；靶细胞青 / His+ CD45+ 金 / His− 灰，图注右侧）
 - ICI P1 **没有 CD19**。圈门缺通道必须当阴性，不要留下 NA 在 `out[is_t] <-` 上炸成 `NAs are not allowed in subscripted assignments`

@@ -27,14 +27,24 @@ if (length(orig_p1) != 25L) {
 orig_fitc <- orig_json$panels$P1$markers[[match("Perforin", orig_p1)]]$fluorochrome
 expect(orig_fitc, "FITC", "original P1 Perforin remains FITC")
 if ("His" %in% orig_p1) fail("original P1 must not gain His")
+orig_p2 <- vapply(orig_json$panels$P2$markers, function(x) x$marker, character(1))
+if ("His" %in% orig_p2) fail("original P2 must not gain His")
+if (!("IgD" %in% orig_p2)) fail("original P2 still has IgD")
 
 ici_json <- jsonlite::fromJSON(file.path(root, "ICI_flow_panel_map.json"), simplifyVector = FALSE)
 ici_p1 <- vapply(ici_json$panels$P1$markers, function(x) x$marker, character(1))
 ici_p3 <- vapply(ici_json$panels$P3$markers, function(x) x$marker, character(1))
 if (length(ici_p1) != 14L) fail(sprintf("ICI P1 should have 14 markers, got %s", length(ici_p1)))
 if (length(ici_p3) != 20L) fail(sprintf("ICI P3 should have 20 markers, got %s", length(ici_p3)))
-if (!is.null(ici_json$panels$P2)) fail("ICI map must not include Panel 2")
+if (is.null(ici_json$panels$P2)) fail("ICI map must include Panel 2 (B + His)")
+ici_p2 <- vapply(ici_json$panels$P2$markers, function(x) x$marker, character(1))
+if (length(ici_p2) != 7L) fail(sprintf("ICI P2 should have 7 markers, got %s", length(ici_p2)))
+if ("IgD" %in% ici_p2) fail("ICI P2 must not include IgD")
+if ("BLIMP-1" %in% ici_p2 || "CD40" %in% ici_p2) fail("ICI P2 must not include BLIMP-1/CD40")
 expect(ici_json$panels$P1$markers[[match("His", ici_p1)]]$fluorochrome, "FITC", "ICI P1 His-FITC")
+expect(ici_json$panels$P2$markers[[match("His", ici_p2)]]$fluorochrome, "FITC", "ICI P2 His-FITC")
+expect(ici_json$panels$P2$markers[[match("IgM", ici_p2)]]$fluorochrome, "RB780", "ICI P2 IgM-RB780")
+expect(ici_json$panels$P2$markers[[match("IgG", ici_p2)]]$fluorochrome, "RB613", "ICI P2 IgG-RB613")
 expect(ici_json$panels$P3$markers[[match("His", ici_p3)]]$fluorochrome, "FITC", "ICI P3 His-FITC")
 expect(ici_json$panels$P3$markers[[match("CD80", ici_p3)]]$fluorochrome, "BUV496", "ICI P3 CD80-BUV496")
 expect(ici_json$panels$P3$markers[[match("NK1.1", ici_p3)]]$fluorochrome, "R718", "ICI P3 NK1.1-R718")
@@ -70,7 +80,18 @@ expect(map3$channel[map3$marker == "CD80"], "BUV496-A", "P3 CD80<-BUV496-A")
 expect(map3$channel[map3$marker == "NK1.1"], "R718-A", "P3 NK1.1<-R718-A")
 expect(map3$channel[map3$marker == "FceRI"], "PE-EF610-A", "P3 FceRI<-PE-EF610-A")
 
-# 文件名：EV-1 / H-3 / ZZX-EV-1；不要把 P3 的 3 当成技术重复；跳过 P2
+cytek_p2 <- c(
+  "FSC-A", "SSC-A", "FVS450-A", "V500-A", "BV750-A", "BV605-A",
+  "RB613-A", "RB780-A", "FITC-A"
+)
+map2 <- match_channels(cytek_p2, rep("", length(cytek_p2)), "P2")
+expect(map2$channel[map2$marker == "His"], "FITC-A", "P2 His<-FITC-A")
+expect(map2$channel[map2$marker == "IgM"], "RB780-A", "P2 IgM<-RB780-A")
+expect(map2$channel[map2$marker == "IgG"], "RB613-A", "P2 IgG<-RB613-A")
+expect(map2$channel[map2$marker == "CD19"], "BV750-A", "P2 CD19<-BV750-A")
+expect(map2$channel[map2$marker == "CD27"], "BV605-A", "P2 CD27<-BV605-A")
+
+# 文件名：EV-1 / H-3 / ZZX-EV-1；P2 要能解析；不要把 P3 的 3 当成技术重复
 ev <- parse_fcs_filename("EV-1_P1_unmixed.fcs")
 if (is.null(ev) || !identical(ev$group, "EV") || !identical(ev$sample, "EV-1") ||
     !identical(ev$bio_sample, "EV-1") || !identical(ev$panel, "P1") ||
@@ -97,8 +118,9 @@ h1 <- parse_fcs_filename("ZZX-H-2_P3_unmixed.fcs")
 if (is.null(h1) || !identical(h1$group, "H") || !identical(h1$sample, "H-2")) {
   fail("ZZX-H-2_P3_unmixed.fcs should parse as H sample H-2")
 }
-if (!is.null(parse_fcs_filename("EV-1_P2_unmixed.fcs"))) {
-  fail("ICI parser must skip Panel 2")
+p2f <- parse_fcs_filename("ZZX-EV-1_P2_unmixed.fcs")
+if (is.null(p2f) || !identical(p2f$panel, "P2") || !identical(p2f$sample, "EV-1")) {
+  fail("ZZX-EV-1_P2_unmixed.fcs should parse as EV-1 P2")
 }
 if (!is.null(parse_fcs_filename("ZZX_EV1-1_P1_unmixed.fcs")) &&
     identical(parse_fcs_filename("ZZX_EV1-1_P1_unmixed.fcs")$group, "H")) {
@@ -202,6 +224,46 @@ if (mean(h_no19$major[his_t] == "CD4") < 0.8) {
   fail(sprintf("His+ CD45+ T should stay CD4 without CD19, got %s",
                paste(unique(h_no19$major[his_t]), collapse = ",")))
 }
+
+# ICI P2：CD19 母门 + CD27×IgM/IgG（无 IgD）；His+ CD45- 仍是 Target
+set.seed(19)
+n2 <- 50L
+p2_block <- function(cd19, cd27, igm, igg, his = 0.3, cd45 = 3.0) {
+  cbind(
+    CD19 = rnorm(n2, cd19, 0.1),
+    CD27 = rnorm(n2, cd27, 0.1),
+    IgM = rnorm(n2, igm, 0.1),
+    IgG = rnorm(n2, igg, 0.1),
+    His = rnorm(n2, his, 0.1),
+    CD45 = rnorm(n2, cd45, 0.1)
+  )
+}
+mat_p2 <- rbind(
+  p2_block(3.2, 0.3, 2.4, 0.2),
+  p2_block(3.1, 3.0, 2.8, 0.2),
+  p2_block(3.0, 2.8, 0.3, 3.1),
+  p2_block(0.2, 0.3, 0.2, 0.2, his = 3.2, cd45 = 0.3)
+)
+hp2 <- hierarchical_gate(mat_p2, "P2")
+if (mean(hp2$subset[seq_len(n2)] %in% c("Naive_B", "MZ_B")) < 0.7) {
+  fail(sprintf("ICI P2 CD27- CD19+ should be Naive_B (or MZ if IgM-high), got %s",
+               paste(unique(hp2$subset[seq_len(n2)]), collapse = ",")))
+}
+if (mean(hp2$subset[seq.int(n2 + 1L, 2L * n2)] %in% c("Unswitched_B", "MZ_B")) < 0.7) {
+  fail(sprintf("ICI P2 CD27+ IgG- should be Unswitched_B (or MZ if IgM-high), got %s",
+               paste(unique(hp2$subset[seq.int(n2 + 1L, 2L * n2)]), collapse = ",")))
+}
+if (mean(hp2$subset[seq.int(2L * n2 + 1L, 3L * n2)] == "Switched_B") < 0.7) {
+  fail(sprintf("ICI P2 CD27+ IgG+ should be Switched_B, got %s",
+               paste(unique(hp2$subset[seq.int(2L * n2 + 1L, 3L * n2)]), collapse = ",")))
+}
+if (mean(hp2$major[seq.int(3L * n2 + 1L, 4L * n2)] == "Target") < 0.85) {
+  fail("ICI P2 His+ CD45- must be Target")
+}
+p2_specs <- subset_plot_specs("P2")
+p2_xy <- vapply(p2_specs, function(s) paste(s$x, s$y, sep = "/"), character(1))
+if (any(grepl("IgD", p2_xy))) fail("ICI P2 subset plots must not require IgD")
+if (any(grepl("BLIMP", p2_xy))) fail("ICI P2 subset plots must not require BLIMP-1")
 
 # 缺 CD19 可以不画 B 门，但不能跳过 NK 等其余亚群图
 set.seed(3)

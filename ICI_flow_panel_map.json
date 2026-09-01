@@ -1,15 +1,15 @@
 {
   "species": "mouse",
   "experiment": "Internation_cell_immune",
-  "purpose": "find His-tagged target cells; immune subsets use the same gates as the original P1/P3 pipeline with the markers on this sheet",
+  "purpose": "find His-tagged target cells; immune subsets use P1 T/NK, P2 B (CD19/CD27/IgM/IgG), P3 myeloid gates with the markers on this sheet",
   "data_dir": "E:/R/Internation cell immune",
   "file_glob": "*_unmixed.fcs",
-  "filename_regex": "^(?:ZZX[_-]?)?(EV|H)[-_]?([123])(?:[-_]([12]))?[-_ ]+(?:PANEL[-_ ]?)?P?0?([13])[-_ ].*(unmixed|raw)\\.fcs$",
+  "filename_regex": "^(?:ZZX[_-]?)?(EV|H)[-_]?([123])(?:[-_]([12]))?[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$",
   "groups": ["EV", "H"],
   "replicates": ["1", "2", "3"],
   "cohort": "ZZX",
   "comparison": "H_vs_EV",
-  "panels_to_run": ["P1", "P3"],
+  "panels_to_run": ["P1", "P2", "P3"],
   "qc": {
     "viability_marker": "L/D",
     "leukocyte_marker": "CD45",
@@ -29,6 +29,7 @@
     "RB670": ["RB670"],
     "RB705": ["RB705"],
     "RB613": ["RB613"],
+    "RB780": ["RB780"],
     "RY586": ["RY586"],
     "RY703": ["RY703"],
     "RY775": ["RY775"],
@@ -54,6 +55,7 @@
     "RB670": "RB670",
     "RB705": "RB705",
     "RB613": "RB613",
+    "RB780": "RB780",
     "RY586": "RY586",
     "RY703": "RY703",
     "RY775": "RY775",
@@ -86,6 +88,19 @@
         {"marker": "CD62L", "fluorochrome": "RY703", "compartment": "surface", "aliases": ["SELL"]},
         {"marker": "CD44", "fluorochrome": "RB613", "compartment": "surface"},
         {"marker": "NKG2D", "fluorochrome": "PE-EF610", "compartment": "surface", "aliases": ["CD314", "KLRK1"]},
+        {"marker": "His", "fluorochrome": "FITC", "compartment": "surface", "aliases": ["HIS", "HISTAG", "6HIS", "HIS-TAG", "HEXAHIS"]}
+      ]
+    },
+    "P2": {
+      "name": "B_His_target",
+      "focus": "His+ target cells plus B (CD19, CD27, IgM, IgG; no IgD/BLIMP/CD40 on this sheet)",
+      "markers": [
+        {"marker": "L/D", "fluorochrome": "FVS450", "compartment": "viability"},
+        {"marker": "CD45", "fluorochrome": "V500", "compartment": "surface"},
+        {"marker": "CD19", "fluorochrome": "BV750", "compartment": "surface"},
+        {"marker": "CD27", "fluorochrome": "BV605", "compartment": "surface"},
+        {"marker": "IgG", "fluorochrome": "RB613", "compartment": "surface", "aliases": ["IGG"]},
+        {"marker": "IgM", "fluorochrome": "RB780", "compartment": "surface", "aliases": ["IGM"]},
         {"marker": "His", "fluorochrome": "FITC", "compartment": "surface", "aliases": ["HIS", "HISTAG", "6HIS", "HIS-TAG", "HEXAHIS"]}
       ]
     },

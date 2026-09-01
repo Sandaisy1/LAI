@@ -112,7 +112,9 @@ source("Flow_dimred_pipeline.R")
 
 ## Internation cell immune（另一套实验，找 His+ 靶细胞）
 
-数据在 `E:/R/Internation cell immune`。染色是图 1–3 的 **P1 + P3**（没有 P2），主目的是用 **His-FITC** 找靶细胞。圈门和分析思路与上面相同，但 **不要改** 原来的 `Flow_dimred_pipeline.R` / `flow_panel_map.json`。
+数据在 `E:/R/Internation cell immune`。染色是 **P1（T/NK）+ P2（B）+ P3（髓系）**，都带 **His-FITC**。主目的是找靶细胞。圈门思路与免疫亚群方案相同，但染色按 `ICI_flow_panel_map.json`，**不要改** `Flow_dimred_pipeline.R` / `flow_panel_map.json`。
+
+ICI **P2** 是 7 色：L/D、CD45、CD19、CD27、IgG-RB613、IgM-RB780、His-FITC（没有 IgD / BLIMP / CD40）。圈门仍是 CD19+ 为 B 母门，再用 CD27×IgM/IgG 对应原 P2 的 naive / unswitched / switched；缺的项跳过，不跳过整个 panel。
 
 组别：**ZZX-EV**（EV-1、EV-2、EV-3）vs **ZZX-H**（H-1、H-2、H-3），比较 H vs EV，n=3。
 
@@ -131,7 +133,7 @@ setwd("E:/R/Internation cell immune")
 source("ICI_Flow_dimred_pipeline.R")
 ```
 
-QC 只去双联体和死细胞，**不要求 CD45+**，也 **不用 P1 紧淋巴门**，以免丢掉 His+ CD45− 靶细胞。活细胞里 His+ CD45− 标成 **His+ target**；His+ CD45+ 仍按原来的 T/NK/髓系亚群命名，并另出各亚群内 His+ 比例。
+QC 只去双联体和死细胞，**不要求 CD45+**，也 **不用 P1 紧淋巴门**，以免丢掉 His+ CD45− 靶细胞。活细胞里 His+ CD45− 标成 **His+ target**；His+ CD45+ 仍按原来的 T/NK/B/髓系亚群命名，并另出各亚群内 His+ 比例。
 
 降维和轨迹与免疫亚群方案同一套：`*_major_split` 按大类着色（含 His+ target），`*_lineage_split` 是全体细亚群，`dimred_by_major/` 再按大类重降维（高对比色）；轨迹先画全体大类树再画各类亚群树。每个 panel 出免疫细胞注释热图 `*_annotation_heatmap`（含 His+ target）。ICI P1 没有 CD19，缺通道按阴性处理，不要再出现 `NAs are not allowed in subscripted assignments`；缺的染色通道该项可以不分析，但不能跳过该 panel 其余图。结果在同目录 `results_flow/`，靶细胞表和图在 `target_His/`。
 

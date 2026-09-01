@@ -1,10 +1,11 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# Internation cell immune：His+ 靶细胞 + P1/P3 免疫亚群
+# Internation cell immune：His+ 靶细胞 + P1/P2/P3 免疫亚群
 #
 # 独立于原来的 Flow_dimred_pipeline.R（E:/R/fuction of cell）。
-# 圈门和分析思路相同，染色按 ICI_flow_panel_map.json（图 1–3）。
-# 没有 Panel 2。主目的是找 His-FITC 靶细胞，再看它们落在哪些免疫亚群里。
+# 圈门和分析思路与免疫亚群方案相同，染色按 ICI_flow_panel_map.json（图 1–3）。
+# P2 是 B 细胞 7 色（CD19/CD27/IgG/IgM + His），没有 IgD/BLIMP/CD40。
+# 主目的是找 His-FITC 靶细胞，再看它们落在哪些免疫亚群里。
 #
 # 组别：ZZX-EV（EV-1 / EV-2 / EV-3）vs ZZX-H（H-1 / H-2 / H-3），比较 H vs EV，n=3。
 #
@@ -129,7 +130,7 @@ parse_fcs_filename_flow <- parse_fcs_filename
 parse_ici_filename_fallback <- function(path) {
   b <- basename(path)
   m <- regexec(
-    "^(?:ZZX[_-]?)?(EV|H)[-_ ]?([123])(?:[-_ ]([12]))?[-_ ]+(?:PANEL[-_ ]?)?P?0?([13])[-_ ].*(unmixed|raw)\\.fcs$",
+    "^(?:ZZX[_-]?)?(EV|H)[-_ ]?([123])(?:[-_ ]([12]))?[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$",
     b,
     ignore.case = TRUE
   )
@@ -159,8 +160,8 @@ parse_fcs_filename <- function(path) {
   x <- parse_fcs_filename_flow(path)
   if (is.null(x)) x <- parse_ici_filename_fallback(path)
   if (is.null(x)) return(NULL)
-  if (is.na(x$panel) || !x$panel %in% c("P1", "P3")) {
-    log_msg("skip Panel ", x$panel, " (Internation sheets are P1/P3 only): ", basename(path))
+  if (is.na(x$panel) || !x$panel %in% c("P1", "P2", "P3")) {
+    log_msg("skip Panel ", x$panel, " (Internation sheets are P1/P2/P3): ", basename(path))
     return(NULL)
   }
   x$bio_sample <- paste0(x$group, "-", x$replicate)
@@ -243,6 +244,44 @@ hierarchical_gate <- function(mat, panel_id) {
   out
 }
 
+# ICI P2 没有 IgD / BLIMP：CD19 母门后用 CD27 × IgM/IgG 对应原 P2 的 naive / unswitched / switched
+gate_p2_major_flow <- gate_p2_major
+gate_p2_major <- function(mat) {
+  mat <- as.matrix(mat)
+  n <- nrow(mat)
+  out <- rep("Naive_B", n)
+  if (n < 40) return(out)
+  b <- rep(TRUE, n)
+  if ("CD19" %in% colnames(mat)) {
+    b_hi <- gate_k2_high(mat, seq_len(n), "CD19", 0.12)
+    if (any(b_hi) && mean(b_hi) > 0.08 && mean(b_hi) < 0.97) {
+      lo_med <- median(colv(mat, "CD19")[!b_hi], na.rm = TRUE)
+      hi_med <- median(colv(mat, "CD19")[b_hi], na.rm = TRUE)
+      if (is.finite(lo_med) && is.finite(hi_med) && hi_med > lo_med + 1.0 && lo_med < 0.9) {
+        b <- b_hi
+        out[!b] <- "other"
+      }
+    }
+  }
+  ib <- which(b)
+  if (length(ib) >= 40 && "CD27" %in% colnames(mat)) {
+    cd27_pos <- p2_pos_mask(colv(mat, "CD27")[ib])
+    cd27_pos[!is.finite(colv(mat, "CD27")[ib])] <- FALSE
+    igg <- colv(mat, "IgG")[ib]
+    igm <- colv(mat, "IgM")[ib]
+    igg_hi <- if (any(is.finite(igg))) p2_pos_mask(igg) else rep(FALSE, length(ib))
+    igm_hi <- if (any(is.finite(igm))) p2_pos_mask(igm) else rep(FALSE, length(ib))
+    igg_hi[!is.finite(igg)] <- FALSE
+    igm_hi[!is.finite(igm)] <- FALSE
+    lab <- rep("Naive_B", length(ib))
+    lab[!cd27_pos] <- "Naive_B"
+    lab[cd27_pos & igg_hi] <- "Switched_B"
+    lab[cd27_pos & !igg_hi] <- "Unswitched_B"
+    out[ib] <- lab
+  }
+  p2_assign_cd19neg_plasma(mat, out)
+}
+
 pal_celltype <- c(pal_celltype,
   "His+ target" = "#00ACC1",
   "Target" = "#00ACC1"
@@ -278,6 +317,15 @@ subset_plot_specs <- function(panel_id) {
   his <- list(
     mk("Target", "His", "CD45", "all", "His+ CD45- target (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE)
   )
+  if (identical(panel_id, "P2")) {
+    p2 <- list(
+      mk("Naive_B", "IgM", "CD27", "CD19", "Naive B in CD19+ (%)", gate = "half_y", y_hi = FALSE),
+      mk("Unswitched_B", "IgM", "CD27", "CD19", "Unswitched memory B in CD19+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("Switched_B", "IgG", "CD27", "CD19", "Switched memory B in CD19+ (%)", gate = "hi_hi"),
+      mk("MZ_B", "IgM", "CD27", "Naive_Unswitched", "MZ B in naive/unswitched (%)", gate = "hi_x", x_hi = TRUE)
+    )
+    return(c(his, p2))
+  }
   orig <- tryCatch(subset_plot_specs_flow(panel_id), error = function(e) list())
   c(his, orig)
 }
@@ -329,6 +377,24 @@ demo_means_p3 <- function() {
   )
 }
 
+demo_means_p2 <- function() {
+  mk <- dr_marker_names("P2")
+  base <- setNames(rep(0.2, length(mk)), mk)
+  pop <- function(...) {
+    v <- base
+    alt <- list(...)
+    for (nm in names(alt)) v[[nm]] <- alt[[nm]]
+    v
+  }
+  list(
+    Naive_B = pop(CD19 = 3.2, CD27 = 0.3, IgM = 2.4, IgG = 0.2, CD45 = 3.0, His = 0.3),
+    Unswitched_B = pop(CD19 = 3.1, CD27 = 3.0, IgM = 2.8, IgG = 0.2, CD45 = 3.0, His = 0.3),
+    MZ_B = pop(CD19 = 3.1, CD27 = 0.3, IgM = 3.3, IgG = 0.2, CD45 = 3.0, His = 0.3),
+    Switched_B = pop(CD19 = 3.0, CD27 = 2.8, IgG = 3.1, IgM = 0.3, CD45 = 3.0, His = 0.3),
+    Target = pop(His = 3.2, CD45 = 0.3, CD19 = 0.2, CD27 = 0.2, IgM = 0.2, IgG = 0.2)
+  )
+}
+
 demo_props <- function(panel_id, group) {
   ctrl <- identical(as.character(group), flow_ctrl_group)
   if (panel_id == "P1") {
@@ -340,6 +406,12 @@ demo_props <- function(panel_id, group) {
     return(c(CD4_naive = 0.10, CD4_TCM = 0.07, CD4_TEM = 0.08, Treg = 0.05, CD4_act = 0.08,
              CD8_naive = 0.07, CD8_TEM = 0.08, NK = 0.09, NK_act = 0.06, NKT_CD4 = 0.04,
              Myeloid = 0.05, Target = 0.23))
+  }
+  if (panel_id == "P2") {
+    if (ctrl) {
+      return(c(Naive_B = 0.28, Unswitched_B = 0.18, MZ_B = 0.10, Switched_B = 0.22, Target = 0.22))
+    }
+    return(c(Naive_B = 0.20, Unswitched_B = 0.16, MZ_B = 0.08, Switched_B = 0.24, Target = 0.32))
   }
   if (ctrl) {
     return(c(Neutrophil = 0.14, Mono_Ly6Chi = 0.10, Macrophage = 0.12, M2_like = 0.08,
@@ -465,7 +537,7 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir,
 }
 
 # -----------------------------------------------------------------------------
-# 主流程（P1 / P3；不要跑原来的 P2）
+# 主流程（P1 / P2 / P3）
 # -----------------------------------------------------------------------------
 if (identical(toupper(Sys.getenv("FLOW_FUNCTIONS_ONLY", "0")), "1") ||
     identical(toupper(Sys.getenv("ICI_FUNCTIONS_ONLY", "0")), "1")) {
@@ -474,7 +546,7 @@ if (identical(toupper(Sys.getenv("FLOW_FUNCTIONS_ONLY", "0")), "1") ||
 
 log_msg("ICI flow dir: ", project_dir)
 log_msg("ICI results: ", result_dir)
-log_msg("ICI purpose: His+ target cells; immune gates reuse original P1/P3 logic with this sheet")
+log_msg("ICI purpose: His+ target cells; immune gates reuse P1 T/NK, P2 B, P3 myeloid logic with this sheet")
 file_tab <- list_unmixed_files(project_dir)
 use_demo <- demo_flag
 if (nrow(file_tab) == 0) {
@@ -485,7 +557,7 @@ if (nrow(file_tab) == 0) {
   log_msg("Auto-fallback to DEMO so the script can still export figure templates")
 } else {
   log_msg("Found unmixed files:\n", paste(file_tab$file, collapse = "\n"))
-  for (pn in c("P1", "P3")) {
+  for (pn in c("P1", "P2", "P3")) {
     n_pn <- sum(file_tab$panel == pn)
     log_msg(pn, " files parsed: ", n_pn)
   }
@@ -500,7 +572,7 @@ if (use_demo) {
              file.path(log_dir, "DEMO_WARNING.txt"))
 }
 
-panels <- c("P1", "P3")
+panels <- c("P1", "P2", "P3")
 summaries <- list()
 for (pn in panels) {
   log_msg("ICI ", pn, ": His+ CD45- = target; remaining CD45+ use original lineage gates")

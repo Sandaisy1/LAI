@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# Internation cell immune：P1/P3 亚群频率总览
+# Internation cell immune：P1/P2/P3 亚群频率总览
 # 只汇总本方案 results_flow/，不读 E:/R/fuction of cell。
 # 入口仍是 source("ICI_Flow_dimred_pipeline.R")
 # =============================================================================
@@ -175,7 +175,7 @@ export_all_subsets_analysis <- function(result_dir) {
       result_dir <- file.path(getwd(), "results_flow")
     }
   }
-  panels <- c("P1", "P3")
+  panels <- c("P1", "P2", "P3")
   cells_by_panel <- lapply(panels, function(pn) read_panel_embeddings(result_dir, pn))
   names(cells_by_panel) <- panels
   n_ok <- sum(vapply(cells_by_panel, function(x) !is.null(x) && nrow(x) > 0, logical(1)))
@@ -193,10 +193,10 @@ export_all_subsets_analysis <- function(result_dir) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
   note <- c(
-    "This scheme is P1 + P3 only (no P2). Do not read results from E:/R/fuction of cell.",
+    "This scheme is P1 + P2 + P3. Do not read results from E:/R/fuction of cell.",
     "Numbers below are % of cells inside each panel tube, not a whole-blood composition.",
-    "Do not add P1+P3 percentages together.",
-    "Focus subsets: P1 T/NK (+ His+ target), P3 myeloid (+ His+ target).",
+    "Do not add P1+P2+P3 percentages together.",
+    "Focus subsets: P1 T/NK (+ His+ target), P2 B (+ His+ target), P3 myeloid (+ His+ target).",
     "Dump channels (coarse only): P1 B and Myeloid; P3 T, B, NK.",
     "Stats: n=3 biological replicates; no tech-rep averaging; do not drop an extreme bio-rep.",
     paste("Panels found:", paste(unique(freq$panel), collapse = ", "))
@@ -225,7 +225,7 @@ export_all_subsets_analysis <- function(result_dir) {
   focus <- freq_plot[freq_plot$role == "focus", , drop = FALSE]
   stats_f <- stats[stats$role == "focus", , drop = FALSE]
   if (nrow(focus) > 0) {
-    save_gg(plot_all_freq_facet(focus, "Focus subsets only  (P1 T/NK, P3 myeloid, His+ target)"),
+    save_gg(plot_all_freq_facet(focus, "Focus subsets only  (P1 T/NK, P2 B, P3 myeloid, His+ target)"),
             file.path(out_dir, "all_subsets_focus_frequency_H_vs_EV"),
             width = max(11, 1.15 * length(unique(focus$subset_label)) / 2), height = 5.8)
   }
