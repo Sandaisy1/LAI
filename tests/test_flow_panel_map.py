@@ -120,11 +120,14 @@ def main() -> int:
     if p2_cd80 != "APC":
         errors.append(f"P2 CD80 should be APC, got {p2_cd80}")
     p3_cd80 = next(m["fluorochrome"] for m in data["panels"]["P3"]["markers"] if m["marker"] == "CD80")
-    if p3_cd80 != "APC":
-        errors.append(f"P3 CD80 should be APC (synced with P2), got {p3_cd80}")
+    if p3_cd80 != "BUV496":
+        errors.append(f"P3 CD80 should be BUV496 (TNF-a is APC on the same tube), got {p3_cd80}")
+    p3_tnf = next(m["fluorochrome"] for m in data["panels"]["P3"]["markers"] if m["marker"] == "TNF-a")
+    if p3_tnf != "APC":
+        errors.append(f"P3 TNF-a should be APC, got {p3_tnf}")
     p1_tnf = next(m["fluorochrome"] for m in data["panels"]["P1"]["markers"] if m["marker"] == "TNF-a")
     if p1_tnf != "APC":
-        errors.append("P1 TNF-a stays APC; P2/P3 CD80 APC are different tubes")
+        errors.append("P1 TNF-a stays APC")
 
     if parse_fcs_filename("flow_panel_map.json.txt") is not None:
         errors.append("json.txt is not an FCS name")

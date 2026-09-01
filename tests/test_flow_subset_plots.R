@@ -48,6 +48,13 @@ uns <- Filter(function(s) identical(s$lineage, "Unswitched_B"), p2s)
 if (!length(uns) || !identical(uns[[1]]$x, "IgD") || !identical(uns[[1]]$y, "CD27")) {
   fail("Unswitched memory contour should be IgD vs CD27")
 }
+p3s <- subset_plot_specs("P3")
+eos <- Filter(function(s) identical(s$lineage, "Eosinophil"), p3s)
+if (!length(eos) || !identical(eos[[1]]$x, "Siglec-F") || !identical(eos[[1]]$y, "CCR3")) {
+  fail("Eosinophil contour should be Siglec-F vs CCR3")
+}
+cdc2 <- Filter(function(s) identical(s$lineage, "cDC2"), p3s)
+if (!length(cdc2)) fail("P3 specs missing cDC2")
 
 cells_na <- data.frame(
   lineage = c("Neutrophil", NA_character_, "T", "cDC1_CD103"),

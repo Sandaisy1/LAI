@@ -80,17 +80,18 @@ if (!is.na(map_p2$channel[map_p2$marker == "CD80"]) &&
   fail("P2 CD80 must not still match BUV496")
 }
 
-# P3 与 P2 同步：CD80=APC，NK1.1 只认 AF700
+# P3：CD80=BUV496（TNF-a 才是 APC）；NK1.1 只认 AF700
 cytek_p3 <- c(
   "FSC-A", "SSC-A", "FVS450-A", "V500-A", "BUV805-A", "RB705-A", "RB670-A",
   "APC-A", "APC-Cy7-A", "BV750-A", "AF700-A", "BUV737-A", "BV605-A", "BUV496-A"
 )
 map_p3 <- match_channels(cytek_p3, rep("", length(cytek_p3)), "P3")
-expect(map_p3$channel[map_p3$marker == "CD80"], "APC-A", "P3 CD80<-APC-A")
+expect(map_p3$channel[map_p3$marker == "CD80"], "BUV496-A", "P3 CD80<-BUV496-A")
+expect(map_p3$channel[map_p3$marker == "TNF-a"], "APC-A", "P3 TNF-a<-APC-A")
 expect(map_p3$channel[map_p3$marker == "NK1.1"], "AF700-A", "P3 NK1.1<-AF700-A")
 if (!is.na(map_p3$channel[map_p3$marker == "CD80"]) &&
-    identical(map_p3$channel[map_p3$marker == "CD80"], "BUV496-A")) {
-  fail("P3 CD80 must not still match BUV496")
+    identical(map_p3$channel[map_p3$marker == "CD80"], "APC-A")) {
+  fail("P3 CD80 must not still match APC (TNF-a is APC)")
 }
 cytek_p3_r718 <- cytek_p3
 cytek_p3_r718[cytek_p3_r718 == "AF700-A"] <- "R718-A"

@@ -33,13 +33,17 @@ expect(lab_of(mk(CD11B = 3.0, LY6C = 0.3, LY6G = 0.2, `F4/80` = 0.4)), "Mono_Ly6
 expect(lab_of(mk(CD11B = 3.0, `F4/80` = 3.2, `I-A/I-E` = 1.8)), "Macrophage", "mac")
 expect(lab_of(mk(CD11B = 3.0, `F4/80` = 3.0, iNOS = 3.2, CD86 = 2.6)), "M1_like_Mac", "m1")
 expect(lab_of(mk(CD11B = 3.0, `F4/80` = 3.0, CD206 = 3.1, `ARG-1` = 2.8)), "M2_like_Mac", "m2")
-expect(lab_of(mk(CD11C = 3.2, `I-A/I-E` = 3.3, CD80 = 2.2, CD11B = 1.4)), "DC", "dc")
-expect(lab_of(mk(CD11C = 3.1, CD103 = 3.0, `I-A/I-E` = 3.0, CD11B = 0.6)), "cDC1_CD103", "cdc1")
-expect(lab_of(mk(`Siglec-F` = 3.2, CCR3 = 2.8, CD11B = 2.4, LY6G = 0.2)), "Eosinophil", "eos")
-expect(lab_of(mk(FceRI = 3.1, CD200R3 = 2.8, CD11B = 1.6)), "Basophil_mast", "baso")
-# CCR3 高但 Siglec-F 不高 → 不是嗜酸
+expect(lab_of(mk(CD11C = 3.2, `I-A/I-E` = 3.3, CD80 = 2.2, CD11B = 0.4)), "cDC2", "cdc2")
+expect(lab_of(mk(CD11C = 3.1, CD103 = 3.0, `I-A/I-E` = 3.0, CD11B = 0.4)), "cDC1_CD103", "cdc1")
+expect(lab_of(mk(`Siglec-F` = 3.2, CCR3 = 2.8, CD11B = 2.6, LY6G = 0.2)), "Eosinophil", "eos")
+expect(lab_of(mk(FceRI = 3.1, CD200R3 = 2.8, CD11B = 2.8)), "Mast", "mast")
+# CCR3 或 Siglec-F 单阳都不是嗜酸
 ccr3_only <- lab_of(mk(CCR3 = 3.2, `Siglec-F` = 0.2, CD11B = 2.4, LY6C = 0.3, `F4/80` = 0.4))
 if (identical(ccr3_only, "Eosinophil")) fail("CCR3-only must not be Eosinophil")
+siglec_only <- lab_of(mk(`Siglec-F` = 3.2, CCR3 = 0.2, CD11B = 2.4, LY6C = 0.3, `F4/80` = 0.4))
+if (identical(siglec_only, "Eosinophil")) fail("Siglec-F-only must not be Eosinophil")
+# TNF-a 不得把巨噬打成 M1
+expect(lab_of(mk(CD11B = 3.0, `F4/80` = 3.2, `TNF-a` = 3.0, iNOS = 0.2, `ARG-1` = 0.2)), "Macrophage", "tnfa-not-m1")
 expect(lab_of(mk(CD19 = 3.3, CD3 = 0.2, CD11B = 0.3)), "B", "dump-B")
 expect(lab_of(mk(CD3 = 3.2, CD19 = 0.2, CD11B = 0.3)), "T", "dump-T")
 expect(lab_of(mk(`NK1.1` = 3.2, CD3 = 0.2, CD11B = 0.3)), "NK", "dump-NK")
@@ -106,12 +110,12 @@ bp3 <- function(name, n) {
 }
 m3 <- rbind(
   bp3("Neutrophil", 80), bp3("Eosinophil", 80), bp3("Macrophage", 80),
-  bp3("M1_like", 70), bp3("M2_like", 70), bp3("DC", 80), bp3("Mono_Ly6Chi", 80),
-  bp3("Basophil", 80)
+  bp3("M1_like", 70), bp3("M2_like", 70), bp3("DC", 80), bp3("cDC1", 70),
+  bp3("Mono_Ly6Chi", 80), bp3("Mast", 80)
 )
 h3 <- hierarchical_gate(m3, "P3")
 if (sum(h3$major == "Myeloid") < 0.8 * nrow(m3)) fail("P3 layer1 should be mostly Myeloid")
-need3 <- c("Neutrophil", "M1_like_Mac", "M2_like_Mac", "Basophil_mast")
+need3 <- c("Neutrophil", "M1_like_Mac", "M2_like_Mac", "Mast", "cDC1_CD103", "cDC2")
 miss3 <- setdiff(need3, unique(h3$subset))
 if (length(miss3)) {
   fail(sprintf("P3 missing subsets: %s; got %s", paste(miss3, collapse = ","), paste(unique(h3$subset), collapse = ",")))
@@ -137,5 +141,26 @@ if (mean(h_mac$subset[seq_len(80)] %in% mac_labs) < 0.5) {
 if (!all(c("M1_like_Mac", "M2_like_Mac") %in% unique(h_mac$subset))) {
   fail(sprintf("P3 M1/M2 missing after MHCII macs, got %s", paste(unique(h_mac$subset), collapse = ",")))
 }
+
+set.seed(8)
+cells_act <- data.frame(
+  sample = rep(c("EV1", "EV2", "EV3", "H1", "H2", "H3"), each = 40),
+  bio_sample = rep(c("EV1", "EV2", "EV3", "H1", "H2", "H3"), each = 40),
+  group = rep(c("EV", "EV", "EV", "H", "H", "H"), each = 40),
+  lineage = "Macrophage",
+  CD40 = rnorm(240, 1.1, 0.2),
+  CD80 = rnorm(240, 0.8, 0.2),
+  CD86 = rnorm(240, 1.0, 0.2),
+  `TNF-a` = rnorm(240, 0.6, 0.15),
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+td <- tempfile("p3_act")
+dir.create(td)
+export_p3_activation_stats(cells_act, td)
+if (!file.exists(file.path(td, "P3_APC_activation_by_sample.csv"))) {
+  fail("P3 activation MFI table missing")
+}
+unlink(td, recursive = TRUE)
 
 cat("OK: P3 labels and P1-shared palette\n")
