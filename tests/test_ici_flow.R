@@ -185,5 +185,8 @@ if (any(h_t_only$major == "Target") || mean(h_t_only$major == "CD4") < 0.85) {
                paste(unique(h_t_only$major), collapse = ",")))
 }
 expect(celltype_label("Target", "P1"), "His+ target", "label-his-target")
+if (!isFALSE(flow_trim_bio_extremes)) {
+  fail("ICI must keep n=3; do not drop extreme bio-reps")
+}
 
 cat("PASS test_ici_flow.R\n")

@@ -92,6 +92,13 @@ if (!nrow(p3n) || !all(p3n$role == "focus")) fail("P3 neutrophil should be focus
 st <- all_subset_stats(freq)
 if (!"delta_H_minus_EV" %in% names(st)) fail("stats missing delta_H_minus_EV")
 if (length(unique(st$panel)) < 3) fail("stats should cover three panels")
+if (!all(as.integer(st$n_EV) == 2L) || !all(as.integer(st$n_H) == 2L)) {
+  fail("all-subset stats should drop 1 extreme bio-rep (n=2)")
+}
+freq_plot <- all_subset_freq_for_plots(freq)
+if (is.null(freq_plot) || nrow(freq_plot) >= nrow(freq)) {
+  fail("plot table should have fewer rows after dropping 1 bio-rep per group")
+}
 
 td <- tempfile("flow_all_subsets")
 dir.create(file.path(td, "P1"), recursive = TRUE)
@@ -107,7 +114,8 @@ need_files <- c(
   "all_subsets_frequency_by_sample.csv",
   "all_subsets_H_vs_EV_stats.csv",
   "all_subsets_frequency_H_vs_EV.pdf",
-  "all_subsets_focus_delta_lollipop.pdf"
+  "all_subsets_focus_delta_lollipop.pdf",
+  "all_subsets_frequency_by_bio_trimmed.csv"
 )
 miss <- need_files[!file.exists(file.path(td, "all_subsets", need_files))]
 if (length(miss)) fail(sprintf("missing outputs: %s", paste(miss, collapse = ", ")))

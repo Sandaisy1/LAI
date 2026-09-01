@@ -144,6 +144,11 @@ if (!"NK" %in% st$subset) fail("NK not in subset stats")
 if (st$mean_H[st$subset == "NK"] >= st$mean_EV[st$subset == "NK"]) {
   fail("H NK frequency should be lower than EV in this synthetic set")
 }
+if (!identical(as.integer(st$n_EV[st$subset == "NK"]), 2L) ||
+    !identical(as.integer(st$n_H[st$subset == "NK"]), 2L)) {
+  fail(sprintf("subset bars should use n=2 after dropping 1 extreme, got n_EV=%s n_H=%s",
+               st$n_EV[st$subset == "NK"], st$n_H[st$subset == "NK"]))
+}
 bar <- plot_subset_stat_bar(data.frame(
   sample = c("EV1", "EV2", "EV3", "H1", "H2", "H3"),
   group = c("EV", "EV", "EV", "H", "H", "H"),

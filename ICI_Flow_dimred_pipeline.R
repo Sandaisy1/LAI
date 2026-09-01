@@ -62,6 +62,8 @@ load_original_flow_functions <- function() {
 }
 
 load_original_flow_functions()
+# ICI 没有技术重复、n=3，不要套用免疫亚群分析里「去掉一个极端生物学重复」的规则
+flow_trim_bio_extremes <- FALSE
 
 find_ici_panel_map <- function() {
   names <- c("ICI_flow_panel_map.json", "ICI_flow_panel_map.json.txt")

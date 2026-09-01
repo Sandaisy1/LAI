@@ -293,7 +293,8 @@ ensure_bio_sample <- function(df) {
   df
 }
 
-# 技术重复先在生物学重复内平均，H vs EV 的 n 是 3 vs 3，不要把 EV1-1/EV1-2 当成两个生物学 n
+# 技术重复先在生物学重复内平均；免疫亚群统计再去掉 1 个极端生物学重复后 n=2。
+# 不要把 EV1-1/EV1-2 当成两个生物学 n。ICI 保持 n=3。
 aggregate_freq_by_bio <- function(freq_df, id_col) {
   freq_df <- ensure_bio_sample(freq_df)
   if (!id_col %in% names(freq_df)) stop("aggregate_freq_by_bio: missing ", id_col)
@@ -306,12 +307,86 @@ aggregate_freq_by_bio <- function(freq_df, id_col) {
   aggregate(fmla, data = d, FUN = mean, na.rm = TRUE)
 }
 
-bio_percent_table <- function(samp) {
+# 免疫亚群降维：三个生物学重复里去掉离中位数更远的那个（最大值或最小值），
+# 剩下的用于均值/SD/检验。降维仍用全部管子。n<3 时不去。
+# ICI 靶细胞实验不要去极端值：在 source 之后设 flow_trim_bio_extremes <- FALSE。
+if (!exists("flow_trim_bio_extremes", inherits = TRUE)) {
+  flow_trim_bio_extremes <- TRUE
+}
+
+flow_should_trim_bio <- function(trim_bio = NULL) {
+  if (!is.null(trim_bio)) return(isTRUE(trim_bio))
+  isTRUE(get0("flow_trim_bio_extremes", ifnotfound = TRUE, inherits = TRUE))
+}
+
+which_extreme_bio <- function(vals) {
+  x <- as.numeric(vals)
+  finite <- is.finite(x)
+  if (sum(finite) < 3L) return(integer(0))
+  idx <- which(finite)
+  xx <- x[idx]
+  med <- stats::median(xx)
+  i_min <- which.min(xx)
+  i_max <- which.max(xx)
+  dmin <- med - xx[i_min]
+  dmax <- xx[i_max] - med
+  if (!is.finite(dmin) || !is.finite(dmax)) return(integer(0))
+  drop_local <- if (dmax >= dmin) i_max else i_min
+  idx[drop_local]
+}
+
+trim_bio_extremes <- function(freq_df, id_col, group_col = "group") {
+  if (is.null(freq_df) || !nrow(freq_df)) return(freq_df)
+  if (!id_col %in% names(freq_df)) stop("trim_bio_extremes: missing ", id_col)
+  ids <- unique(as.character(freq_df[[id_col]]))
+  grps <- unique(as.character(freq_df[[group_col]]))
+  keep_rows <- rep(TRUE, nrow(freq_df))
+  dropped <- list()
+  for (id in ids) {
+    for (g in grps) {
+      ii <- which(as.character(freq_df[[id_col]]) == id &
+                    as.character(freq_df[[group_col]]) == g)
+      if (length(ii) < 3L) next
+      drop_local <- which_extreme_bio(freq_df$percent[ii])
+      if (!length(drop_local)) next
+      row_i <- ii[drop_local]
+      keep_rows[row_i] <- FALSE
+      bio <- if ("bio_sample" %in% names(freq_df)) {
+        as.character(freq_df$bio_sample[row_i])
+      } else {
+        as.character(row_i)
+      }
+      dropped[[length(dropped) + 1L]] <- data.frame(
+        id = id,
+        group = g,
+        dropped_bio = bio,
+        dropped_percent = freq_df$percent[row_i],
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  out <- freq_df[keep_rows, , drop = FALSE]
+  attr(out, "dropped") <- if (length(dropped)) do.call(rbind, dropped) else NULL
+  out
+}
+
+maybe_trim_bio <- function(freq_df, id_col, trim_bio = NULL) {
+  if (!flow_should_trim_bio(trim_bio)) return(freq_df)
+  trim_bio_extremes(freq_df, id_col)
+}
+
+bio_percent_table <- function(samp, trim_bio = NULL) {
   s2 <- ensure_bio_sample(samp)
   s2 <- s2[is.finite(s2$percent), , drop = FALSE]
   if (!nrow(s2)) return(s2)
   out <- aggregate(percent ~ bio_sample + group, data = s2, FUN = mean, na.rm = TRUE)
   out$sample <- out$bio_sample
+  if (!flow_should_trim_bio(trim_bio)) return(out)
+  out$.trim_id <- "subset"
+  out <- trim_bio_extremes(out, ".trim_id")
+  dropped <- attr(out, "dropped")
+  out$.trim_id <- NULL
+  attr(out, "dropped") <- dropped
   out
 }
 
@@ -2487,13 +2562,18 @@ tidyr_pivot <- function(df) {
 }
 
 plot_freq_box <- function(freq_df, title) {
+  ylab <- if (flow_should_trim_bio()) {
+    "% of cells (bio-rep; max/min dropped)"
+  } else {
+    "% of cells (bio-rep)"
+  }
   ggplot2::ggplot(freq_df, ggplot2::aes(x = cluster, y = percent, fill = group)) +
     ggplot2::stat_summary(fun = mean, geom = "col", position = ggplot2::position_dodge(width = 0.8), width = 0.7) +
     ggplot2::geom_point(position = ggplot2::position_dodge(width = 0.8), size = 1.6, alpha = 0.9) +
     ggplot2::scale_fill_manual(values = pal_group) +
     theme_dr() +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
-    ggplot2::labs(title = title, x = NULL, y = "% of cells (per sample)")
+    ggplot2::labs(title = title, x = NULL, y = ylab)
 }
 
 plot_freq_bar <- function(sum_df, title) {
@@ -2534,7 +2614,7 @@ p_to_star <- function(p) {
   "ns"
 }
 
-# ns 时把 P 值写出来：n=3 时柱高看起来不同，t 检验仍常不显著
+# ns 时把 P 值写出来：去极端值后 n=2，柱高看起来不同，t 检验仍常不显著
 p_annot_label <- function(p) {
   star <- p_to_star(p)
   if (!is.finite(p)) return(star)
@@ -3028,6 +3108,7 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
     if (is.null(samp_bio) || nrow(samp_bio) < 2) next
     ctrl_v <- samp_bio$percent[as.character(samp_bio$group) == flow_ctrl_group]
     trt_v <- samp_bio$percent[as.character(samp_bio$group) == flow_trt_group]
+    dropped_bio <- attr(samp_bio, "dropped")
     pv <- if (length(ctrl_v) >= 2 && length(trt_v) >= 2) {
       tryCatch(stats::t.test(trt_v, ctrl_v)$p.value, error = function(e) NA_real_)
     } else {
@@ -3104,6 +3185,12 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
       sd_H = stats::sd(trt_v),
       delta_H_minus_EV = mean(trt_v, na.rm = TRUE) - mean(ctrl_v, na.rm = TRUE),
       p_value = pv,
+      dropped_EV = if (!is.null(dropped_bio) && nrow(dropped_bio)) {
+        paste(dropped_bio$dropped_bio[dropped_bio$group == flow_ctrl_group], collapse = ",")
+      } else "",
+      dropped_H = if (!is.null(dropped_bio) && nrow(dropped_bio)) {
+        paste(dropped_bio$dropped_bio[dropped_bio$group == flow_trt_group], collapse = ",")
+      } else "",
       ylab = ylab,
       stringsAsFactors = FALSE
     )
@@ -3475,19 +3562,29 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
                        file.path(out_dir, paste0(panel_id, "_cluster_marker_heatmap")))
 
   freq_df$cluster <- factor(freq_df$cluster, levels = annot$cluster)
-  freq_bio <- aggregate_freq_by_bio(freq_df, "cluster")
-  save_gg(plot_freq_box(freq_bio, paste(tag, "cluster frequency (bio-rep mean of tech)")),
+  freq_bio <- maybe_trim_bio(aggregate_freq_by_bio(freq_df, "cluster"), "cluster")
+  freq_ylab <- if (flow_should_trim_bio()) {
+    paste(tag, "cluster frequency (bio-rep; max/min dropped)")
+  } else {
+    paste(tag, "cluster frequency (bio-rep)")
+  }
+  save_gg(plot_freq_box(freq_bio, freq_ylab),
           file.path(out_dir, paste0(panel_id, "_cluster_frequency_H_vs_EV")),
           width = max(8, 0.7 * length(unique(freq_df$cluster)) + 2), height = 5.5)
 
   lin_freq <- lineage_frequencies(cells)
-  lin_bio <- aggregate_freq_by_bio(lin_freq, "lineage")
+  lin_bio <- maybe_trim_bio(aggregate_freq_by_bio(lin_freq, "lineage"), "lineage")
   names(lin_bio)[names(lin_bio) == "lineage"] <- "cluster"
-  save_gg(plot_freq_box(lin_bio, paste(tag, "lineage frequency (bio-rep mean of tech)")),
+  lin_ylab <- if (flow_should_trim_bio()) {
+    paste(tag, "lineage frequency (bio-rep; max/min dropped)")
+  } else {
+    paste(tag, "lineage frequency (bio-rep)")
+  }
+  save_gg(plot_freq_box(lin_bio, lin_ylab),
           file.path(out_dir, paste0(panel_id, "_lineage_frequency_H_vs_EV")),
           width = max(7, 0.8 * length(unique(lin_bio$cluster)) + 2), height = 5.5)
 
-  mean_df <- aggregate(percent ~ group + cluster, data = freq_df, FUN = mean)
+  mean_df <- aggregate(percent ~ group + cluster, data = freq_bio, FUN = mean)
   names(mean_df)[names(mean_df) == "percent"] <- "mean_percent"
   save_gg(plot_freq_bar(mean_df, paste(tag, "mean cluster composition")),
           file.path(out_dir, paste0(panel_id, "_cluster_composition_stacked")),
@@ -3584,8 +3681,10 @@ lineage_frequencies <- function(cells) {
   tab
 }
 
-compare_group_freq <- function(freq_df, id_col = "cluster") {
+compare_group_freq <- function(freq_df, id_col = "cluster", trim_bio = NULL) {
   freq_df <- aggregate_freq_by_bio(freq_df, id_col)
+  freq_df <- maybe_trim_bio(freq_df, id_col, trim_bio)
+  dropped <- attr(freq_df, "dropped")
   ids <- unique(as.character(freq_df[[id_col]]))
   g_ctrl <- flow_ctrl_group
   g_trt <- flow_trt_group
@@ -3598,6 +3697,14 @@ compare_group_freq <- function(freq_df, id_col = "cluster") {
     } else {
       pv <- tryCatch(t.test(trt_vals, ctrl_vals)$p.value, error = function(e) NA_real_)
     }
+    drop_ctrl <- NA_character_
+    drop_trt <- NA_character_
+    if (!is.null(dropped) && nrow(dropped)) {
+      dc <- dropped$dropped_bio[dropped$id == id & dropped$group == g_ctrl]
+      dt <- dropped$dropped_bio[dropped$id == id & dropped$group == g_trt]
+      if (length(dc)) drop_ctrl <- paste(dc, collapse = ",")
+      if (length(dt)) drop_trt <- paste(dt, collapse = ",")
+    }
     row <- data.frame(
       id = id,
       n_ctrl = length(ctrl_vals),
@@ -3608,6 +3715,8 @@ compare_group_freq <- function(freq_df, id_col = "cluster") {
       sd_trt = sd(trt_vals),
       delta_trt_minus_ctrl = mean(trt_vals) - mean(ctrl_vals),
       p_value = pv,
+      dropped_ctrl = drop_ctrl,
+      dropped_trt = drop_trt,
       stringsAsFactors = FALSE
     )
     names(row) <- c(
@@ -3616,12 +3725,14 @@ compare_group_freq <- function(freq_df, id_col = "cluster") {
       paste0("mean_", g_ctrl), paste0("mean_", g_trt),
       paste0("sd_", g_ctrl), paste0("sd_", g_trt),
       paste0("delta_", g_trt, "_minus_", g_ctrl),
-      "p_value"
+      "p_value",
+      paste0("dropped_", g_ctrl), paste0("dropped_", g_trt)
     )
     row
   })
   out <- do.call(rbind, rows)
   out$padj <- if (all(is.na(out$p_value))) NA_real_ else p.adjust(out$p_value, method = "BH")
+  attr(out, "dropped") <- dropped
   out[order(out$p_value, na.last = TRUE), ]
 }
 
@@ -3817,6 +3928,11 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   stats_cl <- compare_group_freq(freq_df, "cluster")
   lin_freq <- lineage_frequencies(cells)
   stats_lin <- compare_group_freq(lin_freq, "lineage")
+  if (flow_should_trim_bio()) {
+    log_msg(panel_id, " H vs EV stats: tech reps averaged, then drop 1 extreme bio-rep (max or min) per group; n=2")
+  } else {
+    log_msg(panel_id, " H vs EV stats: tech reps averaged to n=3 bio (no extreme dropped)")
+  }
 
   utils::write.csv(annot, file.path(out_dir, paste0(panel_id, "_cluster_annotation.csv")), row.names = FALSE)
   utils::write.csv(cbind(cluster = rownames(med), as.data.frame(med)),
@@ -3824,6 +3940,21 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   utils::write.csv(freq_df, file.path(out_dir, paste0(panel_id, "_cluster_frequency_by_sample.csv")), row.names = FALSE)
   utils::write.csv(aggregate_freq_by_bio(freq_df, "cluster"),
                    file.path(out_dir, paste0(panel_id, "_cluster_frequency_by_bio.csv")), row.names = FALSE)
+  if (flow_should_trim_bio()) {
+    cl_trim <- trim_bio_extremes(aggregate_freq_by_bio(freq_df, "cluster"), "cluster")
+    utils::write.csv(cl_trim,
+                     file.path(out_dir, paste0(panel_id, "_cluster_frequency_by_bio_trimmed.csv")), row.names = FALSE)
+    dropped_cl <- attr(cl_trim, "dropped")
+    dropped_lin <- attr(stats_lin, "dropped")
+    drop_rows <- Filter(Negate(is.null), list(
+      if (!is.null(dropped_cl)) cbind(panel = panel_id, table = "cluster", dropped_cl),
+      if (!is.null(dropped_lin)) cbind(panel = panel_id, table = "lineage", dropped_lin)
+    ))
+    if (length(drop_rows)) {
+      utils::write.csv(do.call(rbind, drop_rows),
+                       file.path(out_dir, paste0(panel_id, "_dropped_bio_extremes.csv")), row.names = FALSE)
+    }
+  }
   utils::write.csv(stats_cl, file.path(out_dir, paste0(panel_id, "_cluster_H_vs_EV_stats.csv")), row.names = FALSE)
   utils::write.csv(stats_lin, file.path(out_dir, paste0(panel_id, "_lineage_H_vs_EV_stats.csv")), row.names = FALSE)
   if (!is.null(dat$map)) {

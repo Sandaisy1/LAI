@@ -96,10 +96,28 @@ all_subset_stats <- function(freq) {
   out[order(out$panel, out$p_value, na.last = TRUE), ]
 }
 
+# 总览图用技术重复平均后再去掉极端生物学重复的值；原始管内频率另存 CSV
+all_subset_freq_for_plots <- function(freq) {
+  if (is.null(freq) || !nrow(freq)) return(freq)
+  bio <- aggregate_freq_by_bio(freq, "subset_label")
+  bio <- maybe_trim_bio(bio, "subset_label")
+  dropped <- attr(bio, "dropped")
+  meta_cols <- intersect(c("subset_label", "panel", "lineage", "celltype", "role"), names(freq))
+  meta <- unique(freq[, meta_cols, drop = FALSE])
+  out <- merge(bio, meta, by = "subset_label", all.x = TRUE)
+  attr(out, "dropped") <- dropped
+  out
+}
+
 plot_all_freq_facet <- function(freq, title) {
   meta <- unique(freq[, c("panel", "celltype", "subset_label")])
   meta <- meta[order(meta$panel, meta$celltype), ]
   freq$subset_label <- factor(freq$subset_label, levels = unique(meta$subset_label))
+  ylab <- if (exists("flow_should_trim_bio", mode = "function") && flow_should_trim_bio()) {
+    "% of cells in that panel (bio-rep; max/min dropped)"
+  } else {
+    "% of cells in that panel"
+  }
   ggplot2::ggplot(freq, ggplot2::aes(x = celltype, y = percent, fill = group)) +
     ggplot2::stat_summary(fun = mean, geom = "col",
                           position = ggplot2::position_dodge(width = 0.8), width = 0.7) +
@@ -108,7 +126,7 @@ plot_all_freq_facet <- function(freq, title) {
     ggplot2::scale_fill_manual(values = pal_group) +
     theme_dr() +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1, size = 8)) +
-    ggplot2::labs(title = title, x = NULL, y = "% of cells in that panel")
+    ggplot2::labs(title = title, x = NULL, y = ylab)
 }
 
 plot_all_stacked <- function(freq, title) {
@@ -193,22 +211,31 @@ export_all_subsets_analysis <- function(result_dir) {
     "Do not add P1+P2+P3 percentages together.",
     "Focus subsets: P1 T/NK, P2 B, P3 myeloid.",
     "Dump channels (coarse only): P1 B and Myeloid; P3 T, B, NK.",
+    "Stats: average tech reps, then drop 1 extreme bio-rep (max or min) per group.",
     paste("Panels found:", paste(unique(freq$panel), collapse = ", "))
   )
   writeLines(note, file.path(out_dir, "ALL_SUBSETS_NOTE.txt"))
   utils::write.csv(freq, file.path(out_dir, "all_subsets_frequency_by_sample.csv"), row.names = FALSE)
   utils::write.csv(stats, file.path(out_dir, "all_subsets_H_vs_EV_stats.csv"), row.names = FALSE)
+  freq_plot <- all_subset_freq_for_plots(freq)
+  if (!is.null(freq_plot) && nrow(freq_plot)) {
+    utils::write.csv(freq_plot, file.path(out_dir, "all_subsets_frequency_by_bio_trimmed.csv"), row.names = FALSE)
+    dropped <- attr(freq_plot, "dropped")
+    if (!is.null(dropped) && nrow(dropped)) {
+      utils::write.csv(dropped, file.path(out_dir, "all_subsets_dropped_bio_extremes.csv"), row.names = FALSE)
+    }
+  }
 
   n_lab <- length(unique(freq$subset_label))
   w_facet <- max(12, 1.1 * n_lab / 2)
-  save_gg(plot_all_freq_facet(freq, "All subsets (within-panel %)  EV vs H"),
+  save_gg(plot_all_freq_facet(freq_plot, "All subsets (within-panel %)  EV vs H"),
           file.path(out_dir, "all_subsets_frequency_H_vs_EV"),
           width = w_facet, height = 5.8)
-  save_gg(plot_all_stacked(freq, "Within-panel composition (sums to 100% per panel)"),
+  save_gg(plot_all_stacked(freq_plot, "Within-panel composition (mean of remaining bio-reps)"),
           file.path(out_dir, "all_subsets_composition_stacked"),
           width = 11, height = 5.6)
 
-  focus <- freq[freq$role == "focus", , drop = FALSE]
+  focus <- freq_plot[freq_plot$role == "focus", , drop = FALSE]
   stats_f <- stats[stats$role == "focus", , drop = FALSE]
   if (nrow(focus) > 0) {
     save_gg(plot_all_freq_facet(focus, "Focus subsets only  (P1 T/NK, P2 B, P3 myeloid)"),

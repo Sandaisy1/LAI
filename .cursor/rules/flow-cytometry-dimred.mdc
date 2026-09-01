@@ -13,7 +13,7 @@ alwaysApply: false
 - 目录：`E:/R/fuction of cell`（脚本、FCS 与 `results_flow/` 同目录；缺失则回退 `E:/R/function of cell` / `E:/R/flow J-LJY WJZ ZZX` / 仓库根）
 - 只用 `*_unmixed.fcs`，不要拿 raw 做降维
 - 文件名：`ZZX_EV1-1_P1_unmixed.fcs` / `EV1-1_P1_unmixed.fcs`（`ZZX_` 可有可无；生物学重复 1/2/3，技术重复 `-1`/`-2`）。旧名 `EV1_P1_unmixed.fcs` 仍可用。**先匹配 EV 再匹配 H**
-- 样品：`ZZX_EV` = EV1/EV2/EV3，每管两个技术重复 `EV1-1` `EV1-2`；`ZZX_H` = H1/H2/H3，同样 `H1-1` `H1-2`。圈门按 **FCS 管（技术重复）** 单独做；H vs EV 统计先把两个技术重复平均，再按 **n=3 生物学重复** 做 t 检验，不要把 6 个技术管当成 n=6
+- 样品：`ZZX_EV` = EV1/EV2/EV3，每管两个技术重复 `EV1-1` `EV1-2`；`ZZX_H` = H1/H2/H3，同样 `H1-1` `H1-2`。圈门按 **FCS 管（技术重复）** 单独做；H vs EV 统计先把两个技术重复平均，再在三个生物学重复里**去掉离中位数更远的那个最大值或最小值**，用剩下 **n=2** 做均值/SD/t 检验。不要把 6 个技术管当成 n=6。tSNE/UMAP 仍用全部细胞，不要先丢掉某个生物学重复再降维
 - 三个 panel **分开分析、分开出图**，禁止把 P1/P2/P3 拼成一张表达矩阵。全亚群总览只汇总各 panel 已圈好的**管内频率**（`Flow_dimred_all_subsets.R` → `results_flow/all_subsets/`），百分数不能跨 panel 加总，也不能拿去再做联合 UMAP
 - 细胞轨迹（`Flow_dimred_trajectory.R`）和降维同一套思路：每个 panel 先画**全体免疫细胞大类**的一棵树（`P1_major_trajectory`；大类不足 2 个则跳过），再按 **panel × 大类** 单独画亚群树（P1 的 CD4/CD8/NK/NKT，P2 的 B，P3 的髓系）。类内 PCA 当 Component 1/2，骨架用 slingshot（若已装）或亚群中心 MST。根节点按惯例取 naive / NK immature / Naive B / Ly6C hi 单核。轨迹是标志物状态连续体，不要当成发育起源证明。出图：细胞点要够大、黑色分支骨架要细，先画线再画点，不要圈很小、线很粗；**图注放右侧并留白，不要顶栏裁切**
 - **`skip trajectory (... subsets= 1)` 不是失败。** 树至少要 2 个亚群节点。某一大类门控后只有一个标签时，日志会写 `only 1 subset, no tree to draw`。真正要看的是 P1 CD4/CD8（以及拆开后的 NK/NKT）、P2 B、P3 Myeloid。`Panel Px failed: missing value where TRUE/FALSE needed` 才是 bug：`parent_mask` / `if (sum(par) < 20)` 遇到 NA 会炸；比较必须把 NA 收成 FALSE，subset 图失败不得炸掉整块 panel
@@ -32,7 +32,7 @@ alwaysApply: false
 
 ## 比较与出图（每 panel 必须单独出）
 
-比较只有 **H vs EV**（三个生物学重复 vs 三个；技术重复先平均）。联合 UMAP/tSNE 仍用全部细胞，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
+比较只有 **H vs EV**。技术重复先平均成三个生物学重复，再在 EV、H 各自去掉 1 个极端生物学重复（最大值或最小值里离中位数更远的那个），用剩下的值算均值、SD 和检验。联合 UMAP/tSNE 仍用全部细胞，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
 
 每个非空 panel 必须导出 PDF+PNG。图分两层（免疫细胞亚群降维，不要和 ICI 靶细胞寻找弄混）：
 
@@ -43,7 +43,7 @@ alwaysApply: false
 
 **圈门必须每个样品单独走完同一套逻辑**（`hierarchical_gate_by_sample`），不要六个 FCS 共用一个 kmeans 阈值。CD62L/CD44 用完整象限：naive = 62L+44−，**T_CM** = 双阳，**T_EM** = **整个 CD62L− 半平面**（CD44+ 与原点双阴都算 T_EM，不要只框 10–20% 的小矩形）。**T_EFF** = CD8/NK 的 Perforin+ 或 GZMB+，以及 CD4/CD8 里明确的 IFN-γ+ / TNF-α+ 岛。图上写 T_CM / T_EM / T_EFF，不要只写 TCM/TEM。阳性阈值要切在原点主团右侧（抓住 CD62L/CD44 尾巴），不要用全体 q80 把主团切开。每个 FCS 另出 `gating/<样品>/`：2D 十字门铺满坐标轴，CD62L/CD44 标四个象限百分数。subset 图的 EV、H 也各自按本组细胞切完整门，禁止用命中细胞的 10–90% 分位数小框。
 
-**每个亚群**还要出一组论文风格图（`subset_stats/`）：上方 EV（黑）vs H（红）柱状图（均值、**SD** 误差棒、每个重复的白心点、显著性 `ns/*/**/*** `；ns 时标出 P 值）。n=3 时柱高看起来不同也会 ns，不要为了出星号改检验。下方 2D 图按 FlowJo：**概率等高线 + 最外圈以外的 outliers**，EV/H 共用坐标轴、同一门框和百分数。不要只用 ggplot `stat_density_2d(ndensity)`（那是峰值等高线，看起来不像文章里的流式图）。
+**每个亚群**还要出一组论文风格图（`subset_stats/`）：上方 EV（黑）vs H（红）柱状图（均值、**SD** 误差棒、去掉极端值后剩下的重复白心点、显著性 `ns/*/**/*** `；ns 时标出 P 值）。n=2 时柱高看起来不同也会 ns，不要为了出星号改检验。下方 2D 图按 FlowJo：**概率等高线 + 最外圈以外的 outliers**，EV/H 共用坐标轴、同一门框和百分数。不要只用 ggplot `stat_density_2d(ndensity)`（那是峰值等高线，看起来不像文章里的流式图）。
 
 - P1：**先清理**（单细胞 → 淋巴细胞 FSC/SSC → CD45+），再圈大类。T = **CD3+** → **CD4+ CD8−** / **CD4− CD8+**。B = **CD19+**（dump）。NK = **CD3− NKp46+**（NKp46 在 CD11b **之前**，成熟 NK 是 CD11b+；NKp46 缺失才退回 NK1.1）。NKT = **CD3+ NKp46+**。CD4/CD8 内：naive = CD62L high CD44 low；**T_CM** = CD62L+ CD44+，其中 **T_SCM** = CD27+ CD95+；**T_EM** = 整个 CD62L−，再分 **T_EM early**（CD27+）/ **T_EM late**（CD27−）、**SLEC**（SCA-1+）、**MPEC**（SCA-1 low 且 CD27+）；耗竭在 T_EM 里用 **PD-L1 / LAG-3 / TIM-3** 高（CD4 和 CD8 都做）。**T_EFF** = CD8/NK 的 Perforin+ 或 GZMB+，以及 CD4/CD8 明确的 IFN-γ+ / TNF-α+。早期活化 = **CD69+**（可同时 naive 表型）；剩余 CD25+ CD69− → Treg。NK 内互斥：CD69+ → **NK activated**；Perforin+/GZMB+ → **NK T_EFF**；PD-L1/LAG-3/TIM-3 高 → **NK exhausted**；剩余按 Hayakawa **CD27 vs CD11b**：CD27+ CD11b− = immature，双阳 = DP，CD27− CD11b+ = mature。**不要用 NKG2D 当亚群**（组成性表达）。NKT 内：CD4+ = **CD4 NKT**，CD4− = **DN NKT**；少数 CD69 / 杀伤岛可标 activated / effector。NKG2D、IFN-g、TNF-a、GZMB 在 CD4/CD8/NK 上出 **MFI**，不是新亚群。B 与髓系在 P1 只 dump。
 - P2：**先清理**（单细胞 → **宽单核** FSC/SSC，不要只圈小淋巴，活化 B / 浆母更大 → FVS450− 活细胞 → CD45+）。再圈 **CD19+** 作为 B 亚群母门。CD19+ 上 **IgD vs CD27 四象限**：Naive = IgD high CD27−；**Unswitched memory** = IgD high CD27+；**Switched memory** = IgD− CD27+；双阴 = Atypical。**不要把 BLIMP-1 放进这一层**，也不要再用 k=2 把 B 只分成 Naive vs Memory。Switched 内：少数 BLIMP+ → **Plasmablast**（CD19+ 或弱阳 / IgD− / CD27+ / BLIMP-1+）；IgG+ 仍是 switched memory。Naive 或 Unswitched 内 IgM 高 → **MZ B**。CD19− 里 IgD− CD27++ BLIMP-1+ → **Plasma**（浆细胞可以是 CD19−，不要只在 CD19+ 里找）。**CD40 / CD80 / CD86 是 Naive、Unswitched、Switched 上的 MFI 或阳性率**，不是新的第 1 层亚群；**不要用 CD40 叫 Activated**（静息 B 也有 CD40）；少数 CD80/CD86 岛才可标 Activated（CD86 早、CD80 晚）。默认剩余是 Naive / Unswitched / Switched，不是 Plasma。

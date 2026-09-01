@@ -148,10 +148,44 @@ freq_tech <- data.frame(
   percent = c(10, 12, 11, 9, 10, 10, 4, 6, 5, 5, 5, 7),
   stringsAsFactors = FALSE
 )
+if (!identical(which_extreme_bio(c(1, 5, 6)), 1L)) {
+  fail("1,5,6: drop the min (farther from median)")
+}
+if (!identical(which_extreme_bio(c(11, 10, 10)), 1L)) {
+  fail("11,10,10: drop the max outlier")
+}
+if (!identical(which_extreme_bio(c(1, 2, 10)), 3L)) {
+  fail("1,2,10: drop the max outlier")
+}
+if (!identical(which_extreme_bio(c(1, 5, 9)), 3L)) {
+  fail("equal distance from median: drop the max")
+}
+if (length(which_extreme_bio(c(1, 2))) != 0L) {
+  fail("n<3 must keep all bio-reps")
+}
+
+st_full <- compare_group_freq(freq_tech, "lineage", trim_bio = FALSE)
+if (!identical(as.integer(st_full$n_EV[1]), 3L) || !identical(as.integer(st_full$n_H[1]), 3L)) {
+  fail(sprintf("tech replicates must average to n=3 bio before trim, got n_EV=%s n_H=%s",
+               st_full$n_EV[1], st_full$n_H[1]))
+}
+
 st_bio <- compare_group_freq(freq_tech, "lineage")
-if (!identical(as.integer(st_bio$n_EV[1]), 3L) || !identical(as.integer(st_bio$n_H[1]), 3L)) {
-  fail(sprintf("tech replicates must average to n=3 bio, got n_EV=%s n_H=%s",
+if (!identical(as.integer(st_bio$n_EV[1]), 2L) || !identical(as.integer(st_bio$n_H[1]), 2L)) {
+  fail(sprintf("after dropping 1 extreme bio-rep, n must be 2 vs 2, got n_EV=%s n_H=%s",
                st_bio$n_EV[1], st_bio$n_H[1]))
+}
+if (abs(st_bio$mean_EV[1] - 10) > 1e-8) {
+  fail(sprintf("EV 11/10/10 should drop 11, mean=10, got %s", st_bio$mean_EV[1]))
+}
+if (abs(st_bio$mean_H[1] - 5) > 1e-8) {
+  fail(sprintf("H 5/5/6 should drop 6, mean=5, got %s", st_bio$mean_H[1]))
+}
+if (!identical(as.character(st_bio$dropped_EV[1]), "EV1")) {
+  fail(sprintf("should drop EV1, got %s", st_bio$dropped_EV[1]))
+}
+if (!identical(as.character(st_bio$dropped_H[1]), "H3")) {
+  fail(sprintf("should drop H3, got %s", st_bio$dropped_H[1]))
 }
 
 if (!grepl("fuction of cell", flow_primary_data_dir, fixed = TRUE)) {
