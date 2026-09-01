@@ -80,6 +80,60 @@ expect(celltype_label("NKT_DN", "P1"), "DN NKT", "label-nkt-dn")
 expect(lab_of(mk(CD19 = 3.3, CD3 = 0.1, CD4 = 0.2, CD8 = 0.2)), "B", "b")
 expect(lab_of(mk(CD11B = 3.2, CD3 = 0.1, CD19 = 0.1, CD4 = 0.2)), "Myeloid", "myeloid")
 
+# CD4/CD8 必须是象限，不能比大小就把双阳/双阴揉进某一边
+set.seed(5)
+mk_tlin <- function(cd4, cd8, n = 50) {
+  cbind(
+    CD3 = rnorm(n, 3.2, 0.1), CD4 = rnorm(n, cd4, 0.12), CD8 = rnorm(n, cd8, 0.12),
+    CD19 = rnorm(n, 0.2, 0.08), CD11B = rnorm(n, 0.2, 0.08),
+    NKp46 = rnorm(n, 0.2, 0.08), `NK1.1` = rnorm(n, 0.2, 0.08)
+  )
+}
+mat_q <- rbind(mk_tlin(3.15, 0.28), mk_tlin(0.28, 3.15), mk_tlin(0.28, 0.28), mk_tlin(3.15, 3.15))
+gq <- gate_major_lineage(mat_q, "P1")
+n_each <- 50L
+if (mean(gq[seq_len(n_each)] == "CD4") < 0.85) fail("CD4+ CD8- T must be CD4")
+if (mean(gq[seq.int(n_each + 1L, 2L * n_each)] == "CD8") < 0.85) fail("CD4- CD8+ T must be CD8")
+if (mean(gq[seq.int(2L * n_each + 1L, 3L * n_each)] %in% c("CD4", "CD8")) > 0.2) {
+  fail("CD4- CD8- T must not be forced into CD4 or CD8")
+}
+if (mean(gq[seq.int(3L * n_each + 1L, 4L * n_each)] %in% c("CD4", "CD8")) > 0.2) {
+  fail("CD4+ CD8+ T must not be forced into CD4 or CD8")
+}
+if (!identical(unname(dr_lineage_marker_weights("P1", c("CD4", "CD8", "CD62L"))[c("CD4", "CD8")]), c(4, 4))) {
+  fail("joint DR must upweight CD4 and CD8 over shared memory markers")
+}
+if (!(dr_lineage_marker_weights("P1", "CD62L")[["CD62L"]] < dr_lineage_marker_weights("P1", "CD4")[["CD4"]])) {
+  fail("CD62L must not outweigh CD4 in the joint embedding")
+}
+set.seed(6)
+n_sep <- 60L
+shared <- cbind(
+  CD3 = rnorm(2L * n_sep, 3.1, 0.08),
+  CD62L = rnorm(2L * n_sep, 3.0, 0.08),
+  CD44 = rnorm(2L * n_sep, 0.35, 0.08),
+  CD27 = rnorm(2L * n_sep, 2.2, 0.08)
+)
+sep <- cbind(
+  shared,
+  CD4 = c(rnorm(n_sep, 3.1, 0.1), rnorm(n_sep, 0.25, 0.1)),
+  CD8 = c(rnorm(n_sep, 0.25, 0.1), rnorm(n_sep, 3.1, 0.1))
+)
+lab_sep <- rep(c("CD4", "CD8"), each = n_sep)
+sc_sep <- scale_markers(sep)
+cent <- function(m) {
+  pc <- stats::prcomp(m, center = FALSE, scale. = FALSE)$x[, 1:2]
+  d4 <- colMeans(pc[lab_sep == "CD4", , drop = FALSE])
+  d8 <- colMeans(pc[lab_sep == "CD8", , drop = FALSE])
+  sqrt(sum((d4 - d8)^2))
+}
+d_unw <- cent(sc_sep)
+d_w <- cent(weight_dr_markers(sc_sep, "P1"))
+if (!(d_w > d_unw * 1.3)) {
+  fail(sprintf("upweighted CD4/CD8 should pull CD4 vs CD8 apart on PCA (weighted=%s unweighted=%s)",
+               signif(d_w, 3), signif(d_unw, 3)))
+}
+
 # IFN-g / GZMB 背景不得把 TEM 并成 activated / effector
 expect(
   lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.1, `IFN-g` = 2.0)),

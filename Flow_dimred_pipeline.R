@@ -7,7 +7,7 @@
 # 每个 panel 单独联合 UMAP/tSNE。
 # 图1（*_major_split）：全体细胞按大类着色（CD4/CD8/NK/NKT/B/髓系）。
 # *_lineage_split：同一套联合 embedding，点按每一个细亚群着色（不是只画大类）。
-# 各大类再单独降维（dimred_by_major/），类内用高对比色。不要把每种细亚群拆成小格子。
+# 联合降维加重 CD4/CD8/CD3 等谱系标志，避免 naive CD4 与 naive CD8 揉在一起。
 #
 # 用法：
 #   setwd("E:/R/fuction of cell")
@@ -607,6 +607,51 @@ scale_markers <- function(mat) {
   sdv <- apply(mat, 2, sd, na.rm = TRUE)
   sdv[!is.finite(sdv) | sdv < 1e-8] <- 1
   sweep(sweep(mat, 2, mu, "-"), 2, sdv, "/")
+}
+
+# 联合 tSNE/UMAP 要能看见谱系：CD4/CD8 比 CD62L/CD44 权重大，否则 naive CD4 和 naive CD8 会揉成一团
+dr_lineage_marker_weights <- function(panel_id, markers) {
+  markers <- as.character(markers)
+  w <- setNames(rep(1, length(markers)), markers)
+  core <- c("CD4", "CD8", "CD8b")
+  lineage <- c("CD3", "CD19", "NKp46", "NK1.1", "CD11B", "CD11C", "His")
+  if (identical(panel_id, "P2")) {
+    lineage <- c("CD19", "IgD", "CD27", "IgM", "BLIMP-1")
+    core <- character(0)
+  }
+  w[markers %in% lineage] <- 2.5
+  w[markers %in% core] <- 4
+  w
+}
+
+weight_dr_markers <- function(mat, panel_id) {
+  mat <- as.matrix(mat)
+  if (!ncol(mat)) return(mat)
+  w <- dr_lineage_marker_weights(panel_id, colnames(mat))
+  sweep(mat, 2, w, "*")
+}
+
+# CD3+ T 里按 CD4 vs CD8 象限：CD4+ CD8- / CD4- CD8+。不要比谁更大就把双阳/双阴塞进某一边
+assign_t_cd4_cd8 <- function(cd4, cd8, is_t) {
+  n <- length(is_t)
+  out <- rep(NA_character_, n)
+  is_t <- na_to_false(is_t)
+  if (!any(is_t)) return(out)
+  c4 <- as.numeric(cd4)[is_t]
+  c8 <- as.numeric(cd8)[is_t]
+  c4[!is.finite(c4)] <- -Inf
+  c8[!is.finite(c8)] <- -Inf
+  cut4 <- axis_pos_cut(c4)
+  cut8 <- axis_pos_cut(c8)
+  if (!is.finite(cut4)) cut4 <- 1.2
+  if (!is.finite(cut8)) cut8 <- 1.2
+  hi4 <- c4 >= cut4
+  hi8 <- c8 >= cut8
+  lab <- rep("other", sum(is_t))
+  lab[hi4 & !hi8] <- "CD4"
+  lab[!hi4 & hi8] <- "CD8"
+  out[is_t] <- lab
+  out
 }
 
 # -----------------------------------------------------------------------------
@@ -1523,14 +1568,16 @@ gate_major_lineage <- function(mat, panel_id) {
   # NK：CD3- NKp46+。必须在 CD11b 之前，成熟 NK 是 CD11b+ NKp46+
   is_nk <- na_to_false(!is_b & nk > cd3 + 0.3 & nk > cd19)
   is_nkt <- na_to_false(!is_b & !is_nk & nk > 1 & cd3 > 1 & abs(cd3 - nk) < 1.2 & nk > cd19)
-  # T：CD3+，再分成 CD4+ CD8- / CD4- CD8+
+  # T：CD3+，再按 CD4 vs CD8 象限：CD4+ CD8- / CD4- CD8+（双阳/双阴不塞进某一边）
   is_t <- na_to_false(!is_b & !is_nk & !is_nkt & cd3 >= finite_pmax(cd19, cd11b))
   # 剩下的 CD11b+ 才是髓系 dump
   is_my <- na_to_false(!is_b & !is_nk & !is_nkt & !is_t & cd11b > finite_pmax(cd3, cd19, cd4, cd8) + 0.2)
   out[is_b] <- "B"
   out[is_nk] <- "NK"
   out[is_nkt] <- "NKT"
-  out[is_t] <- ifelse(cd4[is_t] >= cd8[is_t], "CD4", "CD8")
+  t_lab <- assign_t_cd4_cd8(cd4, cd8, is_t)
+  out[is_t] <- t_lab[is_t]
+  out[is_t & (is.na(out) | !nzchar(out))] <- "other"
   out[is_my] <- "Myeloid"
   out
 }
@@ -4133,6 +4180,13 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   }
   true_lin <- dat$true_lineage[ok_row]
   mat <- scale_markers(mat_raw)
+  mat <- weight_dr_markers(mat, panel_id)
+  w_used <- dr_lineage_marker_weights(panel_id, colnames(mat))
+  w_hi <- names(w_used)[w_used > 1]
+  if (length(w_hi)) {
+    log_msg(panel_id, " joint DR upweights lineage markers so CD4/CD8/NK do not collapse: ",
+            paste(sprintf("%s x%s", w_hi, w_used[w_hi]), collapse = ", "))
+  }
 
   log_msg(panel_id, " cells=", nrow(mat), " markers=", paste(feat, collapse = ","))
   log_msg(panel_id, " frequencies are from equal-n subsample used for embedding")

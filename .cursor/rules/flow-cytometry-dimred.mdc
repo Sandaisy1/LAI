@@ -32,7 +32,8 @@ alwaysApply: false
 
 ## 比较与出图（每 panel 必须单独出）
 
-比较只有 **H vs EV**。技术重复先平均成三个生物学重复，再在 EV、H 各自去掉 1 个极端生物学重复（最大值或最小值里离中位数更远的那个），用剩下的值算均值、SD 和检验。联合 UMAP/tSNE 仍用全部细胞，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
+- 比较只有 **H vs EV**。技术重复先平均成三个生物学重复，再在 EV、H 各自去掉 1 个极端生物学重复（最大值或最小值里离中位数更远的那个），用剩下的值算均值、SD 和检验。联合 UMAP/tSNE 仍用全部细胞，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
+- **CD4 T 与 CD8 T 在图1上揉在一起，不是圈门没分。** 标签是 CD4+CD8− / CD4−CD8+ 象限（双阳/双阴不要用「谁更大」塞进某一边）。坐标却是全部荧光通道一起算的 tSNE：naive CD4 和 naive CD8 在 CD62L/CD44/CD27 上几乎一样，CD4/CD8 只占两列，会被冲掉。联合降维必须**加重谱系标志**（CD4/CD8 权重大于共享记忆标志），让大红/大绿分开。类内亚群图仍只拿该大类再降维。
 
 每个非空 panel 必须导出 PDF+PNG。图分三层（免疫细胞亚群降维，ICI 靶细胞寻找用同一套绘图规则）：
 
@@ -62,7 +63,8 @@ alwaysApply: false
 # ❌ BAD: 把 EV1/EV2/EV3 先平均成一个“EV”再 UMAP
 # ❌ BAD: 只出 UMAP，不出每个亚群的柱状图+等高线
 # ❌ BAD: 把 *_lineage_split 画成六个大类，或 CD8 亚群全用绿色
-# ❌ BAD: 缺 CD19 就整块 panel / 后面的 NK 图都不出
+# ❌ BAD: 联合 tSNE 各通道等权，naive CD4 和 naive CD8 揉成一团
+# ❌ BAD: CD3+ 里用 cd4>=cd8 把双阳/双阴塞进 CD4 或 CD8
 # ✅ GOOD: 仅 unmixed；P1/P2/P3 各自目录；*_major_split 大类 + *_lineage_split 全体细亚群 + dimred_by_major/
 # ✅ GOOD: 左 EV、右 H，共用 tSNE；图注留在右侧不要裁切；缺通道只 skip 该项
 # ✅ GOOD: 每个 panel 出 annotation_heatmap（按注释亚群，不是 cluster 号）
