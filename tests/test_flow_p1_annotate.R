@@ -221,7 +221,7 @@ leg_w <- grob$widths
 if (!length(leg_w)) fail("figure-1 grob has no widths")
 p_sub <- plot_split_lineage(df_mix, "UMAP1", "UMAP2", "P1", "UMAP-1", "UMAP-2", "sub", color_mode = "subset")
 sub_cts <- unique(as.character(p_sub$data$celltype))
-if (!("CD4 naive" %in% sub_cts)) fail("per-class subset dimred should use fine subset labels")
+if (!("CD4 naive" %in% sub_cts)) fail("lineage_split / subset coloring must show fine subsets such as CD4 naive")
 if (!identical(dimred_major_of("P1", "NKT_CD4"), "NKT")) fail("NKT_CD4 is NKT, not CD4")
 if (!identical(major_display_label("CD4"), "CD4 T")) fail("CD4 display is CD4 T")
 if (!identical(celltype_label("Target", "P1"), "His+ target")) fail("Target display is His+ target")

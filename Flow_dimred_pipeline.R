@@ -5,8 +5,9 @@
 # 输入：*_unmixed.fcs（不要用 raw）
 # 样品：ZZX_EV（EV1/2/3 × 技术重复 -1/-2）与 ZZX_H（H1/2/3 × -1/-2）
 # 每个 panel 单独联合 UMAP/tSNE。
-# 图1：全体免疫细胞按**大类**着色（CD4/CD8/NK/NKT/B/髓系），左 EV、右 H，图注留足边距。
-# 各大类再单独做一次亚群降维。不要把每种细亚群拆成小格子。
+# 图1（*_major_split）：全体细胞按大类着色（CD4/CD8/NK/NKT/B/髓系）。
+# *_lineage_split：同一套联合 embedding，点按每一个细亚群着色（不是只画大类）。
+# 各大类再单独降维（dimred_by_major/），类内用高对比色。不要把每种细亚群拆成小格子。
 #
 # 用法：
 #   setwd("E:/R/fuction of cell")
@@ -2131,94 +2132,95 @@ theme_dr <- function() {
 pal_group <- setNames(c("#1A1A1A", "#E31A1C"), flow_group_levels)
 pal_group_shape <- setNames(c(16, 15), flow_group_levels)
 
-# P1 主图高对比色；P2/P3 亚群也从这套取色，不要做成全紫/全橙
+# 定性高对比色：同一大类内部不要共用一条色相渐变（CD8 不全绿、CD4 不全红棕、NK 不全紫、NKT 不全黄橙）
 pal_p1_hues <- c(
-  "#E74C3C", "#7B52A5", "#5DADE2", "#E8C87A",
-  "#C0392B", "#D4A017", "#27AE60", "#E67E22",
-  "#922B21", "#F5CBA7", "#A9DFBF", "#1E8449",
-  "#145A32", "#7D3C98", "#CA6F1E", "#85C1E9",
-  "#AD1457", "#8E24AA", "#F48FB1", "#FF8F00"
+  "#E74C3C", "#1565C0", "#2E7D32", "#F9A825", "#6A1B9A",
+  "#00897B", "#EF6C00", "#AD1457", "#0277BD", "#9E9D24",
+  "#5D4037", "#00ACC1", "#C62828", "#4527A0", "#558B2F",
+  "#F57C00", "#37474F", "#EC407A", "#1A237E", "#FFD600"
 )
 
 pal_celltype <- c(
   "CD4 activated" = "#E74C3C",
-  "CD4 T_EFF" = "#B03A2E",
-  "CD4 effector" = "#B03A2E",
-  "CD8 activated" = "#58D68D",
-  "NK T_EFF" = "#4A148C",
-  "NK effector" = "#4A148C",
-  "NK activated" = "#FF1744",
-  "NK immature" = "#F48FB1",
-  "NK DP" = "#EC407A",
-  "NK mature" = "#880E4F",
-  "NK exhausted" = "#6A1B9A",
-  "B cell" = "#7B52A5",
-  "Macrophage" = "#5DADE2",
-  "NKT" = "#F9A825",
-  "CD4 NKT" = "#FFD54F",
-  "DN NKT" = "#FF8F00",
-  "NKT activated" = "#FFF59D",
-  "NKT T_EFF" = "#F57F17",
-  "NKT effector" = "#F57F17",
-  "NK" = "#AD1457",
-  "T" = "#D4A017",
-  "CD8 T_CM" = "#27AE60",
-  "CD8 TCM" = "#27AE60",
-  "CD4 T_CM" = "#E67E22",
-  "CD4 TCM" = "#E67E22",
-  "CD4 T_SCM" = "#D35400",
-  "CD8 T_SCM" = "#1ABC9C",
-  "CD4 T_EM early" = "#E59866",
-  "CD8 T_EM early" = "#52BE80",
-  "CD4 T_EM late" = "#A04000",
-  "CD8 T_EM late" = "#0E6655",
-  "CD4 SLEC" = "#C0392B",
-  "CD8 SLEC" = "#117A65",
-  "CD4 MPEC" = "#F5B041",
-  "CD8 MPEC" = "#82E0AA",
-  "CD4 exhausted" = "#6C3483",
-  "Treg" = "#922B21",
+  "CD4 T_EFF" = "#1565C0",
+  "CD4 effector" = "#1565C0",
+  "CD4 T_CM" = "#2E7D32",
+  "CD4 TCM" = "#2E7D32",
+  "CD4 T_SCM" = "#26C6DA",
+  "CD4 T_EM early" = "#8D6E63",
+  "CD4 T_EM late" = "#6A1B9A",
+  "CD4 T_EM" = "#8E24AA",
+  "CD4 TEM" = "#8E24AA",
+  "CD4 SLEC" = "#00897B",
+  "CD4 MPEC" = "#7C4DFF",
+  "CD4 exhausted" = "#FF00FF",
+  "Treg" = "#795548",
   "CD4 naive" = "#F5B041",
-  "CD8 naive" = "#A9DFBF",
-  "CD8 T_EM" = "#1E8449",
-  "CD8 TEM" = "#1E8449",
-  "CD8 T_EFF" = "#145A32",
-  "CD8 effector" = "#145A32",
-  "CD8 exhausted" = "#7D3C98",
-  "CD4 T_EM" = "#6E2C00",
-  "CD4 TEM" = "#6E2C00",
-  "CD4 T" = "#E69A3C",
-  "CD8 T" = "#3D8B40",
+  "CD4 T" = "#EF9A9A",
+  "CD8 activated" = "#00E5FF",
+  "CD8 T_CM" = "#2979FF",
+  "CD8 TCM" = "#2979FF",
+  "CD8 T_SCM" = "#18FFFF",
+  "CD8 T_EM early" = "#795548",
+  "CD8 T_EM late" = "#FF6D00",
+  "CD8 T_EM" = "#EF6C00",
+  "CD8 TEM" = "#EF6C00",
+  "CD8 T_EFF" = "#6200EA",
+  "CD8 effector" = "#6200EA",
+  "CD8 naive" = "#76FF03",
+  "CD8 SLEC" = "#1B5E20",
+  "CD8 MPEC" = "#FFD600",
+  "CD8 exhausted" = "#D500F9",
+  "CD8 T" = "#2E7D32",
+  "NK T_EFF" = "#FF6F00",
+  "NK effector" = "#FF6F00",
+  "NK activated" = "#C6FF00",
+  "NK immature" = "#80DEEA",
+  "NK DP" = "#F48FB1",
+  "NK mature" = "#00695C",
+  "NK exhausted" = "#7B1FA2",
+  "NK" = "#1A237E",
+  "NKT" = "#546E7A",
+  "CD4 NKT" = "#00BFA5",
+  "DN NKT" = "#FF80AB",
+  "NKT activated" = "#304FFE",
+  "NKT T_EFF" = "#BF360C",
+  "NKT effector" = "#BF360C",
+  "B cell" = "#0D47A1",
+  "Macrophage" = "#0277BD",
+  "T" = "#D4A017",
   "T naive" = "#F7DC6F",
-  "T T_CM" = "#F4D03F",
-  "T TCM" = "#F4D03F",
-  "T T_EM" = "#B7950B",
-  "T TEM" = "#B7950B",
-  "Myeloid" = "#85C1E9",
-  "M1-like Mac" = "#1A5276",
-  "M2-like Mac" = "#27AE60",
+  "T T_CM" = "#43A047",
+  "T TCM" = "#43A047",
+  "T T_EM" = "#6A1B9A",
+  "T TEM" = "#6A1B9A",
+  "Myeloid" = "#00897B",
+  "M1-like Mac" = "#C62828",
+  "M2-like Mac" = "#43A047",
   "Naive B" = "#F5B041",
-  "Atypical B" = "#E8C87A",
-  "IgM memory B" = "#A9DFBF",
-  "Unswitched memory B" = "#A9DFBF",
-  "Memory B" = "#27AE60",
-  "Switched B" = "#E67E22",
-  "Switched memory B" = "#E67E22",
-  "MZ B" = "#F4D03F",
-  "Plasmablast" = "#B03A2E",
-  "Activated B" = "#E74C3C",
-  "Plasma" = "#922B21",
+  "Atypical B" = "#7E57C2",
+  "IgM memory B" = "#26A69A",
+  "Unswitched memory B" = "#26A69A",
+  "Memory B" = "#43A047",
+  "Switched B" = "#5E35B1",
+  "Switched memory B" = "#5E35B1",
+  "MZ B" = "#FF8A65",
+  "Plasmablast" = "#C62828",
+  "Activated B" = "#EC407A",
+  "Plasma" = "#4A148C",
   "Eosinophil" = "#E74C3C",
-  "Neutrophil" = "#E67E22",
-  "Ly6C hi mono" = "#CA6F1E",
-  "Ly6C lo mono" = "#E8C87A",
-  "DC" = "#7B52A5",
-  "CD103 DC" = "#922B21",
-  "cDC1" = "#922B21",
-  "cDC2" = "#7D3C98",
-  "Basophil" = "#A9DFBF",
-  "Basophil/mast" = "#A9DFBF",
-  "Mast" = "#A9DFBF",
+  "Neutrophil" = "#FF9800",
+  "Ly6C hi mono" = "#6D4C41",
+  "Ly6C lo mono" = "#BCAAA4",
+  "DC" = "#7E57C2",
+  "CD103 DC" = "#4527A0",
+  "cDC1" = "#4527A0",
+  "cDC2" = "#CE93D8",
+  "Basophil" = "#37474F",
+  "Basophil/mast" = "#37474F",
+  "Mast" = "#37474F",
+  "His+ target" = "#00ACC1",
+  "Target" = "#00ACC1",
   "other" = "#B0B0B0",
   "Other" = "#B0B0B0"
 )
@@ -2324,16 +2326,34 @@ celltype_colors <- function(levels) {
   pal <- pal_celltype[levels]
   miss <- levels[is.na(pal)]
   if (length(miss) > 0) {
-    extra <- pal_p1_hues[((seq_along(miss) - 1L) %% length(pal_p1_hues)) + 1L]
-    pal[is.na(pal)] <- extra
+    used <- unique(unname(pal[!is.na(pal)]))
+    extras <- setdiff(pal_p1_hues, used)
+    if (length(extras) < length(miss)) extras <- c(extras, pal_p1_hues)
+    pal[is.na(pal)] <- extras[seq_along(miss)]
   }
   names(pal) <- levels
   pal
 }
 
+# 同一张图里同类不要挤在一条色相上（RGB 欧氏距离；测试用）
+palette_min_rgb_dist <- function(cols) {
+  cols <- unname(cols)
+  cols <- cols[!is.na(cols) & nzchar(cols)]
+  if (length(cols) < 2L) return(Inf)
+  rgb <- t(grDevices::col2rgb(cols))
+  dmin <- Inf
+  for (i in seq_len(nrow(rgb) - 1L)) {
+    for (j in (i + 1L):nrow(rgb)) {
+      d <- sqrt(sum((rgb[i, ] - rgb[j, ])^2))
+      if (d < dmin) dmin <- d
+    }
+  }
+  dmin
+}
+
 split_dr_save_size <- function(n_keys, facet = TRUE) {
   n_keys <- max(1L, as.integer(n_keys))
-  ncol_leg <- if (n_keys > 10L) 2L else 1L
+  ncol_leg <- if (n_keys > 18L) 3L else if (n_keys > 10L) 2L else 1L
   legend_in <- 2.65 * ncol_leg
   width <- (if (facet) 11.2 else 7.0) + legend_in
   rows <- ceiling(n_keys / ncol_leg)
@@ -2387,7 +2407,8 @@ plot_feature_cols <- function(df) {
   setdiff(num, meta)
 }
 
-# 图1：全体细胞按大类着色。color_mode="subset" 只给各大类自己的亚群图用。
+# color_mode="major"：全体细胞按大类（*_major_split）。
+# color_mode="subset"：全体细胞按细亚群（*_lineage_split），或各大类自己的亚群图。
 plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title,
                                color_mode = c("major", "subset"), ...) {
   color_mode <- match.arg(color_mode)
@@ -2416,6 +2437,10 @@ plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title,
   levs <- c(intersect(prefer, levs), setdiff(levs, prefer))
   plot_df$celltype <- factor(plot_df$celltype, levels = levs)
   pal <- pal_fun(levs)
+  # 多数细胞先画、稀有亚群后画（叠在上面），避免耗竭/naive 被主团盖住
+  freq <- table(plot_df$celltype)
+  plot_df <- plot_df[order(as.integer(freq[as.character(plot_df$celltype)]),
+                           decreasing = TRUE, na.last = TRUE), , drop = FALSE]
   ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype)) +
     ggplot2::geom_point(size = 0.72, alpha = 0.92, stroke = 0) +
     ggplot2::facet_wrap(~group, ncol = 2, scales = "fixed") +
@@ -2478,24 +2503,28 @@ export_major_subset_dimred <- function(cells, panel_id, out_dir) {
       log_msg(panel_id, " ", mj, ": skip class dimred (n=", nrow(sub), ")")
       next
     }
-    sub <- embed_class_cells(sub)
-    lab <- major_display_label(mj)
-    tag <- paste0(panel_id, "_", gsub("[^A-Za-z0-9_-]", "_", mj))
-    ttl <- paste0(panel_id, "  ", lab, "  subsets  EV | H")
-    n_keys <- length(unique(celltype_label(sub$lineage, panel_id)))
-    save_split_dr(
-      plot_split_lineage(sub, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2",
-                         ttl, color_mode = "subset"),
-      file.path(class_dir, paste0(tag, "_tSNE_subset_H_vs_EV")),
-      n_keys
-    )
-    save_split_dr(
-      plot_split_lineage(sub, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
-                         ttl, color_mode = "subset"),
-      file.path(class_dir, paste0(tag, "_UMAP_subset_H_vs_EV")),
-      n_keys
-    )
-    log_msg(panel_id, " ", lab, " subset dimred n=", nrow(sub), " -> ", class_dir)
+    tryCatch({
+      sub <- embed_class_cells(sub)
+      lab <- major_display_label(mj)
+      tag <- paste0(panel_id, "_", gsub("[^A-Za-z0-9_-]", "_", mj))
+      ttl <- paste0(panel_id, "  ", lab, "  subsets  EV | H")
+      n_keys <- length(unique(celltype_label(sub$lineage, panel_id)))
+      save_split_dr(
+        plot_split_lineage(sub, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2",
+                           ttl, color_mode = "subset"),
+        file.path(class_dir, paste0(tag, "_tSNE_subset_H_vs_EV")),
+        n_keys
+      )
+      save_split_dr(
+        plot_split_lineage(sub, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
+                           ttl, color_mode = "subset"),
+        file.path(class_dir, paste0(tag, "_UMAP_subset_H_vs_EV")),
+        n_keys
+      )
+      log_msg(panel_id, " ", lab, " subset dimred n=", nrow(sub), " -> ", class_dir)
+    }, error = function(e) {
+      log_msg(panel_id, " skip ", mj, " class dimred: ", e$message)
+    })
   }
   invisible(class_dir)
 }
@@ -2940,6 +2969,16 @@ subset_hit_mask <- function(cells, spec) {
   lin %in% fam
 }
 
+# 缺染色通道：跳过这一项，不要中断后面的亚群/大类分析
+skip_if_missing_channels <- function(need, available, label) {
+  need <- unique(as.character(need))
+  need <- need[!is.na(need) & nzchar(need)]
+  miss <- setdiff(need, available)
+  if (!length(miss)) return(FALSE)
+  log_msg("skip ", label, " (missing channels: ", paste(miss, collapse = ", "), ")")
+  TRUE
+}
+
 subset_plot_specs <- function(panel_id) {
   mk <- function(lineage, x, y, parent, ylab, use_major = FALSE,
                  gate = "box", x_hi = NA, y_hi = NA) {
@@ -3266,106 +3305,125 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
   dir.create(sub_dir, recursive = TRUE, showWarnings = FALSE)
   stat_rows <- list()
   for (spec in specs) {
-    if (!all(c(spec$x, spec$y) %in% names(cells))) next
-    par <- parent_mask(cells, spec$parent)
-    hit <- subset_hit_mask(cells, spec)
-    par[is.na(par)] <- FALSE
-    hit[is.na(hit)] <- FALSE
-    n_par <- sum(par)
-    n_hit <- sum(par & hit)
-    if (!is.finite(n_par) || !is.finite(n_hit) || n_par < 20 || n_hit < 8) next
-    samp <- subset_sample_percent(cells, spec)
-    if (is.null(samp) || nrow(samp) < 2) next
-    samp_bio <- bio_percent_table(samp)
-    if (is.null(samp_bio) || nrow(samp_bio) < 2) next
-    ctrl_v <- samp_bio$percent[as.character(samp_bio$group) == flow_ctrl_group]
-    trt_v <- samp_bio$percent[as.character(samp_bio$group) == flow_trt_group]
-    dropped_bio <- attr(samp_bio, "dropped")
-    pv <- if (length(ctrl_v) >= 2 && length(trt_v) >= 2) {
-      tryCatch(stats::t.test(trt_v, ctrl_v)$p.value, error = function(e) NA_real_)
-    } else {
-      NA_real_
-    }
-    lab <- if (isTRUE(spec$use_major)) {
-      celltype_label(spec$lineage, panel_id)
-    } else {
-      celltype_label(spec$lineage, panel_id)
-    }
-    ylab <- if (!is.null(spec$ylab) && nzchar(spec$ylab)) spec$ylab else paste0(lab, " (%)")
-    bar <- plot_subset_stat_bar(samp_bio, ylab, pv)
-    d_ctrl <- cells[par & as.character(cells$group) == flow_ctrl_group, , drop = FALSE]
-    d_trt <- cells[par & as.character(cells$group) == flow_trt_group, , drop = FALSE]
-    if (nrow(d_ctrl) < 8 || nrow(d_trt) < 8) next
-    xlim <- finite_axis_lim(c(d_ctrl[[spec$x]], d_trt[[spec$x]]))
-    ylim <- finite_axis_lim(c(d_ctrl[[spec$y]], d_trt[[spec$y]]))
-    # EV、H 各自用本组细胞切完整门，不要六个样品共用一条线，也不要框命中细胞的分位数小盒
-    gate_ctrl <- complete_gate_for(d_ctrl[[spec$x]], d_ctrl[[spec$y]], spec, xlim, ylim)
-    gate_trt <- complete_gate_for(d_trt[[spec$x]], d_trt[[spec$y]], spec, xlim, ylim)
-    xlab <- axis_fl_label(panel_id, spec$x)
-    yfl <- axis_fl_label(panel_id, spec$y)
-    pct_of <- function(g) {
-      v <- samp_bio$percent[as.character(samp_bio$group) == g]
-      if (!length(v) || all(!is.finite(v))) return(0)
-      mean(v, na.rm = TRUE)
-    }
-    col_ctrl <- unname(pal_group[flow_ctrl_group])
-    col_trt <- unname(pal_group[flow_trt_group])
-    if (is.na(col_ctrl)) col_ctrl <- "#1A1A1A"
-    if (is.na(col_trt)) col_trt <- "#E31A1C"
-    xlim <- finite_axis_lim(c(
-      d_ctrl[[spec$x]], d_trt[[spec$x]],
-      gate_ctrl$xmin, gate_ctrl$xmax, gate_ctrl$xcut,
-      gate_trt$xmin, gate_trt$xmax, gate_trt$xcut
-    ))
-    ylim <- finite_axis_lim(c(
-      d_ctrl[[spec$y]], d_trt[[spec$y]],
-      gate_ctrl$ymin, gate_ctrl$ymax, gate_ctrl$ycut,
-      gate_trt$ymin, gate_trt$ymax, gate_trt$ycut
-    ))
-    labs_ctrl <- if (is_cd62_cd44_spec(spec)) {
-      quadrant_pct_labels(d_ctrl[[spec$x]], d_ctrl[[spec$y]], gate_ctrl$xcut, gate_ctrl$ycut, xlim, ylim)
-    } else {
-      NULL
-    }
-    labs_trt <- if (is_cd62_cd44_spec(spec)) {
-      quadrant_pct_labels(d_trt[[spec$x]], d_trt[[spec$y]], gate_trt$xcut, gate_trt$ycut, xlim, ylim)
-    } else {
-      NULL
-    }
-    c_ctrl <- plot_subset_contour(
-      d_ctrl, spec$x, spec$y, col_ctrl, xlab, yfl, pct_of(flow_ctrl_group),
-      gate_ctrl, xlim, ylim, labs_ctrl
-    )
-    c_trt <- plot_subset_contour(
-      d_trt, spec$x, spec$y, col_trt, xlab, yfl, pct_of(flow_trt_group),
-      gate_trt, xlim, ylim, labs_trt
-    )
-    stub <- paste0(panel_id, "_", gsub("[^A-Za-z0-9]+", "_", spec$lineage), "_H_vs_EV")
-    save_subset_figure(bar, c_ctrl, c_trt, file.path(sub_dir, stub))
-    utils::write.csv(samp, file.path(sub_dir, paste0(stub, "_by_sample.csv")), row.names = FALSE)
-    utils::write.csv(samp_bio, file.path(sub_dir, paste0(stub, "_by_bio.csv")), row.names = FALSE)
-    stat_rows[[length(stat_rows) + 1]] <- data.frame(
-      panel = panel_id,
-      subset = spec$lineage,
-      celltype = lab,
-      parent = spec$parent,
-      n_EV = length(ctrl_v),
-      n_H = length(trt_v),
-      mean_EV = mean(ctrl_v, na.rm = TRUE),
-      mean_H = mean(trt_v, na.rm = TRUE),
-      sd_EV = stats::sd(ctrl_v),
-      sd_H = stats::sd(trt_v),
-      delta_H_minus_EV = mean(trt_v, na.rm = TRUE) - mean(ctrl_v, na.rm = TRUE),
-      p_value = pv,
-      dropped_EV = if (!is.null(dropped_bio) && nrow(dropped_bio)) {
-        paste(dropped_bio$dropped_bio[dropped_bio$group == flow_ctrl_group], collapse = ",")
-      } else "",
-      dropped_H = if (!is.null(dropped_bio) && nrow(dropped_bio)) {
-        paste(dropped_bio$dropped_bio[dropped_bio$group == flow_trt_group], collapse = ",")
-      } else "",
-      ylab = ylab,
-      stringsAsFactors = FALSE
-    )
+    if (skip_if_missing_channels(
+      c(spec$x, spec$y), names(cells),
+      paste0(panel_id, " ", spec$lineage, " subset plot")
+    )) next
+    tryCatch({
+      par <- parent_mask(cells, spec$parent)
+      hit <- subset_hit_mask(cells, spec)
+      par[is.na(par)] <- FALSE
+      hit[is.na(hit)] <- FALSE
+      n_par <- sum(par)
+      n_hit <- sum(par & hit)
+      if (!is.finite(n_par) || !is.finite(n_hit) || n_par < 20 || n_hit < 8) {
+        # 细胞不够：不分析这一项，继续后面的亚群
+      } else {
+        samp <- subset_sample_percent(cells, spec)
+        if (is.null(samp) || nrow(samp) < 2) {
+          # 无样品百分比：跳过该项
+        } else {
+          samp_bio <- bio_percent_table(samp)
+          if (is.null(samp_bio) || nrow(samp_bio) < 2) {
+            # 无生物学重复表：跳过该项
+          } else {
+            ctrl_v <- samp_bio$percent[as.character(samp_bio$group) == flow_ctrl_group]
+            trt_v <- samp_bio$percent[as.character(samp_bio$group) == flow_trt_group]
+            dropped_bio <- attr(samp_bio, "dropped")
+            pv <- if (length(ctrl_v) >= 2 && length(trt_v) >= 2) {
+              tryCatch(stats::t.test(trt_v, ctrl_v)$p.value, error = function(e) NA_real_)
+            } else {
+              NA_real_
+            }
+            lab <- if (isTRUE(spec$use_major)) {
+              celltype_label(spec$lineage, panel_id)
+            } else {
+              celltype_label(spec$lineage, panel_id)
+            }
+            ylab <- if (!is.null(spec$ylab) && nzchar(spec$ylab)) spec$ylab else paste0(lab, " (%)")
+            bar <- plot_subset_stat_bar(samp_bio, ylab, pv)
+            d_ctrl <- cells[par & as.character(cells$group) == flow_ctrl_group, , drop = FALSE]
+            d_trt <- cells[par & as.character(cells$group) == flow_trt_group, , drop = FALSE]
+            if (nrow(d_ctrl) < 8 || nrow(d_trt) < 8) {
+              # EV/H 细胞不够：跳过该项
+            } else {
+              xlim <- finite_axis_lim(c(d_ctrl[[spec$x]], d_trt[[spec$x]]))
+              ylim <- finite_axis_lim(c(d_ctrl[[spec$y]], d_trt[[spec$y]]))
+              # EV、H 各自用本组细胞切完整门，不要六个样品共用一条线，也不要框命中细胞的分位数小盒
+              gate_ctrl <- complete_gate_for(d_ctrl[[spec$x]], d_ctrl[[spec$y]], spec, xlim, ylim)
+              gate_trt <- complete_gate_for(d_trt[[spec$x]], d_trt[[spec$y]], spec, xlim, ylim)
+              xlab <- axis_fl_label(panel_id, spec$x)
+              yfl <- axis_fl_label(panel_id, spec$y)
+              pct_of <- function(g) {
+                v <- samp_bio$percent[as.character(samp_bio$group) == g]
+                if (!length(v) || all(!is.finite(v))) return(0)
+                mean(v, na.rm = TRUE)
+              }
+              col_ctrl <- unname(pal_group[flow_ctrl_group])
+              col_trt <- unname(pal_group[flow_trt_group])
+              if (is.na(col_ctrl)) col_ctrl <- "#1A1A1A"
+              if (is.na(col_trt)) col_trt <- "#E31A1C"
+              xlim <- finite_axis_lim(c(
+                d_ctrl[[spec$x]], d_trt[[spec$x]],
+                gate_ctrl$xmin, gate_ctrl$xmax, gate_ctrl$xcut,
+                gate_trt$xmin, gate_trt$xmax, gate_trt$xcut
+              ))
+              ylim <- finite_axis_lim(c(
+                d_ctrl[[spec$y]], d_trt[[spec$y]],
+                gate_ctrl$ymin, gate_ctrl$ymax, gate_ctrl$ycut,
+                gate_trt$ymin, gate_trt$ymax, gate_trt$ycut
+              ))
+              labs_ctrl <- if (is_cd62_cd44_spec(spec)) {
+                quadrant_pct_labels(d_ctrl[[spec$x]], d_ctrl[[spec$y]], gate_ctrl$xcut, gate_ctrl$ycut, xlim, ylim)
+              } else {
+                NULL
+              }
+              labs_trt <- if (is_cd62_cd44_spec(spec)) {
+                quadrant_pct_labels(d_trt[[spec$x]], d_trt[[spec$y]], gate_trt$xcut, gate_trt$ycut, xlim, ylim)
+              } else {
+                NULL
+              }
+              c_ctrl <- plot_subset_contour(
+                d_ctrl, spec$x, spec$y, col_ctrl, xlab, yfl, pct_of(flow_ctrl_group),
+                gate_ctrl, xlim, ylim, labs_ctrl
+              )
+              c_trt <- plot_subset_contour(
+                d_trt, spec$x, spec$y, col_trt, xlab, yfl, pct_of(flow_trt_group),
+                gate_trt, xlim, ylim, labs_trt
+              )
+              stub <- paste0(panel_id, "_", gsub("[^A-Za-z0-9]+", "_", spec$lineage), "_H_vs_EV")
+              save_subset_figure(bar, c_ctrl, c_trt, file.path(sub_dir, stub))
+              utils::write.csv(samp, file.path(sub_dir, paste0(stub, "_by_sample.csv")), row.names = FALSE)
+              utils::write.csv(samp_bio, file.path(sub_dir, paste0(stub, "_by_bio.csv")), row.names = FALSE)
+              stat_rows[[length(stat_rows) + 1]] <- data.frame(
+                panel = panel_id,
+                subset = spec$lineage,
+                celltype = lab,
+                parent = spec$parent,
+                n_EV = length(ctrl_v),
+                n_H = length(trt_v),
+                mean_EV = mean(ctrl_v, na.rm = TRUE),
+                mean_H = mean(trt_v, na.rm = TRUE),
+                sd_EV = stats::sd(ctrl_v),
+                sd_H = stats::sd(trt_v),
+                delta_H_minus_EV = mean(trt_v, na.rm = TRUE) - mean(ctrl_v, na.rm = TRUE),
+                p_value = pv,
+                dropped_EV = if (!is.null(dropped_bio) && nrow(dropped_bio)) {
+                  paste(dropped_bio$dropped_bio[dropped_bio$group == flow_ctrl_group], collapse = ",")
+                } else "",
+                dropped_H = if (!is.null(dropped_bio) && nrow(dropped_bio)) {
+                  paste(dropped_bio$dropped_bio[dropped_bio$group == flow_trt_group], collapse = ",")
+                } else "",
+                ylab = ylab,
+                stringsAsFactors = FALSE
+              )
+            }
+          }
+        }
+      }
+    }, error = function(e) {
+      log_msg(panel_id, " skip ", spec$lineage, " subset plot: ", e$message)
+    })
   }
   if (length(stat_rows)) {
     st <- do.call(rbind, stat_rows)
@@ -3395,6 +3453,12 @@ export_per_sample_gating_figures <- function(cells, panel_id, out_dir) {
   specs <- subset_plot_specs(panel_id)
   key <- vapply(specs, function(s) paste(s$parent, s$x, s$y, sep = "\t"), character(1))
   views <- specs[!duplicated(key)]
+  views <- Filter(function(spec) {
+    !skip_if_missing_channels(
+      c(spec$x, spec$y), names(cells),
+      paste0(panel_id, " ", spec$parent, " ", spec$x, "/", spec$y, " gating")
+    )
+  }, views)
   gate_dir <- file.path(out_dir, "gating")
   dir.create(gate_dir, recursive = TRUE, showWarnings = FALSE)
   smp <- unique(as.character(cells$sample))
@@ -3407,46 +3471,52 @@ export_per_sample_gating_figures <- function(cells, panel_id, out_dir) {
     s_dir <- file.path(gate_dir, s)
     dir.create(s_dir, recursive = TRUE, showWarnings = FALSE)
     for (spec in views) {
-      if (!all(c(spec$x, spec$y) %in% names(cells))) next
-      par <- parent_mask(cells, spec$parent)
-      par[is.na(par)] <- FALSE
-      d <- cells[keep_s & par, , drop = FALSE]
-      if (nrow(d) < 20) next
-      xlim <- finite_axis_lim(d[[spec$x]])
-      ylim <- finite_axis_lim(d[[spec$y]])
-      gate <- complete_gate_for(d[[spec$x]], d[[spec$y]], spec, xlim, ylim)
-      xlim <- finite_axis_lim(c(d[[spec$x]], gate$xmin, gate$xmax, gate$xcut))
-      ylim <- finite_axis_lim(c(d[[spec$y]], gate$ymin, gate$ymax, gate$ycut))
-      gate <- complete_gate_for(d[[spec$x]], d[[spec$y]], spec, xlim, ylim)
-      qlabs <- quadrant_pct_labels(d[[spec$x]], d[[spec$y]], gate$xcut, gate$ycut, xlim, ylim)
-      show_quads <- is_cd62_cd44_spec(spec) || identical(spec$gate, "quad")
-      xlab <- axis_fl_label(panel_id, spec$x)
-      ylab <- axis_fl_label(panel_id, spec$y)
-      pct <- if (isTRUE(spec$use_major) && "cluster_lineage" %in% names(d)) {
-        100 * mean(as.character(d$cluster_lineage) == spec$lineage, na.rm = TRUE)
-      } else if ("lineage" %in% names(d)) {
-        100 * mean(as.character(d$lineage) == spec$lineage, na.rm = TRUE)
-      } else {
-        NA_real_
-      }
-      p <- plot_subset_contour(
-        d, spec$x, spec$y, col, xlab, ylab, pct, gate, xlim, ylim,
-        quad_labs = if (show_quads) qlabs else NULL,
-        highlight = !show_quads
-      )
-      stub <- paste0(
-        panel_id, "_", s, "_",
-        gsub("[^A-Za-z0-9]+", "_", paste(spec$parent, spec$x, spec$y, sep = "_"))
-      )
-      save_gating_plot(p, file.path(s_dir, stub))
-      cut_rows[[length(cut_rows) + 1]] <- data.frame(
-        panel = panel_id, sample = s, group = grp,
-        parent = spec$parent, marker_x = spec$x, marker_y = spec$y,
-        xcut = gate$xcut, ycut = gate$ycut,
-        xmin = gate$xmin, xmax = gate$xmax, ymin = gate$ymin, ymax = gate$ymax,
-        n_parent = nrow(d),
-        stringsAsFactors = FALSE
-      )
+      tryCatch({
+        par <- parent_mask(cells, spec$parent)
+        par[is.na(par)] <- FALSE
+        d <- cells[keep_s & par, , drop = FALSE]
+        if (nrow(d) < 20) {
+          # 该样品该门细胞不够：跳过该项
+        } else {
+          xlim <- finite_axis_lim(d[[spec$x]])
+          ylim <- finite_axis_lim(d[[spec$y]])
+          gate <- complete_gate_for(d[[spec$x]], d[[spec$y]], spec, xlim, ylim)
+          xlim <- finite_axis_lim(c(d[[spec$x]], gate$xmin, gate$xmax, gate$xcut))
+          ylim <- finite_axis_lim(c(d[[spec$y]], gate$ymin, gate$ymax, gate$ycut))
+          gate <- complete_gate_for(d[[spec$x]], d[[spec$y]], spec, xlim, ylim)
+          qlabs <- quadrant_pct_labels(d[[spec$x]], d[[spec$y]], gate$xcut, gate$ycut, xlim, ylim)
+          show_quads <- is_cd62_cd44_spec(spec) || identical(spec$gate, "quad")
+          xlab <- axis_fl_label(panel_id, spec$x)
+          ylab <- axis_fl_label(panel_id, spec$y)
+          pct <- if (isTRUE(spec$use_major) && "cluster_lineage" %in% names(d)) {
+            100 * mean(as.character(d$cluster_lineage) == spec$lineage, na.rm = TRUE)
+          } else if ("lineage" %in% names(d)) {
+            100 * mean(as.character(d$lineage) == spec$lineage, na.rm = TRUE)
+          } else {
+            NA_real_
+          }
+          p <- plot_subset_contour(
+            d, spec$x, spec$y, col, xlab, ylab, pct, gate, xlim, ylim,
+            quad_labs = if (show_quads) qlabs else NULL,
+            highlight = !show_quads
+          )
+          stub <- paste0(
+            panel_id, "_", s, "_",
+            gsub("[^A-Za-z0-9]+", "_", paste(spec$parent, spec$x, spec$y, sep = "_"))
+          )
+          save_gating_plot(p, file.path(s_dir, stub))
+          cut_rows[[length(cut_rows) + 1]] <- data.frame(
+            panel = panel_id, sample = s, group = grp,
+            parent = spec$parent, marker_x = spec$x, marker_y = spec$y,
+            xcut = gate$xcut, ycut = gate$ycut,
+            xmin = gate$xmin, xmax = gate$xmax, ymin = gate$ymin, ymax = gate$ymax,
+            n_parent = nrow(d),
+            stringsAsFactors = FALSE
+          )
+        }
+      }, error = function(e) {
+        log_msg(panel_id, " skip ", s, " ", spec$lineage, " gating: ", e$message)
+      })
     }
   }
   if (length(cut_rows)) {
@@ -3672,7 +3742,9 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
   split_ttl <- paste0(panel_id, "  EV | H")
   log_msg(
     panel_id,
-    " Figure 1: all immune cells colored by major class (not every fine subset); legend kept on the right"
+    " Figure 1 (*_major_split): all cells by major class; ",
+    "*_lineage_split: same embedding, every fine subset; ",
+    "dimred_by_major/: re-embed each class with high-contrast subset colors"
   )
   cells$dimred_major <- dimred_major_of(
     panel_id,
@@ -3690,10 +3762,19 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
   )
   save_split_dr(p_major_tsne, file.path(out_dir, paste0(panel_id, "_H_vs_EV_tSNE_major_split")), n_major)
   save_split_dr(p_major_umap, file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_major_split")), n_major)
-  # 旧文件名仍指向图1（大类），避免只剩被裁切的细亚群总图
-  save_split_dr(p_major_tsne, file.path(out_dir, paste0(panel_id, "_H_vs_EV_tSNE_lineage_split")), n_major)
-  save_split_dr(p_major_umap, file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split")), n_major)
-  save_split_dr(p_major_umap, file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split_joint")), n_major)
+
+  p_subset_tsne <- plot_split_lineage(
+    cells, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2",
+    paste0(split_ttl, "  all subsets"), color_mode = "subset"
+  )
+  p_subset_umap <- plot_split_lineage(
+    cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
+    paste0(split_ttl, "  all subsets"), color_mode = "subset"
+  )
+  n_subset <- length(unique(as.character(p_subset_tsne$data$celltype)))
+  save_split_dr(p_subset_tsne, file.path(out_dir, paste0(panel_id, "_H_vs_EV_tSNE_lineage_split")), n_subset)
+  save_split_dr(p_subset_umap, file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split")), n_subset)
+  save_split_dr(p_subset_umap, file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split_joint")), n_subset)
 
   tryCatch(
     export_major_subset_dimred(cells, panel_id, out_dir),

@@ -203,6 +203,55 @@ if (mean(h_no19$major[his_t] == "CD4") < 0.8) {
                paste(unique(h_no19$major[his_t]), collapse = ",")))
 }
 
+# 缺 CD19 可以不画 B 门，但不能跳过 NK 等其余亚群图
+set.seed(3)
+mk_ici <- function(sample, group, lineage, n, cd3, nk11) {
+  data.frame(
+    sample = rep(sample, n),
+    group = rep(group, n),
+    lineage = rep(lineage, n),
+    cluster_lineage = rep(if (lineage == "NK") "NK" else "CD4", n),
+    CD3 = rnorm(n, cd3, 0.25),
+    `NK1.1` = rnorm(n, nk11, 0.25),
+    NKp46 = rnorm(n, nk11, 0.25),
+    His = rnorm(n, 0.3, 0.1),
+    CD45 = rnorm(n, 3.0, 0.1),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+}
+cells_skip <- rbind(
+  mk_ici("EV-1", "EV", "NK", 80, 0.2, 3.1),
+  mk_ici("EV-1", "EV", "CD4_naive", 120, 3.0, 0.3),
+  mk_ici("EV-2", "EV", "NK", 70, 0.2, 3.1),
+  mk_ici("EV-2", "EV", "CD4_naive", 130, 3.0, 0.3),
+  mk_ici("EV-3", "EV", "NK", 90, 0.2, 3.1),
+  mk_ici("EV-3", "EV", "CD4_naive", 110, 3.0, 0.3),
+  mk_ici("H-1", "H", "NK", 30, 0.2, 3.1),
+  mk_ici("H-1", "H", "CD4_naive", 170, 3.0, 0.3),
+  mk_ici("H-2", "H", "NK", 35, 0.2, 3.1),
+  mk_ici("H-2", "H", "CD4_naive", 165, 3.0, 0.3),
+  mk_ici("H-3", "H", "NK", 28, 0.2, 3.1),
+  mk_ici("H-3", "H", "CD4_naive", 172, 3.0, 0.3)
+)
+td_skip <- tempfile("ici_skip_chan")
+dir.create(td_skip, recursive = TRUE)
+ok_skip <- tryCatch({
+  export_subset_gate_figures(cells_skip, "P1", td_skip)
+  TRUE
+}, error = function(e) {
+  cat("ICI missing-CD19 subset export crashed:", e$message, "\n")
+  FALSE
+})
+if (!isTRUE(ok_skip)) fail("missing CD19 must not abort the rest of ICI subset figures")
+if (!file.exists(file.path(td_skip, "subset_stats", "P1_NK_H_vs_EV.pdf"))) {
+  fail("ICI: missing CD19 must not skip NK subset plots")
+}
+if (file.exists(file.path(td_skip, "subset_stats", "P1_B_H_vs_EV.pdf"))) {
+  fail("ICI: B subset plot should be omitted without CD19, not crash")
+}
+unlink(td_skip, recursive = TRUE)
+
 # Cytek 有时把 AF700 写成 Y710-A
 cytek_p1_y710 <- c(
   "FSC-A", "SSC-A", "FVS450-A", "V500-A", "BUV496-A", "BUV805-A", "RB744-A",

@@ -36,10 +36,11 @@ alwaysApply: false
 
 ## 导出
 
-- 免疫亚群图仍走原流程的 `results_flow/P1/`、`P3/`：**图1按大类着色**（CD4 T / CD8 T / NK / NKT / Myeloid，加上 **His+ target**），左 EV、右 H，图注在右侧；细亚群在 `dimred_by_major/`。轨迹同样：先 `P1_major_trajectory`，再各大类亚群树。不要把二十几个细亚群叠在一张总图上
+- 免疫亚群图仍走原流程的 `results_flow/P1/`、`P3/`：与免疫亚群方案同一套绘图规则。**`*_major_split`** 按大类着色（CD4 T / CD8 T / NK / NKT / Myeloid，加上 **His+ target**）；**`*_lineage_split`** 是同一套联合 embedding 上**全体细亚群**；细亚群再降维在 `dimred_by_major/`，类内必须高对比色。轨迹同样：先 `P1_major_trajectory`，再各大类亚群树。图注在右侧。
 - 每个 panel 出 **免疫细胞注释热图** `*_annotation_heatmap`（标志物 × 已注释亚群；含 His+ target），以及大类版 `*_annotation_heatmap_major`
 - 靶细胞另出 `target_His/`：His+ 占活细胞%、His+ CD45− %、亚群内 His+、H vs EV 统计、tSNE/UMAP（左 EV 右 H；靶细胞青 / His+ CD45+ 金 / His− 灰，图注右侧）
 - ICI P1 **没有 CD19**。圈门缺通道必须当阴性，不要留下 NA 在 `out[is_t] <-` 上炸成 `NAs are not allowed in subscripted assignments`
+- **部分染色通道缺失：该项可以不分析（日志 `skip … missing channels`），但不能跳过该 panel 其余亚群图、大类图、热图和靶细胞表。** 例如缺 CD200R3 就不画肥大细胞门，后面的巨噬/DC 图仍要出
 - **NK1.1** 表上是 AF700（P3 写成 R718）；Cytek 通道名还可能是 `R718-A` / `APC-R700-A` / `Y710-A`，都要配上
 
 ```r

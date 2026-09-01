@@ -34,14 +34,17 @@ alwaysApply: false
 
 比较只有 **H vs EV**。技术重复先平均成三个生物学重复，再在 EV、H 各自去掉 1 个极端生物学重复（最大值或最小值里离中位数更远的那个），用剩下的值算均值、SD 和检验。联合 UMAP/tSNE 仍用全部细胞，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
 
-每个非空 panel 必须导出 PDF+PNG。图分两层（免疫细胞亚群降维，不要和 ICI 靶细胞寻找弄混）：
+每个非空 panel 必须导出 PDF+PNG。图分三层（免疫细胞亚群降维，ICI 靶细胞寻找用同一套绘图规则）：
 
-1. **图1（全体大类）**：左 EV、右 H，共用同一套 tSNE/UMAP，点按 **CD4 T / CD8 T / NK / NKT / B / Myeloid** 着色，不要把二十几个细亚群全叠在一张图上（颜色会糊、图注会被裁掉）。图注放右侧并加宽画布。
-2. **各大类亚群图**（`dimred_by_major/`）：只拿该大类细胞再降维，点按细亚群着色，同样左 EV、右 H。
+1. **图1（全体大类，`*_major_split`）**：左 EV、右 H，共用同一套 tSNE/UMAP，点按 **CD4 T / CD8 T / NK / NKT / B / Myeloid** 着色。图注放右侧并加宽画布。
+2. **全体细亚群（`*_lineage_split` / `*_UMAP_lineage_split`）**：同一套联合 embedding、全体细胞，点按**每一个细亚群**着色，不要只画六个大类。图注多列、稀有亚群落在上层。
+3. **各大类亚群图**（`dimred_by_major/`）：只拿该大类细胞再降维，点按细亚群着色，同样左 EV、右 H。**同一大类内部必须用高对比定性色**（CD8 不要全绿、CD4 不要全红棕、NK 不要全紫、NKT 不要全黄橙）。
+
+**缺染色通道：这一项可以不分析，但不能跳过后面的亚群/大类/panel。** 日志写 `skip … (missing channels: …)`，继续出其余图。
 
 每个 panel 还必须出 **免疫细胞注释热图**（`*_annotation_heatmap`）：行是标志物、列是已圈好的细胞类型（中位数再按标志物 z-score），不要用 kmeans cluster 号当列名。另出一张大类版 `*_annotation_heatmap_major`。ICI 同样出，列里要有 His+ target。
 
-**不要**把每个亚群拆成小格子、也不要每种细胞画一个填充 blob（图2）。不要虚线凸包。旧函数 `separate_region_plot_coords` / `region_fill_polygon` 已删除，不要再加回来。图注必须完整可见。
+**不要**把每个亚群拆成小格子、也不要每种细胞画一个填充 blob（旧图2）。不要虚线凸包。旧函数 `separate_region_plot_coords` / `region_fill_polygon` 已删除，不要再加回来。图注必须完整可见。
 
 **圈门必须每个样品单独走完同一套逻辑**（`hierarchical_gate_by_sample`），不要六个 FCS 共用一个 kmeans 阈值。CD62L/CD44 用完整象限：naive = 62L+44−，**T_CM** = 双阳，**T_EM** = **整个 CD62L− 半平面**（CD44+ 与原点双阴都算 T_EM，不要只框 10–20% 的小矩形）。**T_EFF** = CD8/NK 的 Perforin+ 或 GZMB+，以及 CD4/CD8 里明确的 IFN-γ+ / TNF-α+ 岛。图上写 T_CM / T_EM / T_EFF，不要只写 TCM/TEM。阳性阈值要切在原点主团右侧（抓住 CD62L/CD44 尾巴），不要用全体 q80 把主团切开。每个 FCS 另出 `gating/<样品>/`：2D 十字门铺满坐标轴，CD62L/CD44 标四个象限百分数。subset 图的 EV、H 也各自按本组细胞切完整门，禁止用命中细胞的 10–90% 分位数小框。
 
@@ -51,15 +54,16 @@ alwaysApply: false
 - P2：**先清理**（单细胞 → **宽单核** FSC/SSC，不要只圈小淋巴，活化 B / 浆母更大 → FVS450− 活细胞 → CD45+）。再圈 **CD19+** 作为 B 亚群母门。CD19+ 上 **IgD vs CD27 四象限**：Naive = IgD high CD27−；**Unswitched memory** = IgD high CD27+；**Switched memory** = IgD− CD27+；双阴 = Atypical。**不要把 BLIMP-1 放进这一层**，也不要再用 k=2 把 B 只分成 Naive vs Memory。Switched 内：少数 BLIMP+ → **Plasmablast**（CD19+ 或弱阳 / IgD− / CD27+ / BLIMP-1+）；IgG+ 仍是 switched memory。Naive 或 Unswitched 内 IgM 高 → **MZ B**。CD19− 里 IgD− CD27++ BLIMP-1+ → **Plasma**（浆细胞可以是 CD19−，不要只在 CD19+ 里找）。**CD40 / CD80 / CD86 是 Naive、Unswitched、Switched 上的 MFI 或阳性率**，不是新的第 1 层亚群；**不要用 CD40 叫 Activated**（静息 B 也有 CD40）；少数 CD80/CD86 岛才可标 Activated（CD86 早、CD80 晚）。默认剩余是 Naive / Unswitched / Switched，不是 Plasma。
 - P3：**先清理**（单细胞 → FVS450− → CD45+，不要加小淋巴门）。再圈大类：T = **CD3+**；B = **CD3− CD19+**；NK = **CD3− CD19− NK1.1+**；髓系 = **CD3− CD19− NK1.1−**。髓系先按 **CD11B** 分两支，不要一次 kmeans 比大小。**CD11B+**：Ly6G→中性粒（Ly6C 中阳仍是中性粒）；**Siglec-F 且 CCR3**→嗜酸（单阳不算）；**FceRI 且 CD200R3**→肥大细胞；剩余 **F4/80 high** = 组织巨噬，**F4/80 mid/low 且 Ly6C high** = 炎症单核，其余 Ly6C lo。**CD11B−**：CD11C+ 且 MHC-II+ → DC，再 **CD103+ = cDC1**、**CD103− = cDC2**。MHCII+ 巨噬仍在 CD11B+，不能并成 DC。巨噬内 **M1 = iNOS+ ARG-1−**，**M2 = ARG-1+ CD206+ iNOS−**；不用 IL-10/TGF-b/TNF-a/CD86 当极化。**CD40/CD80/CD86** 是 B/DC/巨噬的 MFI，**TNF-a** 是巨噬/DC/T 的读出，都不是新亚群。P3 的 CD80 是 **BUV496**（TNF-a 才是 APC）。
 - 类内 kmeans 只跑该层标志。不要全局 kmeans 后整团贴一个名字，也不要按 rank 在 UMAP 上撒点
-- **P1/P2/P3 共用 P1 那套高对比色**（红/紫/蓝/米/酒红/金/绿/橙），**同一张 tSNE 上的 NK/NKT 要用品红/琥珀，不要和 CD4 红、CD8 绿撞色**。禁止 P2 全紫、P3 全橙。组别色：EV 黑、H 红
+- **P1/P2/P3 共用高对比定性色**：同一张图、同一大类内部色相必须拉开。禁止 CD8 全绿、CD4 全红棕、NK 全紫红、NKT 全黄橙、P2 全紫、P3 全橙。组别色：EV 黑、H 红
 - P3 **CD80 = BUV496**，**TNF-a = APC**（同一管子不能两个 APC）
 
 ```r
 # ❌ BAD: 用 raw FCS；把 EV1 解析成 H；三 panel 混降维；只出坐标表不出图
 # ❌ BAD: 把 EV1/EV2/EV3 先平均成一个“EV”再 UMAP
 # ❌ BAD: 只出 UMAP，不出每个亚群的柱状图+等高线
-# ❌ BAD: 把每个亚群拆成小格子再画（图2）
-# ✅ GOOD: 仅 unmixed；P1/P2/P3 各自目录；图1按大类着色 + dimred_by_major/ 亚群图
-# ✅ GOOD: 左 EV、右 H，共用 tSNE；图注留在右侧不要裁切
+# ❌ BAD: 把 *_lineage_split 画成六个大类，或 CD8 亚群全用绿色
+# ❌ BAD: 缺 CD19 就整块 panel / 后面的 NK 图都不出
+# ✅ GOOD: 仅 unmixed；P1/P2/P3 各自目录；*_major_split 大类 + *_lineage_split 全体细亚群 + dimred_by_major/
+# ✅ GOOD: 左 EV、右 H，共用 tSNE；图注留在右侧不要裁切；缺通道只 skip 该项
 # ✅ GOOD: 每个 panel 出 annotation_heatmap（按注释亚群，不是 cluster 号）
 ```

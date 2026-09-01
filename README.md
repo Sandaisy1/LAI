@@ -94,8 +94,9 @@ source("Flow_dimred_pipeline.R")
 
 每个 panel 的图在 `E:/R/fuction of cell/results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
 
-- `*_H_vs_EV_tSNE_major_split` / `*_UMAP_major_split`：**图1**，左 EV、右 H，共用联合 tSNE，点按 **免疫大类**（CD4 T / CD8 T / NK / NKT / B / Myeloid）着色；图注在右侧，画布加宽以免裁切。同内容也写到旧名 `*_lineage_split`。
-- `dimred_by_major/`：每个大类单独再降维，点按该大类的**细亚群**着色（同样 EV | H）。不要把二十几个细亚群全叠在图1上。
+- `*_H_vs_EV_tSNE_major_split` / `*_UMAP_major_split`：**图1**，左 EV、右 H，共用联合 tSNE，点按 **免疫大类**（CD4 T / CD8 T / NK / NKT / B / Myeloid）着色；图注在右侧，画布加宽以免裁切。
+- `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split`：同一套 embedding 上的**全体细胞、每一个细亚群**（不是只画六个大类）。
+- `dimred_by_major/`：每个大类单独再降维，点按该大类的**细亚群**着色（同样 EV | H）。类内用高对比定性色，不要 CD8 全绿 / CD4 全红棕 / NK 全紫 / NKT 全黄橙。
 - `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图；下为 FlowJo 风格 2D 图。门是铺到坐标轴的完整象限/半平面（CD62L/CD44 标四个象限），EV 与 H **各自切阈值**。不是只框 10–90% 命中细胞的小矩形。
@@ -124,7 +125,7 @@ source("ICI_Flow_dimred_pipeline.R")
 
 QC 只去双联体和死细胞，**不要求 CD45+**，也 **不用 P1 紧淋巴门**，以免丢掉 His+ CD45− 靶细胞。活细胞里 His+ CD45− 标成 **His+ target**；His+ CD45+ 仍按原来的 T/NK/髓系亚群命名，并另出各亚群内 His+ 比例。
 
-降维和轨迹与免疫亚群方案同一套：图1按大类着色（含 His+ target），细亚群在 `dimred_by_major/`；轨迹先画全体大类树再画各类亚群树。每个 panel 出免疫细胞注释热图 `*_annotation_heatmap`（含 His+ target）。ICI P1 没有 CD19，缺通道按阴性处理，不要再出现 `NAs are not allowed in subscripted assignments`。结果在同目录 `results_flow/`，靶细胞表和图在 `target_His/`。
+降维和轨迹与免疫亚群方案同一套：`*_major_split` 按大类着色（含 His+ target），`*_lineage_split` 是全体细亚群，`dimred_by_major/` 再按大类重降维（高对比色）；轨迹先画全体大类树再画各类亚群树。每个 panel 出免疫细胞注释热图 `*_annotation_heatmap`（含 His+ target）。ICI P1 没有 CD19，缺通道按阴性处理，不要再出现 `NAs are not allowed in subscripted assignments`；缺的染色通道该项可以不分析，但不能跳过该 panel 其余图。结果在同目录 `results_flow/`，靶细胞表和图在 `target_His/`。
 
 若日志出现「没有匹配到任何分析通道」，多半是 Cytek 通道名带 `-A`（如 `BUV496-A`）或 desc 为空，不是文件没找到。用最新脚本再跑；仍失败时日志会列出通道名，并在 `results_flow/00_logs/` 写 `*_channels.csv`。
 

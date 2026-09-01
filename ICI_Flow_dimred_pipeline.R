@@ -496,7 +496,7 @@ panels <- c("P1", "P3")
 summaries <- list()
 for (pn in panels) {
   log_msg("ICI ", pn, ": His+ CD45- = target; remaining CD45+ use original lineage gates")
-  log_msg(pn, " dimred/trajectory follow the immune-subset layout: Figure 1 by major class, then dimred_by_major/, then major + per-class trees")
+  log_msg(pn, " dimred: *_major_split by major class; *_lineage_split all fine subsets on the same embedding; dimred_by_major/ per-class; missing stain channels skip that item only")
   summaries[[pn]] <- tryCatch(
     analyze_one_panel(pn, file_tab, use_demo),
     error = function(e) {

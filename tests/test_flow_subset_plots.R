@@ -128,6 +128,15 @@ stub <- file.path(td, "subset_stats", "P1_NK_H_vs_EV")
 if (!file.exists(paste0(stub, ".pdf")) || !file.exists(paste0(stub, ".png"))) {
   fail("NK subset figure pdf/png missing")
 }
+if (file.exists(file.path(td, "subset_stats", "P1_B_H_vs_EV.pdf"))) {
+  fail("B subset figure should be skipped when CD19 is missing, not written")
+}
+if (!isTRUE(skip_if_missing_channels(c("CD19", "CD3"), names(cells), "test B"))) {
+  fail("skip_if_missing_channels should flag CD19-missing B plots")
+}
+if (isTRUE(skip_if_missing_channels(c("CD3", "NKp46"), names(cells), "test NK"))) {
+  fail("NK plot must not skip when CD3 and NKp46 are present")
+}
 export_per_sample_gating_figures(cells, "P1", td)
 ev1_dir <- file.path(td, "gating", "EV1")
 if (!dir.exists(ev1_dir)) fail("per-sample gating folder missing for EV1")
