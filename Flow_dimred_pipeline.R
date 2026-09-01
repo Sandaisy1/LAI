@@ -582,7 +582,33 @@ read_fcs_expr <- function(path, panel_id) {
   list(exprs = exprs, names = nms, desc = desc, map = map)
 }
 
-qc_filter_matrix <- function(exprs, names, map) {
+# CD45+：有阴性岛就切在两群之间；全体都阳则只去掉左尾，不要把门切到主团上方。
+qc_cd45_cut <- function(v) {
+  v <- as.numeric(v)
+  v <- v[is.finite(v)]
+  if (!length(v)) return(0)
+  if (length(v) < 20) return(as.numeric(stats::quantile(v, 0.08, names = FALSE)))
+  xs <- scale(as.matrix(v))
+  xs[!is.finite(xs)] <- 0
+  set.seed(if (exists("seed_value")) seed_value else 42)
+  km <- tryCatch(
+    stats::kmeans(xs, centers = 2, nstart = 8, iter.max = 200, algorithm = "Lloyd"),
+    error = function(e) NULL
+  )
+  if (!is.null(km) && length(unique(km$cluster)) == 2) {
+    med <- tapply(v, km$cluster, median, na.rm = TRUE)
+    hi <- unname(med[which.max(med)])
+    lo <- unname(med[which.min(med)])
+    frac_hi <- mean(km$cluster == as.integer(names(med)[which.max(med)]))
+    if (is.finite(hi) && is.finite(lo) && (hi - lo) >= 0.55 && frac_hi >= 0.25 && frac_hi <= 0.97) {
+      return(unname((hi + lo) / 2))
+    }
+  }
+  as.numeric(stats::quantile(v, 0.08, names = FALSE))
+}
+
+# 清理：单细胞 →（P1）淋巴细胞 FSC/SSC → 活细胞 → CD45+
+qc_filter_matrix <- function(exprs, names, map, panel_id = NA) {
   keep <- rep(TRUE, nrow(exprs))
   fsc <- grep("^FSC-A$|^FSC_A$|^FSC\\.A$", names, ignore.case = TRUE)
   ssc <- grep("^SSC-A$|^SSC_A$|^SSC\\.A$", names, ignore.case = TRUE)
@@ -596,6 +622,17 @@ qc_filter_matrix <- function(exprs, names, map) {
     ratio <- exprs[, fsc[1]] / pmax(exprs[, fsch[1]], 1)
     keep <- keep & ratio > 0.5 & ratio < 2
   }
+  fscw <- grep("^FSC-W$|^FSC_W$", names, ignore.case = TRUE)
+  if (length(fscw) && any(keep)) {
+    fw <- exprs[, fscw[1]]
+    keep <- keep & fw <= quantile(fw[keep], 0.95, na.rm = TRUE)
+  }
+  if (identical(as.character(panel_id), "P1") && length(fsc) && length(ssc)) {
+    fs <- exprs[, fsc[1]]
+    ss <- exprs[, ssc[1]]
+    keep <- keep & ss <= quantile(ss, 0.82, na.rm = TRUE)
+    keep <- keep & fs >= quantile(fs, 0.05, na.rm = TRUE) & fs <= quantile(fs, 0.97, na.rm = TRUE)
+  }
   ld_idx <- map$channel_index[map$marker == "L/D"]
   if (length(ld_idx) && !is.na(ld_idx[1])) {
     ld <- exprs[, ld_idx[1]]
@@ -603,8 +640,8 @@ qc_filter_matrix <- function(exprs, names, map) {
   }
   cd45_idx <- map$channel_index[map$marker == "CD45"]
   if (length(cd45_idx) && !is.na(cd45_idx[1])) {
-    cd <- exprs[, cd45_idx[1]]
-    keep <- keep & cd >= quantile(cd, 0.2, na.rm = TRUE)
+    cd <- asinh(pmax(as.numeric(exprs[, cd45_idx[1]]), 0) / 150)
+    keep <- keep & cd >= qc_cd45_cut(cd)
   }
   keep[is.na(keep)] <- FALSE
   keep
@@ -646,8 +683,10 @@ demo_means_p1 <- function() {
     CD4_TCM = pop(CD3 = 3.2, CD4 = 3.0, CD62L = 2.8, CD44 = 2.8, CD27 = 2.4),
     CD4_TEM = pop(CD3 = 3.2, CD4 = 3.0, CD62L = 0.3, CD44 = 3.1, CD27 = 0.8),
     Treg = pop(CD3 = 3.1, CD4 = 3.0, CD25 = 3.2, CD69 = 0.4, CD44 = 1.8),
-    CD4_act = pop(CD3 = 3.2, CD4 = 3.0, CD25 = 1.2, CD69 = 3.1, CD44 = 2.6, CD62L = 0.4, `TNF-a` = 2.4, `IFN-g` = 1.8),
+    CD4_act = pop(CD3 = 3.2, CD4 = 3.0, CD25 = 2.8, CD69 = 3.1, CD44 = 0.3, CD62L = 3.2),
+    CD4_eff = pop(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.0, `IFN-g` = 3.2, `TNF-a` = 3.0, CD69 = 0.4),
     CD8_naive = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.9, CD4 = 0.1, CD62L = 3.1, CD44 = 0.3),
+    CD8_act = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD4 = 0.1, CD62L = 3.1, CD44 = 0.3, CD69 = 3.1, CD25 = 2.8),
     CD8_TCM = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD62L = 2.7, CD44 = 2.6),
     CD8_TEM = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 3.0, CD62L = 0.3),
     CD8_eff = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 2.6, GZMB = 3.0, Perforin = 2.8, `IFN-g` = 2.2),
@@ -705,12 +744,12 @@ demo_props <- function(panel_id, group) {
   ctrl <- identical(as.character(group), flow_ctrl_group)
   if (panel_id == "P1") {
     if (ctrl) {
-      return(c(CD4_naive = 0.14, CD4_TCM = 0.07, CD4_TEM = 0.07, Treg = 0.05, CD4_act = 0.05,
-               CD8_naive = 0.09, CD8_TCM = 0.06, CD8_TEM = 0.07, CD8_eff = 0.05, CD8_exh = 0.04,
+      return(c(CD4_naive = 0.12, CD4_TCM = 0.06, CD4_TEM = 0.06, Treg = 0.04, CD4_act = 0.05, CD4_eff = 0.04,
+               CD8_naive = 0.08, CD8_act = 0.04, CD8_TCM = 0.05, CD8_TEM = 0.06, CD8_eff = 0.05, CD8_exh = 0.04,
                NK = 0.12, NKT = 0.04, B = 0.09, Myeloid = 0.06))
     }
-    return(c(CD4_naive = 0.07, CD4_TCM = 0.05, CD4_TEM = 0.07, Treg = 0.05, CD4_act = 0.09,
-             CD8_naive = 0.05, CD8_TCM = 0.05, CD8_TEM = 0.06, CD8_eff = 0.08, CD8_exh = 0.09,
+    return(c(CD4_naive = 0.06, CD4_TCM = 0.04, CD4_TEM = 0.06, Treg = 0.04, CD4_act = 0.08, CD4_eff = 0.05,
+             CD8_naive = 0.04, CD8_act = 0.05, CD8_TCM = 0.04, CD8_TEM = 0.05, CD8_eff = 0.08, CD8_exh = 0.08,
              NK = 0.12, NKT = 0.05, B = 0.08, Myeloid = 0.05))
   }
   if (panel_id == "P2") {
@@ -842,35 +881,50 @@ annotate_clusters <- function(med, panel_id) {
       paste0(prefix, "_T")
     }
     if (panel_id == "P1") {
-      # NK 必须明显 CD3-；不要靠 NK1.1 背景把 T 吃掉
+      nkp <- nv(i, "NKp46")
+      nk11 <- nv(i, "NK1.1")
+      nk <- if (is.finite(nkp) && nkp > -Inf && nkp >= 0) nkp else max(nkp, nk11)
+      # CD45+ 内：B = CD19+（通常 CD3-）；NK = CD3- NKp46+；T = CD3+
       if (is.finite(cd19) && cd19 >= max(cd3, cd4, cd8, nk) - 0.05 && cd19 > cd3 + 0.15) return("B")
       if (is.finite(cd11b) && cd11b > max(cd3, cd4, cd8, cd19) + 0.2) return("Myeloid")
-      if (is.finite(nk) && nk > cd3 + 0.3 && nk > cd19 && nk >= max(cd4, cd8) - 0.15) return("NK")
+      if (is.finite(nk) && nk > cd3 + 0.3 && nk > cd19 && nk >= max(cd4, cd8) - 0.15) {
+        kill <- max(nv(i, "GZMB"), nv(i, "Perforin"))
+        if (is.finite(kill) && kill >= 2.5 && kill > nk - 0.4) return("NK_effector")
+        return("NK")
+      }
       if (is.finite(nk) && is.finite(cd3) && nk > 1 && cd3 > 1 &&
           abs(cd3 - nk) < 1.2 && nk > cd19 && cd3 > cd19 && nk >= max(cd4, cd8) - 0.4) {
         return("NKT")
       }
       if (cd8 > cd4 + 0.15) {
         exh <- max(nv(i, "LAG-3"), nv(i, "TIM-3"))
-        eff <- max(nv(i, "GZMB"), nv(i, "Perforin"))
+        kill <- max(nv(i, "GZMB"), nv(i, "Perforin"))
+        cyto <- max(nv(i, "IFN-g"), nv(i, "TNF-a"))
+        cd69 <- nv(i, "CD69")
+        cd25 <- nv(i, "CD25")
         cd62 <- nv(i, "CD62L")
         cd44 <- nv(i, "CD44")
-        # IFN-g 背景不能当 effector；GZMB/Perforin 必须压过 CD44/CD62L
-        if (is.finite(exh) && exh > max(eff, cd62) + 0.2 && exh >= cd44 - 0.35) return("CD8_exhausted")
-        if (is.finite(eff) && eff > max(cd62, cd44) + 0.15 && eff > exh) return("CD8_effector")
+        if (is.finite(exh) && exh > max(kill, cd62) + 0.2 && exh >= cd44 - 0.35) return("CD8_exhausted")
+        if (is.finite(kill) && kill > max(cd62, cd44) + 0.15 && kill > exh) return("CD8_effector")
+        if (is.finite(cyto) && cyto >= 2.5 && cyto >= max(cd62, cd44) - 0.15 && cyto > kill) {
+          return("CD8_effector")
+        }
+        # 早期活化：CD69+（常伴 CD25 高），可以同时是 CD62L+ CD44-
+        if (is.finite(cd69) && cd69 >= 2.2) return("CD8_activated")
         return(t_mem("CD8"))
       }
       if (cd4 > cd8 + 0.15) {
         cd25 <- nv(i, "CD25")
         cd69 <- nv(i, "CD69")
         tnfa <- nv(i, "TNF-a")
+        ifng <- nv(i, "IFN-g")
         cd62 <- nv(i, "CD62L")
         cd44 <- nv(i, "CD44")
-        act <- max(cd69, tnfa)
-        if (is.finite(cd25) && cd25 > max(cd69, tnfa, nv(i, "IFN-g")) + 0.2 &&
+        if (is.finite(cd69) && cd69 >= 2.2) return("CD4_activated")
+        if (is.finite(cd25) && cd25 > max(cd69, tnfa, ifng) + 0.2 &&
             cd25 >= max(cd62, cd44) - 0.6) return("Treg")
-        # IFN-g 不能单独把 naive/TEM 标成 activated
-        if (is.finite(act) && act > max(cd62, cd44) + 0.2 && act > cd25) return("CD4_activated")
+        cyto <- max(ifng, tnfa)
+        if (is.finite(cyto) && cyto >= 2.5 && cyto >= max(cd62, cd44) - 0.15) return("CD4_effector")
         return(t_mem("CD4"))
       }
       if (is.finite(cd3) && cd3 > max(cd19, cd11b, nk)) return(t_mem("T"))
@@ -967,21 +1021,28 @@ label_cd4_subset <- function(v) {
   cd25 <- vec_get(v, "CD25")
   cd69 <- vec_get(v, "CD69")
   tnfa <- vec_get(v, "TNF-a")
+  ifng <- vec_get(v, "IFN-g")
   cd62 <- vec_get(v, "CD62L")
   cd44 <- vec_get(v, "CD44")
-  act <- max(cd69, tnfa)
-  if (cd25 > act + 0.15 && cd25 > max(cd62, cd44) - 0.8) return("Treg")
-  if (act > max(cd62, cd44) + 0.1 && act > cd25) return("CD4_activated")
+  # 早期活化：CD69+（常 CD25 高），可以同时是 CD62L+ CD44-
+  if (cd69 >= 2.2) return("CD4_activated")
+  if (cd25 > max(cd69, tnfa, ifng) + 0.15 && cd25 > max(cd62, cd44) - 0.8) return("Treg")
+  cyto <- max(ifng, tnfa)
+  if (cyto >= 2.5 && cyto >= max(cd62, cd44) - 0.15) return("CD4_effector")
   mem_from_cd62_cd44(cd62, cd44, "CD4")
 }
 
 label_cd8_subset <- function(v) {
   exh <- max(vec_get(v, "LAG-3"), vec_get(v, "TIM-3"))
-  eff <- max(vec_get(v, "GZMB"), vec_get(v, "Perforin"))
+  kill <- max(vec_get(v, "GZMB"), vec_get(v, "Perforin"))
+  cyto <- max(vec_get(v, "IFN-g"), vec_get(v, "TNF-a"))
+  cd69 <- vec_get(v, "CD69")
   cd62 <- vec_get(v, "CD62L")
   cd44 <- vec_get(v, "CD44")
-  if (exh > eff + 0.1 && exh > cd62 + 0.1) return("CD8_exhausted")
-  if (eff > max(cd62, cd44) + 0.1 && eff > exh) return("CD8_effector")
+  if (exh > kill + 0.1 && exh > cd62 + 0.1) return("CD8_exhausted")
+  if (kill > max(cd62, cd44) + 0.1 && kill > exh) return("CD8_effector")
+  if (cyto >= 2.5 && cyto >= max(cd62, cd44) - 0.15) return("CD8_effector")
+  if (cd69 >= 2.2) return("CD8_activated")
   mem_from_cd62_cd44(cd62, cd44, "CD8")
 }
 
@@ -1159,6 +1220,16 @@ gate_p2_major <- function(mat) {
   out
 }
 
+# P1 NK：文档是 CD3- NKp46+；NKp46 缺失时才退回 NK1.1
+p1_nk_score <- function(mat) {
+  nkp <- colv(mat, "NKp46")
+  nk11 <- colv(mat, "NK1.1")
+  out <- nkp
+  miss <- !is.finite(out)
+  out[miss] <- nk11[miss]
+  out
+}
+
 # 第 1 层：只用谱系抗体圈大类（P1 T/NK，P2 B 的 Naive/Memory，P3 淋巴 vs 髓系）
 gate_major_lineage <- function(mat, panel_id) {
   mat <- as.matrix(mat)
@@ -1171,18 +1242,20 @@ gate_major_lineage <- function(mat, panel_id) {
   cd8 <- finite_pmax(colv(mat, "CD8"), colv(mat, "CD8b"))
   cd19 <- colv(mat, "CD19")
   cd11b <- colv(mat, "CD11B")
-  nk <- finite_pmax(colv(mat, "NK1.1"), colv(mat, "NKp46"))
+  nk <- if (identical(panel_id, "P1")) p1_nk_score(mat) else finite_pmax(colv(mat, "NK1.1"), colv(mat, "NKp46"))
   out <- rep("Myeloid", n)
+  # B：CD45+ 里 CD19+（通常 CD3-）
   is_b <- cd19 > finite_pmax(cd3, cd4, cd8, nk) + 0.1
   is_my <- !is_b & cd11b > finite_pmax(cd3, cd19, cd4, cd8) + 0.2
+  # NK：CD3- NKp46+
   is_nk <- !is_b & !is_my & nk > cd3 + 0.3 & nk > cd19
   is_nkt <- !is_b & !is_my & !is_nk & nk > 1 & cd3 > 1 & abs(cd3 - nk) < 1.2 & nk > cd19
+  # T：CD3+，再分成 CD4+ CD8- / CD4- CD8+
   is_t <- !is_b & !is_my & !is_nk & !is_nkt & cd3 >= finite_pmax(cd19, cd11b)
   out[is_b] <- "B"
   out[is_my] <- "Myeloid"
   out[is_nk] <- "NK"
   out[is_nkt] <- "NKT"
-  # T 细胞必须判到 CD4 或 CD8，不要留下 T TEM
   out[is_t] <- ifelse(cd4 >= cd8, "CD4", "CD8")
   if (panel_id == "P3") {
     out[out %in% c("CD4", "CD8", "NKT")] <- "T"
@@ -1376,14 +1449,31 @@ sequential_t_subsets <- function(mat, idx, line) {
     remain[pos[hi]] <<- FALSE
   }
   if (identical(line, "CD4")) {
+    # 早期活化 CD69+（可同时 naive 表型）；剩余 CD25+ 才是 Treg
+    take_high("CD69", "CD4_activated", 0.15)
     take_high("CD25", "Treg", 0.15)
-    take_high(c("CD69", "TNF-a"), "CD4_activated", 0.15)
+    take_high(c("IFN-g", "TNF-a"), "CD4_effector", 0.25)
     if (any(remain)) labs[remain] <- split_memory_3(mat, idx[remain], "CD4")
   } else {
     take_high(c("LAG-3", "TIM-3"), "CD8_exhausted", 0.15)
     take_high(c("GZMB", "Perforin"), "CD8_effector", 0.15)
+    take_high(c("IFN-g", "TNF-a"), "CD8_effector", 0.25)
+    take_high("CD69", "CD8_activated", 0.15)
     if (any(remain)) labs[remain] <- split_memory_3(mat, idx[remain], "CD8")
   }
+  labs
+}
+
+# NK 内：Perforin+ 或 GZMB+ 为杀伤/效应
+sequential_nk_subsets <- function(mat, idx) {
+  n <- length(idx)
+  if (n == 0) return(character(0))
+  labs <- rep("NK", n)
+  remain <- rep(TRUE, n)
+  if (!any(remain)) return(labs)
+  hi <- gate_k2_high(mat, idx[remain], c("GZMB", "Perforin"), 0.2)
+  pos <- which(remain)
+  if (any(hi)) labs[pos[hi]] <- "NK_effector"
   labs
 }
 
@@ -1544,6 +1634,8 @@ hierarchical_gate <- function(mat, panel_id) {
     subset[i4] <- sequential_t_subsets(mat, i4, "CD4")
     i8 <- which(major == "CD8")
     subset[i8] <- sequential_t_subsets(mat, i8, "CD8")
+    ink <- which(major == "NK")
+    subset[ink] <- sequential_nk_subsets(mat, ink)
   } else if (panel_id == "P2") {
     i_n <- which(major == "Naive_B")
     subset[i_n] <- sequential_b_naive(mat, i_n)
@@ -1615,6 +1707,9 @@ pal_p1_hues <- c(
 
 pal_celltype <- c(
   "CD4 activated" = "#E74C3C",
+  "CD4 effector" = "#B03A2E",
+  "CD8 activated" = "#58D68D",
+  "NK effector" = "#7B241C",
   "B cell" = "#7B52A5",
   "Macrophage" = "#5DADE2",
   "NKT" = "#E8C87A",
@@ -1670,15 +1765,18 @@ celltype_label <- function(lineage, panel_id) {
     CD4_TCM = "CD4 TCM",
     CD4_TEM = "CD4 TEM",
     CD4_activated = "CD4 activated",
+    CD4_effector = "CD4 effector",
     Treg = "Treg",
     CD4_T = "CD4 T",
     CD8_naive = "CD8 naive",
     CD8_TCM = "CD8 TCM",
     CD8_TEM = "CD8 TEM",
+    CD8_activated = "CD8 activated",
     CD8_effector = "CD8 effector",
     CD8_exhausted = "CD8 exhausted",
     CD8_T = "CD8 T",
     NK = "NK",
+    NK_effector = "NK effector",
     NKT = "NKT",
     T = "T",
     T_naive = "T naive",
@@ -1989,11 +2087,13 @@ parent_mask <- function(cells, parent) {
   lin[is.na(lin)] <- ""
   cd4 <- cl == "CD4" | grepl("^CD4_", lin) | lin == "Treg"
   cd8 <- cl == "CD8" | grepl("^CD8_", lin)
+  nk <- cl == "NK" | lin %in% c("NK", "NK_effector")
   out <- switch(as.character(parent),
     all = rep(TRUE, n),
     CD3 = cd4 | cd8 | lin %in% c("T", "NKT") | cl %in% c("T", "NKT"),
     CD4 = cd4,
     CD8 = cd8,
+    NK = nk,
     Myeloid = cl == "Myeloid" | lin %in% c(
       "Neutrophil", "Eosinophil", "Basophil_mast", "Basophil", "Macrophage",
       "M1_like_Mac", "M2_like_Mac", "DC", "cDC1_CD103", "Mono_Ly6Chi", "Mono_Ly6Clo", "Myeloid"
@@ -2026,8 +2126,9 @@ subset_plot_specs <- function(panel_id) {
   }
   if (identical(panel_id, "P1")) {
     return(list(
-      mk("NK", "CD3", "NK1.1", "all", "NK cell (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
-      mk("NKT", "CD3", "NK1.1", "all", "NKT (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("NK", "CD3", "NKp46", "all", "NK cell (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
+      mk("NK_effector", "GZMB", "Perforin", "NK", "NK effector in NK (%)", gate = "hi_hi"),
+      mk("NKT", "CD3", "NKp46", "all", "NKT (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
       mk("B", "CD19", "CD3", "all", "B cell (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("Myeloid", "CD11B", "CD3", "all", "Myeloid (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("CD4", "CD8", "CD4", "CD3", "CD4+ T cell in CD3+ (%)", TRUE, gate = "quad", x_hi = FALSE, y_hi = TRUE),
@@ -2035,11 +2136,13 @@ subset_plot_specs <- function(panel_id) {
       mk("CD4_naive", "CD62L", "CD44", "CD4", "CD4 naive in CD4+ (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("CD4_TCM", "CD62L", "CD44", "CD4", "CD4 TCM in CD4+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
       mk("CD4_TEM", "CD62L", "CD44", "CD4", "CD4 TEM in CD4+ (%)", gate = "half_x", x_hi = FALSE),
-      mk("CD4_activated", "CD69", "TNF-a", "CD4", "CD4 activated in CD4+ (%)", gate = "hi_hi"),
+      mk("CD4_activated", "CD69", "CD25", "CD4", "CD4 activated in CD4+ (%)", gate = "hi_hi"),
+      mk("CD4_effector", "IFN-g", "TNF-a", "CD4", "CD4 effector in CD4+ (%)", gate = "hi_hi"),
       mk("Treg", "CD25", "CD4", "CD4", "Treg in CD4+ (%)", gate = "hi_x", x_hi = TRUE),
       mk("CD8_naive", "CD62L", "CD44", "CD8", "CD8 naive in CD8+ (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("CD8_TCM", "CD62L", "CD44", "CD8", "CD8 TCM in CD8+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
       mk("CD8_TEM", "CD62L", "CD44", "CD8", "CD8 TEM in CD8+ (%)", gate = "half_x", x_hi = FALSE),
+      mk("CD8_activated", "CD69", "CD25", "CD8", "CD8 activated in CD8+ (%)", gate = "hi_hi"),
       mk("CD8_effector", "GZMB", "Perforin", "CD8", "CD8 effector in CD8+ (%)", gate = "hi_hi"),
       mk("CD8_exhausted", "LAG-3", "TIM-3", "CD8", "CD8 exhausted in CD8+ (%)", gate = "hi_hi")
     ))
@@ -2746,7 +2849,7 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
     for (i in seq_len(nrow(sub))) {
       log_msg("Read ", sub$file[i], "  sample=", sub$sample[i], " bio=", sub$bio_sample[i])
       rec <- read_fcs_expr(sub$path[i], panel_id)
-      keep <- qc_filter_matrix(rec$exprs, rec$names, rec$map)
+      keep <- qc_filter_matrix(rec$exprs, rec$names, rec$map, panel_id)
       exprs <- rec$exprs[keep, , drop = FALSE]
       if (nrow(exprs) < 50) {
         log_msg("Too few events after QC: ", sub$file[i])
@@ -2792,6 +2895,9 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
 
 analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   log_msg("==== Panel ", panel_id, " : ", panel_map$panels[[panel_id]]$focus, " ====")
+  if (identical(panel_id, "P1")) {
+    log_msg("P1 gates: singlets → lymphocytes → CD45+ → CD3/CD19/NKp46; CD4+CD8- / CD4-CD8+; CD69/CD25 activation; GZMB/Perforin; IFN-g/TNF-a")
+  }
   out_dir <- file.path(result_dir, panel_id)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   dat <- load_panel_cells(panel_id, file_tab, use_demo, n_per_sample_dr)

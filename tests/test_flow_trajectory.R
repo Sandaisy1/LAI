@@ -12,7 +12,10 @@ fail <- function(msg) {
 }
 
 if (!identical(infer_major_lineage("P1", "Treg"), "CD4")) fail("Treg should map to CD4")
+if (!identical(infer_major_lineage("P1", "CD4_effector"), "CD4")) fail("CD4 effector should map to CD4")
 if (!identical(infer_major_lineage("P1", "CD8_effector"), "CD8")) fail("CD8 effector should map to CD8")
+if (!identical(infer_major_lineage("P1", "CD8_activated"), "CD8")) fail("CD8 activated should map to CD8")
+if (!identical(infer_major_lineage("P1", "NK_effector"), "NK")) fail("NK effector should map to NK")
 if (!identical(infer_major_lineage("P1", "B"), "dump")) fail("P1 B is dump")
 if (!identical(infer_major_lineage("P2", "Plasma"), "B")) fail("P2 plasma is B")
 if (!identical(infer_major_lineage("P3", "Neutrophil"), "Myeloid")) fail("P3 neutrophil is myeloid")

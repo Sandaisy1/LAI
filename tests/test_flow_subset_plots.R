@@ -38,7 +38,11 @@ if (!has_out_pts) fail("subset contour plot should draw outlier events")
 specs <- subset_plot_specs("P1")
 nk <- Filter(function(s) identical(s$lineage, "NK"), specs)
 if (!length(nk)) fail("P1 specs missing NK")
-if (!identical(nk[[1]]$x, "CD3") || !identical(nk[[1]]$y, "NK1.1")) fail("NK contour should be CD3 vs NK1.1")
+if (!identical(nk[[1]]$x, "CD3") || !identical(nk[[1]]$y, "NKp46")) fail("NK contour should be CD3 vs NKp46")
+act <- Filter(function(s) identical(s$lineage, "CD4_activated"), specs)
+if (!length(act) || !identical(act[[1]]$x, "CD69") || !identical(act[[1]]$y, "CD25")) {
+  fail("CD4 activated contour should be CD69 vs CD25")
+}
 
 cells_na <- data.frame(
   lineage = c("Neutrophil", NA_character_, "T", "cDC1_CD103"),
@@ -68,6 +72,7 @@ mk <- function(sample, group, lineage, n, cd3, nk11) {
     cluster_lineage = rep(if (lineage == "NK") "NK" else "CD4", n),
     CD3 = rnorm(n, cd3, 0.25),
     `NK1.1` = rnorm(n, nk11, 0.25),
+    NKp46 = rnorm(n, nk11, 0.25),
     check.names = FALSE,
     stringsAsFactors = FALSE
   )

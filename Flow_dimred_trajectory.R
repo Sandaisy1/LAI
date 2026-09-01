@@ -53,8 +53,9 @@ infer_major_lineage <- function(panel_id, subset) {
   n <- length(s)
   if (identical(panel_id, "P1")) {
     out <- s
-    out[s %in% c("Treg", "CD4_activated") | grepl("^CD4_", s)] <- "CD4"
+    out[s %in% c("Treg", "CD4_activated", "CD4_effector") | grepl("^CD4_", s)] <- "CD4"
     out[grepl("^CD8_", s)] <- "CD8"
+    out[s %in% c("NK", "NK_effector")] <- "NK"
     out[s %in% c("B", "Myeloid")] <- "dump"
     return(out)
   }
