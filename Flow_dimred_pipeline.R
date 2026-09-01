@@ -4394,6 +4394,12 @@ export_functional_state_from_results <- function(result_dir) {
     stop("找不到 results_flow：", result_dir, "。请 setwd 到已经出过总结果的数据目录。")
   }
   log_msg("Standalone functional-state: no FCS, no UMAP; read embeddings in ", result_dir)
+  log_msg(
+    "ALL gated subsets: P1 specs=", length(functional_state_specs("P1")),
+    " P2 specs=", length(functional_state_specs("P2")),
+    " P3 specs=", length(functional_state_specs("P3")),
+    " (old NKT/B-only copies have P1=2 P2=5 P3=0)"
+  )
   n_ok <- 0L
   for (pn in c("P1", "P2", "P3")) {
     cells <- read_panel_cells_for_functional_state(result_dir, pn)
