@@ -205,6 +205,40 @@ if ("celltype" %in% names(lay) && length(unique(lay$celltype)) > 1L) {
 if ("lineage" %in% names(lay) && length(unique(lay$lineage)) > 1L) {
   fail("figure-1 must not facet by lineage")
 }
+cts <- unique(as.character(p_sep$data$celltype))
+if ("CD4 naive" %in% cts) fail("figure-1 should color by major class, not fine subsets")
+if (!("CD4 T" %in% cts && "NK" %in% cts)) {
+  fail(sprintf("figure-1 majors should include CD4 T and NK, got %s", paste(cts, collapse = ",")))
+}
+maj_labs <- c("CD4 T", "CD8 T", "NK", "NKT", "B cell", "Myeloid")
+if (length(unique(unname(pal_major[maj_labs]))) < 6) fail("major-class colors must be distinct")
+if (identical(unname(pal_major[["CD4 T"]]), unname(pal_major[["NK"]]))) {
+  fail("CD4 T and NK must not share a color on the major-class map")
+}
+grob <- ggplot2::ggplotGrob(p_sep)
+if (!any(grepl("guide-box", grob$layout$name))) fail("figure-1 legend (guide-box) is missing")
+leg_w <- grob$widths
+if (!length(leg_w)) fail("figure-1 grob has no widths")
+p_sub <- plot_split_lineage(df_mix, "UMAP1", "UMAP2", "P1", "UMAP-1", "UMAP-2", "sub", color_mode = "subset")
+sub_cts <- unique(as.character(p_sub$data$celltype))
+if (!("CD4 naive" %in% sub_cts)) fail("per-class subset dimred should use fine subset labels")
+if (!identical(dimred_major_of("P1", "NKT_CD4"), "NKT")) fail("NKT_CD4 is NKT, not CD4")
+if (!identical(major_display_label("CD4"), "CD4 T")) fail("CD4 display is CD4 T")
+
+td_dr <- tempfile("flow_major_dr")
+dir.create(td_dr, recursive = TRUE)
+df_dr <- df_mix
+df_dr$tSNE1 <- df_dr$UMAP1
+df_dr$tSNE2 <- df_dr$UMAP2
+export_major_subset_dimred(df_dr, "P1", td_dr)
+need_dr <- c(
+  "P1_CD4_tSNE_subset_H_vs_EV.pdf",
+  "P1_CD4_UMAP_subset_H_vs_EV.pdf",
+  "P1_NK_tSNE_subset_H_vs_EV.pdf"
+)
+miss_dr <- need_dr[!file.exists(file.path(td_dr, "dimred_by_major", need_dr))]
+if (length(miss_dr)) fail(sprintf("missing class dimred: %s", paste(miss_dr, collapse = ", ")))
+unlink(td_dr, recursive = TRUE)
 
 set.seed(8)
 tail_v <- c(rnorm(220, 0.45, 0.12), rnorm(50, 3.1, 0.2))

@@ -1,11 +1,12 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# 流式降维：H vs EV（P1 T/NK，P2 B，P3 髓系）
-# 输入：E:/R/fuction of cell 下的 *_unmixed.fcs（不要用 raw）
+# 免疫细胞亚群降维分析（H vs EV；P1 T/NK，P2 B，P3 髓系）
+# 这是 E:/R/fuction of cell 那套实验。找 His+ 靶细胞走 ICI_Flow_dimred_pipeline.R。
+# 输入：*_unmixed.fcs（不要用 raw）
 # 样品：ZZX_EV（EV1/2/3 × 技术重复 -1/-2）与 ZZX_H（H1/2/3 × -1/-2）
-# 每个 panel 单独联合 UMAP/tSNE，导出 PDF+PNG，并比较 H vs EV 细胞频率
-# 主图（图1，不是图2）：左 EV、右 H，共用同一套联合 tSNE，
-# 每个面板里所有细胞类型叠在一起着色成岛。不要把每种细胞拆成小格子。
+# 每个 panel 单独联合 UMAP/tSNE。
+# 图1：全体免疫细胞按**大类**着色（CD4/CD8/NK/NKT/B/髓系），左 EV、右 H，图注留足边距。
+# 各大类再单独做一次亚群降维。不要把每种细亚群拆成小格子。
 #
 # 用法：
 #   setwd("E:/R/fuction of cell")
@@ -834,8 +835,10 @@ run_pca <- function(mat, npcs = 20) {
 }
 
 run_umap <- function(mat) {
-  if (has_pkg("uwot")) {
-    emb <- uwot::umap(mat, n_neighbors = 15, min_dist = 0.3, metric = "euclidean",
+  n <- nrow(as.matrix(mat))
+  nn <- max(2L, min(15L, n - 1L))
+  if (has_pkg("uwot") && n >= 5L) {
+    emb <- uwot::umap(mat, n_neighbors = nn, min_dist = 0.3, metric = "euclidean",
                       verbose = FALSE, n_threads = 2, seed = seed_value)
     colnames(emb) <- c("UMAP1", "UMAP2")
     return(emb)
@@ -1044,6 +1047,59 @@ nk_family <- function() {
 
 nkt_family <- function() {
   c("NKT", "NKT_CD4", "NKT_DN", "NKT_activated", "NKT_effector")
+}
+
+# 降维总图用的大类（P1 的 B/髓系、P3 的 T/B/NK 仍画在总图上，不当 dump 丢掉）
+dimred_major_of <- function(panel_id, lineage, cluster_lineage = NULL) {
+  s <- as.character(lineage)
+  n <- length(s)
+  out <- rep(NA_character_, n)
+  if (!is.null(cluster_lineage) && length(cluster_lineage) == n) {
+    cl <- as.character(cluster_lineage)
+    keep <- !is.na(cl) & nzchar(cl) & !cl %in% c("other", "Other")
+    out[keep] <- cl[keep]
+  }
+  miss <- is.na(out) | !nzchar(out)
+  if (!any(miss)) return(out)
+  inf <- s
+  inf[s %in% c("Target", "His_target")] <- "Target"
+  inf[s %in% nkt_family() | grepl("^NKT", s)] <- "NKT"
+  inf[s %in% nk_family() | grepl("^NK_", s) | s == "NK"] <- "NK"
+  inf[s %in% c("Treg", "CD4_activated", "CD4_effector", "CD4") | grepl("^CD4_", s)] <- "CD4"
+  inf[s %in% c("CD8") | grepl("^CD8_", s)] <- "CD8"
+  inf[s %in% c("B", "Naive_B", "Atypical_B", "Memory_B", "Switched_B",
+               "Unswitched_B", "IgM_memory", "MZ_B", "Plasmablast",
+               "Activated_B", "Plasma")] <- "B"
+  inf[s %in% c("Myeloid", "Macrophage", "M1_like_Mac", "M2_like_Mac",
+               "Neutrophil", "Eosinophil", "Mono_Ly6Chi", "Mono_Ly6Clo",
+               "DC", "cDC1_CD103", "cDC2", "Mast", "Basophil_mast", "Basophil")] <- "Myeloid"
+  inf[s %in% c("T", "T_naive", "T_TCM", "T_TEM", "T_effector", "T_T")] <- "T"
+  inf[s == "NKT"] <- "NKT"
+  out[miss] <- inf[miss]
+  out[is.na(out) | !nzchar(out)] <- "other"
+  out
+}
+
+major_display_label <- function(major) {
+  rec <- c(
+    CD4 = "CD4 T", CD8 = "CD8 T", T = "T", NK = "NK", NKT = "NKT",
+    B = "B cell", Myeloid = "Myeloid", Target = "His+ target",
+    His_target = "His+ target", dump = "other", other = "other", Other = "other"
+  )
+  lab <- as.character(major)
+  out <- rec[lab]
+  unname(ifelse(is.na(out), lab, out))
+}
+
+major_colors <- function(levels) {
+  pal <- pal_major[levels]
+  miss <- levels[is.na(pal)]
+  if (length(miss) > 0) {
+    extra <- pal_p1_hues[((seq_along(miss) - 1L) %% length(pal_p1_hues)) + 1L]
+    pal[is.na(pal)] <- extra
+  }
+  names(pal) <- levels
+  pal
 }
 
 # P1 NK：不要用 NKG2D 当亚群（小鼠 NK 组成性表达）
@@ -2030,15 +2086,15 @@ pal_celltype <- c(
   "CD8 MPEC" = "#82E0AA",
   "CD4 exhausted" = "#6C3483",
   "Treg" = "#922B21",
-  "CD4 naive" = "#F5CBA7",
+  "CD4 naive" = "#F5B041",
   "CD8 naive" = "#A9DFBF",
   "CD8 T_EM" = "#1E8449",
   "CD8 TEM" = "#1E8449",
   "CD8 T_EFF" = "#145A32",
   "CD8 effector" = "#145A32",
   "CD8 exhausted" = "#7D3C98",
-  "CD4 T_EM" = "#CA6F1E",
-  "CD4 TEM" = "#CA6F1E",
+  "CD4 T_EM" = "#6E2C00",
+  "CD4 TEM" = "#6E2C00",
   "CD4 T" = "#E69A3C",
   "CD8 T" = "#3D8B40",
   "T naive" = "#F7DC6F",
@@ -2049,7 +2105,7 @@ pal_celltype <- c(
   "Myeloid" = "#85C1E9",
   "M1-like Mac" = "#1A5276",
   "M2-like Mac" = "#27AE60",
-  "Naive B" = "#F5CBA7",
+  "Naive B" = "#F5B041",
   "Atypical B" = "#E8C87A",
   "IgM memory B" = "#A9DFBF",
   "Unswitched memory B" = "#A9DFBF",
@@ -2073,6 +2129,21 @@ pal_celltype <- c(
   "Mast" = "#A9DFBF",
   "other" = "#B0B0B0",
   "Other" = "#B0B0B0"
+)
+
+# 图1大类色：色相拉开，不要一堆近红/近绿挤在同一张总图上
+pal_major <- c(
+  "CD4 T" = "#D32F2F",
+  "CD8 T" = "#2E7D32",
+  "T" = "#B71C1C",
+  "NK" = "#6A1B9A",
+  "NKT" = "#F4D03F",
+  "B cell" = "#1565C0",
+  "Myeloid" = "#00897B",
+  "His+ target" = "#00ACC1",
+  "Target" = "#00ACC1",
+  "other" = "#95A5A6",
+  "Other" = "#95A5A6"
 )
 
 celltype_label <- function(lineage, panel_id) {
@@ -2101,6 +2172,8 @@ celltype_label <- function(lineage, panel_id) {
     CD4_effector = "CD4 T_EFF",
     Treg = "Treg",
     CD4_T = "CD4 T",
+    CD4 = "CD4 T",
+    CD8 = "CD8 T",
     CD8_naive = "CD8 naive",
     CD8_TCM = "CD8 T_CM",
     CD8_TSCM = "CD8 T_SCM",
@@ -2164,6 +2237,37 @@ celltype_colors <- function(levels) {
   pal
 }
 
+split_dr_save_size <- function(n_keys, facet = TRUE) {
+  n_keys <- max(1L, as.integer(n_keys))
+  ncol_leg <- if (n_keys > 10L) 2L else 1L
+  legend_in <- 2.65 * ncol_leg
+  width <- (if (facet) 11.2 else 7.0) + legend_in
+  rows <- ceiling(n_keys / ncol_leg)
+  height <- max(6.8, 4.9 + 0.42 * rows)
+  list(width = width, height = height, ncol_leg = ncol_leg)
+}
+
+# 图注放在右侧独立留白，不要被 coord/facet 裁掉
+save_split_dr <- function(plot, path_stub, n_keys, facet = TRUE) {
+  sz <- split_dr_save_size(n_keys, facet)
+  plot <- plot +
+    ggplot2::guides(color = ggplot2::guide_legend(
+      ncol = sz$ncol_leg,
+      override.aes = list(size = 4.4, alpha = 1),
+      title = NULL
+    )) +
+    ggplot2::theme(
+      legend.position = "right",
+      legend.justification = c(0, 0.5),
+      legend.text = ggplot2::element_text(size = 11),
+      legend.key.size = grid::unit(0.5, "cm"),
+      legend.spacing.y = grid::unit(0.16, "cm"),
+      legend.margin = ggplot2::margin(4, 10, 4, 8),
+      plot.margin = ggplot2::margin(10, 28, 14, 12)
+    )
+  save_gg(plot, path_stub, width = sz$width, height = sz$height)
+}
+
 theme_split_dr <- function() {
   ggplot2::theme_classic(base_size = 13) +
     ggplot2::theme(
@@ -2183,17 +2287,16 @@ theme_split_dr <- function() {
 
 plot_feature_cols <- function(df) {
   meta <- c("sample", "group", "cluster", "cluster_lineage", "lineage", "true_lineage",
-            "bio_sample", "tech_rep",
+            "bio_sample", "tech_rep", "dimred_major",
             "UMAP1", "UMAP2", "tSNE1", "tSNE2", "sep1", "sep2", "major_plot")
   num <- names(df)[vapply(df, is.numeric, logical(1))]
   setdiff(num, meta)
 }
 
-# 主图（图1）：左 EV、右 H。全体细胞先做一次联合 tSNE/UMAP，再按组别切开。
-# 每个面板里所有细胞类型叠在同一套坐标上，点着色成岛（像论文 WT|KO）。
-# 不要把每种细胞拆成小格子，也不要画填充 blob（那是图2）。
-# 旧参数 separate_majors 已废弃，传入也会被忽略。
-plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title, ...) {
+# 图1：全体细胞按大类着色。color_mode="subset" 只给各大类自己的亚群图用。
+plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title,
+                               color_mode = c("major", "subset"), ...) {
+  color_mode <- match.arg(color_mode)
   if (!x %in% names(df) || !y %in% names(df)) {
     stop("plot_split_lineage needs shared embedding columns ", x, " and ", y)
   }
@@ -2201,21 +2304,33 @@ plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title, ...) {
   plot_df$group <- factor(plot_df$group, levels = flow_group_levels)
   keep <- is.finite(plot_df[[x]]) & is.finite(plot_df[[y]]) & !is.na(plot_df$group)
   plot_df <- plot_df[keep, , drop = FALSE]
-  plot_df$celltype <- celltype_label(plot_df$lineage, panel_id)
-  prefer <- names(pal_celltype)
-  levs <- unique(plot_df$celltype)
+  if (identical(color_mode, "major")) {
+    maj <- dimred_major_of(
+      panel_id,
+      plot_df$lineage,
+      if ("cluster_lineage" %in% names(plot_df)) plot_df$cluster_lineage else NULL
+    )
+    plot_df$celltype <- major_display_label(maj)
+    prefer <- names(pal_major)
+    pal_fun <- major_colors
+  } else {
+    plot_df$celltype <- celltype_label(plot_df$lineage, panel_id)
+    prefer <- names(pal_celltype)
+    pal_fun <- celltype_colors
+  }
+  levs <- unique(as.character(plot_df$celltype))
   levs <- c(intersect(prefer, levs), setdiff(levs, prefer))
   plot_df$celltype <- factor(plot_df$celltype, levels = levs)
-  pal <- celltype_colors(levs)
+  pal <- pal_fun(levs)
   ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype)) +
-    ggplot2::geom_point(size = 0.42, alpha = 0.88, stroke = 0) +
+    ggplot2::geom_point(size = 0.72, alpha = 0.92, stroke = 0) +
     ggplot2::facet_wrap(~group, ncol = 2, scales = "fixed") +
     ggplot2::scale_color_manual(values = pal, drop = FALSE) +
     ggplot2::guides(color = ggplot2::guide_legend(
-      override.aes = list(size = 3.6, alpha = 1), ncol = 1
+      override.aes = list(size = 3.8, alpha = 1), ncol = 1
     )) +
     ggplot2::labs(title = title, x = xlab, y = ylab, color = NULL) +
-    ggplot2::coord_equal() +
+    ggplot2::coord_fixed(ratio = 1, clip = "off") +
     theme_split_dr() +
     ggplot2::theme(
       axis.text = ggplot2::element_blank(),
@@ -2223,8 +2338,72 @@ plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title, ...) {
       panel.border = ggplot2::element_blank(),
       panel.spacing = ggplot2::unit(1.15, "lines"),
       legend.key = ggplot2::element_blank(),
-      plot.margin = ggplot2::margin(6, 8, 8, 10)
+      plot.margin = ggplot2::margin(8, 18, 10, 10)
     )
+}
+
+embed_class_cells <- function(sub) {
+  if (nrow(sub) < 40L) return(sub)
+  feat <- plot_feature_cols(sub)
+  if (length(feat) < 2L) return(sub)
+  mat <- as.matrix(sub[, feat, drop = FALSE])
+  mat[!is.finite(mat)] <- 0
+  sc <- tryCatch(scale(mat), error = function(e) mat)
+  sc[!is.finite(sc)] <- 0
+  pca <- tryCatch(run_pca(sc, npcs = min(15, ncol(sc))), error = function(e) NULL)
+  if (is.null(pca) || is.null(pca$embedding) || ncol(pca$embedding) < 2) return(sub)
+  npcs_use <- min(ncol(pca$embedding), max(2, ncol(sc)))
+  pca_use <- pca$embedding[, seq_len(npcs_use), drop = FALSE]
+  um <- tryCatch(run_umap(pca_use), error = function(e) NULL)
+  ts <- tryCatch(run_tsne(pca_use), error = function(e) NULL)
+  if (!is.null(um) && ncol(um) >= 2 && nrow(um) == nrow(sub)) {
+    sub$UMAP1 <- um[, 1]
+    sub$UMAP2 <- um[, 2]
+  }
+  if (!is.null(ts) && ncol(ts) >= 2 && nrow(ts) == nrow(sub)) {
+    sub$tSNE1 <- ts[, 1]
+    sub$tSNE2 <- ts[, 2]
+  }
+  sub
+}
+
+export_major_subset_dimred <- function(cells, panel_id, out_dir) {
+  cells$dimred_major <- dimred_major_of(
+    panel_id,
+    cells$lineage,
+    if ("cluster_lineage" %in% names(cells)) cells$cluster_lineage else NULL
+  )
+  majors <- unique(as.character(cells$dimred_major))
+  majors <- majors[!is.na(majors) & nzchar(majors) & !majors %in% c("other", "dump", "")]
+  class_dir <- file.path(out_dir, "dimred_by_major")
+  dir.create(class_dir, recursive = TRUE, showWarnings = FALSE)
+  for (mj in majors) {
+    hit <- !is.na(cells$dimred_major) & as.character(cells$dimred_major) == mj
+    sub <- cells[hit, , drop = FALSE]
+    if (nrow(sub) < 40L) {
+      log_msg(panel_id, " ", mj, ": skip class dimred (n=", nrow(sub), ")")
+      next
+    }
+    sub <- embed_class_cells(sub)
+    lab <- major_display_label(mj)
+    tag <- paste0(panel_id, "_", gsub("[^A-Za-z0-9_-]", "_", mj))
+    ttl <- paste0(panel_id, "  ", lab, "  subsets  EV | H")
+    n_keys <- length(unique(celltype_label(sub$lineage, panel_id)))
+    save_split_dr(
+      plot_split_lineage(sub, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2",
+                         ttl, color_mode = "subset"),
+      file.path(class_dir, paste0(tag, "_tSNE_subset_H_vs_EV")),
+      n_keys
+    )
+    save_split_dr(
+      plot_split_lineage(sub, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
+                         ttl, color_mode = "subset"),
+      file.path(class_dir, paste0(tag, "_UMAP_subset_H_vs_EV")),
+      n_keys
+    )
+    log_msg(panel_id, " ", lab, " subset dimred n=", nrow(sub), " -> ", class_dir)
+  }
+  invisible(class_dir)
 }
 
 plot_embedding <- function(df, x, y, color_col, title, point_size = 0.35) {
@@ -3234,23 +3413,32 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
   split_ttl <- paste0(panel_id, "  EV | H")
   log_msg(
     panel_id,
-    " main tSNE/UMAP is Figure 1: EV | H on one shared embedding, all cell types overlaid (not per-subset tiles)"
+    " Figure 1: all immune cells colored by major class (not every fine subset); legend kept on the right"
   )
+  cells$dimred_major <- dimred_major_of(
+    panel_id,
+    cells$lineage,
+    if ("cluster_lineage" %in% names(cells)) cells$cluster_lineage else NULL
+  )
+  n_major <- length(unique(major_display_label(cells$dimred_major)))
+  p_major_tsne <- plot_split_lineage(
+    cells, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2",
+    paste0(split_ttl, "  major classes"), color_mode = "major"
+  )
+  p_major_umap <- plot_split_lineage(
+    cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
+    paste0(split_ttl, "  major classes"), color_mode = "major"
+  )
+  save_split_dr(p_major_tsne, file.path(out_dir, paste0(panel_id, "_H_vs_EV_tSNE_major_split")), n_major)
+  save_split_dr(p_major_umap, file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_major_split")), n_major)
+  # 旧文件名仍指向图1（大类），避免只剩被裁切的细亚群总图
+  save_split_dr(p_major_tsne, file.path(out_dir, paste0(panel_id, "_H_vs_EV_tSNE_lineage_split")), n_major)
+  save_split_dr(p_major_umap, file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split")), n_major)
+  save_split_dr(p_major_umap, file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split_joint")), n_major)
 
-  save_gg(
-    plot_split_lineage(cells, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2", split_ttl),
-    file.path(out_dir, paste0(panel_id, "_H_vs_EV_tSNE_lineage_split")),
-    width = 11.2, height = 5.4
-  )
-  save_gg(
-    plot_split_lineage(cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2", split_ttl),
-    file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split")),
-    width = 11.2, height = 5.4
-  )
-  save_gg(
-    plot_split_lineage(cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2", split_ttl),
-    file.path(out_dir, paste0(panel_id, "_H_vs_EV_UMAP_lineage_split_joint")),
-    width = 11.2, height = 5.4
+  tryCatch(
+    export_major_subset_dimred(cells, panel_id, out_dir),
+    error = function(e) log_msg(panel_id, " per-major subset dimred failed: ", e$message)
   )
 
   save_gg(plot_embedding(cells, "UMAP1", "UMAP2", "group", paste(tag, "-", umap_lab, "by group")),

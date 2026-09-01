@@ -36,6 +36,13 @@ if (!identical(default_trajectory_root("P3", "Myeloid", c("DC", "Mono_Ly6Chi")),
   fail("myeloid root should be Ly6C hi mono")
 }
 
+if (!identical(default_panel_major_root("P1", c("NK", "CD4", "CD8")), "CD4")) {
+  fail("P1 major-class tree should root at CD4")
+}
+if (!identical(default_panel_major_root("P3", c("Myeloid", "T", "B")), "T")) {
+  fail("P3 major-class tree should root at T")
+}
+
 xy <- rbind(
   cbind(rnorm(40, 0, 0.15), rnorm(40, 0, 0.15)),
   cbind(rnorm(40, 2.4, 0.15), rnorm(40, 0.1, 0.15)),
@@ -127,6 +134,38 @@ if (!grepl("only 1 subset", skip_msg)) fail("NK skip should say only 1 subset")
 if (file.exists(file.path(td, "P1", "trajectory", "P1_NK_trajectory.pdf"))) {
   fail("single-subset NK should not write a trajectory tree")
 }
+
+# 两大类：应写出 panel 级 major trajectory，同时各大类仍有亚群树
+df_maj <- rbind(
+  data.frame(
+    sample = rep(c("EV1", "EV2", "EV3", "H1", "H2", "H3"), each = 45),
+    group = rep(c("EV", "EV", "EV", "H", "H", "H"), each = 45),
+    lineage = rep(c("CD4_naive", "CD4_TCM", "CD4_TEM"), length.out = 270),
+    UMAP1 = rnorm(270, 0, 0.2),
+    UMAP2 = rnorm(270, 0, 0.2),
+    cluster_lineage = "CD4",
+    stringsAsFactors = FALSE
+  ),
+  data.frame(
+    sample = rep(c("EV1", "EV2", "EV3", "H1", "H2", "H3"), each = 45),
+    group = rep(c("EV", "EV", "EV", "H", "H", "H"), each = 45),
+    lineage = rep(c("CD8_naive", "CD8_TCM", "CD8_TEM"), length.out = 270),
+    UMAP1 = rnorm(270, 3, 0.2),
+    UMAP2 = rnorm(270, 0.2, 0.2),
+    cluster_lineage = "CD8",
+    stringsAsFactors = FALSE
+  )
+)
+utils::write.csv(df_maj, file.path(td, "P1", "P1_cell_embeddings.csv"), row.names = FALSE)
+export_panel_trajectories(td, "P1")
+need_maj <- c("P1_major_trajectory.pdf", "P1_major_trajectory_H_vs_EV.pdf",
+              "P1_CD4_trajectory.pdf", "P1_CD8_trajectory.pdf")
+miss_maj <- need_maj[!file.exists(file.path(td, "P1", "trajectory", need_maj))]
+if (length(miss_maj)) fail(sprintf("missing major/class trajectory: %s", paste(miss_maj, collapse = ", ")))
+p_tr2 <- plot_trajectory_tree(df_plot, fit, "P1", "legend check", facet_group = FALSE)
+tr_theme <- p_tr2$theme
+leg_pos <- if (!is.null(tr_theme$legend.position)) tr_theme$legend.position else NA
+if (!identical(leg_pos, "right")) fail(sprintf("trajectory legend should be on the right, got %s", leg_pos))
 
 unlink(td, recursive = TRUE)
 cat("OK: per-panel major-class trajectories\n")

@@ -76,9 +76,11 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 
 看专项结果请先看比较目录下的 `Focused_cytoskeleton_mito/`（全基因 GSEA），不要只看 topN 的 ORA。若专项分析仍不显著，说明这些通路在本数据里没有协同变化。
 
-## 流式降维（H vs EV，P1 / P2 / P3）
+# 流式降维（免疫细胞亚群，H vs EV，P1 / P2 / P3）
 
-小鼠流式在 `E:/R/fuction of cell`，只用 `*_unmixed.fcs`。分析结果写在同一目录的 `results_flow/`。三个 panel **分开**做 UMAP/tSNE，比较 **ZZX_EV**（EV1/2/3，每管两个技术重复 EV1-1/EV1-2）与 **ZZX_H**（H1/2/3，H1-1/H1-2）。统计按生物学重复 n=3，两个技术重复先平均。
+这是 **`E:/R/fuction of cell`** 的免疫细胞亚群降维。找 His+ 靶细胞是另一套实验，走 `ICI_Flow_dimred_pipeline.R`（`E:/R/Internation cell immune`），不要混用。
+
+小鼠流式只用 `*_unmixed.fcs`。分析结果写在同一目录的 `results_flow/`。三个 panel **分开**做 UMAP/tSNE，比较 **ZZX_EV**（EV1/2/3，每管两个技术重复 EV1-1/EV1-2）与 **ZZX_H**（H1/2/3，H1-1/H1-2）。统计按生物学重复 n=3，两个技术重复先平均。
 
 ```r
 setwd("E:/R/fuction of cell")
@@ -92,7 +94,8 @@ source("Flow_dimred_pipeline.R")
 
 每个 panel 的图在 `E:/R/fuction of cell/results_flow/P1/`、`P2/`、`P3/`（PDF + PNG）：
 
-- `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split`：**主图**（图1，像论文 WT|KO），左 EV、右 H，共用同一套联合 tSNE，**所有细胞类型叠在同一张散点图上着色**；L 形坐标轴、无刻度。不要把每个亚群拆成小格子，也不要每种细胞画一个填充色块（图2）。
+- `*_H_vs_EV_tSNE_major_split` / `*_UMAP_major_split`：**图1**，左 EV、右 H，共用联合 tSNE，点按 **免疫大类**（CD4 T / CD8 T / NK / NKT / B / Myeloid）着色；图注在右侧，画布加宽以免裁切。同内容也写到旧名 `*_lineage_split`。
+- `dimred_by_major/`：每个大类单独再降维，点按该大类的**细亚群**着色（同样 EV | H）。不要把二十几个细亚群全叠在图1上。
 - `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图；下为 FlowJo 风格 2D 图。门是铺到坐标轴的完整象限/半平面（CD62L/CD44 标四个象限），EV 与 H **各自切阈值**。不是只框 10–90% 命中细胞的小矩形。
@@ -102,7 +105,7 @@ source("Flow_dimred_pipeline.R")
 
 三个 panel 的抗体不同，**不能**拼成一张矩阵做联合 UMAP。`Flow_dimred_all_subsets.R` 在各自圈完亚群后，把频率汇总到 `results_flow/all_subsets/`（H vs EV 柱状图、堆叠组成、热图、H−EV 差值）。百分数是该 panel 管子里的比例，P1 的 B/髓系、P3 的 T/B/NK 只是 dump。主流程跑完会自动出这份总览；也可单独 `source("Flow_dimred_all_subsets.R")`。
 
-每个 panel 的每一大类另出细胞轨迹（类似 Monocle 骨架图）：`Flow_dimred_trajectory.R` → `results_flow/P1/trajectory/` 等。P1 画 CD4、CD8，以及拆开后的 NK/NKT；P2 画 B；P3 画髓系。坐标是该类内的 Component 1/2，点按细亚群着色，黑线是分支骨架。根节点按惯例是 naive T、NK immature、Naive B 或 Ly6C hi 单核。也可单独 `source("Flow_dimred_trajectory.R")`。日志里 `skip trajectory (... subsets= 1)` 表示该大类只有一个亚群，画不出树，不是分析失败。
+每个 panel 的轨迹和降维同一套结构：`Flow_dimred_trajectory.R` → `results_flow/P1/trajectory/` 等。先画 **全体大类** 树（`P1_major_trajectory`），再画各大类的亚群树（P1 的 CD4/CD8/NK/NKT，P2 的 B，P3 的髓系）。坐标是该类内的 Component 1/2，点按细亚群（或大类）着色，黑线是分支骨架。根节点按惯例是 naive T、NK immature、Naive B 或 Ly6C hi 单核。也可单独 `source("Flow_dimred_trajectory.R")`。日志里 `skip trajectory (... subsets= 1)` 或 `skip major-class trajectory` 表示节点不够画树，不是分析失败。图注在右侧，不要被裁掉。
 
 无 FCS 时可 `Sys.setenv(FLOW_DEMO = "1")` 导出演示图，不能当正式结果。
 

@@ -1,14 +1,12 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# 每个 panel、每一大类免疫细胞的轨迹（Monocle 风格骨架图）
+# 免疫细胞亚群：细胞轨迹（与降维同一套思路）
 #
-# 不是把 P1/P2/P3 拼成一张矩阵。每个 panel 里按大类单独降维、单独画树：
-#   P1: CD4、CD8、NK、NKT（只有一个亚群则跳过；B/髓系是 dump）
-#   P2: B（Naive / Unswitched / Switched / MZ / Plasmablast / Plasma）
-#   P3: 髓系（CD11B+ 粒/巨噬/单核；CD11B- cDC1/cDC2）
-#
-# 根节点按惯例：CD4/CD8 naive、NK immature、Naive B、Ly6C hi 单核。轨迹表示标志物
-# 状态连续体，不是发育起源的证明。
+# 每个 panel：
+#   1) 全体免疫细胞按大类画一棵树（P1_major_trajectory；大类不足 2 个则跳过）
+#   2) 每个大类再单独画亚群树（CD4/CD8/NK/NKT；P2 的 B；P3 的髓系）
+# 图注放在右侧留白，不要顶栏挤掉。
+# 这是 E:/R/fuction of cell 的免疫亚群分析。His+ 靶细胞走 ICI_* 脚本。
 #
 # 用法：
 #   setwd("E:/R/fuction of cell")
@@ -80,6 +78,20 @@ majors_for_trajectory <- function(panel_id, cells) {
   infer_major_lineage(panel_id, cells$lineage)
 }
 
+default_panel_major_root <- function(panel_id, majors) {
+  maj <- unique(as.character(majors))
+  maj <- maj[nzchar(maj) & !is.na(maj)]
+  prefer <- switch(
+    as.character(panel_id),
+    P1 = "CD4",
+    P2 = "B",
+    P3 = "T",
+    maj[1]
+  )
+  if (!is.null(prefer) && prefer %in% maj) return(prefer)
+  maj[1]
+}
+
 default_trajectory_root <- function(panel_id, major, lineages) {
   lin <- unique(as.character(lineages))
   prefer <- NULL
@@ -96,7 +108,7 @@ default_trajectory_root <- function(panel_id, major, lineages) {
 marker_columns <- function(df) {
   meta <- c("sample", "group", "cluster", "cluster_lineage", "lineage",
             "UMAP1", "UMAP2", "tSNE1", "tSNE2", "true_lineage",
-            "Component1", "Component2", "pseudotime", "major")
+            "Component1", "Component2", "pseudotime", "major", "dimred_major")
   num <- names(df)[vapply(df, is.numeric, logical(1))]
   setdiff(num, meta)
 }
@@ -336,7 +348,13 @@ plot_trajectory_tree <- function(df, fit, panel_id, title, facet_group = FALSE) 
   if ("group" %in% names(plot_df)) {
     plot_df$group <- factor(plot_df$group, levels = flow_group_levels)
   }
-  pal <- celltype_colors(levels(plot_df$celltype))
+  pal <- if (length(levs) && all(levs %in% names(pal_major))) {
+    major_colors(levs)
+  } else {
+    celltype_colors(levs)
+  }
+  n_keys <- length(levs)
+  ncol_leg <- if (n_keys > 10) 2L else 1L
   sk <- if (length(fit$curves)) {
     do.call(rbind, lapply(seq_along(fit$curves), function(i) {
       cr <- fit$curves[[i]]
@@ -385,18 +403,24 @@ plot_trajectory_tree <- function(df, fit, panel_id, title, facet_group = FALSE) 
   }
   p +
     ggplot2::scale_color_manual(values = pal, drop = FALSE) +
-    ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(size = 4.2, alpha = 1), nrow = 2)) +
-    ggplot2::coord_equal() +
+    ggplot2::guides(color = ggplot2::guide_legend(
+      override.aes = list(size = 4.2, alpha = 1), ncol = ncol_leg
+    )) +
+    ggplot2::coord_fixed(ratio = 1, clip = "off") +
     ggplot2::theme_classic(base_size = 15) +
     ggplot2::theme(
-      legend.position = "top",
+      legend.position = "right",
+      legend.justification = c(0, 0.5),
       legend.title = ggplot2::element_blank(),
       legend.text = ggplot2::element_text(size = 12),
+      legend.key.size = grid::unit(0.5, "cm"),
+      legend.margin = ggplot2::margin(4, 10, 4, 8),
       strip.background = ggplot2::element_blank(),
       strip.text = ggplot2::element_text(face = "bold", size = 16),
       axis.title = ggplot2::element_text(size = 14),
       axis.text = ggplot2::element_text(size = 12),
       panel.grid = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(8, 18, 10, 10),
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 16)
     ) +
     ggplot2::labs(title = title, x = "Component 1", y = "Component 2", color = NULL)
@@ -451,12 +475,13 @@ export_one_major_trajectory <- function(cells, panel_id, major, out_dir) {
                    file.path(out_dir, paste0(tag, "_pseudotime.csv")), row.names = FALSE)
   ttl <- paste0(panel_id, "  ", major, "  trajectory  (root: ",
                 celltype_label(root, panel_id), ")")
-  save_gg(plot_trajectory_tree(sub, fit, panel_id, ttl, facet_group = FALSE),
-          file.path(out_dir, paste0(tag, "_trajectory")),
-          width = 8.2, height = 7.2)
-  save_gg(plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  EV | H"), facet_group = TRUE),
-          file.path(out_dir, paste0(tag, "_trajectory_H_vs_EV")),
-          width = 13.2, height = 6.6)
+  n_keys <- length(unique(celltype_label(sub$lineage, panel_id)))
+  save_split_dr(plot_trajectory_tree(sub, fit, panel_id, ttl, facet_group = FALSE),
+                file.path(out_dir, paste0(tag, "_trajectory")),
+                n_keys, facet = FALSE)
+  save_split_dr(plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  EV | H"), facet_group = TRUE),
+                file.path(out_dir, paste0(tag, "_trajectory_H_vs_EV")),
+                n_keys, facet = TRUE)
   if (any(is.finite(sub$pseudotime))) {
     save_gg(plot_pseudotime_group(sub, paste0(panel_id, "  ", major, "  pseudotime H vs EV")),
             file.path(out_dir, paste0(tag, "_pseudotime_H_vs_EV")),
@@ -475,6 +500,67 @@ read_panel_cells_for_trajectory <- function(result_dir, panel_id) {
   df
 }
 
+export_panel_major_trajectory <- function(cells, panel_id, out_dir) {
+  maj <- dimred_major_of(
+    panel_id,
+    cells$lineage,
+    if ("cluster_lineage" %in% names(cells)) cells$cluster_lineage else NULL
+  )
+  keep <- !is.na(maj) & nzchar(maj) & !maj %in% c("other", "dump", "")
+  keep[is.na(keep)] <- FALSE
+  sub <- cells[keep, , drop = FALSE]
+  if (!nrow(sub)) {
+    log_msg(panel_id, ": skip major-class trajectory (no majors)")
+    return(invisible(NULL))
+  }
+  sub$lineage <- maj[keep]
+  sub$major <- sub$lineage
+  n_lin <- length(unique(as.character(sub$lineage)))
+  if (nrow(sub) < 80 || n_lin < 2) {
+    log_msg(panel_id, ": skip major-class trajectory (need >=2 majors; n=",
+            nrow(sub), ", majors=", n_lin, ")")
+    return(invisible(NULL))
+  }
+  cap <- 4000L
+  if (nrow(sub) > cap) {
+    set.seed(if (exists("seed_value")) seed_value else 42)
+    sub <- sub[sample.int(nrow(sub), cap), , drop = FALSE]
+  }
+  xy <- class_components(sub)
+  root <- default_panel_major_root(panel_id, sub$lineage)
+  fit <- fit_lineage_trajectory(xy, sub$lineage, root)
+  if (is.null(fit)) {
+    log_msg(panel_id, ": major-class trajectory fit failed")
+    return(invisible(NULL))
+  }
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  sub$pseudotime <- fit$pseudotime
+  sub$Component1 <- fit$xy[, 1]
+  sub$Component2 <- fit$xy[, 2]
+  keep_cols <- intersect(
+    c("sample", "group", "lineage", "major", "Component1", "Component2", "pseudotime", "UMAP1", "UMAP2"),
+    names(sub)
+  )
+  utils::write.csv(sub[, keep_cols, drop = FALSE],
+                   file.path(out_dir, paste0(panel_id, "_major_pseudotime.csv")), row.names = FALSE)
+  ttl <- paste0(panel_id, "  major classes  trajectory  (root: ",
+                major_display_label(root), ")")
+  n_keys <- length(unique(major_display_label(sub$lineage)))
+  save_split_dr(
+    plot_trajectory_tree(sub, fit, panel_id, ttl, facet_group = FALSE),
+    file.path(out_dir, paste0(panel_id, "_major_trajectory")),
+    n_keys, facet = FALSE
+  )
+  save_split_dr(
+    plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  EV | H"), facet_group = TRUE),
+    file.path(out_dir, paste0(panel_id, "_major_trajectory_H_vs_EV")),
+    n_keys, facet = TRUE
+  )
+  log_msg(panel_id, " major-class trajectory (", fit$method, ", root=", root,
+          ", n=", nrow(sub), ") -> ", out_dir)
+  invisible(fit)
+}
+
 export_panel_trajectories <- function(result_dir, panel_id) {
   cells <- read_panel_cells_for_trajectory(result_dir, panel_id)
   if (is.null(cells) || nrow(cells) < 80) {
@@ -485,11 +571,15 @@ export_panel_trajectories <- function(result_dir, panel_id) {
   out_dir <- file.path(result_dir, panel_id, "trajectory")
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   writeLines(c(
-    "Trajectory is a marker-state continuum inside one major class of one panel.",
-    "P1/P2/P3 are not concatenated. Root: naive T/B or Ly6C-hi monocytes by convention.",
+    "Same layout as the dimred figures: one tree of major classes, then one tree per class of subsets.",
+    "P1/P2/P3 are not concatenated. Class roots: naive T/B or Ly6C-hi monocytes by convention.",
     "This is not proof of developmental origin. Neutrophils on the myeloid tree are a branch, not derived from monocytes.",
     paste("Method: slingshot if installed, otherwise MST of subset centroids + smooth curves.")
   ), file.path(out_dir, "TRAJECTORY_NOTE.txt"))
+  tryCatch(
+    export_panel_major_trajectory(cells, panel_id, out_dir),
+    error = function(e) log_msg(panel_id, " major-class trajectory failed: ", e$message)
+  )
   majors <- setdiff(unique(as.character(cells$major)), c("dump", "", NA, "other"))
   for (mj in majors) {
     tryCatch(
