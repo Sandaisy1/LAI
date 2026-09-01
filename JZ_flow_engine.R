@@ -3987,15 +3987,17 @@ functional_state_specs <- function(panel_id) {
   list()
 }
 
-functional_marker_sample_percent <- function(cells, parent, marker) {
+functional_marker_sample_percent <- function(cells, parent, marker, cut = NA_real_) {
   par <- functional_parent_mask(cells, parent)
+  if (!is.finite(cut)) {
+    cut <- axis_pos_cut(as.numeric(cells[[marker]][par]))
+  }
   smp <- unique(as.character(cells$sample))
   rows <- lapply(smp, function(s) {
     keep_s <- as.character(cells$sample) == s
     hit <- keep_s & par
     v <- as.numeric(cells[[marker]][hit])
     n_par <- sum(hit)
-    cut <- if (n_par >= 8) axis_pos_cut(v) else NA_real_
     n_pos <- if (is.finite(cut)) sum(is.finite(v) & v >= cut) else 0L
     grp <- as.character(cells$group[keep_s][1])
     bio <- if ("bio_sample" %in% names(cells)) as.character(cells$bio_sample[keep_s][1]) else s
@@ -4111,13 +4113,20 @@ save_func_state_figure <- function(columns, path_stub) {
       print(columns[[i]]$c_trt, vp = grid::viewport(layout.pos.row = 3, layout.pos.col = i), newpage = FALSE)
     }
   }
+  pdf_fun <- if (isTRUE(capabilities("cairo")) && exists("cairo_pdf", where = asNamespace("grDevices"), inherits = FALSE)) {
+    grDevices::cairo_pdf
+  } else {
+    grDevices::pdf
+  }
   tryCatch({
-    grDevices::pdf(paste0(path_stub, ".pdf"), width = w, height = h)
+    pdf_fun(paste0(path_stub, ".pdf"), width = w, height = h)
     draw_one()
     grDevices::dev.off()
   }, error = function(e) log_msg("functional-state pdf failed: ", e$message))
   tryCatch({
-    grDevices::png(paste0(path_stub, ".png"), width = w, height = h, units = "in", res = 300)
+    png_args <- list(filename = paste0(path_stub, ".png"), width = w, height = h, units = "in", res = 300)
+    if (isTRUE(capabilities("cairo"))) png_args$type <- "cairo"
+    do.call(grDevices::png, png_args)
     draw_one()
     grDevices::dev.off()
   }, error = function(e) log_msg("functional-state png failed: ", e$message))
@@ -4157,9 +4166,9 @@ export_one_functional_state <- function(cells, panel_id, spec, out_dir) {
   xlab <- axis_fl_label(panel_id, xmk)
   columns <- list()
   stat_rows <- list()
-  hi_y_spec <- list(gate = "hi_y", x_hi = NA, y_hi = TRUE)
   for (mk in markers) {
-    samp <- functional_marker_sample_percent(cells, parent, mk)
+    cut_mk <- axis_pos_cut(as.numeric(c(d_ctrl[[mk]], d_trt[[mk]])))
+    samp <- functional_marker_sample_percent(cells, parent, mk, cut_mk)
     if (is.null(samp) || nrow(samp) < 2) next
     samp_bio <- bio_percent_table(samp)
     if (is.null(samp_bio) || nrow(samp_bio) < 2) next
@@ -4174,18 +4183,15 @@ export_one_functional_state <- function(cells, panel_id, spec, out_dir) {
     bar <- plot_func_state_bar(samp_bio, ylab, pv)
     yfl <- axis_fl_label(panel_id, mk)
     xlim <- finite_axis_lim(c(d_ctrl[[xmk]], d_trt[[xmk]]))
-    ylim <- finite_axis_lim(c(d_ctrl[[mk]], d_trt[[mk]]))
-    gate_ctrl <- complete_gate_for(d_ctrl[[xmk]], d_ctrl[[mk]], hi_y_spec, xlim, ylim)
-    gate_trt <- complete_gate_for(d_trt[[xmk]], d_trt[[mk]], hi_y_spec, xlim, ylim)
+    ylim <- finite_axis_lim(c(d_ctrl[[mk]], d_trt[[mk]], cut_mk))
+    gate <- complete_gate_rect(xlim, ylim, mean(xlim), cut_mk, NA, TRUE)
     xlim <- finite_axis_lim(c(
-      d_ctrl[[xmk]], d_trt[[xmk]],
-      gate_ctrl$xmin, gate_ctrl$xmax, gate_trt$xmin, gate_trt$xmax
+      d_ctrl[[xmk]], d_trt[[xmk]], gate$xmin, gate$xmax
     ))
     ylim <- finite_axis_lim(c(
-      d_ctrl[[mk]], d_trt[[mk]],
-      gate_ctrl$ymin, gate_ctrl$ymax, gate_ctrl$ycut,
-      gate_trt$ymin, gate_trt$ymax, gate_trt$ycut
+      d_ctrl[[mk]], d_trt[[mk]], gate$ymin, gate$ymax, gate$ycut
     ))
+    gate <- complete_gate_rect(xlim, ylim, mean(xlim), cut_mk, NA, TRUE)
     pct_of <- function(g) {
       v <- samp_bio$percent[as.character(samp_bio$group) == g]
       if (!length(v) || all(!is.finite(v))) return(0)
@@ -4193,11 +4199,11 @@ export_one_functional_state <- function(cells, panel_id, spec, out_dir) {
     }
     c_ctrl <- plot_func_state_contour(
       d_ctrl, xmk, mk, col_ctrl, xlab, yfl, pct_of(flow_ctrl_group),
-      gate_ctrl, xlim, ylim, tag_ctrl, show_x = FALSE
+      gate, xlim, ylim, tag_ctrl, show_x = FALSE
     )
     c_trt <- plot_func_state_contour(
       d_trt, xmk, mk, col_trt, xlab, yfl, pct_of(flow_trt_group),
-      gate_trt, xlim, ylim, tag_trt, show_x = TRUE
+      gate, xlim, ylim, tag_trt, show_x = TRUE
     )
     columns[[length(columns) + 1]] <- list(bar = bar, c_ctrl = c_ctrl, c_trt = c_trt)
     dropped_bio <- attr(samp_bio, "dropped")
