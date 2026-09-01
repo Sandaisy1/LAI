@@ -78,7 +78,7 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 
 # 流式降维（免疫细胞亚群，H vs EV，P1 / P2 / P3）
 
-这是 **`E:/R/fuction of cell`** 的免疫细胞亚群降维。找 His+ 靶细胞是另一套实验，走 `ICI_Flow_dimred_pipeline.R`（`E:/R/Internation cell immune`），不要混用。
+这是 **`E:/R/fuction of cell`** 的免疫细胞亚群降维。找 His+ 靶细胞是另一套实验，走 `ICI_Flow_dimred_pipeline.R`（`E:/R/Internation cell immune`）。**JY-EVNK vs JY-NNK** 是第三套，走 `JY_Flow_dimred_pipeline.R`（`E:/R/fuction of cell-ljy`）。三套不要混用。
 
 小鼠流式只用 `*_unmixed.fcs`。分析结果写在同一目录的 `results_flow/`。三个 panel **分开**做 UMAP/tSNE，比较 **ZZX_EV**（EV1/2/3，每管两个技术重复 EV1-1/EV1-2）与 **ZZX_H**（H1/2/3，H1-1/H1-2）。统计：技术重复先平均；三个生物学重复里去掉离中位数更远的最大值或最小值，用剩下 n=2 做均值/SD/检验。tSNE 仍用全部细胞。
 
@@ -136,6 +136,27 @@ source("ICI_Flow_dimred_pipeline.R")
 QC 只去双联体和死细胞，**不要求 CD45+**，也 **不用 P1 紧淋巴门**，以免丢掉 His+ CD45− 靶细胞。活细胞里 His+ CD45− 标成 **His+ target**；His+ CD45+ 仍按原来的 T/NK/B/髓系亚群命名，并另出各亚群内 His+ 比例。
 
 降维和轨迹与免疫亚群方案同一套：`*_major_split` 按大类着色（含 His+ target），`*_lineage_split` 是全体细亚群，`dimred_by_major/` 再按大类重降维（高对比色）；轨迹先画全体大类树再画各类亚群树。每个 panel 出免疫细胞注释热图 `*_annotation_heatmap`（含 His+ target）。ICI P1 没有 CD19，缺通道按阴性处理，不要再出现 `NAs are not allowed in subscripted assignments`；缺的染色通道该项可以不分析，但不能跳过该 panel 其余图。结果在同目录 `results_flow/`，靶细胞表和图在 `target_His/`。
+
+## JY（第三套实验，免疫亚群降维，JY-EVNK vs JY-NNK）
+
+数据在 `E:/R/fuction of cell-ljy`。分析与上面的免疫亚群降维一致（同一套 P1/P2/P3 染色、圈门、图件），只换目录和组别。
+
+组别：**JY-EVNK**（生物学重复 EVNK-1、EVNK-2、EVNK-3；每个生物学重复两个技术重复，如 EVNK1-1、EVNK1-2）vs **JY-NNK**（NNK-1、NNK-2、NNK-3；技术重复如 NNK1-1、NNK1-2）。统计同样是技术重复先平均，再去掉 1 个极端生物学重复，n=2。tSNE/UMAP 仍用全部管子。
+
+三套方案完全独立。把下面文件**整套**拷到 `E:/R/fuction of cell-ljy`（不要去 `E:/R/fuction of cell` 找原流程，也不要 `source` `Flow_dimred_pipeline.R` 或 `ICI_*`）：
+
+- `JY_Flow_dimred_pipeline.R`（入口）
+- `JY_flow_engine.R`（本方案自己的分析函数库）
+- `JY_flow_panel_map.json`
+- `JY_Flow_dimred_all_subsets.R`
+- `JY_Flow_dimred_trajectory.R`
+
+```r
+setwd("E:/R/fuction of cell-ljy")
+source("JY_Flow_dimred_pipeline.R")
+```
+
+文件名：`EVNK1-1_P1_unmixed.fcs`、`JY-NNK-2-2_P3_unmixed.fcs`、`NNK-3-1_P2_unmixed.fcs` 都可以（`JY-` 可有可无）。**先匹配 EVNK 再匹配 NNK**。结果在同目录 `results_flow/`，比较标签是 NNK vs EVNK。
 
 若日志出现「没有匹配到任何分析通道」，多半是 Cytek 通道名带 `-A`（如 `BUV496-A`）或 desc 为空，不是文件没找到。用最新脚本再跑；仍失败时日志会列出通道名，并在 `results_flow/00_logs/` 写 `*_channels.csv`。
 
