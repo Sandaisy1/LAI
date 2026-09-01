@@ -3097,6 +3097,8 @@ parent_mask <- function(cells, parent) {
       lin %in% c("Memory_B", "IgM_memory", "Unswitched_B", "Switched_B", "Plasmablast",
                  "Plasma", "Activated_B", "MZ_B"),
     Naive_B = cl == "Naive_B" | lin %in% c("Naive_B", "MZ_B"),
+    Atypical_B = cl == "Atypical_B" | lin == "Atypical_B",
+    Activated_B = lin == "Activated_B" | cl == "Activated_B",
     rep(TRUE, n)
   )
   out[is.na(out)] <- FALSE
@@ -3886,6 +3888,363 @@ export_p3_activation_stats <- function(cells, out_dir) {
   invisible(tab)
 }
 
+# -----------------------------------------------------------------------------
+# NKT / B 亚群单独的活化、效应、耗竭（图1：上柱状图，下对照/处理等高线）
+# B 的 P2 没有 PD-L1/LAG-3/TIM-3：只报 CD86/CD80/CD40，缺通道 skip，不伪造抑制门。
+# -----------------------------------------------------------------------------
+flow_comparison_tag <- function() {
+  trt <- gsub("[^A-Za-z0-9]+", "_", as.character(flow_trt_group)[1])
+  ctrl <- gsub("[^A-Za-z0-9]+", "_", as.character(flow_ctrl_group)[1])
+  paste0(trt, "_vs_", ctrl)
+}
+
+func_group_short <- function(g) {
+  rec <- c(
+    EV = "EV", H = "H",
+    "JY-EVNK" = "EVNK", "JY-NNK" = "NNK",
+    "JZ-EVB" = "EVB", "JZ-AB" = "AB"
+  )
+  g <- as.character(g)[1]
+  if (g %in% names(rec)) rec[[g]] else g
+}
+
+marker_pretty_label <- function(mk) {
+  rec <- c(
+    "IFN-g" = "IFN-\u03B3", "TNF-a" = "TNF-\u03B1", GZMB = "Granzyme B",
+    Perforin = "Perforin", CD69 = "CD69", "PD-L1" = "PD-L1",
+    "LAG-3" = "LAG-3", "TIM-3" = "TIM-3", CD80 = "CD80", CD86 = "CD86",
+    CD40 = "CD40", NKG2D = "NKG2D"
+  )
+  mk <- as.character(mk)[1]
+  if (mk %in% names(rec)) rec[[mk]] else mk
+}
+
+func_parent_pretty <- function(p) {
+  rec <- c(
+    NKT = "NKT cell", Naive_B = "Naive B", Unswitched_B = "Unswitched B",
+    Switched_B = "Switched B", Atypical_B = "Atypical B",
+    Activated_B = "Activated B"
+  )
+  p <- as.character(p)[1]
+  if (p %in% names(rec)) rec[[p]] else p
+}
+
+functional_parent_mask <- function(cells, parent) {
+  n <- nrow(cells)
+  if (n < 1) return(logical(0))
+  cl <- if ("cluster_lineage" %in% names(cells)) as.character(cells$cluster_lineage) else rep("", n)
+  lin <- if ("lineage" %in% names(cells)) as.character(cells$lineage) else rep("", n)
+  cl[is.na(cl)] <- ""
+  lin[is.na(lin)] <- ""
+  out <- switch(
+    as.character(parent),
+    NKT = cl == "NKT" | lin %in% nkt_family() | grepl("^NKT", lin),
+    Naive_B = lin == "Naive_B" | (cl == "Naive_B" & !lin %in% c("MZ_B", "Activated_B")),
+    Unswitched_B = lin == "Unswitched_B" | (cl == "Unswitched_B" & !lin %in% c("MZ_B", "Activated_B")),
+    Switched_B = lin == "Switched_B" | (cl == "Switched_B" & !lin %in% c("Plasmablast", "Activated_B")),
+    Atypical_B = lin == "Atypical_B" | cl == "Atypical_B",
+    Activated_B = lin == "Activated_B" | cl == "Activated_B",
+    parent_mask(cells, parent)
+  )
+  out[is.na(out)] <- FALSE
+  out
+}
+
+func_x_marker <- function(parent, available) {
+  if (identical(as.character(parent), "NKT")) {
+    for (m in c("NKp46", "NK1.1", "CD3")) if (m %in% available) return(m)
+    return(NA_character_)
+  }
+  for (m in c("CD19", "IgD", "CD27")) if (m %in% available) return(m)
+  NA_character_
+}
+
+functional_state_specs <- function(panel_id) {
+  if (identical(panel_id, "P1")) {
+    return(list(
+      list(parent = "NKT", state = "activation_effector",
+           markers = c("CD69", "IFN-g", "TNF-a", "GZMB")),
+      list(parent = "NKT", state = "exhaustion",
+           markers = c("PD-L1", "LAG-3", "TIM-3"))
+    ))
+  }
+  if (identical(panel_id, "P2")) {
+    return(lapply(
+      c("Naive_B", "Unswitched_B", "Switched_B", "Atypical_B", "Activated_B"),
+      function(p) list(parent = p, state = "activation", markers = c("CD86", "CD80", "CD40"))
+    ))
+  }
+  list()
+}
+
+functional_marker_sample_percent <- function(cells, parent, marker) {
+  par <- functional_parent_mask(cells, parent)
+  smp <- unique(as.character(cells$sample))
+  rows <- lapply(smp, function(s) {
+    keep_s <- as.character(cells$sample) == s
+    hit <- keep_s & par
+    v <- as.numeric(cells[[marker]][hit])
+    n_par <- sum(hit)
+    cut <- if (n_par >= 8) axis_pos_cut(v) else NA_real_
+    n_pos <- if (is.finite(cut)) sum(is.finite(v) & v >= cut) else 0L
+    grp <- as.character(cells$group[keep_s][1])
+    bio <- if ("bio_sample" %in% names(cells)) as.character(cells$bio_sample[keep_s][1]) else s
+    if (is.na(bio) || !nzchar(bio)) bio <- s
+    tech <- if ("tech_rep" %in% names(cells)) as.character(cells$tech_rep[keep_s][1]) else NA_character_
+    data.frame(
+      sample = s, bio_sample = bio, tech_rep = tech, group = grp,
+      parent = parent, marker = marker, n_parent = n_par, n_pos = n_pos,
+      percent = if (n_par > 0 && is.finite(cut)) 100 * n_pos / n_par else NA_real_,
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, rows)
+}
+
+plot_func_state_bar <- function(sample_df, ylab, pval) {
+  sample_df <- sample_df[is.finite(sample_df$percent), , drop = FALSE]
+  glev <- flow_group_levels
+  glab <- unname(vapply(glev, func_group_short, character(1)))
+  sample_df$g_lab <- factor(
+    vapply(as.character(sample_df$group), func_group_short, character(1)),
+    levels = glab
+  )
+  pal_s <- pal_group
+  names(pal_s) <- glab
+  means <- data.frame(
+    g_lab = factor(glab, levels = glab),
+    mean = vapply(glev, function(g) {
+      mean(sample_df$percent[as.character(sample_df$group) == g], na.rm = TRUE)
+    }, numeric(1)),
+    sd = vapply(glev, function(g) {
+      v <- sample_df$percent[as.character(sample_df$group) == g]
+      if (length(v) < 2) 0 else stats::sd(v)
+    }, numeric(1)),
+    stringsAsFactors = FALSE
+  )
+  means$mean[!is.finite(means$mean)] <- 0
+  means$sd[!is.finite(means$sd)] <- 0
+  y_top <- max(c(sample_df$percent, means$mean + means$sd), na.rm = TRUE)
+  if (!is.finite(y_top) || y_top <= 0) y_top <- 1
+  star <- p_annot_label(pval)
+  ggplot2::ggplot() +
+    ggplot2::geom_col(
+      data = means, ggplot2::aes(x = g_lab, y = mean, color = g_lab),
+      fill = "white", width = 0.52, linewidth = 0.9
+    ) +
+    ggplot2::geom_errorbar(
+      data = means, ggplot2::aes(x = g_lab, ymin = pmax(0, mean - sd), ymax = mean + sd, color = g_lab),
+      width = 0.15, linewidth = 0.45, show.legend = FALSE
+    ) +
+    ggplot2::geom_point(
+      data = sample_df,
+      ggplot2::aes(x = g_lab, y = percent, color = g_lab, fill = g_lab),
+      shape = 21, size = 2.5, stroke = 0.35,
+      position = ggplot2::position_jitter(width = 0.07, height = 0, seed = 1)
+    ) +
+    ggplot2::annotate("segment", x = 1, xend = 2, y = y_top * 1.10, yend = y_top * 1.10, linewidth = 0.4) +
+    ggplot2::annotate("text", x = 1.5, y = y_top * 1.20, label = star, fontface = "bold", size = 3.5) +
+    ggplot2::scale_color_manual(values = pal_s, drop = FALSE) +
+    ggplot2::scale_fill_manual(values = pal_s, drop = FALSE) +
+    ggplot2::scale_y_continuous(expand = ggplot2::expansion(mult = c(0, 0.30))) +
+    ggplot2::coord_cartesian(ylim = c(0, y_top * 1.40)) +
+    ggplot2::theme_classic(base_size = 11) +
+    ggplot2::theme(
+      legend.position = "none",
+      axis.title.x = ggplot2::element_blank(),
+      axis.text = ggplot2::element_text(color = "black"),
+      axis.line = ggplot2::element_line(color = "black", linewidth = 0.4),
+      plot.title = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(4, 6, 2, 8)
+    ) +
+    ggplot2::labs(y = ylab)
+}
+
+plot_func_state_contour <- function(df, x, y, color, xlab, ylab, pct, gate,
+                                    xlim, ylim, group_tag = NULL, show_x = TRUE) {
+  gate$xcut <- NA_real_
+  p <- plot_subset_contour(df, x, y, color, xlab, ylab, pct, gate, xlim, ylim, NULL, TRUE)
+  if (!is.null(group_tag) && nzchar(group_tag)) {
+    p <- p + ggplot2::labs(tag = group_tag) +
+      ggplot2::theme(
+        plot.tag = ggplot2::element_text(face = "bold", size = 11, color = color),
+        plot.tag.position = "left"
+      )
+  }
+  if (!isTRUE(show_x)) {
+    p <- p + ggplot2::theme(
+      axis.title.x = ggplot2::element_blank(),
+      axis.text.x = ggplot2::element_blank(),
+      axis.ticks.x = ggplot2::element_blank()
+    )
+  }
+  p + ggplot2::theme(
+    axis.text = ggplot2::element_text(color = "black"),
+    axis.title.y = ggplot2::element_text(color = "black"),
+    plot.margin = ggplot2::margin(4, 8, 6, 10)
+  )
+}
+
+save_func_state_figure <- function(columns, path_stub) {
+  n <- length(columns)
+  if (!n) return(invisible(FALSE))
+  dir.create(dirname(path_stub), recursive = TRUE, showWarnings = FALSE)
+  w <- max(2.9 * n + 0.4, 7.4)
+  h <- 8.6
+  draw_one <- function() {
+    grid::grid.newpage()
+    lay <- grid::grid.layout(3, n, heights = grid::unit(c(1.05, 1.28, 1.42), "null"))
+    grid::pushViewport(grid::viewport(layout = lay, width = 0.98, height = 0.97))
+    for (i in seq_len(n)) {
+      print(columns[[i]]$bar, vp = grid::viewport(layout.pos.row = 1, layout.pos.col = i), newpage = FALSE)
+      print(columns[[i]]$c_ctrl, vp = grid::viewport(layout.pos.row = 2, layout.pos.col = i), newpage = FALSE)
+      print(columns[[i]]$c_trt, vp = grid::viewport(layout.pos.row = 3, layout.pos.col = i), newpage = FALSE)
+    }
+  }
+  tryCatch({
+    grDevices::pdf(paste0(path_stub, ".pdf"), width = w, height = h)
+    draw_one()
+    grDevices::dev.off()
+  }, error = function(e) log_msg("functional-state pdf failed: ", e$message))
+  tryCatch({
+    grDevices::png(paste0(path_stub, ".png"), width = w, height = h, units = "in", res = 300)
+    draw_one()
+    grDevices::dev.off()
+  }, error = function(e) log_msg("functional-state png failed: ", e$message))
+  invisible(TRUE)
+}
+
+export_one_functional_state <- function(cells, panel_id, spec, out_dir) {
+  parent <- spec$parent
+  markers <- intersect(as.character(spec$markers), names(cells))
+  xmk <- func_x_marker(parent, names(cells))
+  label <- paste0(panel_id, " ", parent, " ", spec$state)
+  if (!length(markers) || is.na(xmk) || !nzchar(xmk)) {
+    skip_if_missing_channels(c(spec$markers, "lineage-x"), names(cells), label)
+    return(invisible(NULL))
+  }
+  if (skip_if_missing_channels(c(xmk, markers), names(cells), label)) {
+    return(invisible(NULL))
+  }
+  par <- functional_parent_mask(cells, parent)
+  if (sum(par) < 20) {
+    log_msg("skip ", label, " (parent n=", sum(par), ")")
+    return(invisible(NULL))
+  }
+  d_ctrl <- cells[par & as.character(cells$group) == flow_ctrl_group, , drop = FALSE]
+  d_trt <- cells[par & as.character(cells$group) == flow_trt_group, , drop = FALSE]
+  if (nrow(d_ctrl) < 8 || nrow(d_trt) < 8) {
+    log_msg("skip ", label, " (too few cells in one group)")
+    return(invisible(NULL))
+  }
+  col_ctrl <- unname(pal_group[flow_ctrl_group])
+  col_trt <- unname(pal_group[flow_trt_group])
+  if (is.na(col_ctrl)) col_ctrl <- "#1A1A1A"
+  if (is.na(col_trt)) col_trt <- "#E31A1C"
+  tag_ctrl <- func_group_short(flow_ctrl_group)
+  tag_trt <- func_group_short(flow_trt_group)
+  parent_lab <- func_parent_pretty(parent)
+  xlab <- axis_fl_label(panel_id, xmk)
+  columns <- list()
+  stat_rows <- list()
+  hi_y_spec <- list(gate = "hi_y", x_hi = NA, y_hi = TRUE)
+  for (mk in markers) {
+    samp <- functional_marker_sample_percent(cells, parent, mk)
+    if (is.null(samp) || nrow(samp) < 2) next
+    samp_bio <- bio_percent_table(samp)
+    if (is.null(samp_bio) || nrow(samp_bio) < 2) next
+    ctrl_v <- samp_bio$percent[as.character(samp_bio$group) == flow_ctrl_group]
+    trt_v <- samp_bio$percent[as.character(samp_bio$group) == flow_trt_group]
+    pv <- if (length(ctrl_v) >= 2 && length(trt_v) >= 2) {
+      tryCatch(stats::t.test(trt_v, ctrl_v)$p.value, error = function(e) NA_real_)
+    } else {
+      NA_real_
+    }
+    ylab <- paste0(marker_pretty_label(mk), "\u207A ", parent_lab, " (%)")
+    bar <- plot_func_state_bar(samp_bio, ylab, pv)
+    yfl <- axis_fl_label(panel_id, mk)
+    xlim <- finite_axis_lim(c(d_ctrl[[xmk]], d_trt[[xmk]]))
+    ylim <- finite_axis_lim(c(d_ctrl[[mk]], d_trt[[mk]]))
+    gate_ctrl <- complete_gate_for(d_ctrl[[xmk]], d_ctrl[[mk]], hi_y_spec, xlim, ylim)
+    gate_trt <- complete_gate_for(d_trt[[xmk]], d_trt[[mk]], hi_y_spec, xlim, ylim)
+    xlim <- finite_axis_lim(c(
+      d_ctrl[[xmk]], d_trt[[xmk]],
+      gate_ctrl$xmin, gate_ctrl$xmax, gate_trt$xmin, gate_trt$xmax
+    ))
+    ylim <- finite_axis_lim(c(
+      d_ctrl[[mk]], d_trt[[mk]],
+      gate_ctrl$ymin, gate_ctrl$ymax, gate_ctrl$ycut,
+      gate_trt$ymin, gate_trt$ymax, gate_trt$ycut
+    ))
+    pct_of <- function(g) {
+      v <- samp_bio$percent[as.character(samp_bio$group) == g]
+      if (!length(v) || all(!is.finite(v))) return(0)
+      mean(v, na.rm = TRUE)
+    }
+    c_ctrl <- plot_func_state_contour(
+      d_ctrl, xmk, mk, col_ctrl, xlab, yfl, pct_of(flow_ctrl_group),
+      gate_ctrl, xlim, ylim, tag_ctrl, show_x = FALSE
+    )
+    c_trt <- plot_func_state_contour(
+      d_trt, xmk, mk, col_trt, xlab, yfl, pct_of(flow_trt_group),
+      gate_trt, xlim, ylim, tag_trt, show_x = TRUE
+    )
+    columns[[length(columns) + 1]] <- list(bar = bar, c_ctrl = c_ctrl, c_trt = c_trt)
+    dropped_bio <- attr(samp_bio, "dropped")
+    stat_rows[[length(stat_rows) + 1]] <- data.frame(
+      panel = panel_id, parent = parent, state = spec$state, marker = mk,
+      n_ctrl = length(ctrl_v), n_trt = length(trt_v),
+      mean_ctrl = mean(ctrl_v, na.rm = TRUE), mean_trt = mean(trt_v, na.rm = TRUE),
+      sd_ctrl = if (length(ctrl_v) >= 2) stats::sd(ctrl_v) else NA_real_,
+      sd_trt = if (length(trt_v) >= 2) stats::sd(trt_v) else NA_real_,
+      p_value = pv,
+      dropped_ctrl = if (!is.null(dropped_bio) && nrow(dropped_bio)) {
+        paste(dropped_bio$dropped_bio[dropped_bio$group == flow_ctrl_group], collapse = ",")
+      } else "",
+      dropped_trt = if (!is.null(dropped_bio) && nrow(dropped_bio)) {
+        paste(dropped_bio$dropped_bio[dropped_bio$group == flow_trt_group], collapse = ",")
+      } else "",
+      stringsAsFactors = FALSE
+    )
+    stub_one <- paste0(
+      panel_id, "_", parent, "_", gsub("[^A-Za-z0-9]+", "_", mk), "_",
+      flow_comparison_tag()
+    )
+    utils::write.csv(samp, file.path(out_dir, paste0(stub_one, "_by_sample.csv")), row.names = FALSE)
+    utils::write.csv(samp_bio, file.path(out_dir, paste0(stub_one, "_by_bio.csv")), row.names = FALSE)
+  }
+  if (!length(columns)) return(invisible(NULL))
+  stub <- file.path(
+    out_dir,
+    paste0(panel_id, "_", parent, "_", spec$state, "_", flow_comparison_tag())
+  )
+  save_func_state_figure(columns, stub)
+  if (length(stat_rows)) {
+    st <- do.call(rbind, stat_rows)
+    utils::write.csv(st, paste0(stub, "_stats.csv"), row.names = FALSE)
+  }
+  log_msg(panel_id, " functional-state ", parent, " ", spec$state, " -> ", stub)
+  invisible(stub)
+}
+
+export_functional_state_figures <- function(cells, panel_id, out_dir) {
+  specs <- functional_state_specs(panel_id)
+  if (!length(specs)) return(invisible(NULL))
+  func_dir <- file.path(out_dir, "functional_state")
+  dir.create(func_dir, recursive = TRUE, showWarnings = FALSE)
+  if (identical(panel_id, "P2")) {
+    log_msg("P2 B subsets: no PD-L1/LAG-3/TIM-3 on this panel; skip exhaustion, report CD86/CD80/CD40")
+  }
+  for (spec in specs) {
+    tryCatch(
+      export_one_functional_state(cells, panel_id, spec, func_dir),
+      error = function(e) log_msg(panel_id, " skip ", spec$parent, " ", spec$state, ": ", e$message)
+    )
+  }
+  log_msg(panel_id, " functional-state figures: ", func_dir)
+  invisible(TRUE)
+}
+
 export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, umap_is_pca = FALSE, tsne_is_pca = FALSE) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   marker_dir <- file.path(out_dir, "markers")
@@ -4038,6 +4397,10 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
       error = function(e) log_msg(panel_id, " APC/TNF-a MFI failed: ", e$message)
     )
   }
+  tryCatch(
+    export_functional_state_figures(cells, panel_id, out_dir),
+    error = function(e) log_msg(panel_id, " functional-state figures failed: ", e$message)
+  )
   invisible(TRUE)
 }
 

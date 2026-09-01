@@ -213,4 +213,18 @@ if (inherits(keep_tr, "error")) {
   fail(sprintf("jy_keep_cand must accept Windows paths after trajectory: %s", keep_tr$message))
 }
 
+if (!exists("export_functional_state_figures", mode = "function")) {
+  fail("JY engine must ship NKT/B functional-state export (do not source Flow_*)")
+}
+if (!identical(flow_comparison_tag(), "JY_NNK_vs_JY_EVNK")) {
+  fail("JY functional-state files must be tagged JY_NNK_vs_JY_EVNK")
+}
+jy_p1 <- functional_state_specs("P1")
+if (!length(jy_p1) || !identical(jy_p1[[1]]$parent, "NKT")) {
+  fail("JY P1 functional-state must analyze NKT")
+}
+if (!"Activated_B" %in% vapply(functional_state_specs("P2"), function(s) s$parent, character(1))) {
+  fail("JY P2 functional-state must include Activated_B")
+}
+
 cat("PASS test_jy_flow.R\n")

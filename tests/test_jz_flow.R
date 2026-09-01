@@ -229,4 +229,15 @@ if (inherits(keep_win, "error")) {
 }
 if (!isTRUE(keep_win)) fail("jz_keep_cand must keep E:/R/fuction of cell-wjz paths")
 
+if (!exists("export_functional_state_figures", mode = "function")) {
+  fail("JZ engine must ship NKT/B functional-state export (do not source Flow_* / JY_*)")
+}
+if (!identical(flow_comparison_tag(), "JZ_AB_vs_JZ_EVB")) {
+  fail("JZ functional-state files must be tagged JZ_AB_vs_JZ_EVB")
+}
+jz_p1 <- functional_state_specs("P1")
+if (!length(jz_p1) || !identical(jz_p1[[2]]$state, "exhaustion")) {
+  fail("JZ P1 functional-state must include NKT exhaustion")
+}
+
 cat("PASS test_jz_flow.R\n")
