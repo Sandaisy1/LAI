@@ -345,6 +345,24 @@ ok_stop <- tryCatch({
 }, error = function(e) TRUE)
 if (!isTRUE(ok_stop)) fail("rerun without embeddings should stop, not silently succeed")
 
+# 同一会话里已有旧 helper 时，独立脚本仍要从本目录覆盖最新函数
+export_functional_state_from_results <- function(...) "stale"
+if (exists("func_p3_state_parents", mode = "function")) {
+  rm(list = "func_p3_state_parents", envir = .GlobalEnv)
+}
+Sys.setenv(FLOW_FUNCTIONAL_STATE_FROM_PIPELINE = "1")
+source(file.path(dirname(normalizePath(this_file)), "..", "Flow_dimred_functional_state.R"))
+if (!exists("func_p3_state_parents", mode = "function")) {
+  fail("standalone script must reload all-subset helpers even if an old export helper exists")
+}
+if (!isTRUE(is.function(export_functional_state_from_results)) ||
+    identical(body(export_functional_state_from_results), body(function(...) "stale"))) {
+  fail("standalone script must overwrite a stale export_functional_state_from_results")
+}
+if (!length(functional_state_specs("P3"))) {
+  fail("reloaded standalone helpers must include P3 myeloid functional-state")
+}
+
 unlink(td, recursive = TRUE)
 unlink(td2, recursive = TRUE)
 unlink(td3, recursive = TRUE)

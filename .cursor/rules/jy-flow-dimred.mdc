@@ -31,7 +31,7 @@ QC、分层、图件与原 `Flow_*` 免疫亚群方案一致：
 2. 三个 panel 分开降维。图1 `*_major_split` 大类；`*_lineage_split` 全体细亚群；`dimred_by_major/` 类内再降维
 3. 组别色：JY-EVNK 黑、JY-NNK 红
 4. 比较标题和文件名用 **JY-NNK / JY-EVNK**（`*_JY_NNK_vs_JY_EVNK_*`），不要写成 H vs EV，也不要只写 NNK vs EVNK
-5. 各亚群功能状态出在 `results_flow/P1|P2|P3/functional_state/`。P1：CD4/CD8/NK/NKT 各亚群的 CD69/IFN-γ/TNF-α/GZMB 与 PD-L1/LAG-3/TIM-3；P2：CD19 及各 B 亚群的 CD86/CD80/CD40；P3 髓系：活化 CD86/CD80/CD40/TNF-α/IL-6，抑制 IL-10/TGF-β（不要叫耗竭，不要分析 dump T/B/NK）。图为上柱下等高线，JY-EVNK 黑、JY-NNK 红。不要 `source` Flow_* 来画这些图。总结果已出时只 `source("JY_Flow_dimred_functional_state.R")`，读 embeddings，不重跑 UMAP
+5. 各亚群功能状态出在 `results_flow/P1|P2|P3/functional_state/`。总结果已出时只 `source("JY_Flow_dimred_functional_state.R")`：脚本会从本目录重新加载 `JY_flow_engine.R`（即使当前会话刚跑过主流程），只读 embeddings，不重跑 UMAP。P1：CD4/CD8/NK/NKT 各亚群的 CD69/IFN-γ/TNF-α/GZMB 与 PD-L1/LAG-3/TIM-3；P2：CD19 及各 B 亚群的 CD86/CD80/CD40；P3 髓系：活化 CD86/CD80/CD40/TNF-α/IL-6，抑制 IL-10/TGF-β（不要叫耗竭，不要分析 dump T/B/NK）。图为上柱下等高线，JY-EVNK 黑、JY-NNK 红。不要 `source` Flow_* 来画这些图。
 
 ```r
 # ❌ BAD: source("Flow_dimred_pipeline.R")；去 E:/R/fuction of cell 找原流程

@@ -12,7 +12,7 @@
 # 用法：把本方案全部 JY_* 文件放到数据目录（不要去 fuction of cell 找原流程）
 #   setwd("E:/R/fuction of cell-ljy")
 #   source("JY_Flow_dimred_pipeline.R")
-# 总结果已经出来、只补 NKT/B 活化与耗竭：
+# 总结果已经出来、只补各亚群活化 / 抑制 / 耗竭（不重跑 UMAP）：
 #   source("JY_Flow_dimred_functional_state.R")
 # 无 FCS 时可 Sys.setenv(FLOW_DEMO = "1")
 #

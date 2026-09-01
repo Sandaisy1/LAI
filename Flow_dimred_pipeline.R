@@ -15,8 +15,8 @@
 # 三个 panel 跑完后会自动汇总全亚群频率，并按大类画轨迹：
 #   source("Flow_dimred_all_subsets.R")   # 也可单独重出 results_flow/all_subsets/
 #   source("Flow_dimred_trajectory.R")    # 也可单独重出 P1/P2/P3/trajectory/
-# 总结果已经出来、只补 NKT/B 活化与耗竭：
-#   source("Flow_dimred_functional_state.R")  # 读 *_cell_embeddings.csv，不重跑 UMAP
+# 总结果已经出来、只补各亚群活化 / 抑制 / 耗竭（不重跑 UMAP）：
+#   source("Flow_dimred_functional_state.R")  # 读 *_cell_embeddings.csv
 # 无 FCS 时可跑演示数据（会在日志里标明 DEMO，不可当正式结果）：
 #   Sys.setenv(FLOW_DEMO = "1")
 #   source("Flow_dimred_pipeline.R")
@@ -4370,6 +4370,7 @@ export_functional_state_from_results <- function(result_dir) {
   if (!dir.exists(result_dir)) {
     stop("找不到 results_flow：", result_dir, "。请 setwd 到已经出过总结果的数据目录。")
   }
+  log_msg("Standalone functional-state: no FCS, no UMAP; read embeddings in ", result_dir)
   n_ok <- 0L
   for (pn in c("P1", "P2", "P3")) {
     cells <- read_panel_cells_for_functional_state(result_dir, pn)

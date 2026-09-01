@@ -4378,6 +4378,7 @@ export_functional_state_from_results <- function(result_dir) {
   if (!dir.exists(result_dir)) {
     stop("找不到 results_flow：", result_dir, "。请 setwd 到已经出过总结果的数据目录。")
   }
+  log_msg("Standalone functional-state: no FCS, no UMAP; read embeddings in ", result_dir)
   n_ok <- 0L
   for (pn in c("P1", "P2", "P3")) {
     cells <- read_panel_cells_for_functional_state(result_dir, pn)

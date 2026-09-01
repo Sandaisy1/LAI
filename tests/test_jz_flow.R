@@ -250,12 +250,18 @@ if (!all(c("Macrophage", "Mono_Ly6Chi", "cDC1_CD103") %in% jz_p3_parents)) {
   fail("JZ P3 functional-state must analyze myeloid subsets")
 }
 
-rm(list = "export_functional_state_from_results", envir = .GlobalEnv)
+export_functional_state_from_results <- function(...) "stale"
+if (exists("func_p3_state_parents", mode = "function")) {
+  rm(list = "func_p3_state_parents", envir = .GlobalEnv)
+}
 jz_engine_loaded <- TRUE
 Sys.setenv(FLOW_FUNCTIONAL_STATE_FROM_PIPELINE = "1", FLOW_FUNCTIONS_ONLY = "1", JZ_FUNCTIONS_ONLY = "1")
 sys.source(file.path(root, "JZ_Flow_dimred_functional_state.R"), envir = .GlobalEnv)
 if (!exists("export_functional_state_from_results", mode = "function")) {
   fail("JZ functional-state script must reload the engine if the rerun helper is missing")
+}
+if (!exists("func_p3_state_parents", mode = "function")) {
+  fail("JZ standalone script must reload all-subset helpers even if jz_engine_loaded is TRUE")
 }
 
 cat("PASS test_jz_flow.R\n")

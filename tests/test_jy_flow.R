@@ -237,13 +237,22 @@ if (any(c("T", "B", "NK") %in% jy_p3_parents)) {
   fail("JY P3 must not treat dump T/B/NK as functional-state parents")
 }
 
-# 同一会话里旧引擎已加载时，独立脚本仍要重新 source JY_flow_engine.R
-rm(list = "export_functional_state_from_results", envir = .GlobalEnv)
+# 同一会话里旧引擎已加载、甚至残留旧 helper 时，独立脚本仍要重新 source JY_flow_engine.R
+export_functional_state_from_results <- function(...) "stale"
+if (exists("func_p3_state_parents", mode = "function")) {
+  rm(list = "func_p3_state_parents", envir = .GlobalEnv)
+}
 jy_engine_loaded <- TRUE
 Sys.setenv(FLOW_FUNCTIONAL_STATE_FROM_PIPELINE = "1", FLOW_FUNCTIONS_ONLY = "1", JY_FUNCTIONS_ONLY = "1")
 sys.source(file.path(root, "JY_Flow_dimred_functional_state.R"), envir = .GlobalEnv)
 if (!exists("export_functional_state_from_results", mode = "function")) {
   fail("JY functional-state script must reload the engine if the rerun helper is missing")
+}
+if (!exists("func_p3_state_parents", mode = "function")) {
+  fail("JY standalone script must reload all-subset helpers even if jy_engine_loaded is TRUE")
+}
+if (!length(functional_state_specs("P3"))) {
+  fail("JY reloaded engine must include P3 myeloid functional-state")
 }
 
 cat("PASS test_jy_flow.R\n")

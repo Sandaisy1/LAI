@@ -1,14 +1,12 @@
 #!/usr/bin/env Rscript
 # =============================================================================
 # JZ：只重出各亚群的活化、抑制或耗竭（JZ-AB / JZ-EVB）
-# 读本方案 results_flow/P1|P2|P3/*_cell_embeddings.csv，不读 FCS，不重跑 UMAP。
-# 不要 source Flow_dimred_pipeline.R 或 ICI_* / JY_*。
+#
+# 总降维已经跑完时单独运行。读本方案 results_flow/P1|P2|P3/*_cell_embeddings.csv，
+# 不读 FCS，不重跑 UMAP。不要 source Flow_dimred_pipeline.R 或 ICI_* / JY_*。
 #
 #   setwd("E:/R/fuction of cell-wjz")
 #   source("JZ_Flow_dimred_functional_state.R")
-#
-# 若刚才刚跑过主流程，请先关掉 R 再开，或至少覆盖最新 JZ_flow_engine.R。
-# 若 all-subsets 之后出现 Trailing backslash，说明 JZ_Flow_dimred_all_subsets.R 也是旧拷贝。
 # =============================================================================
 
 jz_keep_cand <- function(p) {
@@ -21,10 +19,8 @@ jz_keep_cand <- function(p) {
 }
 
 load_jz_engine_functions <- function() {
-  if (exists("export_functional_state_from_results", mode = "function") &&
-      isTRUE(get0("jz_engine_loaded", ifnotfound = FALSE))) {
-    return(invisible(TRUE))
-  }
+  # 总结果已出、单独 source 本文件时：始终从本目录重新加载 JZ_flow_engine.R，
+  # 覆盖同一会话里刚跑过的旧主流程（jz_engine_loaded 已是 TRUE 也不跳过）。
   pipe <- "JZ_flow_engine.R"
   cands <- c(file.path(getwd(), pipe), pipe)
   args <- commandArgs(trailingOnly = FALSE)
@@ -49,11 +45,12 @@ load_jz_engine_functions <- function() {
     stop("找不到 JZ_flow_engine.R。JZ 方案不使用 Flow_dimred_pipeline.R。")
   }
   source(hit, local = FALSE)
-  if (!exists("export_functional_state_from_results", mode = "function")) {
+  if (!exists("export_functional_state_from_results", mode = "function") ||
+      !exists("func_p3_state_parents", mode = "function")) {
     stop(
-      "当前 JZ_flow_engine.R 太旧，没有 export_functional_state_from_results。\n",
-      "请把最新 JZ_* 整套覆盖到 E:/R/fuction of cell-wjz（尤其是 JZ_flow_engine.R 和 JZ_Flow_dimred_all_subsets.R），",
-      "关掉 R 再开，然后：\n",
+      "当前 JZ_flow_engine.R 太旧，不能出全部亚群的功能状态图。\n",
+      "请把最新 JZ_* 整套覆盖到 E:/R/fuction of cell-wjz（尤其是 JZ_flow_engine.R），",
+      "然后：\n",
       "  setwd(\"E:/R/fuction of cell-wjz\")\n",
       "  source(\"JZ_Flow_dimred_functional_state.R\")"
     )
