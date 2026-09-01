@@ -26,14 +26,36 @@ ct <- plot_subset_contour(
   "CD3", "NK1.1", "#1A1A1A", "CD3", "NK1.1", 12.3,
   list(xmin = 0.7, xmax = 1.3, ymin = 0.7, ymax = 1.3)
 )
-has_contour <- FALSE
-has_out_pts <- FALSE
+has_path <- FALSE
+has_pts <- FALSE
+n_pts <- 0L
 for (ly in ct$layers) {
-  if (inherits(ly$geom, "GeomContour")) has_contour <- TRUE
-  if (inherits(ly$geom, "GeomPoint")) has_out_pts <- TRUE
+  if (inherits(ly$geom, "GeomPath")) has_path <- TRUE
+  if (inherits(ly$geom, "GeomPoint")) {
+    has_pts <- TRUE
+    n_pts <- n_pts + nrow(ly$data)
+  }
 }
-if (!has_contour) fail("subset contour plot should draw FlowJo-style contours")
-if (!has_out_pts) fail("subset contour plot should draw outlier events")
+if (!has_path) fail("subset contour plot should draw FlowJo-style contour paths")
+if (!has_pts) fail("subset contour plot should draw the event cloud, not only the gate")
+if (n_pts < 50) fail("event cloud should include interior cells, not only a few outliers")
+
+# Compact CD4-like blob: almost no outliers. Must still show the cloud.
+tight <- data.frame(CD4 = rnorm(400, 2.05, 0.06), `PD-L1` = rnorm(400, 0.28, 0.07),
+                    check.names = FALSE)
+pc_t <- flow_prob_contour(tight$CD4, tight$`PD-L1`)
+paths_t <- flow_contour_path_df(pc_t)
+if (is.null(paths_t) || nrow(paths_t) < 10) fail("compact blobs should still yield contour paths")
+ct_t <- plot_subset_contour(
+  tight, "CD4", "PD-L1", "#1A1A1A", "CD4", "PD-L1", 21,
+  list(xmin = 1.7, xmax = 2.4, ymin = 0.4, ymax = 0.8, xcut = NA, ycut = 0.4),
+  xlim = c(0, 2.5), ylim = c(0, 1.5)
+)
+n_tight <- 0L
+for (ly in ct_t$layers) {
+  if (inherits(ly$geom, "GeomPoint")) n_tight <- n_tight + nrow(ly$data)
+}
+if (n_tight < 200) fail("compact CD4 T_CM-like plots must draw interior events, not an empty gate")
 
 specs <- subset_plot_specs("P1")
 nk <- Filter(function(s) identical(s$lineage, "NK"), specs)

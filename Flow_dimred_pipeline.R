@@ -3020,12 +3020,12 @@ flow_prob_contour <- function(x, y, n_grid = 70, bw_mult = 1.45,
     levels = numeric(0), x = x, y = y, outlier = rep(TRUE, n)
   )
   if (n < 8 || !requireNamespace("MASS", quietly = TRUE)) return(empty)
-  hx <- safe_kde_bw(x) * bw_mult
-  hy <- safe_kde_bw(y) * bw_mult
   rx <- range(x)
   ry <- range(y)
-  lims <- c(rx + c(-1, 1) * max(diff(rx) * 0.08, 0.05),
-            ry + c(-1, 1) * max(diff(ry) * 0.08, 0.05))
+  hx <- max(safe_kde_bw(x) * bw_mult, diff(rx) * 0.05, 0.08)
+  hy <- max(safe_kde_bw(y) * bw_mult, diff(ry) * 0.05, 0.08)
+  lims <- c(rx + c(-1, 1) * max(diff(rx) * 0.08, hx),
+            ry + c(-1, 1) * max(diff(ry) * 0.08, hy))
   kd <- tryCatch(
     MASS::kde2d(x, y, n = n_grid, h = c(hx, hy), lims = lims),
     error = function(e) NULL
@@ -3053,6 +3053,33 @@ flow_prob_contour <- function(x, y, n_grid = 70, bw_mult = 1.45,
   dens <- kd$z[cbind(ix, iy)]
   outer_lev <- if (length(levs)) min(levs) else 0
   list(grid = grid, levels = levs, x = x, y = y, outlier = !is.finite(dens) | dens < outer_lev)
+}
+
+flow_contour_path_df <- function(pc) {
+  if (is.null(pc) || !length(pc$levels) || nrow(pc$grid) < 16) return(NULL)
+  xs <- unique(pc$grid$x)
+  ys <- unique(pc$grid$y)
+  if (length(xs) < 4 || length(ys) < 4) return(NULL)
+  zmat <- matrix(pc$grid$z, nrow = length(xs), ncol = length(ys))
+  if (!identical(dim(zmat), c(length(xs), length(ys)))) return(NULL)
+  cls <- tryCatch(
+    grDevices::contourLines(xs, ys, zmat, levels = pc$levels),
+    error = function(e) list()
+  )
+  if (!length(cls)) return(NULL)
+  rows <- lapply(seq_along(cls), function(i) {
+    xx <- cls[[i]]$x
+    yy <- cls[[i]]$y
+    if (length(xx) < 2) return(NULL)
+    if (xx[1] != xx[length(xx)] || yy[1] != yy[length(yy)]) {
+      xx <- c(xx, xx[1])
+      yy <- c(yy, yy[1])
+    }
+    data.frame(x = xx, y = yy, grp = i, stringsAsFactors = FALSE)
+  })
+  rows <- Filter(Negate(is.null), rows)
+  if (!length(rows)) return(NULL)
+  do.call(rbind, rows)
 }
 
 parent_mask <- function(cells, parent) {
@@ -3372,27 +3399,23 @@ plot_subset_contour <- function(df, x, y, color, xlab, ylab, pct, gate,
   if (is.null(xlim)) xlim <- finite_axis_lim(c(d$x, extra))
   if (is.null(ylim)) ylim <- finite_axis_lim(c(d$y, extra))
   p <- ggplot2::ggplot()
-  pc <- if (nrow(d) >= 40) flow_prob_contour(d$x, d$y) else NULL
-  if (!is.null(pc) && length(pc$levels) >= 2 && nrow(pc$grid) > 10) {
-    out <- data.frame(x = pc$x[pc$outlier], y = pc$y[pc$outlier])
-    if (nrow(out) > 2500) {
-      set.seed(if (exists("seed_value")) seed_value else 42)
-      out <- out[sample.int(nrow(out), 2500), , drop = FALSE]
-    }
-    if (nrow(out)) {
-      p <- p + ggplot2::geom_point(
-        data = out, ggplot2::aes(x = x, y = y),
-        size = 0.22, alpha = 0.45, color = color, stroke = 0, shape = 16
-      )
-    }
-    p <- p + ggplot2::geom_contour(
-      data = pc$grid, ggplot2::aes(x = x, y = y, z = z),
-      breaks = pc$levels, color = color, linewidth = 0.38, lineend = "round"
-    )
-  } else {
+  bg <- d
+  if (nrow(bg) > 3000) {
+    set.seed(if (exists("seed_value")) seed_value else 42)
+    bg <- bg[sample.int(nrow(bg), 3000), , drop = FALSE]
+  }
+  if (nrow(bg)) {
     p <- p + ggplot2::geom_point(
-      data = d, ggplot2::aes(x = x, y = y),
-      size = 0.28, alpha = 0.35, color = color, stroke = 0
+      data = bg, ggplot2::aes(x = x, y = y),
+      size = 0.22, alpha = 0.32, color = color, stroke = 0, shape = 16
+    )
+  }
+  pc <- if (nrow(d) >= 40) flow_prob_contour(d$x, d$y) else NULL
+  paths <- flow_contour_path_df(pc)
+  if (!is.null(paths) && nrow(paths) > 2) {
+    p <- p + ggplot2::geom_path(
+      data = paths, ggplot2::aes(x = x, y = y, group = grp),
+      color = color, linewidth = 0.5, lineend = "round", inherit.aes = FALSE
     )
   }
   if (!is.null(gate$xcut) && length(gate$xcut) && is.finite(gate$xcut[1])) {
