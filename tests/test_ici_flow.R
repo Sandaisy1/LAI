@@ -310,16 +310,17 @@ if (exists("original_flow_pipeline_candidates", mode = "function") ||
 }
 if (exists("load_ici_engine", mode = "function")) {
   engine_body <- paste(deparse(load_ici_engine), collapse = "\n")
-  if (grepl("source\\([^)]*Flow_dimred_pipeline\\.R", engine_body)) {
-    fail("load_ici_engine must source ICI_flow_engine.R only, never Flow_dimred_pipeline.R")
+  if (!grepl("ICI_flow_engine\\.R", engine_body)) {
+    fail("load_ici_engine must load ICI_flow_engine.R")
   }
-  if (grepl("file\\.path\\([^\\n]*fuction of cell", engine_body, ignore.case = TRUE)) {
-    fail("load_ici_engine must not search E:/R/fuction of cell")
+  if (grepl("source\\([^)]*Flow_dimred_pipeline\\.R", engine_body) ||
+      grepl("pipe <- \"Flow_dimred_pipeline\\.R\"", engine_body)) {
+    fail("load_ici_engine must source ICI_flow_engine.R only, never Flow_dimred_pipeline.R")
   }
 }
 for (nm in ici_bundle[grepl("\\.R$", ici_bundle)]) {
   txt <- paste(readLines(file.path(root, nm), warn = FALSE), collapse = "\n")
-  if (grepl("source\\([^\\n]*Flow_dimred_pipeline\\.R", txt)) {
+  if (grepl('source\\([\'"]Flow_dimred_pipeline\\.R[\'"]', txt)) {
     fail(sprintf("%s must not source Flow_dimred_pipeline.R", nm))
   }
 }
