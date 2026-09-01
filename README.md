@@ -96,7 +96,7 @@ source("Flow_dimred_pipeline.R")
 
 - `*_H_vs_EV_tSNE_major_split` / `*_UMAP_major_split`：**图1**，左 EV、右 H，共用联合 tSNE，点按 **免疫大类**（CD4 T / CD8 T / NK / NKT / B / Myeloid）着色；图注在右侧，画布加宽以免裁切。联合降维会加重 CD4/CD8/CD3 等谱系标志，避免 naive CD4 与 naive CD8 因共享 CD62L/CD44 而揉在一起。圈门是 CD4+CD8− / CD4−CD8+ 象限，不是「谁的荧光更高」。
 - `*_H_vs_EV_tSNE_lineage_split` / `*_UMAP_lineage_split`：同一套 embedding 上的**全体细胞、每一个细亚群**（不是只画六个大类）。
-- `dimred_by_major/`：每个大类单独再降维，点按该大类的**细亚群**着色（同样 EV | H）。类内用高对比定性色，不要 CD8 全绿 / CD4 全红棕 / NK 全紫 / NKT 全黄橙。
+- `dimred_by_major/`：每个大类单独再降维，点按该大类的**细亚群**着色（同样 EV | H）。类内用高对比定性色，不要 CD8 全绿 / CD4 全红棕 / NK 全紫 / NKT 全黄橙。细胞少时点会放大、画布缩小，避免大空白上颜色糊成一团。
 - `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图；下为 FlowJo 风格 2D 图。门是铺到坐标轴的完整象限/半平面（CD62L/CD44 标四个象限），EV 与 H **各自切阈值**。不是只框 10–90% 命中细胞的小矩形。

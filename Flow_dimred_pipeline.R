@@ -631,6 +631,45 @@ weight_dr_markers <- function(mat, panel_id) {
   sweep(mat, 2, w, "*")
 }
 
+# 类内再降维：压低已经用来定大类的谱系通道，加重这一层的亚群标志（CD62L/CD44 等）
+class_dr_marker_weights <- function(major, markers) {
+  markers <- as.character(markers)
+  w <- setNames(rep(1, length(markers)), markers)
+  maj <- as.character(major)[1]
+  if (is.na(maj) || !nzchar(maj)) return(w)
+  w[markers %in% c("L/D", "CD45")] <- 0.2
+  if (maj %in% c("CD4", "CD8")) {
+    w[markers %in% c("CD3", "CD4", "CD8", "CD8b", "CD19", "NKp46", "NK1.1", "CD11B")] <- 0.35
+    up <- c("CD62L", "CD44", "CD27", "CD95", "CD69", "CD25", "SCA-1",
+            "LAG-3", "TIM-3", "PD-L1", "IFN-g", "TNF-a", "GZMB", "Perforin")
+    w[markers %in% up] <- 3.2
+  } else if (identical(maj, "NK")) {
+    w[markers %in% c("CD3", "CD19", "CD4", "CD8", "CD8b")] <- 0.35
+    up <- c("NKp46", "NK1.1", "CD27", "CD11B", "CD69", "GZMB", "Perforin",
+            "LAG-3", "TIM-3", "PD-L1")
+    w[markers %in% up] <- 3.2
+  } else if (identical(maj, "NKT")) {
+    w[markers %in% c("CD19", "CD11B")] <- 0.4
+    up <- c("CD4", "CD8", "CD69", "GZMB", "IFN-g", "NKp46", "NK1.1", "CD44")
+    w[markers %in% up] <- 3
+  } else if (maj %in% c("B", "Naive_B", "Unswitched_B", "Switched_B")) {
+    up <- c("IgD", "CD27", "IgM", "IgG", "BLIMP-1", "CD80", "CD86")
+    w[markers %in% up] <- 3.2
+  } else if (identical(maj, "Myeloid")) {
+    up <- c("CD11B", "CD11C", "LY6C", "LY6G", "F4/80", "Siglec-F", "CCR3",
+            "I-A/I-E", "CD103", "CD206", "FceRI")
+    w[markers %in% up] <- 3
+  }
+  w
+}
+
+weight_class_dr_markers <- function(mat, major) {
+  mat <- as.matrix(mat)
+  if (!ncol(mat)) return(mat)
+  w <- class_dr_marker_weights(major, colnames(mat))
+  sweep(mat, 2, w, "*")
+}
+
 # CD3+ T 里按 CD4 vs CD8 象限：CD4+ CD8- / CD4- CD8+。不要比谁更大就把双阳/双阴塞进某一边
 assign_t_cd4_cd8 <- function(cd4, cd8, is_t) {
   n <- length(is_t)
@@ -956,12 +995,23 @@ run_pca <- function(mat, npcs = 20) {
   list(embedding = pcs, sdev = pr$sdev)
 }
 
-run_umap <- function(mat) {
+run_umap <- function(mat, compact = NULL) {
   n <- nrow(as.matrix(mat))
-  nn <- max(2L, min(15L, n - 1L))
+  if (is.null(compact)) compact <- n < 2500L
+  if (isTRUE(compact)) {
+    nn <- max(5L, min(12L, n - 1L))
+    min_dist <- 0.06
+    spread <- 0.7
+  } else {
+    nn <- max(10L, min(20L, n - 1L))
+    min_dist <- 0.18
+    spread <- 1
+  }
   if (has_pkg("uwot") && n >= 5L) {
-    emb <- uwot::umap(mat, n_neighbors = nn, min_dist = 0.3, metric = "euclidean",
-                      verbose = FALSE, n_threads = 2, seed = seed_value)
+    emb <- uwot::umap(
+      mat, n_neighbors = nn, min_dist = min_dist, spread = spread,
+      metric = "euclidean", verbose = FALSE, n_threads = 2, seed = seed_value
+    )
     colnames(emb) <- c("UMAP1", "UMAP2")
     return(emb)
   }
@@ -971,8 +1021,14 @@ run_umap <- function(mat) {
   pca
 }
 
-run_tsne <- function(mat) {
-  perplexity <- max(5, min(30, floor((nrow(mat) - 1) / 3)))
+run_tsne <- function(mat, compact = NULL) {
+  n <- nrow(as.matrix(mat))
+  if (is.null(compact)) compact <- n < 2500L
+  if (isTRUE(compact)) {
+    perplexity <- max(5, min(12, floor((n - 1) / 6)))
+  } else {
+    perplexity <- max(5, min(30, floor((n - 1) / 3)))
+  }
   if (has_pkg("Rtsne")) {
     set.seed(seed_value)
     ts <- Rtsne::Rtsne(
@@ -2194,7 +2250,7 @@ pal_celltype <- c(
   "CD4 T_CM" = "#2E7D32",
   "CD4 TCM" = "#2E7D32",
   "CD4 T_SCM" = "#26C6DA",
-  "CD4 T_EM early" = "#8D6E63",
+  "CD4 T_EM early" = "#1DE9B6",
   "CD4 T_EM late" = "#6A1B9A",
   "CD4 T_EM" = "#8E24AA",
   "CD4 TEM" = "#8E24AA",
@@ -2398,23 +2454,65 @@ palette_min_rgb_dist <- function(cols) {
   dmin
 }
 
-split_dr_save_size <- function(n_keys, facet = TRUE) {
+# 细胞少时点要大，否则大画布上看不见群
+dr_point_size <- function(n) {
+  n <- max(1, as.numeric(n)[1])
+  sz <- 4.0 - 0.85 * log10(n)
+  max(0.55, min(2.7, sz))
+}
+
+dr_point_alpha <- function(n) {
+  n <- max(1, as.numeric(n)[1])
+  if (n < 500) 1 else if (n < 2500) 0.94 else 0.8
+}
+
+embedding_axis_limits <- function(x, y, pad = 0.07) {
+  x <- as.numeric(x)
+  y <- as.numeric(y)
+  ok <- is.finite(x) & is.finite(y)
+  if (!any(ok)) return(list(x = c(-1, 1), y = c(-1, 1)))
+  xr <- range(x[ok])
+  yr <- range(y[ok])
+  if (diff(xr) < 1e-6) xr <- xr + c(-0.5, 0.5)
+  if (diff(yr) < 1e-6) yr <- yr + c(-0.5, 0.5)
+  # 正方形视野，两边一起裁空白，不要只剩稀稀拉拉的小点飘在大白纸上
+  span <- max(diff(xr), diff(yr))
+  mx <- mean(xr)
+  my <- mean(yr)
+  half <- span * (0.5 + pad)
+  list(x = c(mx - half, mx + half), y = c(my - half, my + half))
+}
+
+split_dr_save_size <- function(n_keys, facet = TRUE, n_cells = Inf) {
   n_keys <- max(1L, as.integer(n_keys))
+  n_cells <- max(1, as.numeric(n_cells)[1])
   ncol_leg <- if (n_keys > 18L) 3L else if (n_keys > 10L) 2L else 1L
   legend_in <- 2.65 * ncol_leg
-  width <- (if (facet) 11.2 else 7.0) + legend_in
+  panel_w <- if (isTRUE(facet)) {
+    if (n_cells < 400) 7.0 else if (n_cells < 1500) 8.2 else 10.0
+  } else {
+    if (n_cells < 400) 4.8 else if (n_cells < 1500) 5.6 else 6.6
+  }
   rows <- ceiling(n_keys / ncol_leg)
-  height <- max(6.8, 4.9 + 0.42 * rows)
-  list(width = width, height = height, ncol_leg = ncol_leg)
+  height <- if (n_cells < 400) {
+    max(5.15, 4.15 + 0.38 * rows)
+  } else {
+    max(6.2, 4.7 + 0.42 * rows)
+  }
+  list(width = panel_w + legend_in, height = height, ncol_leg = ncol_leg)
 }
 
 # 图注放在右侧独立留白，不要被 coord/facet 裁掉
-save_split_dr <- function(plot, path_stub, n_keys, facet = TRUE) {
-  sz <- split_dr_save_size(n_keys, facet)
+save_split_dr <- function(plot, path_stub, n_keys, facet = TRUE, n_cells = NULL) {
+  if (is.null(n_cells) && !is.null(plot$data) && nrow(plot$data) > 0) {
+    n_cells <- nrow(plot$data)
+  }
+  if (is.null(n_cells) || !is.finite(n_cells)) n_cells <- Inf
+  sz <- split_dr_save_size(n_keys, facet, n_cells)
   plot <- plot +
     ggplot2::guides(color = ggplot2::guide_legend(
       ncol = sz$ncol_leg,
-      override.aes = list(size = 4.4, alpha = 1),
+      override.aes = list(size = 4.8, alpha = 1),
       title = NULL
     )) +
     ggplot2::theme(
@@ -2488,21 +2586,23 @@ plot_split_lineage <- function(df, x, y, panel_id, xlab, ylab, title,
   freq <- table(plot_df$celltype)
   plot_df <- plot_df[order(as.integer(freq[as.character(plot_df$celltype)]),
                            decreasing = TRUE, na.last = TRUE), , drop = FALSE]
+  n <- nrow(plot_df)
+  lims <- embedding_axis_limits(plot_df[[x]], plot_df[[y]])
   ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype)) +
-    ggplot2::geom_point(size = 0.72, alpha = 0.92, stroke = 0) +
+    ggplot2::geom_point(size = dr_point_size(n), alpha = dr_point_alpha(n), stroke = 0.12) +
     ggplot2::facet_wrap(~group, ncol = 2, scales = "fixed") +
     ggplot2::scale_color_manual(values = pal, drop = FALSE) +
     ggplot2::guides(color = ggplot2::guide_legend(
       override.aes = list(size = 3.8, alpha = 1), ncol = 1
     )) +
     ggplot2::labs(title = title, x = xlab, y = ylab, color = NULL) +
-    ggplot2::coord_fixed(ratio = 1, clip = "off") +
+    ggplot2::coord_fixed(ratio = 1, xlim = lims$x, ylim = lims$y, expand = FALSE, clip = "off") +
     theme_split_dr() +
     ggplot2::theme(
       axis.text = ggplot2::element_blank(),
       axis.ticks = ggplot2::element_blank(),
       panel.border = ggplot2::element_blank(),
-      panel.spacing = ggplot2::unit(1.15, "lines"),
+      panel.spacing = ggplot2::unit(0.7, "lines"),
       legend.key = ggplot2::element_blank(),
       plot.margin = ggplot2::margin(8, 18, 10, 10)
     )
@@ -2516,12 +2616,18 @@ embed_class_cells <- function(sub) {
   mat[!is.finite(mat)] <- 0
   sc <- tryCatch(scale(mat), error = function(e) mat)
   sc[!is.finite(sc)] <- 0
-  pca <- tryCatch(run_pca(sc, npcs = min(15, ncol(sc))), error = function(e) NULL)
+  maj <- if ("dimred_major" %in% names(sub)) {
+    names(sort(table(as.character(sub$dimred_major)), decreasing = TRUE))[1]
+  } else {
+    NA_character_
+  }
+  sc <- weight_class_dr_markers(sc, maj)
+  pca <- tryCatch(run_pca(sc, npcs = min(12, ncol(sc))), error = function(e) NULL)
   if (is.null(pca) || is.null(pca$embedding) || ncol(pca$embedding) < 2) return(sub)
   npcs_use <- min(ncol(pca$embedding), max(2, ncol(sc)))
   pca_use <- pca$embedding[, seq_len(npcs_use), drop = FALSE]
-  um <- tryCatch(run_umap(pca_use), error = function(e) NULL)
-  ts <- tryCatch(run_tsne(pca_use), error = function(e) NULL)
+  um <- tryCatch(run_umap(pca_use, compact = TRUE), error = function(e) NULL)
+  ts <- tryCatch(run_tsne(pca_use, compact = TRUE), error = function(e) NULL)
   if (!is.null(um) && ncol(um) >= 2 && nrow(um) == nrow(sub)) {
     sub$UMAP1 <- um[, 1]
     sub$UMAP2 <- um[, 2]
@@ -2576,14 +2682,15 @@ export_major_subset_dimred <- function(cells, panel_id, out_dir) {
   invisible(class_dir)
 }
 
-plot_embedding <- function(df, x, y, color_col, title, point_size = 0.35) {
+plot_embedding <- function(df, x, y, color_col, title, point_size = NULL) {
   plot_df <- df
   if (identical(color_col, "lineage")) {
     plot_df$lineage <- celltype_label(plot_df$lineage, NA)
   }
   nlev <- length(unique(plot_df[[color_col]]))
+  if (is.null(point_size)) point_size <- dr_point_size(nrow(plot_df))
   p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = .data[[color_col]])) +
-    ggplot2::geom_point(size = point_size, alpha = 0.75, stroke = 0) +
+    ggplot2::geom_point(size = point_size, alpha = dr_point_alpha(nrow(plot_df)), stroke = 0.1) +
     ggplot2::coord_equal() +
     theme_dr() +
     ggplot2::labs(title = title, color = color_col, x = x, y = y)
@@ -2602,7 +2709,7 @@ plot_embedding <- function(df, x, y, color_col, title, point_size = 0.35) {
 
 plot_marker_embedding <- function(df, x, y, marker, title) {
   ggplot2::ggplot(df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = .data[[marker]])) +
-    ggplot2::geom_point(size = 0.3, alpha = 0.8, stroke = 0) +
+    ggplot2::geom_point(size = dr_point_size(nrow(df)), alpha = dr_point_alpha(nrow(df)), stroke = 0.08) +
     ggplot2::scale_color_gradientn(colours = c("#0D0887", "#CC4678", "#F0F921")) +
     ggplot2::coord_equal() +
     theme_dr() +

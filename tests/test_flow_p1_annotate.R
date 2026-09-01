@@ -316,6 +316,32 @@ miss_dr <- need_dr[!file.exists(file.path(td_dr, "dimred_by_major", need_dr))]
 if (length(miss_dr)) fail(sprintf("missing class dimred: %s", paste(miss_dr, collapse = ", ")))
 unlink(td_dr, recursive = TRUE)
 
+if (!(dr_point_size(120) > 1.7)) fail("few-cell dimred points must be large enough to see")
+if (!(dr_point_size(120) > dr_point_size(8000))) fail("point size must shrink when n is large")
+sz_sparse <- split_dr_save_size(8L, TRUE, n_cells = 180)
+sz_dense <- split_dr_save_size(8L, TRUE, n_cells = 12000)
+if (!(sz_sparse$width < sz_dense$width && sz_sparse$height <= sz_dense$height)) {
+  fail("few-cell class plots must use a smaller canvas, not a huge empty page")
+}
+w_cd4 <- class_dr_marker_weights("CD4", c("CD3", "CD4", "CD62L", "CD44", "CD69"))
+if (!(w_cd4[["CD62L"]] > w_cd4[["CD3"]] && w_cd4[["CD44"]] > w_cd4[["CD4"]])) {
+  fail("CD4 class re-embedding must upweight CD62L/CD44 over lineage channels")
+}
+set.seed(31)
+df_sparse <- data.frame(
+  UMAP1 = c(rnorm(80, 0, 0.4), rnorm(80, 2.2, 0.4)),
+  UMAP2 = c(rnorm(80, 0, 0.4), rnorm(80, 2.0, 0.4)),
+  group = rep(c("EV", "H"), each = 80),
+  lineage = rep(c("CD4_naive", "CD4_TEM_late"), times = 80),
+  stringsAsFactors = FALSE
+)
+p_sp <- plot_split_lineage(df_sparse, "UMAP1", "UMAP2", "P1", "UMAP-1", "UMAP-2",
+                           "sparse", color_mode = "subset")
+sp_sz <- p_sp$layers[[1]]$aes_params$size
+if (is.null(sp_sz) || !is.finite(sp_sz) || sp_sz < 1.5) {
+  fail(sprintf("sparse subset dimred geom size should be large, got %s", sp_sz))
+}
+
 set.seed(8)
 tail_v <- c(rnorm(220, 0.45, 0.12), rnorm(50, 3.1, 0.2))
 cut_t <- axis_pos_cut(tail_v)

@@ -74,7 +74,7 @@ if (identical(unname(pal_celltype[["CD4 NKT"]]), unname(pal_celltype[["CD4 T_CM"
 cd8_fam <- pal_celltype[c("CD8 activated", "CD8 T_CM", "CD8 T_EM late", "CD8 naive", "CD8 T_EFF", "CD8 exhausted")]
 if (anyNA(cd8_fam)) fail("CD8 family colors missing")
 if (palette_min_rgb_dist(cd8_fam) < 80) fail("CD8 subset colors are too similar (need high-contrast hues, not a green ramp)")
-cd4_fam <- pal_celltype[c("CD4 activated", "CD4 T_EFF", "CD4 T_CM", "CD4 T_EM late", "CD4 SLEC",
+cd4_fam <- pal_celltype[c("CD4 activated", "CD4 T_EFF", "CD4 T_CM", "CD4 T_EM early", "CD4 T_EM late", "CD4 SLEC",
                           "CD4 MPEC", "CD4 exhausted", "Treg", "CD4 naive")]
 if (anyNA(cd4_fam)) fail("CD4 family colors missing")
 if (palette_min_rgb_dist(cd4_fam) < 80) fail("CD4 subset colors are too similar (need high-contrast hues, not red/brown)")
