@@ -6,7 +6,7 @@ alwaysApply: false
 
 # 流式 H vs EV：降维与免疫细胞比较
 
-写或改 **Flow_*** 流式脚本时按本规则。输入是 **unmixed FCS**，不是 raw、不是 Cuffdiff。RNA-seq 仍走 `TG_RNAseq_*.R`。找 His+ 靶细胞是另一套实验，走 `ICI_*`（`E:/R/Internation cell immune`）。**JY-NNK / JY-EVNK** 是第三套，走 `JY_*`（`E:/R/fuction of cell-ljy`）。不要改、不要 `source` 那两套文件，也不要让它们来找本目录的 `Flow_dimred_pipeline.R`。
+写或改 **Flow_*** 流式脚本时按本规则。输入是 **unmixed FCS**，不是 raw、不是 Cuffdiff。RNA-seq 仍走 `TG_RNAseq_*.R`。找 His+ 靶细胞是另一套实验，走 `ICI_*`（`E:/R/Internation cell immune`）。**JY-NNK / JY-EVNK** 走 `JY_*`（`E:/R/fuction of cell-ljy`）。**JZ-AB / JZ-EVB** 走 `JZ_*`（`E:/R/fuction of cell-wjz`）。不要改、不要 `source` 那几套文件，也不要让它们来找本目录的 `Flow_dimred_pipeline.R`。
 
 ## 数据
 

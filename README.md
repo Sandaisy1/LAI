@@ -78,7 +78,7 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 
 # 流式降维（免疫细胞亚群，H vs EV，P1 / P2 / P3）
 
-这是 **`E:/R/fuction of cell`** 的免疫细胞亚群降维。找 His+ 靶细胞是另一套实验，走 `ICI_Flow_dimred_pipeline.R`（`E:/R/Internation cell immune`）。**JY-NNK / JY-EVNK** 是第三套，走 `JY_Flow_dimred_pipeline.R`（`E:/R/fuction of cell-ljy`）。三套不要混用。
+这是 **`E:/R/fuction of cell`** 的免疫细胞亚群降维。找 His+ 靶细胞是另一套实验，走 `ICI_Flow_dimred_pipeline.R`（`E:/R/Internation cell immune`）。**JY-NNK / JY-EVNK** 走 `JY_Flow_dimred_pipeline.R`（`E:/R/fuction of cell-ljy`）。**JZ-AB / JZ-EVB** 走 `JZ_Flow_dimred_pipeline.R`（`E:/R/fuction of cell-wjz`）。几套不要混用。
 
 小鼠流式只用 `*_unmixed.fcs`。分析结果写在同一目录的 `results_flow/`。三个 panel **分开**做 UMAP/tSNE，比较 **ZZX_EV**（EV1/2/3，每管两个技术重复 EV1-1/EV1-2）与 **ZZX_H**（H1/2/3，H1-1/H1-2）。统计：技术重复先平均；三个生物学重复里去掉离中位数更远的最大值或最小值，用剩下 n=2 做均值/SD/检验。tSNE 仍用全部细胞。
 
@@ -143,7 +143,7 @@ QC 只去双联体和死细胞，**不要求 CD45+**，也 **不用 P1 紧淋巴
 
 组别：**JY-EVNK**（生物学重复 EVNK-1、EVNK-2、EVNK-3；每个生物学重复两个技术重复，如 EVNK1-1、EVNK1-2）与 **JY-NNK**（NNK-1、NNK-2、NNK-3；技术重复如 NNK1-1、NNK1-2）。比较是 **JY-NNK / JY-EVNK**（NNK 相对 EVNK）。统计同样是技术重复先平均，再去掉 1 个极端生物学重复，n=2。tSNE/UMAP 仍用全部管子。
 
-三套方案完全独立。把下面文件**整套**拷到 `E:/R/fuction of cell-ljy`（不要去 `E:/R/fuction of cell` 找原流程，也不要 `source` `Flow_dimred_pipeline.R` 或 `ICI_*`）：
+四套方案完全独立。把下面文件**整套**拷到 `E:/R/fuction of cell-ljy`（不要去 `E:/R/fuction of cell` 找原流程，也不要 `source` `Flow_dimred_pipeline.R`、`ICI_*` 或 `JZ_*`）：
 
 - `JY_Flow_dimred_pipeline.R`（入口）
 - `JY_flow_engine.R`（本方案自己的分析函数库）
@@ -157,6 +157,27 @@ source("JY_Flow_dimred_pipeline.R")
 ```
 
 文件名：`EVNK1-1_P1_unmixed.fcs`、`JY-NNK-2-2_P3_unmixed.fcs`、`NNK-3-1_P2_unmixed.fcs` 都可以（`JY-` 可有可无）。**先匹配 EVNK 再匹配 NNK**。结果在同目录 `results_flow/`，比较标签是 **JY-NNK / JY-EVNK**。
+
+## JZ（第四套实验，免疫亚群降维，比较 JZ-AB / JZ-EVB）
+
+数据在 `E:/R/fuction of cell-wjz`。分析与上面的免疫亚群降维一致（同一套 P1/P2/P3 染色、圈门、图件），只换目录和组别。
+
+组别：**JZ-EVB**（生物学重复 EVB-1、EVB-2、EVB-3；每个生物学重复两个技术重复，如 EVB1-1、EVB1-2）与 **JZ-AB**（AB-1、AB-2、AB-3；技术重复如 AB1-1、AB1-2）。比较是 **JZ-AB / JZ-EVB**（AB 相对 EVB）。统计同样是技术重复先平均，再去掉 1 个极端生物学重复，n=2。tSNE/UMAP 仍用全部管子。
+
+四套方案完全独立。把下面文件**整套**拷到 `E:/R/fuction of cell-wjz`（不要去 `E:/R/fuction of cell` 或 `cell-ljy` 找原流程，也不要 `source` `Flow_dimred_pipeline.R`、`ICI_*` 或 `JY_*`）：
+
+- `JZ_Flow_dimred_pipeline.R`（入口）
+- `JZ_flow_engine.R`（本方案自己的分析函数库）
+- `JZ_flow_panel_map.json`
+- `JZ_Flow_dimred_all_subsets.R`
+- `JZ_Flow_dimred_trajectory.R`
+
+```r
+setwd("E:/R/fuction of cell-wjz")
+source("JZ_Flow_dimred_pipeline.R")
+```
+
+文件名：`EVB1-1_P1_unmixed.fcs`、`JZ-AB-2-2_P3_unmixed.fcs`、`AB-3-1_P2_unmixed.fcs` 都可以（`JZ-` 可有可无）。**先匹配 EVB 再匹配 AB**。结果在同目录 `results_flow/`，比较标签是 **JZ-AB / JZ-EVB**。
 
 若日志出现「没有匹配到任何分析通道」，多半是 Cytek 通道名带 `-A`（如 `BUV496-A`）或 desc 为空，不是文件没找到。用最新脚本再跑；仍失败时日志会列出通道名，并在 `results_flow/00_logs/` 写 `*_channels.csv`。
 

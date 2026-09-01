@@ -1,24 +1,24 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# JY：P1/P2/P3 亚群频率总览（JY-NNK / JY-EVNK）
+# JZ：P1/P2/P3 亚群频率总览（JZ-AB / JZ-EVB）
 # 只汇总本方案 results_flow/，不读 E:/R/fuction of cell 或 Internation。
-# 入口仍是 source("JY_Flow_dimred_pipeline.R")
+# 入口仍是 source("JZ_Flow_dimred_pipeline.R")
 # =============================================================================
 
-jy_keep_cand <- function(p) {
+jz_keep_cand <- function(p) {
   s <- gsub("\\", "/", as.character(p))
-  if (grepl("cell-ljy", s, ignore.case = TRUE)) return(TRUE)
-  if (grepl("cell-wjz", s, ignore.case = TRUE)) return(FALSE)
+  if (grepl("cell-wjz", s, ignore.case = TRUE)) return(TRUE)
+  if (grepl("cell-ljy", s, ignore.case = TRUE)) return(FALSE)
   if (grepl("Internation cell immune", s, ignore.case = TRUE)) return(FALSE)
   if (grepl("fuction of cell|function of cell", s, ignore.case = TRUE)) return(FALSE)
   TRUE
 }
 
-load_jy_engine_functions <- function() {
-  if (isTRUE(get0("jy_engine_loaded", ifnotfound = FALSE))) {
+load_jz_engine_functions <- function() {
+  if (isTRUE(get0("jz_engine_loaded", ifnotfound = FALSE))) {
     return(invisible(TRUE))
   }
-  pipe <- "JY_flow_engine.R"
+  pipe <- "JZ_flow_engine.R"
   cands <- c(file.path(getwd(), pipe), pipe)
   args <- commandArgs(trailingOnly = FALSE)
   file_arg <- grep("^--file=", args, value = TRUE)
@@ -36,10 +36,10 @@ load_jy_engine_functions <- function() {
     cands <- c(file.path(dirname(normalizePath(ofile, mustWork = FALSE)), pipe), cands)
   }
   cands <- unique(cands)
-  cands <- cands[vapply(cands, jy_keep_cand, logical(1))]
+  cands <- cands[vapply(cands, jz_keep_cand, logical(1))]
   hit <- cands[file.exists(cands)][1]
   if (is.na(hit) || !nzchar(hit)) {
-    stop("找不到 JY_flow_engine.R。JY 方案不使用 Flow_dimred_pipeline.R。")
+    stop("找不到 JZ_flow_engine.R。JZ 方案不使用 Flow_dimred_pipeline.R。")
   }
   source(hit, local = FALSE)
   invisible(TRUE)
@@ -189,7 +189,7 @@ export_all_subsets_analysis <- function(result_dir) {
   names(cells_by_panel) <- panels
   n_ok <- sum(vapply(cells_by_panel, function(x) !is.null(x) && nrow(x) > 0, logical(1)))
   if (n_ok < 1) {
-    log_msg("all-subsets: no panel embeddings under ", result_dir, " ; run JY_Flow_dimred_pipeline.R first")
+    log_msg("all-subsets: no panel embeddings under ", result_dir, " ; run JZ_Flow_dimred_pipeline.R first")
     return(invisible(NULL))
   }
   freq <- collect_all_subset_frequencies(cells_by_panel)
@@ -212,7 +212,7 @@ export_all_subsets_analysis <- function(result_dir) {
   )
   writeLines(note, file.path(out_dir, "ALL_SUBSETS_NOTE.txt"))
   utils::write.csv(freq, file.path(out_dir, "all_subsets_frequency_by_sample.csv"), row.names = FALSE)
-  utils::write.csv(stats, file.path(out_dir, "all_subsets_JY_NNK_vs_JY_EVNK_stats.csv"), row.names = FALSE)
+  utils::write.csv(stats, file.path(out_dir, "all_subsets_JZ_AB_vs_JZ_EVB_stats.csv"), row.names = FALSE)
   freq_plot <- all_subset_freq_for_plots(freq)
   if (!is.null(freq_plot) && nrow(freq_plot)) {
     utils::write.csv(freq_plot, file.path(out_dir, "all_subsets_frequency_by_bio_trimmed.csv"), row.names = FALSE)
@@ -224,8 +224,8 @@ export_all_subsets_analysis <- function(result_dir) {
 
   n_lab <- length(unique(freq$subset_label))
   w_facet <- max(12, 1.1 * n_lab / 2)
-  save_gg(plot_all_freq_facet(freq_plot, "All subsets (within-panel %)  JY-NNK / JY-EVNK"),
-          file.path(out_dir, "all_subsets_frequency_JY_NNK_vs_JY_EVNK"),
+  save_gg(plot_all_freq_facet(freq_plot, "All subsets (within-panel %)  JZ-AB / JZ-EVB"),
+          file.path(out_dir, "all_subsets_frequency_JZ_AB_vs_JZ_EVB"),
           width = w_facet, height = 5.8)
   save_gg(plot_all_stacked(freq_plot, "Within-panel composition (mean of remaining bio-reps)"),
           file.path(out_dir, "all_subsets_composition_stacked"),
@@ -235,14 +235,14 @@ export_all_subsets_analysis <- function(result_dir) {
   stats_f <- stats[stats$role == "focus", , drop = FALSE]
   if (nrow(focus) > 0) {
     save_gg(plot_all_freq_facet(focus, "Focus subsets only  (P1 T/NK, P2 B, P3 myeloid)"),
-            file.path(out_dir, "all_subsets_focus_frequency_JY_NNK_vs_JY_EVNK"),
+            file.path(out_dir, "all_subsets_focus_frequency_JZ_AB_vs_JZ_EVB"),
             width = max(11, 1.15 * length(unique(focus$subset_label)) / 2), height = 5.8)
   }
   if (nrow(stats_f) > 0) {
     save_gg(plot_all_heatmap(stats_f, "Focus subset mean %  (within panel)"),
             file.path(out_dir, "all_subsets_focus_mean_heatmap"),
             width = 6.5, height = max(6, 0.28 * nrow(stats_f) + 2))
-    save_gg(plot_all_lollipop(stats_f, "Focus subsets  JY-NNK minus JY-EVNK"),
+    save_gg(plot_all_lollipop(stats_f, "Focus subsets  JZ-AB minus JZ-EVB"),
             file.path(out_dir, "all_subsets_focus_delta_lollipop"),
             width = 8.5, height = max(6, 0.28 * nrow(stats_f) + 2))
   }
@@ -252,7 +252,7 @@ export_all_subsets_analysis <- function(result_dir) {
   invisible(list(frequency = freq, stats = stats, out_dir = out_dir))
 }
 
-load_jy_engine_functions()
+load_jz_engine_functions()
 
 if (!identical(toupper(Sys.getenv("FLOW_ALL_SUBSETS_FROM_PIPELINE", "0")), "1") &&
     !identical(toupper(Sys.getenv("FLOW_FUNCTIONS_ONLY", "0")), "1")) {

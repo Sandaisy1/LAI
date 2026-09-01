@@ -1,10 +1,10 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# JY 免疫细胞亚群降维：函数库（不要单独 source 本文件）
-# 这是 E:/R/fuction of cell-ljy 的方案，比较 JY-NNK / JY-EVNK。
+# JZ 免疫细胞亚群降维：函数库（不要单独 source 本文件）
+# 这是 E:/R/fuction of cell-wjz 的方案，比较 JZ-AB / JZ-EVB。
 # 圈门、降维、去极端生物学重复与 E:/R/fuction of cell 的免疫亚群分析一致，
-# 但文件、目录、组别完全独立：禁止 source Flow_dimred_pipeline.R 或 ICI_*。
-# 入口：source("JY_Flow_dimred_pipeline.R")
+# 但文件、目录、组别完全独立：禁止 source Flow_dimred_pipeline.R、ICI_* 或 JY_*。
+# 入口：source("JZ_Flow_dimred_pipeline.R")
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1)
@@ -95,31 +95,31 @@ get_script_dir <- function() {
 
 script_dir <- get_script_dir()
 
-# 读写目录：只在 E:/R/fuction of cell-ljy；不要回退到 fuction of cell 或 Internation
-flow_primary_data_dir <- "E:/R/fuction of cell-ljy"
-flow_legacy_data_dir <- "E:/R/fuction of cell-ljy"
-flow_legacy_data_dir2 <- "E:/R/fuction of cell-ljy"
+# 读写目录：只在 E:/R/fuction of cell-wjz；不要回退到 fuction of cell 或 Internation
+flow_primary_data_dir <- "E:/R/fuction of cell-wjz"
+flow_legacy_data_dir <- "E:/R/fuction of cell-wjz"
+flow_legacy_data_dir2 <- "E:/R/fuction of cell-wjz"
 
-jy_is_foreign_dir <- function(p) {
+jz_is_foreign_dir <- function(p) {
   s <- gsub("\\\\", "/", as.character(p))
-  if (grepl("cell-ljy", s, ignore.case = TRUE)) return(FALSE)
-  if (grepl("cell-wjz", s, ignore.case = TRUE)) return(TRUE)
+  if (grepl("cell-wjz", s, ignore.case = TRUE)) return(FALSE)
+  if (grepl("cell-ljy", s, ignore.case = TRUE)) return(TRUE)
   if (grepl("Internation cell immune", s, ignore.case = TRUE)) return(TRUE)
   grepl("fuction of cell|function of cell", s, ignore.case = TRUE)
 }
 
 resolve_flow_dir <- function() {
-  env_dir <- Sys.getenv("JY_FLOW_DIR", unset = "")
+  env_dir <- Sys.getenv("JZ_FLOW_DIR", unset = "")
   if (!nzchar(env_dir)) env_dir <- Sys.getenv("FLOW_DIR", unset = "")
   preferred <- c(
     env_dir,
     flow_primary_data_dir,
-    "E:\\R\\fuction of cell-ljy",
-    "E:/R/function of cell-ljy",
-    "E:\\R\\function of cell-ljy"
+    "E:\\R\\fuction of cell-wjz",
+    "E:/R/function of cell-wjz",
+    "E:\\R\\function of cell-wjz"
   )
   preferred <- unique(preferred[nzchar(preferred)])
-  preferred <- preferred[!vapply(preferred, jy_is_foreign_dir, logical(1))]
+  preferred <- preferred[!vapply(preferred, jz_is_foreign_dir, logical(1))]
   for (d in preferred) {
     if (dir.exists(d)) {
       return(normalizePath(d, winslash = "/", mustWork = FALSE))
@@ -127,14 +127,14 @@ resolve_flow_dir <- function() {
   }
   candidates <- c(
     flow_primary_data_dir,
-    "E:\\R\\fuction of cell-ljy",
-    file.path(script_dir, "fuction of cell-ljy"),
-    file.path(script_dir, "function of cell-ljy"),
+    "E:\\R\\fuction of cell-wjz",
+    file.path(script_dir, "fuction of cell-wjz"),
+    file.path(script_dir, "function of cell-wjz"),
     script_dir,
     getwd()
   )
   candidates <- unique(candidates[nzchar(candidates)])
-  candidates <- candidates[!vapply(candidates, jy_is_foreign_dir, logical(1))]
+  candidates <- candidates[!vapply(candidates, jz_is_foreign_dir, logical(1))]
   for (d in candidates) {
     if (!dir.exists(d)) next
     hits <- list.files(d, pattern = "(?i)_unmixed\\.fcs$", recursive = TRUE)
@@ -167,34 +167,34 @@ asinh_cofactor <- 150
 seed_value <- 42
 
 # -----------------------------------------------------------------------------
-# 2. 文件名：JY-EVNK / JY-NNK
-#    生物学重复 EVNK-1/2/3 与 NNK-1/2/3；每个生物学重复两个技术重复 EVNK1-1、NNK1-2
-#    必须先匹配 EVNK，再匹配 NNK，避免 EVNK 被拆成 EV 或 NNK
+# 2. 文件名：JZ-EVB / JZ-AB
+#    生物学重复 EVB-1/2/3 与 AB-1/2/3；每个生物学重复两个技术重复 EVB1-1、AB1-2
+#    必须先匹配 EVB，再匹配 AB，避免 EVB 被拆成 EV 或 AB
 # -----------------------------------------------------------------------------
-flow_ctrl_group <- "JY-EVNK"
-flow_trt_group <- "JY-NNK"
-flow_group_levels <- c("JY-EVNK", "JY-NNK")
-flow_cohort <- "JY"
+flow_ctrl_group <- "JZ-EVB"
+flow_trt_group <- "JZ-AB"
+flow_group_levels <- c("JZ-EVB", "JZ-AB")
+flow_cohort <- "JZ"
 
-# 比较是 JY-NNK / JY-EVNK（处理 / 对照）。文件名里仍写 EVNK、NNK。
-jy_canon_group <- function(grp) {
+# 比较是 JZ-AB / JZ-EVB（处理 / 对照）。文件名里仍写 EVB、AB。
+jz_canon_group <- function(grp) {
   g <- toupper(gsub("[^A-Za-z0-9]", "", as.character(grp)))
   if (!nzchar(g) || is.na(g)) return(NA_character_)
-  if (grepl("EVNK", g, fixed = TRUE)) return("JY-EVNK")
-  if (grepl("NNK", g, fixed = TRUE)) return("JY-NNK")
+  if (grepl("EVB", g, fixed = TRUE)) return("JZ-EVB")
+  if (identical(g, "AB") || identical(g, "JZAB")) return("JZ-AB")
   NA_character_
 }
 
-jy_short_arm <- function(grp) {
-  g <- jy_canon_group(grp)
-  if (identical(g, "JY-EVNK")) return("EVNK")
-  if (identical(g, "JY-NNK")) return("NNK")
+jz_short_arm <- function(grp) {
+  g <- jz_canon_group(grp)
+  if (identical(g, "JZ-EVB")) return("EVB")
+  if (identical(g, "JZ-AB")) return("AB")
   NA_character_
 }
 
-# 带技术重复的名字优先，避免把 EVNK1-1_P1 的 “1” 当成 panel
-flow_re_tech <- "^(?:JY[_-]?)?(EVNK|NNK)[-_ ]?([123])[-_ ]([12])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$"
-flow_re_bio <- "^(?:JY[_-]?)?(EVNK|NNK)[-_ ]?([123])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$"
+# 带技术重复的名字优先，避免把 EVB1-1_P1 的 “1” 当成 panel
+flow_re_tech <- "^(?:JZ[_-]?)?(EVB|AB)[-_ ]?([123])[-_ ]([12])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$"
+flow_re_bio <- "^(?:JZ[_-]?)?(EVB|AB)[-_ ]?([123])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$"
 flow_re_folder_tech <- "^([123])[-_ ]([12])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$"
 
 group_from_path <- function(path) {
@@ -202,7 +202,7 @@ group_from_path <- function(path) {
   parts <- toupper(gsub("[^A-Za-z0-9]", "", parts))
   parts <- parts[nzchar(parts)]
   for (p in rev(parts)) {
-    g <- jy_canon_group(p)
+    g <- jz_canon_group(p)
     if (!is.na(g) && nzchar(g)) return(g)
   }
   NA_character_
@@ -247,10 +247,10 @@ parse_fcs_filename <- function(path) {
       is.na(panel_n) || !nzchar(panel_n)) {
     return(NULL)
   }
-  grp <- jy_canon_group(grp)
+  grp <- jz_canon_group(grp)
   if (is.na(grp) || !nzchar(grp)) return(NULL)
-  arm <- jy_short_arm(grp)
-  # 组别 JY-EVNK / JY-NNK；生物学重复 EVNK-1；技术管 EVNK1-1
+  arm <- jz_short_arm(grp)
+  # 组别 JZ-EVB / JZ-AB；生物学重复 EVB-1；技术管 EVB1-1
   bio_sample <- paste0(arm, "-", bio)
   sample <- if (!is.na(tech) && nzchar(tech)) paste0(arm, bio, "-", tech) else bio_sample
   list(
@@ -305,7 +305,7 @@ ensure_bio_sample <- function(df) {
 }
 
 # 技术重复先在生物学重复内平均；免疫亚群统计再去掉 1 个极端生物学重复后 n=2。
-# 不要把 EVNK1-1/EVNK1-2 当成两个生物学 n。JY 统计 n=2。
+# 不要把 EVB1-1/EVB1-2 当成两个生物学 n。JZ 统计 n=2。
 aggregate_freq_by_bio <- function(freq_df, id_col) {
   freq_df <- ensure_bio_sample(freq_df)
   if (!id_col %in% names(freq_df)) stop("aggregate_freq_by_bio: missing ", id_col)
@@ -320,7 +320,7 @@ aggregate_freq_by_bio <- function(freq_df, id_col) {
 
 # 免疫亚群降维：三个生物学重复里去掉离中位数更远的那个（最大值或最小值），
 # 剩下的用于均值/SD/检验。降维仍用全部管子。n<3 时不去。
-# JY 与免疫亚群方案一样去极端值；ICI 才是 n=3。不要把本方案改成 ICI。
+# JZ 与免疫亚群方案一样去极端值；ICI 才是 n=3。不要把本方案改成 ICI。
 if (!exists("flow_trim_bio_extremes", inherits = TRUE)) {
   flow_trim_bio_extremes <- TRUE
 }
@@ -403,38 +403,38 @@ bio_percent_table <- function(samp, trim_bio = NULL) {
 
 # -----------------------------------------------------------------------------
 # 3. Panel 地图
-# Windows 常把“另存为”弄成 JY_flow_panel_map.json.txt（资源管理器显示“文本文档”）
+# Windows 常把“另存为”弄成 JZ_flow_panel_map.json.txt（资源管理器显示“文本文档”）
 # -----------------------------------------------------------------------------
 panel_map_search_dirs <- function() {
-  env_dir <- Sys.getenv("JY_FLOW_DIR", unset = "")
+  env_dir <- Sys.getenv("JZ_FLOW_DIR", unset = "")
   if (!nzchar(env_dir)) env_dir <- Sys.getenv("FLOW_DIR", unset = "")
   dirs <- c(
     getwd(),
     script_dir,
     project_dir,
     flow_primary_data_dir,
-    "E:\\R\\fuction of cell-ljy",
-    "E:/R/function of cell-ljy",
+    "E:\\R\\fuction of cell-wjz",
+    "E:/R/function of cell-wjz",
     env_dir
   )
   dirs <- unique(dirs[nzchar(dirs)])
-  dirs <- dirs[!vapply(dirs, jy_is_foreign_dir, logical(1))]
+  dirs <- dirs[!vapply(dirs, jz_is_foreign_dir, logical(1))]
   dirs[dir.exists(dirs)]
 }
 
 find_panel_map_file <- function(dirs = panel_map_search_dirs()) {
   dirs <- dirs[nzchar(dirs) & dir.exists(dirs)]
-  dirs <- dirs[!vapply(dirs, jy_is_foreign_dir, logical(1))]
+  dirs <- dirs[!vapply(dirs, jz_is_foreign_dir, logical(1))]
   names <- c(
-    "JY_flow_panel_map.json",
-    "JY_flow_panel_map.json.txt",
-    "JY_flow_panel_map.txt"
+    "JZ_flow_panel_map.json",
+    "JZ_flow_panel_map.json.txt",
+    "JZ_flow_panel_map.txt"
   )
   exact <- unlist(lapply(dirs, function(d) file.path(d, names)), use.names = FALSE)
   hit <- exact[file.exists(exact)]
   if (length(hit) > 0) return(hit[[1]])
   fuzzy <- unlist(lapply(dirs, function(d) {
-    list.files(d, pattern = "^JY_flow_panel_map", ignore.case = TRUE, full.names = TRUE)
+    list.files(d, pattern = "^JZ_flow_panel_map", ignore.case = TRUE, full.names = TRUE)
   }), use.names = FALSE)
   if (length(fuzzy) > 0) return(fuzzy[[1]])
   NULL
@@ -460,9 +460,9 @@ load_panel_map <- function() {
     paste0("  ", d, " -> ", paste(list.files(d), collapse = ", "))
   }, character(1)), collapse = "\n")
   stop(
-    "找不到 JY_flow_panel_map.json。\n",
-    "Windows 若类型是“文本文档”、图标是记事本，真实文件名多半是 JY_flow_panel_map.json.txt。\n",
-    "在资源管理器：查看 → 去掉“隐藏已知文件类型的扩展名”，再改名为 JY_flow_panel_map.json。\n",
+    "找不到 JZ_flow_panel_map.json。\n",
+    "Windows 若类型是“文本文档”、图标是记事本，真实文件名多半是 JZ_flow_panel_map.json.txt。\n",
+    "在资源管理器：查看 → 去掉“隐藏已知文件类型的扩展名”，再改名为 JZ_flow_panel_map.json。\n",
     "已搜索：\n", listing
   )
 }
@@ -2670,18 +2670,18 @@ export_major_subset_dimred <- function(cells, panel_id, out_dir) {
       sub <- embed_class_cells(sub)
       lab <- major_display_label(mj)
       tag <- paste0(panel_id, "_", gsub("[^A-Za-z0-9_-]", "_", mj))
-      ttl <- paste0(panel_id, "  ", lab, "  subsets  JY-EVNK | JY-NNK")
+      ttl <- paste0(panel_id, "  ", lab, "  subsets  JZ-EVB | JZ-AB")
       n_keys <- length(unique(celltype_label(sub$lineage, panel_id)))
       save_split_dr(
         plot_split_lineage(sub, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2",
                            ttl, color_mode = "subset"),
-        file.path(class_dir, paste0(tag, "_tSNE_subset_JY_NNK_vs_JY_EVNK")),
+        file.path(class_dir, paste0(tag, "_tSNE_subset_JZ_AB_vs_JZ_EVB")),
         n_keys
       )
       save_split_dr(
         plot_split_lineage(sub, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
                            ttl, color_mode = "subset"),
-        file.path(class_dir, paste0(tag, "_UMAP_subset_JY_NNK_vs_JY_EVNK")),
+        file.path(class_dir, paste0(tag, "_UMAP_subset_JZ_AB_vs_JZ_EVB")),
         n_keys
       )
       log_msg(panel_id, " ", lab, " subset dimred n=", nrow(sub), " -> ", class_dir)
@@ -3555,7 +3555,7 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
                 d_trt, spec$x, spec$y, col_trt, xlab, yfl, pct_of(flow_trt_group),
                 gate_trt, xlim, ylim, labs_trt
               )
-              stub <- paste0(panel_id, "_", gsub("[^A-Za-z0-9]+", "_", spec$lineage), "_JY_NNK_vs_JY_EVNK")
+              stub <- paste0(panel_id, "_", gsub("[^A-Za-z0-9]+", "_", spec$lineage), "_JZ_AB_vs_JZ_EVB")
               save_subset_figure(bar, c_ctrl, c_trt, file.path(sub_dir, stub))
               utils::write.csv(samp, file.path(sub_dir, paste0(stub, "_by_sample.csv")), row.names = FALSE)
               utils::write.csv(samp_bio, file.path(sub_dir, paste0(stub, "_by_bio.csv")), row.names = FALSE)
@@ -3592,7 +3592,7 @@ export_subset_gate_figures <- function(cells, panel_id, out_dir) {
   if (length(stat_rows)) {
     st <- do.call(rbind, stat_rows)
     st$padj <- if (all(is.na(st$p_value))) NA_real_ else p.adjust(st$p_value, method = "BH")
-    utils::write.csv(st, file.path(sub_dir, paste0(panel_id, "_subset_JY_NNK_vs_JY_EVNK_stats.csv")), row.names = FALSE)
+    utils::write.csv(st, file.path(sub_dir, paste0(panel_id, "_subset_JZ_AB_vs_JZ_EVB_stats.csv")), row.names = FALSE)
   }
   log_msg(panel_id, " subset stat+contour figures: ", sub_dir)
   invisible(TRUE)
@@ -3760,7 +3760,7 @@ export_p1_activation_stats <- function(cells, out_dir) {
   stats_mfi$metric <- "MFI"
   stats_pct$metric <- "pct_positive"
   stats <- rbind(stats_mfi, stats_pct)
-  utils::write.csv(stats, file.path(out_dir, "P1_TNK_activation_JY_NNK_vs_JY_EVNK_stats.csv"), row.names = FALSE)
+  utils::write.csv(stats, file.path(out_dir, "P1_TNK_activation_JZ_AB_vs_JZ_EVB_stats.csv"), row.names = FALSE)
   log_msg("P1 NKG2D/IFN-g/TNF-a/GZMB MFI written (not used as subset labels)")
   invisible(tab)
 }
@@ -3821,7 +3821,7 @@ export_p2_activation_stats <- function(cells, out_dir) {
   stats_mfi$metric <- "MFI"
   stats_pct$metric <- "pct_positive"
   stats <- rbind(stats_mfi, stats_pct)
-  utils::write.csv(stats, file.path(out_dir, "P2_Bcell_activation_JY_NNK_vs_JY_EVNK_stats.csv"), row.names = FALSE)
+  utils::write.csv(stats, file.path(out_dir, "P2_Bcell_activation_JZ_AB_vs_JZ_EVB_stats.csv"), row.names = FALSE)
   log_msg("P2 CD40/CD80/CD86 MFI and % positivity written (not used as subset labels)")
   invisible(tab)
 }
@@ -3891,7 +3891,7 @@ export_p3_activation_stats <- function(cells, out_dir) {
   stats_mfi$metric <- "MFI"
   stats_pct$metric <- "pct_positive"
   stats <- rbind(stats_mfi, stats_pct)
-  utils::write.csv(stats, file.path(out_dir, "P3_APC_activation_JY_NNK_vs_JY_EVNK_stats.csv"), row.names = FALSE)
+  utils::write.csv(stats, file.path(out_dir, "P3_APC_activation_JZ_AB_vs_JZ_EVB_stats.csv"), row.names = FALSE)
   log_msg("P3 CD40/CD80/CD86/TNF-a MFI written (not used as subset labels)")
   invisible(tab)
 }
@@ -3902,8 +3902,8 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
   dir.create(marker_dir, showWarnings = FALSE)
   umap_lab <- if (umap_is_pca) "PCA (UMAP fallback)" else "UMAP"
   tsne_lab <- if (tsne_is_pca) "PCA (tSNE fallback)" else "tSNE"
-  tag <- paste0(panel_id, " JY-NNK / JY-EVNK")
-  split_ttl <- paste0(panel_id, "  JY-EVNK | JY-NNK")
+  tag <- paste0(panel_id, " JZ-AB / JZ-EVB")
+  split_ttl <- paste0(panel_id, "  JZ-EVB | JZ-AB")
   log_msg(
     panel_id,
     " Figure 1 (*_major_split): all cells by major class; ",
@@ -3924,8 +3924,8 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     cells, "UMAP1", "UMAP2", panel_id, "UMAP-1", "UMAP-2",
     paste0(split_ttl, "  major classes"), color_mode = "major"
   )
-  save_split_dr(p_major_tsne, file.path(out_dir, paste0(panel_id, "_JY_NNK_vs_JY_EVNK_tSNE_major_split")), n_major)
-  save_split_dr(p_major_umap, file.path(out_dir, paste0(panel_id, "_JY_NNK_vs_JY_EVNK_UMAP_major_split")), n_major)
+  save_split_dr(p_major_tsne, file.path(out_dir, paste0(panel_id, "_JZ_AB_vs_JZ_EVB_tSNE_major_split")), n_major)
+  save_split_dr(p_major_umap, file.path(out_dir, paste0(panel_id, "_JZ_AB_vs_JZ_EVB_UMAP_major_split")), n_major)
 
   p_subset_tsne <- plot_split_lineage(
     cells, "tSNE1", "tSNE2", panel_id, "tSNE-1", "tSNE-2",
@@ -3936,9 +3936,9 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     paste0(split_ttl, "  all subsets"), color_mode = "subset"
   )
   n_subset <- length(unique(as.character(p_subset_tsne$data$celltype)))
-  save_split_dr(p_subset_tsne, file.path(out_dir, paste0(panel_id, "_JY_NNK_vs_JY_EVNK_tSNE_lineage_split")), n_subset)
-  save_split_dr(p_subset_umap, file.path(out_dir, paste0(panel_id, "_JY_NNK_vs_JY_EVNK_UMAP_lineage_split")), n_subset)
-  save_split_dr(p_subset_umap, file.path(out_dir, paste0(panel_id, "_JY_NNK_vs_JY_EVNK_UMAP_lineage_split_joint")), n_subset)
+  save_split_dr(p_subset_tsne, file.path(out_dir, paste0(panel_id, "_JZ_AB_vs_JZ_EVB_tSNE_lineage_split")), n_subset)
+  save_split_dr(p_subset_umap, file.path(out_dir, paste0(panel_id, "_JZ_AB_vs_JZ_EVB_UMAP_lineage_split")), n_subset)
+  save_split_dr(p_subset_umap, file.path(out_dir, paste0(panel_id, "_JZ_AB_vs_JZ_EVB_UMAP_lineage_split_joint")), n_subset)
 
   tryCatch(
     export_major_subset_dimred(cells, panel_id, out_dir),
@@ -3953,8 +3953,8 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
           file.path(out_dir, paste0(panel_id, "_UMAP_by_cluster")), width = 8)
   save_gg(plot_embedding(cells, "UMAP1", "UMAP2", "lineage", paste(tag, "-", umap_lab, "by lineage")),
           file.path(out_dir, paste0(panel_id, "_UMAP_by_lineage")), width = 8)
-  save_gg(plot_density_split(cells, "UMAP1", "UMAP2", paste(tag, "-", umap_lab, "density JY-NNK / JY-EVNK")),
-          file.path(out_dir, paste0(panel_id, "_UMAP_density_JY_NNK_vs_JY_EVNK")), width = 10, height = 5)
+  save_gg(plot_density_split(cells, "UMAP1", "UMAP2", paste(tag, "-", umap_lab, "density JZ-AB / JZ-EVB")),
+          file.path(out_dir, paste0(panel_id, "_UMAP_density_JZ_AB_vs_JZ_EVB")), width = 10, height = 5)
 
   save_gg(plot_embedding(cells, "tSNE1", "tSNE2", "group", paste(tag, "-", tsne_lab, "by group")),
           file.path(out_dir, paste0(panel_id, "_tSNE_by_group")))
@@ -3964,8 +3964,8 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
           file.path(out_dir, paste0(panel_id, "_tSNE_by_cluster")), width = 8)
   save_gg(plot_embedding(cells, "tSNE1", "tSNE2", "lineage", paste(tag, "-", tsne_lab, "by lineage")),
           file.path(out_dir, paste0(panel_id, "_tSNE_by_lineage")), width = 8)
-  save_gg(plot_density_split(cells, "tSNE1", "tSNE2", paste(tag, "-", tsne_lab, "density JY-NNK / JY-EVNK")),
-          file.path(out_dir, paste0(panel_id, "_tSNE_density_JY_NNK_vs_JY_EVNK")), width = 10, height = 5)
+  save_gg(plot_density_split(cells, "tSNE1", "tSNE2", paste(tag, "-", tsne_lab, "density JZ-AB / JZ-EVB")),
+          file.path(out_dir, paste0(panel_id, "_tSNE_density_JZ_AB_vs_JZ_EVB")), width = 10, height = 5)
 
   dr_cols <- colnames(med)
   for (mk in dr_cols) {
@@ -3990,7 +3990,7 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     paste(tag, "cluster frequency (bio-rep)")
   }
   save_gg(plot_freq_box(freq_bio, freq_ylab),
-          file.path(out_dir, paste0(panel_id, "_cluster_frequency_JY_NNK_vs_JY_EVNK")),
+          file.path(out_dir, paste0(panel_id, "_cluster_frequency_JZ_AB_vs_JZ_EVB")),
           width = max(8, 0.7 * length(unique(freq_df$cluster)) + 2), height = 5.5)
 
   lin_freq <- lineage_frequencies(cells)
@@ -4002,7 +4002,7 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     paste(tag, "lineage frequency (bio-rep)")
   }
   save_gg(plot_freq_box(lin_bio, lin_ylab),
-          file.path(out_dir, paste0(panel_id, "_lineage_frequency_JY_NNK_vs_JY_EVNK")),
+          file.path(out_dir, paste0(panel_id, "_lineage_frequency_JZ_AB_vs_JZ_EVB")),
           width = max(7, 0.8 * length(unique(lin_bio$cluster)) + 2), height = 5.5)
 
   mean_df <- aggregate(percent ~ group + cluster, data = freq_bio, FUN = mean)
@@ -4019,7 +4019,7 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     title <- cowplot::ggdraw() +
       cowplot::draw_label(paste(tag, "dimensionality reduction overview"), fontface = "bold", size = 14)
     overview <- cowplot::plot_grid(title, overview, ncol = 1, rel_heights = c(0.08, 1))
-    save_gg(overview, file.path(out_dir, paste0(panel_id, "_JY_NNK_vs_JY_EVNK_dimred_overview")),
+    save_gg(overview, file.path(out_dir, paste0(panel_id, "_JZ_AB_vs_JZ_EVB_dimred_overview")),
             width = 16, height = 5.8)
   }
   tryCatch(
@@ -4052,7 +4052,7 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
 }
 
 # -----------------------------------------------------------------------------
-# 8. 频率统计 JY-NNK / JY-EVNK
+# 8. 频率统计 JZ-AB / JZ-EVB
 # -----------------------------------------------------------------------------
 # 旧表里的 "T" 单独成列时 read.csv 会变成 TRUE
 read_embed_csv <- function(path) {
@@ -4196,7 +4196,7 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
   } else {
     sub <- file_tab[file_tab$panel == panel_id, ]
     if (nrow(sub) == 0) {
-      log_msg(panel_id, " : no unmixed files (need JY-EVNK1-1_", panel_id, "_unmixed.fcs / EVNK1-1_", panel_id, "_unmixed.fcs)")
+      log_msg(panel_id, " : no unmixed files (need JZ-EVB1-1_", panel_id, "_unmixed.fcs / EVB1-1_", panel_id, "_unmixed.fcs)")
       return(NULL)
     }
     for (i in seq_len(nrow(sub))) {
@@ -4357,9 +4357,9 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   lin_freq <- lineage_frequencies(cells)
   stats_lin <- compare_group_freq(lin_freq, "lineage")
   if (flow_should_trim_bio()) {
-    log_msg(panel_id, " JY-NNK / JY-EVNK stats: tech reps averaged, then drop 1 extreme bio-rep (max or min) per group; n=2")
+    log_msg(panel_id, " JZ-AB / JZ-EVB stats: tech reps averaged, then drop 1 extreme bio-rep (max or min) per group; n=2")
   } else {
-    log_msg(panel_id, " JY-NNK / JY-EVNK stats: tech reps averaged to n=3 bio (no extreme dropped)")
+    log_msg(panel_id, " JZ-AB / JZ-EVB stats: tech reps averaged to n=3 bio (no extreme dropped)")
   }
 
   utils::write.csv(annot, file.path(out_dir, paste0(panel_id, "_cluster_annotation.csv")), row.names = FALSE)
@@ -4383,8 +4383,8 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
                        file.path(out_dir, paste0(panel_id, "_dropped_bio_extremes.csv")), row.names = FALSE)
     }
   }
-  utils::write.csv(stats_cl, file.path(out_dir, paste0(panel_id, "_cluster_JY_NNK_vs_JY_EVNK_stats.csv")), row.names = FALSE)
-  utils::write.csv(stats_lin, file.path(out_dir, paste0(panel_id, "_lineage_JY_NNK_vs_JY_EVNK_stats.csv")), row.names = FALSE)
+  utils::write.csv(stats_cl, file.path(out_dir, paste0(panel_id, "_cluster_JZ_AB_vs_JZ_EVB_stats.csv")), row.names = FALSE)
+  utils::write.csv(stats_lin, file.path(out_dir, paste0(panel_id, "_lineage_JZ_AB_vs_JZ_EVB_stats.csv")), row.names = FALSE)
   if (!is.null(dat$map)) {
     utils::write.csv(dat$map, file.path(out_dir, paste0(panel_id, "_channel_map.csv")), row.names = FALSE)
   }
@@ -4400,7 +4400,7 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
 }
 
 # -----------------------------------------------------------------------------
-# 10. 本文件只提供函数。分析入口是 JY_Flow_dimred_pipeline.R
+# 10. 本文件只提供函数。分析入口是 JZ_Flow_dimred_pipeline.R
 # -----------------------------------------------------------------------------
-jy_engine_loaded <- TRUE
-log_msg("JY_flow_engine.R: function library only; run JY_Flow_dimred_pipeline.R")
+jz_engine_loaded <- TRUE
+log_msg("JZ_flow_engine.R: function library only; run JZ_Flow_dimred_pipeline.R")

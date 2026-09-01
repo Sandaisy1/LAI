@@ -1,23 +1,23 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# JY：细胞轨迹（比较 JY-NNK / JY-EVNK）
+# JZ：细胞轨迹（比较 JZ-AB / JZ-EVB）
 # 只写本方案 results_flow/P1|P2|P3/trajectory/，不读 fuction of cell 或 Internation。
 # =============================================================================
 
-jy_keep_cand <- function(p) {
+jz_keep_cand <- function(p) {
   s <- gsub("\\", "/", as.character(p))
-  if (grepl("cell-ljy", s, ignore.case = TRUE)) return(TRUE)
-  if (grepl("cell-wjz", s, ignore.case = TRUE)) return(FALSE)
+  if (grepl("cell-wjz", s, ignore.case = TRUE)) return(TRUE)
+  if (grepl("cell-ljy", s, ignore.case = TRUE)) return(FALSE)
   if (grepl("Internation cell immune", s, ignore.case = TRUE)) return(FALSE)
   if (grepl("fuction of cell|function of cell", s, ignore.case = TRUE)) return(FALSE)
   TRUE
 }
 
-load_jy_engine_functions <- function() {
-  if (isTRUE(get0("jy_engine_loaded", ifnotfound = FALSE))) {
+load_jz_engine_functions <- function() {
+  if (isTRUE(get0("jz_engine_loaded", ifnotfound = FALSE))) {
     return(invisible(TRUE))
   }
-  pipe <- "JY_flow_engine.R"
+  pipe <- "JZ_flow_engine.R"
   cands <- c(file.path(getwd(), pipe), pipe)
   args <- commandArgs(trailingOnly = FALSE)
   file_arg <- grep("^--file=", args, value = TRUE)
@@ -35,10 +35,10 @@ load_jy_engine_functions <- function() {
     cands <- c(file.path(dirname(normalizePath(ofile, mustWork = FALSE)), pipe), cands)
   }
   cands <- unique(cands)
-  cands <- cands[vapply(cands, jy_keep_cand, logical(1))]
+  cands <- cands[vapply(cands, jz_keep_cand, logical(1))]
   hit <- cands[file.exists(cands)][1]
   if (is.na(hit) || !nzchar(hit)) {
-    stop("找不到 JY_flow_engine.R。JY 方案不使用 Flow_dimred_pipeline.R。")
+    stop("找不到 JZ_flow_engine.R。JZ 方案不使用 Flow_dimred_pipeline.R。")
   }
   source(hit, local = FALSE)
   invisible(TRUE)
@@ -479,12 +479,12 @@ export_one_major_trajectory <- function(cells, panel_id, major, out_dir) {
   save_split_dr(plot_trajectory_tree(sub, fit, panel_id, ttl, facet_group = FALSE),
                 file.path(out_dir, paste0(tag, "_trajectory")),
                 n_keys, facet = FALSE)
-  save_split_dr(plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  JY-EVNK | JY-NNK"), facet_group = TRUE),
-                file.path(out_dir, paste0(tag, "_trajectory_JY_NNK_vs_JY_EVNK")),
+  save_split_dr(plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  JZ-EVB | JZ-AB"), facet_group = TRUE),
+                file.path(out_dir, paste0(tag, "_trajectory_JZ_AB_vs_JZ_EVB")),
                 n_keys, facet = TRUE)
   if (any(is.finite(sub$pseudotime))) {
-    save_gg(plot_pseudotime_group(sub, paste0(panel_id, "  ", major, "  pseudotime JY-NNK / JY-EVNK")),
-            file.path(out_dir, paste0(tag, "_pseudotime_JY_NNK_vs_JY_EVNK")),
+    save_gg(plot_pseudotime_group(sub, paste0(panel_id, "  ", major, "  pseudotime JZ-AB / JZ-EVB")),
+            file.path(out_dir, paste0(tag, "_pseudotime_JZ_AB_vs_JZ_EVB")),
             width = 5.2, height = 4.6)
   }
   log_msg(panel_id, " ", major, " trajectory (", fit$method, ", root=", root,
@@ -552,8 +552,8 @@ export_panel_major_trajectory <- function(cells, panel_id, out_dir) {
     n_keys, facet = FALSE
   )
   save_split_dr(
-    plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  JY-EVNK | JY-NNK"), facet_group = TRUE),
-    file.path(out_dir, paste0(panel_id, "_major_trajectory_JY_NNK_vs_JY_EVNK")),
+    plot_trajectory_tree(sub, fit, panel_id, paste0(ttl, "  JZ-EVB | JZ-AB"), facet_group = TRUE),
+    file.path(out_dir, paste0(panel_id, "_major_trajectory_JZ_AB_vs_JZ_EVB")),
     n_keys, facet = TRUE
   )
   log_msg(panel_id, " major-class trajectory (", fit$method, ", root=", root,
@@ -605,7 +605,7 @@ export_all_panel_trajectories <- function(result_dir) {
   invisible(TRUE)
 }
 
-load_jy_engine_functions()
+load_jz_engine_functions()
 
 if (!identical(toupper(Sys.getenv("FLOW_TRAJECTORY_FROM_PIPELINE", "0")), "1") &&
     !identical(toupper(Sys.getenv("FLOW_FUNCTIONS_ONLY", "0")), "1")) {
