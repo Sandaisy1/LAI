@@ -39,6 +39,11 @@ specs <- subset_plot_specs("P1")
 nk <- Filter(function(s) identical(s$lineage, "NK"), specs)
 if (!length(nk)) fail("P1 specs missing NK")
 if (!identical(nk[[1]]$x, "CD3") || !identical(nk[[1]]$y, "NKp46")) fail("NK contour should be CD3 vs NKp46")
+if (!isTRUE(nk[[1]]$use_major)) fail("NK overview should use major so split subsets still count")
+im <- Filter(function(s) identical(s$lineage, "NK_immature"), specs)
+if (!length(im) || !identical(im[[1]]$x, "CD27") || !identical(im[[1]]$y, "CD11B")) {
+  fail("NK immature contour should be CD27 vs CD11B")
+}
 act <- Filter(function(s) identical(s$lineage, "CD4_activated"), specs)
 if (!length(act) || !identical(act[[1]]$x, "CD69") || !identical(act[[1]]$y, "CD25")) {
   fail("CD4 activated contour should be CD69 vs CD25")
@@ -74,6 +79,18 @@ ok_if <- tryCatch({
   if (sum(par) < 20 || sum(par & hit) < 8) TRUE else TRUE
 }, error = function(e) FALSE)
 if (!isTRUE(ok_if)) fail("NA masks must not crash if (sum(par) < 20)")
+
+pm_nk <- data.frame(
+  lineage = c("NK_mature", "NKT_CD4", "CD4_naive"),
+  cluster_lineage = c("NK", "NKT", "CD4"),
+  stringsAsFactors = FALSE
+)
+if (!identical(parent_mask(pm_nk, "NK"), c(TRUE, FALSE, FALSE))) {
+  fail("NK parent must not swallow NKT")
+}
+if (!identical(parent_mask(pm_nk, "NKT"), c(FALSE, TRUE, FALSE))) {
+  fail("NKT parent must not swallow NK")
+}
 
 set.seed(3)
 mk <- function(sample, group, lineage, n, cd3, nk11) {

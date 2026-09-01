@@ -12,6 +12,8 @@ fail <- function(msg) {
 }
 
 if (!identical(subset_role("P1", "CD4_naive"), "focus")) fail("P1 T subset should be focus")
+if (!identical(subset_role("P1", "NK_immature"), "focus")) fail("P1 NK subset should be focus")
+if (!identical(subset_role("P1", "NKT_CD4"), "focus")) fail("P1 NKT subset should be focus")
 if (!identical(subset_role("P1", "B"), "dump")) fail("P1 B should be dump")
 if (!identical(subset_role("P2", "Naive_B"), "focus")) fail("P2 B subset should be focus")
 if (!identical(subset_role("P3", "Neutrophil"), "focus")) fail("P3 neutrophil should be focus")

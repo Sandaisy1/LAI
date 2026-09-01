@@ -8,7 +8,7 @@
 # 不是同一群细胞，也不能加总成全血组成。
 #
 # 细亚群以对应 panel 为准：
-#   P1 = T/NK，P2 = B，P3 = 髓系
+#   P1 = T/NK/NKT，P2 = B，P3 = 髓系
 # P1 的 B/Myeloid、P3 的 T/B/NK 只是 dump 通道，图里标成 dump。
 #
 # 用法（三个 panel 跑完之后）：

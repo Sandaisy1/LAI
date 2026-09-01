@@ -63,7 +63,20 @@ expect(lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD44 = 2.6, CD62L = 0.4, GZMB = 3.0, Perf
 expect(lab_of(mk(CD3 = 3.0, CD8 = 3.0, `LAG-3` = 3.1, `TIM-3` = 2.9, CD44 = 2.8)), "CD8_exhausted", "cd8-exh")
 expect(lab_of(mk(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, CD8 = 1.0)), "NK", "nk")
 expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, `NK1.1` = 0.3, CD8 = 0.2)), "NK", "nk-by-nkp46")
-expect(lab_of(mk(CD3 = 3.0, `NK1.1` = 2.8, NKp46 = 2.2, CD4 = 1.2, CD44 = 2.4)), "NKT", "nkt")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, CD11B = 3.0, CD19 = 0.1, CD27 = 0.3)), "NK_mature", "nk-before-cd11b")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, CD27 = 3.0, CD11B = 0.3)), "NK_immature", "nk-immature")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, CD27 = 3.0, CD11B = 2.8)), "NK_DP", "nk-dp")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, CD69 = 3.1, CD11B = 2.4, NKG2D = 3.2)), "NK_activated", "nk-act")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, GZMB = 3.1, Perforin = 2.9, CD69 = 0.4)), "NK_effector", "nk-eff")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, `LAG-3` = 3.0, `TIM-3` = 2.8, `PD-L1` = 2.8, CD11B = 2.6)), "NK_exhausted", "nk-exh")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, NKG2D = 3.2, CD69 = 0.3, CD11B = 0.3, CD27 = 0.3)), "NK", "nkg2d-not-act")
+expect(celltype_label("NK_immature", "P1"), "NK immature", "label-nk-im")
+expect(celltype_label("NK_mature", "P1"), "NK mature", "label-nk-mat")
+expect(celltype_label("NK_effector", "P1"), "NK T_EFF", "label-nk-teff")
+expect(lab_of(mk(CD3 = 3.0, `NK1.1` = 2.8, NKp46 = 2.6, CD4 = 0.3, CD44 = 2.4)), "NKT_DN", "nkt-dn")
+expect(lab_of(mk(CD3 = 3.0, `NK1.1` = 2.8, NKp46 = 2.6, CD4 = 3.0, CD8 = 0.2)), "NKT_CD4", "nkt-cd4")
+expect(celltype_label("NKT_CD4", "P1"), "CD4 NKT", "label-nkt-cd4")
+expect(celltype_label("NKT_DN", "P1"), "DN NKT", "label-nkt-dn")
 expect(lab_of(mk(CD19 = 3.3, CD3 = 0.1, CD4 = 0.2, CD8 = 0.2)), "B", "b")
 expect(lab_of(mk(CD11B = 3.2, CD3 = 0.1, CD19 = 0.1, CD4 = 0.2)), "Myeloid", "myeloid")
 
@@ -118,6 +131,42 @@ need8 <- c("CD8_effector", "CD8_activated", "CD8_naive", "CD8_TCM", "CD8_TSCM",
            "CD8_MPEC", "CD8_SLEC", "CD8_exhausted")
 miss8 <- setdiff(need8, cd8_labs)
 if (length(miss8)) fail(sprintf("CD8 missing %s (got %s)", paste(miss8, collapse = ","), paste(cd8_labs, collapse = ",")))
+
+set.seed(42)
+mat_nk <- rbind(
+  bind_pop("NK_immature", 80), bind_pop("NK_DP", 80), bind_pop("NK_mature", 80),
+  bind_pop("NK_act", 80), bind_pop("NK_eff", 80), bind_pop("NK_exh", 80)
+)
+h_nk <- hierarchical_gate(mat_nk, "P1")
+if (any(h_nk$major == "Myeloid")) fail("CD11b+ NKp46+ cells must not dump to Myeloid")
+if (mean(h_nk$major == "NK") < 0.9) {
+  fail(sprintf("NK pops should be major NK, got %s", paste(unique(h_nk$major), collapse = ",")))
+}
+need_nk <- c("NK_immature", "NK_DP", "NK_mature", "NK_activated", "NK_effector", "NK_exhausted")
+miss_nk <- setdiff(need_nk, unique(h_nk$subset))
+if (length(miss_nk)) {
+  fail(sprintf("NK missing %s (got %s)", paste(miss_nk, collapse = ","), paste(unique(h_nk$subset), collapse = ",")))
+}
+
+set.seed(42)
+mat_nkt <- rbind(bind_pop("NKT_CD4", 80), bind_pop("NKT_DN", 80))
+h_nkt <- hierarchical_gate(mat_nkt, "P1")
+if (mean(h_nkt$major == "NKT") < 0.85) {
+  fail(sprintf("NKT pops should stay NKT not CD4/T, got major=%s subset=%s",
+               paste(unique(h_nkt$major), collapse = ","), paste(unique(h_nkt$subset), collapse = ",")))
+}
+need_nkt <- c("NKT_CD4", "NKT_DN")
+miss_nkt <- setdiff(need_nkt, unique(h_nkt$subset))
+if (length(miss_nkt)) {
+  fail(sprintf("NKT missing %s (got %s)", paste(miss_nkt, collapse = ","), paste(unique(h_nkt$subset), collapse = ",")))
+}
+
+nk_ov <- Filter(function(s) identical(s$lineage, "NK"), subset_plot_specs("P1"))
+if (!length(nk_ov) || !isTRUE(nk_ov[[1]]$use_major)) fail("NK overview should count all NK subsets via major")
+im_sp <- Filter(function(s) identical(s$lineage, "NK_immature"), subset_plot_specs("P1"))
+if (!length(im_sp) || !identical(im_sp[[1]]$x, "CD27") || !identical(im_sp[[1]]$y, "CD11B")) {
+  fail("NK immature figure should be CD27 vs CD11B")
+}
 
 set.seed(4)
 n <- 80
@@ -222,5 +271,39 @@ gx <- c(rnorm(200, 0.45, 0.12), rnorm(40, 3.2, 0.18))
 gy <- c(rnorm(200, 0.40, 0.12), rnorm(40, 0.45, 0.12))
 g_naive <- complete_gate_for(gx, gy, nv[[1]], c(0, 7), c(0, 6))
 if ((g_naive$xmax - g_naive$xmin) < 3) fail("naive gate must span to the axis max, not a quantile box of hit cells")
+
+pm_cells <- data.frame(
+  lineage = c("NK_mature", "NKT_CD4", "CD4_naive", "NK_immature"),
+  cluster_lineage = c("NK", "NKT", "CD4", "NK"),
+  stringsAsFactors = FALSE
+)
+if (!identical(parent_mask(pm_cells, "NK"), c(TRUE, FALSE, FALSE, TRUE))) {
+  fail("NK parent must include NK_* and exclude NKT")
+}
+if (!identical(parent_mask(pm_cells, "NKT"), c(FALSE, TRUE, FALSE, FALSE))) {
+  fail("NKT parent must include NKT_* and exclude NK")
+}
+
+set.seed(16)
+cells_act <- data.frame(
+  sample = rep(c("EV1", "EV2", "EV3", "H1", "H2", "H3"), each = 40),
+  bio_sample = rep(c("EV1", "EV2", "EV3", "H1", "H2", "H3"), each = 40),
+  group = rep(c("EV", "EV", "EV", "H", "H", "H"), each = 40),
+  cluster_lineage = "NK",
+  lineage = "NK_mature",
+  NKG2D = rnorm(240, 2.4, 0.2),
+  `IFN-g` = rnorm(240, 0.6, 0.15),
+  `TNF-a` = rnorm(240, 0.5, 0.15),
+  GZMB = rnorm(240, 0.8, 0.15),
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+td_act <- tempfile("p1_act")
+dir.create(td_act)
+export_p1_activation_stats(cells_act, td_act)
+if (!file.exists(file.path(td_act, "P1_TNK_activation_by_sample.csv"))) {
+  fail("P1 activation MFI table missing")
+}
+unlink(td_act, recursive = TRUE)
 
 cat("OK: P1 T/NK subset labels\n")

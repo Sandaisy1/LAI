@@ -704,10 +704,18 @@ demo_means_p1 <- function() {
     CD8_SLEC = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 3.0, CD62L = 0.3, `SCA-1` = 3.1, CD27 = 0.4),
     CD8_eff = pop(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 2.6, GZMB = 3.0, Perforin = 2.8, `IFN-g` = 2.2),
     CD8_exh = pop(CD3 = 3.0, CD8 = 3.0, CD8b = 2.6, `LAG-3` = 3.1, `TIM-3` = 2.9, `PD-L1` = 2.8, CD44 = 2.8, CD62L = 0.3),
-    NK = pop(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, NKG2D = 2.6, CD8 = 1.0, GZMB = 2.4, Perforin = 2.2),
-    NKT = pop(CD3 = 3.0, `NK1.1` = 2.8, NKp46 = 2.2, CD4 = 1.2, CD44 = 2.4),
+    NK = pop(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, NKG2D = 2.6, CD8 = 1.0, CD27 = 0.3, CD11B = 0.3),
+    NK_immature = pop(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, CD27 = 3.0, CD11B = 0.3, NKG2D = 2.6, CD69 = 0.3),
+    NK_DP = pop(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, CD27 = 3.0, CD11B = 2.8, NKG2D = 2.6, CD69 = 0.3),
+    NK_mature = pop(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, CD27 = 0.3, CD11B = 3.0, NKG2D = 2.6, CD69 = 0.3),
+    NK_act = pop(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, CD69 = 3.1, CD25 = 2.4, CD11B = 2.2, CD27 = 0.5),
+    NK_eff = pop(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, GZMB = 3.1, Perforin = 2.9, CD69 = 0.4, CD11B = 2.4, CD27 = 0.4),
+    NK_exh = pop(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, `LAG-3` = 3.0, `TIM-3` = 2.8, `PD-L1` = 2.8,
+                CD11B = 2.6, CD27 = 0.4, CD69 = 0.3),
+    NKT_CD4 = pop(CD3 = 3.0, `NK1.1` = 2.8, NKp46 = 2.6, CD4 = 3.0, CD8 = 0.2, CD44 = 2.4, CD69 = 0.3),
+    NKT_DN = pop(CD3 = 3.0, `NK1.1` = 2.8, NKp46 = 2.6, CD4 = 0.3, CD8 = 0.3, CD44 = 2.4, CD69 = 0.3),
     B = pop(CD19 = 3.3, CD3 = 0.1, CD27 = 1.2),
-    Myeloid = pop(CD11B = 3.2, CD3 = 0.1, CD19 = 0.1, `NK1.1` = 0.1)
+    Myeloid = pop(CD11B = 3.2, CD3 = 0.1, CD19 = 0.1, `NK1.1` = 0.1, NKp46 = 0.1)
   )
 }
 
@@ -760,17 +768,21 @@ demo_props <- function(panel_id, group) {
   ctrl <- identical(as.character(group), flow_ctrl_group)
   if (panel_id == "P1") {
     if (ctrl) {
-      return(c(CD4_naive = 0.08, CD4_TCM = 0.04, CD4_TSCM = 0.03, CD4_TEM = 0.03, CD4_MPEC = 0.03,
+      return(c(CD4_naive = 0.07, CD4_TCM = 0.04, CD4_TSCM = 0.03, CD4_TEM = 0.03, CD4_MPEC = 0.03,
                CD4_SLEC = 0.03, CD4_exh = 0.03, Treg = 0.03, CD4_act = 0.04, CD4_eff = 0.03,
-               CD8_naive = 0.06, CD8_act = 0.03, CD8_TCM = 0.03, CD8_TSCM = 0.03, CD8_TEM = 0.03,
+               CD8_naive = 0.05, CD8_act = 0.03, CD8_TCM = 0.03, CD8_TSCM = 0.03, CD8_TEM = 0.03,
                CD8_MPEC = 0.03, CD8_SLEC = 0.03, CD8_eff = 0.04, CD8_exh = 0.04,
-               NK = 0.10, NKT = 0.03, B = 0.07, Myeloid = 0.05))
+               NK = 0.03, NK_immature = 0.03, NK_DP = 0.02, NK_mature = 0.03,
+               NK_act = 0.02, NK_eff = 0.02, NK_exh = 0.02, NKT_CD4 = 0.02, NKT_DN = 0.02,
+               B = 0.06, Myeloid = 0.04))
     }
-    return(c(CD4_naive = 0.04, CD4_TCM = 0.03, CD4_TSCM = 0.03, CD4_TEM = 0.03, CD4_MPEC = 0.03,
-             CD4_SLEC = 0.04, CD4_exh = 0.04, Treg = 0.03, CD4_act = 0.06, CD4_eff = 0.04,
+    return(c(CD4_naive = 0.03, CD4_TCM = 0.03, CD4_TSCM = 0.03, CD4_TEM = 0.03, CD4_MPEC = 0.03,
+             CD4_SLEC = 0.04, CD4_exh = 0.04, Treg = 0.03, CD4_act = 0.05, CD4_eff = 0.04,
              CD8_naive = 0.03, CD8_act = 0.04, CD8_TCM = 0.03, CD8_TSCM = 0.03, CD8_TEM = 0.03,
-             CD8_MPEC = 0.03, CD8_SLEC = 0.04, CD8_eff = 0.06, CD8_exh = 0.06,
-             NK = 0.10, NKT = 0.04, B = 0.06, Myeloid = 0.04))
+             CD8_MPEC = 0.03, CD8_SLEC = 0.04, CD8_eff = 0.05, CD8_exh = 0.05,
+             NK = 0.03, NK_immature = 0.03, NK_DP = 0.02, NK_mature = 0.03,
+             NK_act = 0.03, NK_eff = 0.03, NK_exh = 0.03, NKT_CD4 = 0.02, NKT_DN = 0.03,
+             B = 0.05, Myeloid = 0.03))
   }
   if (panel_id == "P2") {
     if (ctrl) {
@@ -919,17 +931,15 @@ annotate_clusters <- function(med, panel_id) {
       nkp <- nv(i, "NKp46")
       nk11 <- nv(i, "NK1.1")
       nk <- if (is.finite(nkp) && nkp > -Inf && nkp >= 0) nkp else max(nkp, nk11)
-      # CD45+ 内：B = CD19+（通常 CD3-）；NK = CD3- NKp46+；T = CD3+
+      row <- setNames(as.list(med[i, ]), colnames(med))
+      # CD45+ 内：B = CD19+；NK = CD3- NKp46+（必须在 CD11b 之前，成熟 NK 是 CD11b+）
       if (is.finite(cd19) && cd19 >= max(cd3, cd4, cd8, nk) - 0.05 && cd19 > cd3 + 0.15) return("B")
-      if (is.finite(cd11b) && cd11b > max(cd3, cd4, cd8, cd19) + 0.2) return("Myeloid")
       if (is.finite(nk) && nk > cd3 + 0.3 && nk > cd19 && nk >= max(cd4, cd8) - 0.15) {
-        kill <- max(nv(i, "GZMB"), nv(i, "Perforin"))
-        if (is.finite(kill) && kill >= 2.5 && kill > nk - 0.4) return("NK_effector")
-        return("NK")
+        return(label_nk_subset(row))
       }
-      if (is.finite(nk) && is.finite(cd3) && nk > 1 && cd3 > 1 &&
-          abs(cd3 - nk) < 1.2 && nk > cd19 && cd3 > cd19 && nk >= max(cd4, cd8) - 0.4) {
-        return("NKT")
+      if (is.finite(nk) && is.finite(cd3) && nk >= 1.8 && cd3 >= 1.8 &&
+          abs(cd3 - nk) < 1.2 && nk > cd19 && cd3 > cd19) {
+        return(label_nkt_subset(row))
       }
       if (cd8 > cd4 + 0.15) {
         kill <- max(nv(i, "GZMB"), nv(i, "Perforin"))
@@ -959,6 +969,7 @@ annotate_clusters <- function(med, panel_id) {
         return(t_mem("CD4"))
       }
       if (is.finite(cd3) && cd3 > max(cd19, cd11b, nk)) return(t_mem("T"))
+      if (is.finite(cd11b) && cd11b > max(cd3, cd4, cd8, cd19) + 0.2) return("Myeloid")
       return("Myeloid")
     }
     if (panel_id == "P2") {
@@ -1023,6 +1034,42 @@ tem_family <- function(prefix) {
 
 tcm_family <- function(prefix) {
   paste0(prefix, c("_TCM", "_TSCM"))
+}
+
+# P1 NK 亚群（不含 NKT：NKT 是 CD3+）
+nk_family <- function() {
+  c("NK", "NK_activated", "NK_effector", "NK_exhausted",
+    "NK_immature", "NK_DP", "NK_mature")
+}
+
+nkt_family <- function() {
+  c("NKT", "NKT_CD4", "NKT_DN", "NKT_activated", "NKT_effector")
+}
+
+# P1 NK：不要用 NKG2D 当亚群（小鼠 NK 组成性表达）
+label_nk_subset <- function(v) {
+  cd69 <- vec_get(v, "CD69")
+  kill <- max(vec_get(v, "GZMB"), vec_get(v, "Perforin"))
+  exh <- max(vec_get(v, "PD-L1"), vec_get(v, "LAG-3"), vec_get(v, "TIM-3"))
+  cd27 <- vec_get(v, "CD27")
+  cd11b <- vec_get(v, "CD11B")
+  if (cd69 >= 2.2) return("NK_activated")
+  if (kill >= 2.5) return("NK_effector")
+  if (exh >= 2.5) return("NK_exhausted")
+  if (cd27 > 1.2 && cd11b < 1.0) return("NK_immature")
+  if (cd27 > 1.2 && cd11b > 1.2) return("NK_DP")
+  if (cd11b > 1.2 && cd27 < 1.2) return("NK_mature")
+  "NK"
+}
+
+label_nkt_subset <- function(v) {
+  cd69 <- vec_get(v, "CD69")
+  kill <- max(vec_get(v, "GZMB"), vec_get(v, "IFN-g"))
+  cd4 <- vec_get(v, "CD4")
+  if (cd69 >= 2.2) return("NKT_activated")
+  if (kill >= 2.5) return("NKT_effector")
+  if (cd4 >= 1.5) return("NKT_CD4")
+  "NKT_DN"
 }
 
 # 大类圈定之后，只根据这一层的定义标志给亚群命名
@@ -1324,17 +1371,18 @@ gate_major_lineage <- function(mat, panel_id) {
   out <- rep("Myeloid", n)
   # B：CD45+ 里 CD19+（通常 CD3-）
   is_b <- cd19 > finite_pmax(cd3, cd4, cd8, nk) + 0.1
-  is_my <- !is_b & cd11b > finite_pmax(cd3, cd19, cd4, cd8) + 0.2
-  # NK：CD3- NKp46+
-  is_nk <- !is_b & !is_my & nk > cd3 + 0.3 & nk > cd19
-  is_nkt <- !is_b & !is_my & !is_nk & nk > 1 & cd3 > 1 & abs(cd3 - nk) < 1.2 & nk > cd19
+  # NK：CD3- NKp46+。必须在 CD11b 之前，成熟 NK 是 CD11b+ NKp46+
+  is_nk <- !is_b & nk > cd3 + 0.3 & nk > cd19
+  is_nkt <- !is_b & !is_nk & nk > 1 & cd3 > 1 & abs(cd3 - nk) < 1.2 & nk > cd19
   # T：CD3+，再分成 CD4+ CD8- / CD4- CD8+
-  is_t <- !is_b & !is_my & !is_nk & !is_nkt & cd3 >= finite_pmax(cd19, cd11b)
+  is_t <- !is_b & !is_nk & !is_nkt & cd3 >= finite_pmax(cd19, cd11b)
+  # 剩下的 CD11b+ 才是髓系 dump
+  is_my <- !is_b & !is_nk & !is_nkt & !is_t & cd11b > finite_pmax(cd3, cd19, cd4, cd8) + 0.2
   out[is_b] <- "B"
-  out[is_my] <- "Myeloid"
   out[is_nk] <- "NK"
   out[is_nkt] <- "NKT"
   out[is_t] <- ifelse(cd4 >= cd8, "CD4", "CD8")
+  out[is_my] <- "Myeloid"
   out
 }
 
@@ -1567,16 +1615,71 @@ sequential_t_subsets <- function(mat, idx, line) {
   labs
 }
 
-# NK 内：Perforin+ 或 GZMB+ 为杀伤/效应
+# 剩余 NK：Hayakawa CD27 vs CD11b（未成熟 / 双阳 / 成熟）；双阴留 NK
+split_nk_cd27_cd11b <- function(mat, idx) {
+  n <- length(idx)
+  if (n == 0) return(character(0))
+  cd27 <- colv(mat, "CD27")[idx]
+  cd11b <- colv(mat, "CD11B")[idx]
+  if (n < 8 || (!any(is.finite(cd27)) && !any(is.finite(cd11b)))) {
+    return(rep("NK", n))
+  }
+  cut27 <- if (any(is.finite(cd27))) axis_pos_cut(cd27) else Inf
+  cut11 <- if (any(is.finite(cd11b))) axis_pos_cut(cd11b) else Inf
+  hi27 <- is.finite(cd27) & is.finite(cut27) & cd27 >= cut27
+  hi11 <- is.finite(cd11b) & is.finite(cut11) & cd11b >= cut11
+  out <- rep("NK", n)
+  out[hi27 & !hi11] <- "NK_immature"
+  out[hi27 & hi11] <- "NK_DP"
+  out[!hi27 & hi11] <- "NK_mature"
+  out
+}
+
+# NK 内互斥：CD69 → 杀伤 → 耗竭 → 剩余 CD27 vs CD11b。不要用 NKG2D 当亚群。
 sequential_nk_subsets <- function(mat, idx) {
   n <- length(idx)
   if (n == 0) return(character(0))
   labs <- rep("NK", n)
   remain <- rep(TRUE, n)
-  if (!any(remain)) return(labs)
-  hi <- gate_k2_high(mat, idx[remain], c("GZMB", "Perforin"), 0.2)
-  pos <- which(remain)
-  if (any(hi)) labs[pos[hi]] <- "NK_effector"
+  take_high <- function(markers, label, min_sep) {
+    if (!any(remain)) return(invisible())
+    hi <- gate_k2_high(mat, idx[remain], markers, min_sep)
+    pos <- which(remain)
+    labs[pos[hi]] <<- label
+    remain[pos[hi]] <<- FALSE
+  }
+  take_high("CD69", "NK_activated", 0.15)
+  take_high(c("GZMB", "Perforin"), "NK_effector", 0.15)
+  take_high(c("PD-L1", "LAG-3", "TIM-3"), "NK_exhausted", 0.15)
+  if (any(remain)) labs[remain] <- split_nk_cd27_cd11b(mat, idx[remain])
+  labs
+}
+
+# NKT 内：少数活化/效应先拿走，剩余按 CD4+ / CD4-（DN）
+sequential_nkt_subsets <- function(mat, idx) {
+  n <- length(idx)
+  if (n == 0) return(character(0))
+  labs <- rep("NKT_DN", n)
+  remain <- rep(TRUE, n)
+  take_high <- function(markers, label, min_sep) {
+    if (!any(remain)) return(invisible())
+    hi <- gate_k2_high(mat, idx[remain], markers, min_sep)
+    pos <- which(remain)
+    labs[pos[hi]] <<- label
+    remain[pos[hi]] <<- FALSE
+  }
+  take_high("CD69", "NKT_activated", 0.15)
+  take_high(c("GZMB", "IFN-g"), "NKT_effector", 0.25)
+  if (any(remain)) {
+    cd4 <- colv(mat, "CD4")[idx[remain]]
+    if (sum(is.finite(cd4)) >= 8) {
+      cut4 <- axis_pos_cut(cd4)
+      hi4 <- is.finite(cd4) & is.finite(cut4) & cd4 >= cut4
+    } else {
+      hi4 <- is.finite(cd4) & cd4 >= 1.5
+    }
+    labs[remain] <- ifelse(hi4, "NKT_CD4", "NKT_DN")
+  }
   labs
 }
 
@@ -1808,6 +1911,8 @@ hierarchical_gate <- function(mat, panel_id) {
     subset[i8] <- sequential_t_subsets(mat, i8, "CD8")
     ink <- which(major == "NK")
     subset[ink] <- sequential_nk_subsets(mat, ink)
+    inkt <- which(major == "NKT")
+    subset[inkt] <- sequential_nkt_subsets(mat, inkt)
   } else if (panel_id == "P2") {
     i_n <- which(major == "Naive_B")
     subset[i_n] <- sequential_b_naive(mat, i_n)
@@ -1893,9 +1998,19 @@ pal_celltype <- c(
   "CD8 activated" = "#58D68D",
   "NK T_EFF" = "#7B241C",
   "NK effector" = "#7B241C",
+  "NK activated" = "#E74C3C",
+  "NK immature" = "#F5B7B1",
+  "NK DP" = "#E59866",
+  "NK mature" = "#922B21",
+  "NK exhausted" = "#6C3483",
   "B cell" = "#7B52A5",
   "Macrophage" = "#5DADE2",
   "NKT" = "#E8C87A",
+  "CD4 NKT" = "#F4D03F",
+  "DN NKT" = "#D4AC0D",
+  "NKT activated" = "#F9E79F",
+  "NKT T_EFF" = "#B7950B",
+  "NKT effector" = "#B7950B",
   "NK" = "#C0392B",
   "T" = "#D4A017",
   "CD8 T_CM" = "#27AE60",
@@ -1998,8 +2113,17 @@ celltype_label <- function(lineage, panel_id) {
     CD8_exhausted = "CD8 exhausted",
     CD8_T = "CD8 T",
     NK = "NK",
+    NK_activated = "NK activated",
+    NK_immature = "NK immature",
+    NK_DP = "NK DP",
+    NK_mature = "NK mature",
+    NK_exhausted = "NK exhausted",
     NK_effector = "NK T_EFF",
     NKT = "NKT",
+    NKT_CD4 = "CD4 NKT",
+    NKT_DN = "DN NKT",
+    NKT_activated = "NKT activated",
+    NKT_effector = "NKT T_EFF",
     T = "T",
     T_naive = "T naive",
     T_TCM = "T T_CM",
@@ -2313,13 +2437,15 @@ parent_mask <- function(cells, parent) {
   lin[is.na(lin)] <- ""
   cd4 <- cl == "CD4" | grepl("^CD4_", lin) | lin == "Treg"
   cd8 <- cl == "CD8" | grepl("^CD8_", lin)
-  nk <- cl == "NK" | lin %in% c("NK", "NK_effector")
+  nk <- cl == "NK" | lin %in% nk_family()
+  nkt <- cl == "NKT" | lin %in% nkt_family()
   out <- switch(as.character(parent),
     all = rep(TRUE, n),
-    CD3 = cd4 | cd8 | lin %in% c("T", "NKT") | cl %in% c("T", "NKT"),
+    CD3 = cd4 | cd8 | nkt | lin == "T" | cl == "T",
     CD4 = cd4,
     CD8 = cd8,
     NK = nk,
+    NKT = nkt,
     CD4_TCM = lin %in% tcm_family("CD4"),
     CD8_TCM = lin %in% tcm_family("CD8"),
     CD4_TEM = lin %in% tem_family("CD4"),
@@ -2363,6 +2489,8 @@ subset_hit_mask <- function(cells, spec) {
   fam <- switch(as.character(spec$lineage),
     CD4_TEM = tem_family("CD4"),
     CD8_TEM = tem_family("CD8"),
+    NK = nk_family(),
+    NKT = nkt_family(),
     DC = c("DC", "cDC1_CD103", "cDC2"),
     Mast = c("Mast", "Basophil_mast", "Basophil"),
     spec$lineage
@@ -2378,9 +2506,18 @@ subset_plot_specs <- function(panel_id) {
   }
   if (identical(panel_id, "P1")) {
     return(list(
-      mk("NK", "CD3", "NKp46", "all", "NK cell (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
+      mk("NK", "CD3", "NKp46", "all", "NK cell (%)", TRUE, gate = "quad", x_hi = FALSE, y_hi = TRUE),
+      mk("NK_activated", "CD69", "NKp46", "NK", "NK activated in NK (%)", gate = "hi_hi"),
       mk("NK_effector", "GZMB", "Perforin", "NK", "NK T_EFF in NK (%)", gate = "hi_hi"),
-      mk("NKT", "CD3", "NKp46", "all", "NKT (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("NK_exhausted", "LAG-3", "TIM-3", "NK", "NK exhausted in NK (%)", gate = "hi_hi"),
+      mk("NK_immature", "CD27", "CD11B", "NK", "NK immature in NK (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
+      mk("NK_DP", "CD27", "CD11B", "NK", "NK DP in NK (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("NK_mature", "CD27", "CD11B", "NK", "NK mature in NK (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
+      mk("NKT", "CD3", "NKp46", "all", "NKT (%)", TRUE, gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("NKT_CD4", "CD8", "CD4", "NKT", "CD4 NKT in NKT (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
+      mk("NKT_DN", "CD8", "CD4", "NKT", "DN NKT in NKT (%)", gate = "quad", x_hi = FALSE, y_hi = FALSE),
+      mk("NKT_activated", "CD69", "CD3", "NKT", "NKT activated in NKT (%)", gate = "hi_hi"),
+      mk("NKT_effector", "GZMB", "IFN-g", "NKT", "NKT T_EFF in NKT (%)", gate = "hi_hi"),
       mk("B", "CD19", "CD3", "all", "B cell (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("Myeloid", "CD11B", "CD3", "all", "Myeloid (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("CD4", "CD8", "CD4", "CD3", "CD4+ T cell in CD3+ (%)", TRUE, gate = "quad", x_hi = FALSE, y_hi = TRUE),
@@ -2874,6 +3011,77 @@ export_per_sample_gating_figures <- function(cells, panel_id, out_dir) {
   invisible(TRUE)
 }
 
+# P1 活化读出：NKG2D / IFN-g / TNF-a / GZMB 在 CD4/CD8/NK 上的 MFI，不是新亚群
+p1_activation_parent <- function(lin, cl = NULL) {
+  lin <- as.character(lin)
+  lin[is.na(lin)] <- ""
+  out <- rep(NA_character_, length(lin))
+  out[grepl("^CD4_", lin) | lin == "Treg"] <- "CD4"
+  out[grepl("^CD8_", lin)] <- "CD8"
+  out[lin %in% nk_family()] <- "NK"
+  if (!is.null(cl)) {
+    cl <- as.character(cl)
+    cl[is.na(cl)] <- ""
+    out[is.na(out) & cl == "CD4"] <- "CD4"
+    out[is.na(out) & cl == "CD8"] <- "CD8"
+    out[is.na(out) & cl == "NK"] <- "NK"
+  }
+  out
+}
+
+export_p1_activation_stats <- function(cells, out_dir) {
+  if (!"lineage" %in% names(cells)) return(invisible(NULL))
+  cl <- if ("cluster_lineage" %in% names(cells)) cells$cluster_lineage else NULL
+  par <- p1_activation_parent(cells$lineage, cl)
+  markers <- intersect(c("NKG2D", "IFN-g", "TNF-a", "GZMB"), names(cells))
+  if (!length(markers) || !any(!is.na(par))) return(invisible(NULL))
+  parents <- c("CD4", "CD8", "NK")
+  cuts <- lapply(markers, function(mk) axis_pos_cut(as.numeric(cells[[mk]][!is.na(par)])))
+  names(cuts) <- markers
+  smp <- unique(as.character(cells$sample))
+  rows <- list()
+  for (s in smp) {
+    ii <- which(as.character(cells$sample) == s)
+    if (!length(ii)) next
+    grp <- as.character(cells$group[ii[1]])
+    bio <- if ("bio_sample" %in% names(cells)) as.character(cells$bio_sample[ii[1]]) else s
+    tech <- if ("tech_rep" %in% names(cells)) as.character(cells$tech_rep[ii[1]]) else NA_character_
+    for (pn in parents) {
+      hit <- ii[par[ii] == pn & !is.na(par[ii])]
+      if (length(hit) < 5) next
+      for (mk in markers) {
+        v <- as.numeric(cells[[mk]][hit])
+        cut <- cuts[[mk]]
+        rows[[length(rows) + 1]] <- data.frame(
+          sample = s, bio_sample = bio, tech_rep = tech, group = grp,
+          parent = pn, marker = mk, n_cells = length(hit),
+          MFI = stats::median(v, na.rm = TRUE),
+          pct_positive = 100 * mean(is.finite(v) & is.finite(cut) & v >= cut),
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+  if (!length(rows)) return(invisible(NULL))
+  tab <- do.call(rbind, rows)
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  utils::write.csv(tab, file.path(out_dir, "P1_TNK_activation_by_sample.csv"), row.names = FALSE)
+  mfi_df <- tab
+  mfi_df$id <- paste(mfi_df$parent, mfi_df$marker, "MFI", sep = "|")
+  mfi_df$percent <- mfi_df$MFI
+  pct_df <- tab
+  pct_df$id <- paste(pct_df$parent, pct_df$marker, "pct_pos", sep = "|")
+  pct_df$percent <- pct_df$pct_positive
+  stats_mfi <- compare_group_freq(mfi_df, "id")
+  stats_pct <- compare_group_freq(pct_df, "id")
+  stats_mfi$metric <- "MFI"
+  stats_pct$metric <- "pct_positive"
+  stats <- rbind(stats_mfi, stats_pct)
+  utils::write.csv(stats, file.path(out_dir, "P1_TNK_activation_H_vs_EV_stats.csv"), row.names = FALSE)
+  log_msg("P1 NKG2D/IFN-g/TNF-a/GZMB MFI written (not used as subset labels)")
+  invisible(tab)
+}
+
 # P2 活化：CD40 / CD80 / CD86 是 Naive / Unswitched / Switched 上的 MFI 与阳性率，不是新亚群
 export_p2_activation_stats <- function(cells, out_dir) {
   markers <- intersect(c("CD40", "CD80", "CD86"), names(cells))
@@ -3105,6 +3313,12 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
     export_per_sample_gating_figures(cells, panel_id, out_dir),
     error = function(e) log_msg(panel_id, " per-sample gating figures failed: ", e$message)
   )
+  if (identical(panel_id, "P1")) {
+    tryCatch(
+      export_p1_activation_stats(cells, out_dir),
+      error = function(e) log_msg(panel_id, " T/NK activation MFI failed: ", e$message)
+    )
+  }
   if (identical(panel_id, "P2")) {
     tryCatch(
       export_p2_activation_stats(cells, out_dir),

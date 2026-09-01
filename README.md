@@ -96,13 +96,13 @@ source("Flow_dimred_pipeline.R")
 - `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图；下为 FlowJo 风格 2D 图。门是铺到坐标轴的完整象限/半平面（CD62L/CD44 标四个象限），EV 与 H **各自切阈值**。不是只框 10–90% 命中细胞的小矩形。
-- `gating/<样品>/`：**每个 FCS 单独**的完整圈门图 + `*_per_sample_gate_cuts.csv`。圈门按每个样品单独做完同一套逻辑。P1 分层：naive / **T_CM** / **T_SCM**（CD27+ CD95+）/ **T_EM early·late** / **SLEC** / **MPEC** / **T_EFF** / **exhausted**（PD-L1、LAG-3、TIM-3），以及 CD69 活化。P2：宽单核门 → CD45+ → CD19+ → IgD vs CD27 的 Naive / Unswitched / Switched；再分 MZ、Plasmablast、Plasma；CD40/CD80/CD86 出 MFI 表，不当第 1 层亚群。P3：CD3/CD19/NK1.1 大类 → 三阴髓系按 CD11B 分；嗜酸要 Siglec-F+CCR3+；肥大细胞 FceRI+CD200R3+；F4/80 high 巨噬 vs Ly6C hi 单核；CD11B− 上 CD11C+MHC-II+ 再分 cDC1/cDC2。
+- `gating/<样品>/`：**每个 FCS 单独**的完整圈门图 + `*_per_sample_gate_cuts.csv`。圈门按每个样品单独做完同一套逻辑。P1 分层：naive / **T_CM** / **T_SCM**（CD27+ CD95+）/ **T_EM early·late** / **SLEC** / **MPEC** / **T_EFF** / **exhausted**（PD-L1、LAG-3、TIM-3），以及 CD69 活化。NK 在 CD11b **之前**用 NKp46 圈出，再按 CD69 / 杀伤 / 耗竭 / **CD27 vs CD11b**（immature、DP、mature）拆；NKT 再分成 CD4 NKT 与 DN NKT。NKG2D 不当亚群，与 IFN-g/TNF-a/GZMB 一起出 MFI 表。P2：宽单核门 → CD45+ → CD19+ → IgD vs CD27 的 Naive / Unswitched / Switched；再分 MZ、Plasmablast、Plasma；CD40/CD80/CD86 出 MFI 表，不当第 1 层亚群。P3：CD3/CD19/NK1.1 大类 → 三阴髓系按 CD11B 分；嗜酸要 Siglec-F+CCR3+；肥大细胞 FceRI+CD200R3+；F4/80 high 巨噬 vs Ly6C hi 单核；CD11B− 上 CD11C+MHC-II+ 再分 cDC1/cDC2。
 - `markers/`：各通道在 UMAP 上的着色
 - `*_cluster_marker_heatmap`、`*_cluster_frequency_H_vs_EV`、`*_H_vs_EV_dimred_overview`
 
 三个 panel 的抗体不同，**不能**拼成一张矩阵做联合 UMAP。`Flow_dimred_all_subsets.R` 在各自圈完亚群后，把频率汇总到 `results_flow/all_subsets/`（H vs EV 柱状图、堆叠组成、热图、H−EV 差值）。百分数是该 panel 管子里的比例，P1 的 B/髓系、P3 的 T/B/NK 只是 dump。主流程跑完会自动出这份总览；也可单独 `source("Flow_dimred_all_subsets.R")`。
 
-每个 panel 的每一大类另出细胞轨迹（类似 Monocle 骨架图）：`Flow_dimred_trajectory.R` → `results_flow/P1/trajectory/` 等。P1 画 CD4、CD8；P2 画 B；P3 画髓系。坐标是该类内的 Component 1/2，点按细亚群着色，黑线是分支骨架。根节点按惯例是 naive T/B 或 Ly6C hi 单核。也可单独 `source("Flow_dimred_trajectory.R")`。日志里 `skip trajectory (... subsets= 1)` 表示该大类只有一个亚群（常见于 P1 NK/NKT），画不出树，不是分析失败。
+每个 panel 的每一大类另出细胞轨迹（类似 Monocle 骨架图）：`Flow_dimred_trajectory.R` → `results_flow/P1/trajectory/` 等。P1 画 CD4、CD8，以及拆开后的 NK/NKT；P2 画 B；P3 画髓系。坐标是该类内的 Component 1/2，点按细亚群着色，黑线是分支骨架。根节点按惯例是 naive T、NK immature、Naive B 或 Ly6C hi 单核。也可单独 `source("Flow_dimred_trajectory.R")`。日志里 `skip trajectory (... subsets= 1)` 表示该大类只有一个亚群，画不出树，不是分析失败。
 
 无 FCS 时可 `Sys.setenv(FLOW_DEMO = "1")` 导出演示图，不能当正式结果。
 

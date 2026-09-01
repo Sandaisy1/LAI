@@ -3,11 +3,11 @@
 # 每个 panel、每一大类免疫细胞的轨迹（Monocle 风格骨架图）
 #
 # 不是把 P1/P2/P3 拼成一张矩阵。每个 panel 里按大类单独降维、单独画树：
-#   P1: CD4、CD8（NK/NKT 只有一个亚群则跳过；B/髓系是 dump）
+#   P1: CD4、CD8、NK、NKT（只有一个亚群则跳过；B/髓系是 dump）
 #   P2: B（Naive / Unswitched / Switched / MZ / Plasmablast / Plasma）
 #   P3: 髓系（CD11B+ 粒/巨噬/单核；CD11B- cDC1/cDC2）
 #
-# 根节点按惯例：CD4/CD8 naive、Naive B、Ly6C hi 单核。轨迹表示标志物
+# 根节点按惯例：CD4/CD8 naive、NK immature、Naive B、Ly6C hi 单核。轨迹表示标志物
 # 状态连续体，不是发育起源的证明。
 #
 # 用法：
@@ -55,7 +55,8 @@ infer_major_lineage <- function(panel_id, subset) {
     out <- s
     out[s %in% c("Treg", "CD4_activated", "CD4_effector") | grepl("^CD4_", s)] <- "CD4"
     out[grepl("^CD8_", s)] <- "CD8"
-    out[s %in% c("NK", "NK_effector")] <- "NK"
+    out[s %in% nk_family() | grepl("^NK_", s)] <- "NK"
+    out[s %in% nkt_family() | grepl("^NKT", s)] <- "NKT"
     out[s %in% c("B", "Myeloid")] <- "dump"
     return(out)
   }
@@ -84,6 +85,8 @@ default_trajectory_root <- function(panel_id, major, lineages) {
   prefer <- NULL
   if (identical(panel_id, "P1") && identical(major, "CD4")) prefer <- "CD4_naive"
   if (identical(panel_id, "P1") && identical(major, "CD8")) prefer <- "CD8_naive"
+  if (identical(panel_id, "P1") && identical(major, "NK")) prefer <- "NK_immature"
+  if (identical(panel_id, "P1") && identical(major, "NKT")) prefer <- "NKT_DN"
   if (identical(panel_id, "P2") && identical(major, "B")) prefer <- "Naive_B"
   if (identical(panel_id, "P3") && identical(major, "Myeloid")) prefer <- "Mono_Ly6Chi"
   if (!is.null(prefer) && prefer %in% lin) return(prefer)
@@ -416,7 +419,7 @@ export_one_major_trajectory <- function(cells, panel_id, major, out_dir) {
   n_lin <- length(unique(lin))
   if (nrow(sub) < 80 || n_lin < 2) {
     why <- if (n_lin < 2) {
-      "only 1 subset, no tree to draw (NK/NKT are a single population)"
+      "only 1 subset, no tree to draw"
     } else {
       "too few cells (need n>=80)"
     }

@@ -20,12 +20,17 @@ if (!identical(infer_major_lineage("P1", "CD4_effector"), "CD4")) fail("CD4 effe
 if (!identical(infer_major_lineage("P1", "CD8_effector"), "CD8")) fail("CD8 effector should map to CD8")
 if (!identical(infer_major_lineage("P1", "CD8_activated"), "CD8")) fail("CD8 activated should map to CD8")
 if (!identical(infer_major_lineage("P1", "NK_effector"), "NK")) fail("NK effector should map to NK")
+if (!identical(infer_major_lineage("P1", "NK_immature"), "NK")) fail("NK immature should map to NK")
+if (!identical(infer_major_lineage("P1", "NKT_CD4"), "NKT")) fail("CD4 NKT should map to NKT")
 if (!identical(infer_major_lineage("P1", "B"), "dump")) fail("P1 B is dump")
 if (!identical(infer_major_lineage("P2", "Plasma"), "B")) fail("P2 plasma is B")
 if (!identical(infer_major_lineage("P3", "Neutrophil"), "Myeloid")) fail("P3 neutrophil is myeloid")
 if (!identical(infer_major_lineage("P3", "T"), "dump")) fail("P3 T is dump")
 if (!identical(default_trajectory_root("P1", "CD4", c("CD4_TEM", "CD4_naive")), "CD4_naive")) {
   fail("CD4 root should be naive")
+}
+if (!identical(default_trajectory_root("P1", "NK", c("NK_mature", "NK_immature")), "NK_immature")) {
+  fail("NK root should be immature")
 }
 if (!identical(default_trajectory_root("P3", "Myeloid", c("DC", "Mono_Ly6Chi")), "Mono_Ly6Chi")) {
   fail("myeloid root should be Ly6C hi mono")
