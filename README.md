@@ -101,7 +101,7 @@ source("Flow_dimred_pipeline.R")
 - `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图；下为 FlowJo 风格 2D 图。门是铺到坐标轴的完整象限/半平面（CD62L/CD44 标四个象限），EV 与 H **各自切阈值**。不是只框 10–90% 命中细胞的小矩形。
 - `gating/<样品>/`：**每个 FCS 单独**的完整圈门图 + `*_per_sample_gate_cuts.csv`。圈门按每个样品单独做完同一套逻辑。P1 分层：naive / **T_CM** / **T_SCM**（CD27+ CD95+）/ **T_EM early·late** / **SLEC** / **MPEC** / **T_EFF** / **exhausted**（PD-L1、LAG-3、TIM-3），以及 CD69 活化。NK 在 CD11b **之前**用 NKp46 圈出，再按 CD69 / 杀伤 / 耗竭 / **CD27 vs CD11b**（immature、DP、mature）拆；NKT 再分成 CD4 NKT 与 DN NKT。NKG2D 不当亚群，与 IFN-g/TNF-a/GZMB 一起出 MFI 表。P2：宽单核门 → CD45+ → CD19+ → IgD vs CD27 的 Naive / Unswitched / Switched；再分 MZ、Plasmablast、Plasma；CD40/CD80/CD86 出 MFI 表，不当第 1 层亚群。P3：CD3/CD19/NK1.1 大类 → 三阴髓系按 CD11B 分；嗜酸要 Siglec-F+CCR3+；肥大细胞 FceRI+CD200R3+；F4/80 high 巨噬 vs Ly6C hi 单核；CD11B− 上 CD11C+MHC-II+ 再分 cDC1/cDC2。
 - `markers/`：各通道在 UMAP 上的着色
-- `*_cluster_marker_heatmap`、`*_cluster_frequency_H_vs_EV`、`*_H_vs_EV_dimred_overview`
+- `*_cluster_marker_heatmap`、`*_annotation_heatmap`（按注释亚群的标志物中位数，另有 `*_annotation_heatmap_major`）、`*_cluster_frequency_H_vs_EV`、`*_H_vs_EV_dimred_overview`
 
 三个 panel 的抗体不同，**不能**拼成一张矩阵做联合 UMAP。`Flow_dimred_all_subsets.R` 在各自圈完亚群后，把频率汇总到 `results_flow/all_subsets/`（H vs EV 柱状图、堆叠组成、热图、H−EV 差值）。百分数是该 panel 管子里的比例，P1 的 B/髓系、P3 的 T/B/NK 只是 dump。主流程跑完会自动出这份总览；也可单独 `source("Flow_dimred_all_subsets.R")`。
 
@@ -124,7 +124,7 @@ source("ICI_Flow_dimred_pipeline.R")
 
 QC 只去双联体和死细胞，**不要求 CD45+**，也 **不用 P1 紧淋巴门**，以免丢掉 His+ CD45− 靶细胞。活细胞里 His+ CD45− 标成 **His+ target**；His+ CD45+ 仍按原来的 T/NK/髓系亚群命名，并另出各亚群内 His+ 比例。
 
-降维和轨迹与免疫亚群方案同一套：图1按大类着色（含 His+ target），细亚群在 `dimred_by_major/`；轨迹先画全体大类树再画各类亚群树。ICI P1 没有 CD19，缺通道按阴性处理，不要再出现 `NAs are not allowed in subscripted assignments`。结果在同目录 `results_flow/`，靶细胞表和图在 `target_His/`。
+降维和轨迹与免疫亚群方案同一套：图1按大类着色（含 His+ target），细亚群在 `dimred_by_major/`；轨迹先画全体大类树再画各类亚群树。每个 panel 出免疫细胞注释热图 `*_annotation_heatmap`（含 His+ target）。ICI P1 没有 CD19，缺通道按阴性处理，不要再出现 `NAs are not allowed in subscripted assignments`。结果在同目录 `results_flow/`，靶细胞表和图在 `target_His/`。
 
 若日志出现「没有匹配到任何分析通道」，多半是 Cytek 通道名带 `-A`（如 `BUV496-A`）或 desc 为空，不是文件没找到。用最新脚本再跑；仍失败时日志会列出通道名，并在 `results_flow/00_logs/` 写 `*_channels.csv`。
 

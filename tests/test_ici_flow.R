@@ -217,4 +217,29 @@ if (!identical(dimred_major_of("P1", c("Target", NA_character_, "CD4_naive")),
   fail("NA lineage must not crash dimred_major_of; Target stays Target")
 }
 
+cells_hm <- data.frame(
+  lineage = c(rep("Target", 20), rep("CD4_naive", 20), rep("NK", 20)),
+  cluster_lineage = c(rep("Target", 20), rep("CD4", 20), rep("NK", 20)),
+  His = c(rnorm(20, 3.2, 0.1), rnorm(20, 0.3, 0.1), rnorm(20, 0.3, 0.1)),
+  CD45 = c(rnorm(20, 0.3, 0.1), rnorm(20, 3.0, 0.1), rnorm(20, 3.0, 0.1)),
+  CD3 = c(rnorm(20, 0.2, 0.1), rnorm(20, 3.1, 0.1), rnorm(20, 0.2, 0.1)),
+  `NK1.1` = c(rnorm(20, 0.2, 0.1), rnorm(20, 0.2, 0.1), rnorm(20, 3.1, 0.1)),
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+med_ici <- lineage_median_matrix(cells_hm, "P1", "subset")
+if (is.null(med_ici) || !("His+ target" %in% rownames(med_ici))) {
+  fail("ICI annotation heatmap must include His+ target")
+}
+if (!(med_ici["His+ target", "His"] > med_ici["CD4 naive", "His"])) {
+  fail("His+ target should be His-high on the annotation heatmap")
+}
+td_ici_hm <- tempfile("ici_annot_hm")
+dir.create(td_ici_hm, recursive = TRUE)
+export_annotation_heatmaps(cells_hm, "P1", td_ici_hm)
+if (!file.exists(file.path(td_ici_hm, "P1_annotation_heatmap.pdf"))) {
+  fail("ICI annotation heatmap pdf missing")
+}
+unlink(td_ici_hm, recursive = TRUE)
+
 cat("PASS test_ici_flow.R\n")

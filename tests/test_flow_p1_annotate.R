@@ -224,6 +224,28 @@ sub_cts <- unique(as.character(p_sub$data$celltype))
 if (!("CD4 naive" %in% sub_cts)) fail("per-class subset dimred should use fine subset labels")
 if (!identical(dimred_major_of("P1", "NKT_CD4"), "NKT")) fail("NKT_CD4 is NKT, not CD4")
 if (!identical(major_display_label("CD4"), "CD4 T")) fail("CD4 display is CD4 T")
+if (!identical(celltype_label("Target", "P1"), "His+ target")) fail("Target display is His+ target")
+
+med_ann <- lineage_median_matrix(df_mix, "P1", "subset")
+if (is.null(med_ann) || nrow(med_ann) < 2) fail("annotation heatmap needs >=2 annotated types")
+if (!all(c("CD3", "NK1.1") %in% colnames(med_ann))) fail("annotation heatmap should use lineage markers")
+if (!("CD4 naive" %in% rownames(med_ann) && "NK" %in% rownames(med_ann))) {
+  fail(sprintf("annotation rows should be cell types, got %s", paste(rownames(med_ann), collapse = ",")))
+}
+if (!(med_ann["CD4 naive", "CD3"] > med_ann["NK", "CD3"])) fail("CD4 naive should be CD3-high vs NK")
+if (!(med_ann["NK", "NK1.1"] > med_ann["CD4 naive", "NK1.1"])) fail("NK should be NK1.1-high vs CD4")
+med_maj <- lineage_median_matrix(df_mix, "P1", "major")
+if (is.null(med_maj) || !all(c("CD4 T", "NK") %in% rownames(med_maj))) {
+  fail("major annotation heatmap should have CD4 T and NK")
+}
+td_hm <- tempfile("flow_annot_hm")
+dir.create(td_hm, recursive = TRUE)
+export_annotation_heatmaps(df_mix, "P1", td_hm)
+need_hm <- c("P1_annotation_heatmap.pdf", "P1_annotation_heatmap.png",
+             "P1_annotation_heatmap.csv", "P1_annotation_heatmap_major.pdf")
+miss_hm <- need_hm[!file.exists(file.path(td_hm, need_hm))]
+if (length(miss_hm)) fail(sprintf("missing annotation heatmap: %s", paste(miss_hm, collapse = ", ")))
+unlink(td_hm, recursive = TRUE)
 
 td_dr <- tempfile("flow_major_dr")
 dir.create(td_dr, recursive = TRUE)

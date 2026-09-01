@@ -2311,7 +2311,9 @@ celltype_label <- function(lineage, panel_id) {
     Mast = "Mast",
     Basophil_mast = "Mast",
     Basophil = "Mast",
-    Other = "other"
+    Other = "other",
+    Target = "His+ target",
+    His_target = "His+ target"
   )
   lab <- as.character(lineage)
   out <- rec[lab]
@@ -2566,6 +2568,159 @@ plot_cluster_heatmap <- function(med, title, outfile) {
       grDevices::dev.off()
     }, error = function(e) log_msg("pheatmap failed: ", e$message))
   }
+}
+
+# 按已圈好的免疫细胞类型（不是 kmeans cluster 号）算标志物中位数，做注释热图
+heatmap_marker_cols <- function(cells, panel_id) {
+  feat <- intersect(plot_feature_cols(cells), names(cells))
+  feat <- setdiff(feat, c("L/D", "Time", "time", "FSC-A", "SSC-A", "FSC-H", "SSC-H", "FSC-W", "SSC-W"))
+  pref <- tryCatch(dr_marker_names(panel_id), error = function(e) character(0))
+  c(intersect(pref, feat), setdiff(feat, pref))
+}
+
+lineage_median_matrix <- function(cells, panel_id, by = c("subset", "major"), min_n = 8L) {
+  by <- match.arg(by)
+  feat <- heatmap_marker_cols(cells, panel_id)
+  if (!length(feat) || is.null(cells) || !nrow(cells)) return(NULL)
+  if (identical(by, "major")) {
+    raw <- dimred_major_of(
+      panel_id,
+      cells$lineage,
+      if ("cluster_lineage" %in% names(cells)) cells$cluster_lineage else NULL
+    )
+    key <- major_display_label(raw)
+    class_lab <- key
+  } else {
+    key <- celltype_label(cells$lineage, panel_id)
+    class_lab <- major_display_label(dimred_major_of(
+      panel_id,
+      cells$lineage,
+      if ("cluster_lineage" %in% names(cells)) cells$cluster_lineage else NULL
+    ))
+  }
+  key <- as.character(key)
+  class_lab <- as.character(class_lab)
+  key[is.na(key) | !nzchar(key)] <- "other"
+  class_lab[is.na(class_lab) | !nzchar(class_lab)] <- "other"
+  keep <- key != "other" & is.finite(rowSums(as.data.frame(cells[, feat, drop = FALSE]), na.rm = TRUE))
+  if (sum(keep) < 20L) return(NULL)
+  mat <- as.matrix(cells[keep, feat, drop = FALSE])
+  storage.mode(mat) <- "double"
+  key <- key[keep]
+  class_lab <- class_lab[keep]
+  ntab <- table(key)
+  ok <- names(ntab)[as.integer(ntab) >= min_n]
+  if (length(ok) < 2L) return(NULL)
+  hit <- key %in% ok
+  mat <- mat[hit, , drop = FALSE]
+  key <- key[hit]
+  class_lab <- class_lab[hit]
+  types <- unique(key)
+  med <- do.call(rbind, lapply(types, function(tp) {
+    apply(mat[key == tp, , drop = FALSE], 2, median, na.rm = TRUE)
+  }))
+  if (is.null(dim(med))) med <- matrix(med, nrow = length(types), dimnames = list(types, feat))
+  rownames(med) <- types
+  colnames(med) <- feat
+  cls <- vapply(types, function(tp) {
+    names(sort(table(class_lab[key == tp]), decreasing = TRUE))[1]
+  }, character(1))
+  maj_ord <- c("CD4 T", "CD8 T", "T", "NKT", "NK", "B cell", "Myeloid", "His+ target")
+  ord <- order(match(cls, maj_ord, nomatch = 99L), types)
+  med <- med[ord, , drop = FALSE]
+  attr(med, "cell_class") <- unname(cls[ord])
+  attr(med, "cell_n") <- as.integer(ntab[rownames(med)])
+  med
+}
+
+plot_annotation_heatmap <- function(med, title, outfile) {
+  if (is.null(med) || !nrow(med) || !ncol(med)) return(invisible(NULL))
+  z <- scale(med)
+  z[is.na(z)] <- 0
+  df <- as.data.frame(z)
+  df$cluster <- rownames(df)
+  long <- tidyr_pivot(df)
+  long$cluster <- factor(long$cluster, levels = rev(rownames(med)))
+  long$marker <- factor(long$marker, levels = colnames(med))
+  n_type <- nrow(med)
+  n_mk <- ncol(med)
+  w <- max(8.5, 0.48 * n_type + 3.2)
+  h <- max(5.6, 0.32 * n_mk + 2.4)
+  p <- ggplot2::ggplot(long, ggplot2::aes(x = cluster, y = marker, fill = value)) +
+    ggplot2::geom_tile(color = "white", linewidth = 0.15) +
+    ggplot2::scale_fill_gradient2(low = "#2166AC", mid = "white", high = "#B2182B") +
+    ggplot2::theme_bw(base_size = 11) +
+    ggplot2::theme(
+      axis.text.x = ggplot2::element_text(angle = 45, hjust = 1, vjust = 1, size = 9),
+      axis.text.y = ggplot2::element_text(size = 9),
+      plot.margin = ggplot2::margin(8, 12, 8, 8)
+    ) +
+    ggplot2::labs(title = title, x = NULL, y = NULL, fill = "z-score")
+  save_gg(p, outfile, width = w, height = h)
+  if (has_pkg("pheatmap")) {
+    ann <- NULL
+    cls <- attr(med, "cell_class")
+    if (!is.null(cls) && length(cls) == nrow(med)) {
+      ann <- data.frame(Class = unname(cls), row.names = rownames(med), stringsAsFactors = FALSE)
+    }
+    pal_ann <- NULL
+    if (!is.null(ann)) {
+      levs <- unique(ann$Class)
+      pal_ann <- list(Class = major_colors(levs))
+    }
+    tryCatch({
+      args <- list(
+        mat = t(z),
+        main = title,
+        border_color = NA,
+        cluster_rows = FALSE,
+        cluster_cols = FALSE,
+        fontsize_col = 9,
+        fontsize_row = 9
+      )
+      if (!is.null(ann)) {
+        args$annotation_col <- ann
+        args$annotation_colors <- pal_ann
+      }
+      grDevices::pdf(paste0(outfile, "_pheatmap.pdf"), width = w, height = h)
+      do.call(pheatmap::pheatmap, args)
+      grDevices::dev.off()
+      grDevices::png(paste0(outfile, "_pheatmap.png"), width = w, height = h, units = "in", res = 180)
+      do.call(pheatmap::pheatmap, args)
+      grDevices::dev.off()
+    }, error = function(e) log_msg("annotation pheatmap failed: ", e$message))
+  }
+  invisible(med)
+}
+
+export_annotation_heatmaps <- function(cells, panel_id, out_dir) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  med_sub <- lineage_median_matrix(cells, panel_id, "subset")
+  if (!is.null(med_sub)) {
+    utils::write.csv(cbind(celltype = rownames(med_sub), cell_class = attr(med_sub, "cell_class"),
+                           n = attr(med_sub, "cell_n"), as.data.frame(med_sub, check.names = FALSE)),
+                     file.path(out_dir, paste0(panel_id, "_annotation_heatmap.csv")),
+                     row.names = FALSE)
+    plot_annotation_heatmap(
+      med_sub,
+      paste0(panel_id, "  immune-cell annotation (subset median, z)"),
+      file.path(out_dir, paste0(panel_id, "_annotation_heatmap"))
+    )
+    log_msg(panel_id, " annotation heatmap: ", nrow(med_sub), " cell types x ", ncol(med_sub), " markers")
+  }
+  med_maj <- lineage_median_matrix(cells, panel_id, "major")
+  if (!is.null(med_maj)) {
+    utils::write.csv(cbind(celltype = rownames(med_maj), cell_class = attr(med_maj, "cell_class"),
+                           n = attr(med_maj, "cell_n"), as.data.frame(med_maj, check.names = FALSE)),
+                     file.path(out_dir, paste0(panel_id, "_annotation_heatmap_major.csv")),
+                     row.names = FALSE)
+    plot_annotation_heatmap(
+      med_maj,
+      paste0(panel_id, "  immune-cell annotation (major class median, z)"),
+      file.path(out_dir, paste0(panel_id, "_annotation_heatmap_major"))
+    )
+  }
+  invisible(list(subset = med_sub, major = med_maj))
 }
 
 tidyr_pivot <- function(df) {
@@ -3577,6 +3732,10 @@ export_dimred_plots <- function(cells, med, annot, freq_df, panel_id, out_dir, u
 
   plot_cluster_heatmap(med, paste(tag, "cluster median markers (z)"),
                        file.path(out_dir, paste0(panel_id, "_cluster_marker_heatmap")))
+  tryCatch(
+    export_annotation_heatmaps(cells, panel_id, out_dir),
+    error = function(e) log_msg(panel_id, " annotation heatmap failed: ", e$message)
+  )
 
   freq_df$cluster <- factor(freq_df$cluster, levels = annot$cluster)
   freq_bio <- maybe_trim_bio(aggregate_freq_by_bio(freq_df, "cluster"), "cluster")
