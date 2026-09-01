@@ -23,6 +23,7 @@ if (!identical(infer_major_lineage("P1", "NK_effector"), "NK")) fail("NK effecto
 if (!identical(infer_major_lineage("P1", "NK_immature"), "NK")) fail("NK immature should map to NK")
 if (!identical(infer_major_lineage("P1", "NKT_CD4"), "NKT")) fail("CD4 NKT should map to NKT")
 if (!identical(infer_major_lineage("P1", "B"), "dump")) fail("P1 B is dump")
+if (!identical(infer_major_lineage("P1", "Target"), "Target")) fail("His+ target is its own class, not dump")
 if (!identical(infer_major_lineage("P2", "Plasma"), "B")) fail("P2 plasma is B")
 if (!identical(infer_major_lineage("P3", "Neutrophil"), "Myeloid")) fail("P3 neutrophil is myeloid")
 if (!identical(infer_major_lineage("P3", "T"), "dump")) fail("P3 T is dump")

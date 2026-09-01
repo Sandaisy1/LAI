@@ -122,7 +122,9 @@ setwd("E:/R/Internation cell immune")
 source("ICI_Flow_dimred_pipeline.R")
 ```
 
-QC 只去双联体和死细胞，**不要求 CD45+**，也 **不用 P1 紧淋巴门**，以免丢掉 His+ CD45− 靶细胞。活细胞里 His+ CD45− 标成 **His+ target**；His+ CD45+ 仍按原来的 T/NK/髓系亚群命名，并另出各亚群内 His+ 比例。结果在同目录 `results_flow/`，靶细胞表和图在 `target_His/`。
+QC 只去双联体和死细胞，**不要求 CD45+**，也 **不用 P1 紧淋巴门**，以免丢掉 His+ CD45− 靶细胞。活细胞里 His+ CD45− 标成 **His+ target**；His+ CD45+ 仍按原来的 T/NK/髓系亚群命名，并另出各亚群内 His+ 比例。
+
+降维和轨迹与免疫亚群方案同一套：图1按大类着色（含 His+ target），细亚群在 `dimred_by_major/`；轨迹先画全体大类树再画各类亚群树。ICI P1 没有 CD19，缺通道按阴性处理，不要再出现 `NAs are not allowed in subscripted assignments`。结果在同目录 `results_flow/`，靶细胞表和图在 `target_His/`。
 
 若日志出现「没有匹配到任何分析通道」，多半是 Cytek 通道名带 `-A`（如 `BUV496-A`）或 desc 为空，不是文件没找到。用最新脚本再跑；仍失败时日志会列出通道名，并在 `results_flow/00_logs/` 写 `*_channels.csv`。
 

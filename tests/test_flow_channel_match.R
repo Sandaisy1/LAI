@@ -45,6 +45,10 @@ cytek_p1_r718 <- cytek_p1
 cytek_p1_r718[cytek_p1_r718 == "AF700-A"] <- "R718-A"
 map_r718 <- match_channels(cytek_p1_r718, desc_blank, "P1")
 expect(map_r718$channel[map_r718$marker == "NK1.1"], "R718-A", "P1 NK1.1<-R718-A")
+cytek_p1_y710 <- cytek_p1
+cytek_p1_y710[cytek_p1_y710 == "AF700-A"] <- "Y710-A"
+map_y710 <- match_channels(cytek_p1_y710, desc_blank, "P1")
+expect(map_y710$channel[map_y710$marker == "NK1.1"], "Y710-A", "P1 NK1.1<-Y710-A")
 
 # 表上写 PE-eFluor™ 610，Cytek 也可能导出这个全名
 cytek_p1_ef <- cytek_p1

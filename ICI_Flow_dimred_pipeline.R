@@ -359,6 +359,28 @@ ici_his_mask <- function(cells) {
   tgt
 }
 
+plot_ici_his_split <- function(cells, x, y, xlab, ylab, title, pal) {
+  plot_df <- cells
+  plot_df$group <- factor(plot_df$group, levels = flow_group_levels)
+  levs <- intersect(names(pal), unique(as.character(plot_df$celltype)))
+  plot_df$celltype <- factor(plot_df$celltype, levels = levs)
+  ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype)) +
+    ggplot2::geom_point(size = 0.72, alpha = 0.92, stroke = 0) +
+    ggplot2::facet_wrap(~group, ncol = 2, scales = "fixed") +
+    ggplot2::scale_color_manual(values = pal[levs], drop = FALSE) +
+    ggplot2::labs(title = title, x = xlab, y = ylab, color = NULL) +
+    ggplot2::coord_fixed(ratio = 1, clip = "off") +
+    theme_split_dr() +
+    ggplot2::theme(
+      axis.text = ggplot2::element_blank(),
+      axis.ticks = ggplot2::element_blank(),
+      panel.border = ggplot2::element_blank(),
+      panel.spacing = ggplot2::unit(1.15, "lines"),
+      legend.key = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(8, 18, 10, 10)
+    )
+}
+
 export_ici_his_stats <- function(cells, panel_id, out_dir) {
   if (!nrow(cells) || !("His" %in% names(cells))) return(invisible(NULL))
   tgt <- ici_his_mask(cells)
@@ -401,19 +423,25 @@ export_ici_his_stats <- function(cells, panel_id, out_dir) {
   }
   utils::write.csv(lin_tab, file.path(his_dir, paste0(panel_id, "_His_within_subset_by_sample.csv")), row.names = FALSE)
   log_msg(panel_id, " His+ target tables: ", his_dir)
-  if ("His" %in% names(cells) && "CD45" %in% names(cells) && "tSNE1" %in% names(cells)) {
+  pal_his <- c("His+ target" = "#00ACC1", "His+ CD45+" = "#F9A825", "His-" = "#B0B0B0")
+  if ("His" %in% names(cells) && "tSNE1" %in% names(cells)) {
     plot_df <- cells
-    plot_df$his_lab <- ifelse(tgt, "His+ target", ifelse(his_pos, "His+ CD45+", "His-"))
-    pal <- c("His+ target" = "#00ACC1", "His+ CD45+" = "#F9A825", "His-" = "#B0B0B0")
-    p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = tSNE1, y = tSNE2, color = his_lab)) +
-      ggplot2::geom_point(size = 0.35, alpha = 0.85) +
-      ggplot2::scale_color_manual(values = pal) +
-      ggplot2::facet_wrap(~group, nrow = 1) +
-      theme_dr() +
-      ggplot2::labs(title = paste(panel_id, "His+ target  EV | H"), color = NULL,
-                    x = "tSNE-1", y = "tSNE-2")
-    save_gg(p, file.path(his_dir, paste0(panel_id, "_H_vs_EV_tSNE_His_target")),
-            width = 10.5, height = 5.2)
+    plot_df$celltype <- ifelse(tgt, "His+ target", ifelse(his_pos, "His+ CD45+", "His-"))
+    n_keys <- length(unique(as.character(plot_df$celltype)))
+    save_split_dr(
+      plot_ici_his_split(plot_df, "tSNE1", "tSNE2", "tSNE-1", "tSNE-2",
+                         paste(panel_id, "  EV | H  His+ target"), pal_his),
+      file.path(his_dir, paste0(panel_id, "_H_vs_EV_tSNE_His_target")),
+      n_keys
+    )
+    if ("UMAP1" %in% names(cells)) {
+      save_split_dr(
+        plot_ici_his_split(plot_df, "UMAP1", "UMAP2", "UMAP-1", "UMAP-2",
+                           paste(panel_id, "  EV | H  His+ target"), pal_his),
+        file.path(his_dir, paste0(panel_id, "_H_vs_EV_UMAP_His_target")),
+        n_keys
+      )
+    }
   }
   invisible(tab)
 }
@@ -468,6 +496,7 @@ panels <- c("P1", "P3")
 summaries <- list()
 for (pn in panels) {
   log_msg("ICI ", pn, ": His+ CD45- = target; remaining CD45+ use original lineage gates")
+  log_msg(pn, " dimred/trajectory follow the immune-subset layout: Figure 1 by major class, then dimred_by_major/, then major + per-class trees")
   summaries[[pn]] <- tryCatch(
     analyze_one_panel(pn, file_tab, use_demo),
     error = function(e) {

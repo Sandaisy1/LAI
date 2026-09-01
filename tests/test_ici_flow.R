@@ -189,4 +189,32 @@ if (!isFALSE(flow_trim_bio_extremes)) {
   fail("ICI must keep n=3; do not drop extreme bio-reps")
 }
 
+# ICI P1 没有 CD19：缺列不得把 is_t 弄成 NA 然后 Panel P1 failed
+mat_no_cd19 <- mat[, setdiff(colnames(mat), "CD19"), drop = FALSE]
+h_no19 <- tryCatch(hierarchical_gate(mat_no_cd19, "P1"), error = function(e) e)
+if (inherits(h_no19, "error")) {
+  fail(sprintf("P1 without CD19 must not crash: %s", h_no19$message))
+}
+if (mean(h_no19$major[tgt] == "Target") < 0.85) {
+  fail("His+ CD45- still Target when CD19 channel is absent")
+}
+if (mean(h_no19$major[his_t] == "CD4") < 0.8) {
+  fail(sprintf("His+ CD45+ T should stay CD4 without CD19, got %s",
+               paste(unique(h_no19$major[his_t]), collapse = ",")))
+}
+
+# Cytek 有时把 AF700 写成 Y710-A
+cytek_p1_y710 <- c(
+  "FSC-A", "SSC-A", "FVS450-A", "V500-A", "BUV496-A", "BUV805-A", "RB744-A",
+  "RB670-A", "RY586-A", "PE-A", "Y710-A", "APC-Cy7-A", "RY703-A", "RB613-A",
+  "PE-EF610-A", "FITC-A"
+)
+map_y <- match_channels(cytek_p1_y710, rep("", length(cytek_p1_y710)), "P1")
+expect(map_y$channel[map_y$marker == "NK1.1"], "Y710-A", "P1 NK1.1<-Y710-A")
+
+if (!identical(dimred_major_of("P1", c("Target", NA_character_, "CD4_naive")),
+               c("Target", "other", "CD4"))) {
+  fail("NA lineage must not crash dimred_major_of; Target stays Target")
+}
+
 cat("PASS test_ici_flow.R\n")

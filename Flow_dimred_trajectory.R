@@ -48,9 +48,11 @@ load_flow_pipeline_functions <- function() {
 
 infer_major_lineage <- function(panel_id, subset) {
   s <- as.character(subset)
+  s[is.na(s)] <- ""
   n <- length(s)
   if (identical(panel_id, "P1")) {
     out <- s
+    out[s %in% c("Target", "His_target")] <- "Target"
     out[s %in% c("Treg", "CD4_activated", "CD4_effector") | grepl("^CD4_", s)] <- "CD4"
     out[grepl("^CD8_", s)] <- "CD8"
     out[s %in% nk_family() | grepl("^NK_", s)] <- "NK"
@@ -580,7 +582,7 @@ export_panel_trajectories <- function(result_dir, panel_id) {
     export_panel_major_trajectory(cells, panel_id, out_dir),
     error = function(e) log_msg(panel_id, " major-class trajectory failed: ", e$message)
   )
-  majors <- setdiff(unique(as.character(cells$major)), c("dump", "", NA, "other"))
+  majors <- setdiff(unique(as.character(cells$major)), c("dump", "", NA, "other", "Target"))
   for (mj in majors) {
     tryCatch(
       export_one_major_trajectory(cells, panel_id, mj, out_dir),

@@ -652,7 +652,8 @@ read_fcs_expr <- function(path, panel_id) {
   if (length(miss) > 0) {
     log_msg("Unmatched markers: ", paste(miss, collapse = ", "))
     if ("NK1.1" %in% miss) {
-      log_msg("NK1.1 is AF700 on the sheet; Cytek unmixed often names that detector R718-A / APC-R700-A. Both should match.")
+      log_msg("NK1.1 is AF700 on the sheet; Cytek unmixed often names that detector R718-A / APC-R700-A / Y710-A. All should match.")
+      log_msg("Channel names in this file: ", format_channel_preview(nms, desc))
     }
   }
   list(exprs = exprs, names = nms, desc = desc, map = map)
@@ -1064,6 +1065,19 @@ colv <- function(mat, name) {
   as.numeric(mat[, name])
 }
 
+# 缺通道（ICI P1 没有 CD19）时当 -Inf，不要留下 NA 把 is_t 弄成 NA 后炸在 out[is_t] <-
+colv_neg <- function(mat, name) {
+  x <- colv(mat, name)
+  x[!is.finite(x)] <- -Inf
+  x
+}
+
+na_to_false <- function(x) {
+  x <- as.logical(x)
+  x[is.na(x)] <- FALSE
+  x
+}
+
 finite_pmax <- function(...) {
   args <- list(...)
   out <- args[[1]]
@@ -1127,6 +1141,7 @@ nkt_family <- function() {
 # 降维总图用的大类（P1 的 B/髓系、P3 的 T/B/NK 仍画在总图上，不当 dump 丢掉）
 dimred_major_of <- function(panel_id, lineage, cluster_lineage = NULL) {
   s <- as.character(lineage)
+  s[is.na(s)] <- ""
   n <- length(s)
   out <- rep(NA_character_, n)
   if (!is.null(cluster_lineage) && length(cluster_lineage) == n) {
@@ -1466,6 +1481,7 @@ p1_nk_score <- function(mat) {
   out <- nkp
   miss <- !is.finite(out)
   out[miss] <- nk11[miss]
+  out[!is.finite(out)] <- -Inf
   out
 }
 
@@ -1493,26 +1509,27 @@ gate_major_lineage <- function(mat, panel_id) {
   if (panel_id == "P3") {
     return(gate_p3_major(mat))
   }
-  cd3 <- colv(mat, "CD3")
-  cd4 <- colv(mat, "CD4")
+  cd3 <- colv_neg(mat, "CD3")
+  cd4 <- colv_neg(mat, "CD4")
   cd8 <- finite_pmax(colv(mat, "CD8"), colv(mat, "CD8b"))
-  cd19 <- colv(mat, "CD19")
-  cd11b <- colv(mat, "CD11B")
+  cd19 <- colv_neg(mat, "CD19")
+  cd11b <- colv_neg(mat, "CD11B")
   nk <- if (identical(panel_id, "P1")) p1_nk_score(mat) else finite_pmax(colv(mat, "NK1.1"), colv(mat, "NKp46"))
+  nk[!is.finite(nk)] <- -Inf
   out <- rep("Myeloid", n)
-  # B：CD45+ 里 CD19+（通常 CD3-）
-  is_b <- cd19 > finite_pmax(cd3, cd4, cd8, nk) + 0.1
+  # B：CD45+ 里 CD19+。ICI P1 没有 CD19 时整列 -Inf，is_b 全 FALSE，不要留下 NA
+  is_b <- na_to_false(cd19 > finite_pmax(cd3, cd4, cd8, nk) + 0.1)
   # NK：CD3- NKp46+。必须在 CD11b 之前，成熟 NK 是 CD11b+ NKp46+
-  is_nk <- !is_b & nk > cd3 + 0.3 & nk > cd19
-  is_nkt <- !is_b & !is_nk & nk > 1 & cd3 > 1 & abs(cd3 - nk) < 1.2 & nk > cd19
+  is_nk <- na_to_false(!is_b & nk > cd3 + 0.3 & nk > cd19)
+  is_nkt <- na_to_false(!is_b & !is_nk & nk > 1 & cd3 > 1 & abs(cd3 - nk) < 1.2 & nk > cd19)
   # T：CD3+，再分成 CD4+ CD8- / CD4- CD8+
-  is_t <- !is_b & !is_nk & !is_nkt & cd3 >= finite_pmax(cd19, cd11b)
+  is_t <- na_to_false(!is_b & !is_nk & !is_nkt & cd3 >= finite_pmax(cd19, cd11b))
   # 剩下的 CD11b+ 才是髓系 dump
-  is_my <- !is_b & !is_nk & !is_nkt & !is_t & cd11b > finite_pmax(cd3, cd19, cd4, cd8) + 0.2
+  is_my <- na_to_false(!is_b & !is_nk & !is_nkt & !is_t & cd11b > finite_pmax(cd3, cd19, cd4, cd8) + 0.2)
   out[is_b] <- "B"
   out[is_nk] <- "NK"
   out[is_nkt] <- "NKT"
-  out[is_t] <- ifelse(cd4 >= cd8, "CD4", "CD8")
+  out[is_t] <- ifelse(cd4[is_t] >= cd8[is_t], "CD4", "CD8")
   out[is_my] <- "Myeloid"
   out
 }
@@ -2023,7 +2040,7 @@ sequential_myeloid <- function(mat, idx) {
   if (!"CD11B" %in% colnames(mat) || !any(is.finite(cd11b))) {
     return(sequential_cd11b_pos(mat, idx))
   }
-  pos <- p2_pos_mask(cd11b)
+  pos <- na_to_false(p2_pos_mask(cd11b))
   out <- rep("other", n)
   if (any(pos)) out[pos] <- sequential_cd11b_pos(mat, idx[pos])
   if (any(!pos)) out[!pos] <- sequential_cd11b_neg(mat, idx[!pos])
@@ -2449,7 +2466,7 @@ export_major_subset_dimred <- function(cells, panel_id, out_dir) {
     if ("cluster_lineage" %in% names(cells)) cells$cluster_lineage else NULL
   )
   majors <- unique(as.character(cells$dimred_major))
-  majors <- majors[!is.na(majors) & nzchar(majors) & !majors %in% c("other", "dump", "")]
+  majors <- majors[!is.na(majors) & nzchar(majors) & !majors %in% c("other", "dump", "", "Target")]
   class_dir <- file.path(out_dir, "dimred_by_major")
   dir.create(class_dir, recursive = TRUE, showWarnings = FALSE)
   for (mj in majors) {
