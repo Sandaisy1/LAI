@@ -197,4 +197,20 @@ if (grepl("Internation cell immune", engine_txt) &&
 
 expect(panel_map$panels$P1$markers[[match("Perforin", jy_p1)]]$fluorochrome, "FITC", "JY P1 Perforin-FITC")
 
+# all_subsets 会覆盖 jy_keep_cand；路径里的反斜杠必须用 fixed gsub，不能当正则
+Sys.setenv(FLOW_ALL_SUBSETS_FROM_PIPELINE = "1", FLOW_FUNCTIONS_ONLY = "1")
+sys.source(file.path(root, "JY_Flow_dimred_all_subsets.R"), envir = .GlobalEnv)
+win_p <- "E:\\R\\fuction of cell-ljy\\JY_Flow_dimred_trajectory.R"
+keep_win <- tryCatch(jy_keep_cand(win_p), error = function(e) e)
+if (inherits(keep_win, "error")) {
+  fail(sprintf("jy_keep_cand must accept Windows paths after all_subsets: %s", keep_win$message))
+}
+if (!isTRUE(keep_win)) fail("jy_keep_cand must keep E:/R/fuction of cell-ljy paths")
+Sys.setenv(FLOW_TRAJECTORY_FROM_PIPELINE = "1")
+sys.source(file.path(root, "JY_Flow_dimred_trajectory.R"), envir = .GlobalEnv)
+keep_tr <- tryCatch(jy_keep_cand(win_p), error = function(e) e)
+if (inherits(keep_tr, "error")) {
+  fail(sprintf("jy_keep_cand must accept Windows paths after trajectory: %s", keep_tr$message))
+}
+
 cat("PASS test_jy_flow.R\n")

@@ -101,7 +101,7 @@ flow_legacy_data_dir <- "E:/R/fuction of cell-wjz"
 flow_legacy_data_dir2 <- "E:/R/fuction of cell-wjz"
 
 jz_is_foreign_dir <- function(p) {
-  s <- gsub("\\\\", "/", as.character(p))
+  s <- gsub("\\", "/", as.character(p), fixed = TRUE)
   if (grepl("cell-wjz", s, ignore.case = TRUE)) return(FALSE)
   if (grepl("cell-ljy", s, ignore.case = TRUE)) return(TRUE)
   if (grepl("Internation cell immune", s, ignore.case = TRUE)) return(TRUE)
@@ -198,7 +198,7 @@ flow_re_bio <- "^(?:JZ[_-]?)?(EVB|AB)[-_ ]?([123])[-_ ]+(?:PANEL[-_ ]?)?P?0?([12
 flow_re_folder_tech <- "^([123])[-_ ]([12])[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$"
 
 group_from_path <- function(path) {
-  parts <- unlist(strsplit(gsub("\\\\", "/", as.character(path)), "/"))
+  parts <- unlist(strsplit(gsub("\\", "/", as.character(path), fixed = TRUE), "/"))
   parts <- toupper(gsub("[^A-Za-z0-9]", "", parts))
   parts <- parts[nzchar(parts)]
   for (p in rev(parts)) {

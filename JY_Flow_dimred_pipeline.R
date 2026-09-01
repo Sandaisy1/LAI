@@ -44,7 +44,7 @@ jy_script_dir <- jy_get_script_dir()
 jy_primary_data_dir <- "E:/R/fuction of cell-ljy"
 
 jy_keep_cand <- function(p) {
-  s <- gsub("\\\\", "/", as.character(p))
+  s <- gsub("\\", "/", as.character(p), fixed = TRUE)
   if (grepl("cell-ljy", s, ignore.case = TRUE)) return(TRUE)
   if (grepl("cell-wjz", s, ignore.case = TRUE)) return(FALSE)
   if (grepl("Internation cell immune", s, ignore.case = TRUE)) return(FALSE)

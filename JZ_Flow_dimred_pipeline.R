@@ -44,7 +44,7 @@ jz_script_dir <- jz_get_script_dir()
 jz_primary_data_dir <- "E:/R/fuction of cell-wjz"
 
 jz_keep_cand <- function(p) {
-  s <- gsub("\\\\", "/", as.character(p))
+  s <- gsub("\\", "/", as.character(p), fixed = TRUE)
   if (grepl("cell-wjz", s, ignore.case = TRUE)) return(TRUE)
   if (grepl("cell-ljy", s, ignore.case = TRUE)) return(FALSE)
   if (grepl("Internation cell immune", s, ignore.case = TRUE)) return(FALSE)

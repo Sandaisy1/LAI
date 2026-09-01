@@ -220,4 +220,13 @@ expect(jy_json$groups[[2]], "JY-NNK", "JY map still JY-NNK")
 expect(jy_json$data_dir, "E:/R/fuction of cell-ljy", "JY data_dir unchanged")
 expect(panel_map$panels$P1$markers[[match("Perforin", jz_p1)]]$fluorochrome, "FITC", "JZ P1 Perforin-FITC")
 
+Sys.setenv(FLOW_ALL_SUBSETS_FROM_PIPELINE = "1", FLOW_FUNCTIONS_ONLY = "1")
+sys.source(file.path(root, "JZ_Flow_dimred_all_subsets.R"), envir = .GlobalEnv)
+win_p <- "E:\\R\\fuction of cell-wjz\\JZ_Flow_dimred_trajectory.R"
+keep_win <- tryCatch(jz_keep_cand(win_p), error = function(e) e)
+if (inherits(keep_win, "error")) {
+  fail(sprintf("jz_keep_cand must accept Windows paths after all_subsets: %s", keep_win$message))
+}
+if (!isTRUE(keep_win)) fail("jz_keep_cand must keep E:/R/fuction of cell-wjz paths")
+
 cat("PASS test_jz_flow.R\n")
