@@ -291,13 +291,49 @@ if (!file.exists(file.path(td_ici_hm, "P1_annotation_heatmap.pdf"))) {
 }
 unlink(td_ici_hm, recursive = TRUE)
 
-cands <- original_flow_pipeline_candidates()
-if (!any(grepl("fuction of cell", cands, ignore.case = TRUE))) {
-  fail("ICI must look for Flow_dimred_pipeline.R under E:/R/fuction of cell")
+# 两套方案完全独立：ICI 不得 source / 查找免疫亚群的 Flow_dimred_pipeline.R
+ici_bundle <- c(
+  "ICI_Flow_dimred_pipeline.R",
+  "ICI_flow_engine.R",
+  "ICI_flow_panel_map.json",
+  "ICI_Flow_dimred_all_subsets.R",
+  "ICI_Flow_dimred_trajectory.R"
+)
+for (nm in ici_bundle) {
+  if (!file.exists(file.path(root, nm))) {
+    fail(sprintf("target-cell scheme must ship %s (do not borrow Flow_* from fuction of cell)", nm))
+  }
 }
-hit_pipe <- find_original_flow_pipeline()
-if (is.na(hit_pipe) || !file.exists(hit_pipe)) {
-  fail("ICI must resolve Flow_dimred_pipeline.R from the repo or the immune-subset folder")
+if (exists("original_flow_pipeline_candidates", mode = "function") ||
+    exists("find_original_flow_pipeline", mode = "function")) {
+  fail("ICI must not look up Flow_dimred_pipeline.R in the immune-subset folder")
+}
+if (exists("load_ici_engine", mode = "function")) {
+  engine_body <- paste(deparse(load_ici_engine), collapse = "\n")
+  if (grepl("source\\([^)]*Flow_dimred_pipeline\\.R", engine_body)) {
+    fail("load_ici_engine must source ICI_flow_engine.R only, never Flow_dimred_pipeline.R")
+  }
+  if (grepl("file\\.path\\([^\\n]*fuction of cell", engine_body, ignore.case = TRUE)) {
+    fail("load_ici_engine must not search E:/R/fuction of cell")
+  }
+}
+for (nm in ici_bundle[grepl("\\.R$", ici_bundle)]) {
+  txt <- paste(readLines(file.path(root, nm), warn = FALSE), collapse = "\n")
+  if (grepl("source\\([^\\n]*Flow_dimred_pipeline\\.R", txt)) {
+    fail(sprintf("%s must not source Flow_dimred_pipeline.R", nm))
+  }
+}
+engine_txt <- paste(readLines(file.path(root, "ICI_flow_engine.R"), warn = FALSE), collapse = "\n")
+if (grepl("flow_panel_map\\.json", engine_txt) &&
+    !grepl("ICI_flow_panel_map\\.json", engine_txt)) {
+  fail("ICI_flow_engine.R must read ICI_flow_panel_map.json, not flow_panel_map.json")
+}
+if (grepl("E:/R/fuction of cell", engine_txt) &&
+    grepl("flow_primary_data_dir\\s*<-\\s*\"E:/R/fuction of cell\"", engine_txt)) {
+  fail("ICI_flow_engine.R must not use E:/R/fuction of cell as the data directory")
+}
+if (!isFALSE(flow_trim_bio_extremes)) {
+  fail("ICI must keep all n=3 bio-reps (flow_trim_bio_extremes = FALSE)")
 }
 
 cat("PASS test_ici_flow.R\n")

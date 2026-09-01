@@ -116,7 +116,15 @@ source("Flow_dimred_pipeline.R")
 
 组别：**ZZX-EV**（EV-1、EV-2、EV-3）vs **ZZX-H**（H-1、H-2、H-3），比较 H vs EV，n=3。
 
-把 `ICI_Flow_dimred_pipeline.R` 和 `ICI_flow_panel_map.json` 放到 `E:/R/Internation cell immune`。原来的 `Flow_dimred_pipeline.R` 可以留在 `E:/R/fuction of cell`，ICI 会自己去找，不必拷到 Internation 目录。
+两套方案完全独立。把下面文件**整套**拷到 `E:/R/Internation cell immune`（不要去 `E:/R/fuction of cell` 找原流程，也不要 `source` `Flow_dimred_pipeline.R`）：
+
+- `ICI_Flow_dimred_pipeline.R`（入口）
+- `ICI_flow_engine.R`（本方案自己的分析函数库）
+- `ICI_flow_panel_map.json`
+- `ICI_Flow_dimred_all_subsets.R`
+- `ICI_Flow_dimred_trajectory.R`
+
+免疫亚群那套 `Flow_*` 继续只放在 `E:/R/fuction of cell`，两边互不干扰。
 
 ```r
 setwd("E:/R/Internation cell immune")

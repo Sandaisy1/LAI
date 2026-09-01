@@ -1,16 +1,16 @@
 ---
 description: Internation cell immune：His+ 靶细胞流式（P1/P3，独立于原 Flow_* 流程）
-globs: "**/ICI_Flow*.{R,r,Rmd,json}"
+globs: "**/ICI_*.{R,r,Rmd,json}"
 alwaysApply: false
 ---
 
 # Internation cell immune：找 His+ 靶细胞
 
-写或改 **ICI_** 流式脚本时按本规则。不要改 `Flow_dimred_pipeline.R`、`flow_panel_map.json`、`Flow_dimred_all_subsets.R`、`Flow_dimred_trajectory.R`（那是 `E:/R/fuction of cell` 的另一套实验）。
+写或改 **ICI_** 流式脚本时按本规则。两套方案完全独立、互不 `source`、互不改对方文件。不要改 `Flow_dimred_pipeline.R`、`flow_panel_map.json`、`Flow_dimred_all_subsets.R`、`Flow_dimred_trajectory.R`（那是 `E:/R/fuction of cell` 的免疫亚群实验）。也不要去那个目录查找原流程。
 
 ## 数据
 
-- 目录：`E:/R/Internation cell immune`（用户拼写就是 Internation；脚本、FCS、`ICI_flow_panel_map.json` 与 `results_flow/` 同目录）
+- 目录：`E:/R/Internation cell immune`（用户拼写就是 Internation）。把下面整套文件放在该目录，与 FCS、`results_flow/` 同目录：`ICI_Flow_dimred_pipeline.R`、`ICI_flow_engine.R`、`ICI_flow_panel_map.json`、`ICI_Flow_dimred_all_subsets.R`、`ICI_Flow_dimred_trajectory.R`
 - 只用 `*_unmixed.fcs`；没有 Panel 2
 - 组别：**ZZX-EV**（EV-1、EV-2、EV-3）vs **ZZX-H**（H-1、H-2、H-3），比较 **H vs EV**，n=3。文件名写成 `EV-1_P1_unmixed.fcs` / `ZZX-H-2_P3_unmixed.fcs`。没有技术重复时样品名就是 `EV-1`，不要再编 `EV1-1`
 - 染色以 `ICI_flow_panel_map.json` 和图 1–3 为准，不要把原实验的耗竭/GZMB/CD27 等通道硬套过来
@@ -45,9 +45,10 @@ alwaysApply: false
 
 ```r
 # ❌ BAD: 改 Flow_dimred_pipeline.R 或 flow_panel_map.json 来适配这套染色
+# ❌ BAD: ICI 去 E:/R/fuction of cell 找 / source Flow_dimred_pipeline.R
 # ❌ BAD: QC 先切 CD45+ / 小淋巴，再在剩余细胞里找 His
 # ❌ BAD: 把 His+ CD45+ 的 T/NK 全部改名为 Target
-# ✅ GOOD: 新文件 ICI_Flow_dimred_pipeline.R + ICI_flow_panel_map.json
+# ✅ GOOD: Internation 目录放齐全部 ICI_*（含 ICI_flow_engine.R），单独 source ICI_Flow_dimred_pipeline.R
+# ✅ GOOD: 免疫亚群目录只放 Flow_*，单独 source Flow_dimred_pipeline.R
 # ✅ GOOD: His+ CD45- = 靶细胞；His+ CD45+ 保留免疫亚群
-# ✅ GOOD: Internation 目录可以没有 Flow_dimred_pipeline.R，去 E:/R/fuction of cell 找
 ```
