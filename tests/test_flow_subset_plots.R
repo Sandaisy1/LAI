@@ -120,7 +120,7 @@ bar <- plot_subset_stat_bar(data.frame(
   group = c("EV", "EV", "EV", "H", "H", "H"),
   percent = c(6.3, 7.0, 3.8, 4.1, 4.3, 3.0),
   stringsAsFactors = FALSE
-), "CD4 TEM in CD4+ (%)", 0.18)
+), "CD4 T_EM in CD4+ (%)", 0.18)
 pt_fill <- NA
 for (ly in bar$layers) {
   if (inherits(ly$geom, "GeomPoint") && !is.null(ly$aes_params$fill)) pt_fill <- ly$aes_params$fill

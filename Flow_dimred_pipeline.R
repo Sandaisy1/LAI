@@ -1412,7 +1412,7 @@ gate_k2_high <- function(mat, idx, markers, min_sep = 0.15, max_frac = 1) {
   out
 }
 
-# CD62L vs CD44 完整象限：naive (62L+44-) / TCM (62L+44+) / TEM (62L-44+ 及双阴)
+# CD62L vs CD44 完整象限：naive (62L+44-) / T_CM (62L+44+) / T_EM (62L-44+ 及双阴)
 split_memory_3 <- function(mat, idx, prefix) {
   n <- length(idx)
   if (n == 0) return(character(0))
@@ -1453,6 +1453,7 @@ sequential_t_subsets <- function(mat, idx, line) {
     take_high("CD69", "CD4_activated", 0.15)
     take_high("CD25", "Treg", 0.15)
     take_high(c("IFN-g", "TNF-a"), "CD4_effector", 0.25)
+    # 剩余：T_CM = CD62L+ CD44+；T_EM = 整个 CD62L−
     if (any(remain)) labs[remain] <- split_memory_3(mat, idx[remain], "CD4")
   } else {
     take_high(c("LAG-3", "TIM-3"), "CD8_exhausted", 0.15)
@@ -1707,27 +1708,36 @@ pal_p1_hues <- c(
 
 pal_celltype <- c(
   "CD4 activated" = "#E74C3C",
+  "CD4 T_EFF" = "#B03A2E",
   "CD4 effector" = "#B03A2E",
   "CD8 activated" = "#58D68D",
+  "NK T_EFF" = "#7B241C",
   "NK effector" = "#7B241C",
   "B cell" = "#7B52A5",
   "Macrophage" = "#5DADE2",
   "NKT" = "#E8C87A",
   "NK" = "#C0392B",
   "T" = "#D4A017",
+  "CD8 T_CM" = "#27AE60",
   "CD8 TCM" = "#27AE60",
+  "CD4 T_CM" = "#E67E22",
   "CD4 TCM" = "#E67E22",
   "Treg" = "#922B21",
   "CD4 naive" = "#F5CBA7",
   "CD8 naive" = "#A9DFBF",
+  "CD8 T_EM" = "#1E8449",
   "CD8 TEM" = "#1E8449",
+  "CD8 T_EFF" = "#145A32",
   "CD8 effector" = "#145A32",
   "CD8 exhausted" = "#7D3C98",
+  "CD4 T_EM" = "#CA6F1E",
   "CD4 TEM" = "#CA6F1E",
   "CD4 T" = "#E69A3C",
   "CD8 T" = "#3D8B40",
   "T naive" = "#F7DC6F",
+  "T T_CM" = "#F4D03F",
   "T TCM" = "#F4D03F",
+  "T T_EM" = "#B7950B",
   "T TEM" = "#B7950B",
   "Myeloid" = "#85C1E9",
   "M1-like Mac" = "#1A5276",
@@ -1762,26 +1772,27 @@ celltype_label <- function(lineage, panel_id) {
     Activated_B = "Activated B",
     Plasma = "Plasma",
     CD4_naive = "CD4 naive",
-    CD4_TCM = "CD4 TCM",
-    CD4_TEM = "CD4 TEM",
+    CD4_TCM = "CD4 T_CM",
+    CD4_TEM = "CD4 T_EM",
     CD4_activated = "CD4 activated",
-    CD4_effector = "CD4 effector",
+    CD4_effector = "CD4 T_EFF",
     Treg = "Treg",
     CD4_T = "CD4 T",
     CD8_naive = "CD8 naive",
-    CD8_TCM = "CD8 TCM",
-    CD8_TEM = "CD8 TEM",
+    CD8_TCM = "CD8 T_CM",
+    CD8_TEM = "CD8 T_EM",
     CD8_activated = "CD8 activated",
-    CD8_effector = "CD8 effector",
+    CD8_effector = "CD8 T_EFF",
     CD8_exhausted = "CD8 exhausted",
     CD8_T = "CD8 T",
     NK = "NK",
-    NK_effector = "NK effector",
+    NK_effector = "NK T_EFF",
     NKT = "NKT",
     T = "T",
     T_naive = "T naive",
-    T_TCM = "T TCM",
-    T_TEM = "T TEM",
+    T_TCM = "T T_CM",
+    T_TEM = "T T_EM",
+    T_effector = "T T_EFF",
     T_T = "T",
     Myeloid = "Myeloid",
     Macrophage = "Macrophage",
@@ -2127,23 +2138,23 @@ subset_plot_specs <- function(panel_id) {
   if (identical(panel_id, "P1")) {
     return(list(
       mk("NK", "CD3", "NKp46", "all", "NK cell (%)", gate = "quad", x_hi = FALSE, y_hi = TRUE),
-      mk("NK_effector", "GZMB", "Perforin", "NK", "NK effector in NK (%)", gate = "hi_hi"),
+      mk("NK_effector", "GZMB", "Perforin", "NK", "NK T_EFF in NK (%)", gate = "hi_hi"),
       mk("NKT", "CD3", "NKp46", "all", "NKT (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
       mk("B", "CD19", "CD3", "all", "B cell (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("Myeloid", "CD11B", "CD3", "all", "Myeloid (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("CD4", "CD8", "CD4", "CD3", "CD4+ T cell in CD3+ (%)", TRUE, gate = "quad", x_hi = FALSE, y_hi = TRUE),
       mk("CD8", "CD8", "CD4", "CD3", "CD8+ T cell in CD3+ (%)", TRUE, gate = "quad", x_hi = TRUE, y_hi = FALSE),
       mk("CD4_naive", "CD62L", "CD44", "CD4", "CD4 naive in CD4+ (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
-      mk("CD4_TCM", "CD62L", "CD44", "CD4", "CD4 TCM in CD4+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
-      mk("CD4_TEM", "CD62L", "CD44", "CD4", "CD4 TEM in CD4+ (%)", gate = "half_x", x_hi = FALSE),
+      mk("CD4_TCM", "CD62L", "CD44", "CD4", "CD4 T_CM in CD4+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("CD4_TEM", "CD62L", "CD44", "CD4", "CD4 T_EM in CD4+ (%)", gate = "half_x", x_hi = FALSE),
       mk("CD4_activated", "CD69", "CD25", "CD4", "CD4 activated in CD4+ (%)", gate = "hi_hi"),
-      mk("CD4_effector", "IFN-g", "TNF-a", "CD4", "CD4 effector in CD4+ (%)", gate = "hi_hi"),
+      mk("CD4_effector", "IFN-g", "TNF-a", "CD4", "CD4 T_EFF in CD4+ (%)", gate = "hi_hi"),
       mk("Treg", "CD25", "CD4", "CD4", "Treg in CD4+ (%)", gate = "hi_x", x_hi = TRUE),
       mk("CD8_naive", "CD62L", "CD44", "CD8", "CD8 naive in CD8+ (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE),
-      mk("CD8_TCM", "CD62L", "CD44", "CD8", "CD8 TCM in CD8+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
-      mk("CD8_TEM", "CD62L", "CD44", "CD8", "CD8 TEM in CD8+ (%)", gate = "half_x", x_hi = FALSE),
+      mk("CD8_TCM", "CD62L", "CD44", "CD8", "CD8 T_CM in CD8+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
+      mk("CD8_TEM", "CD62L", "CD44", "CD8", "CD8 T_EM in CD8+ (%)", gate = "half_x", x_hi = FALSE),
       mk("CD8_activated", "CD69", "CD25", "CD8", "CD8 activated in CD8+ (%)", gate = "hi_hi"),
-      mk("CD8_effector", "GZMB", "Perforin", "CD8", "CD8 effector in CD8+ (%)", gate = "hi_hi"),
+      mk("CD8_effector", "GZMB", "Perforin", "CD8", "CD8 T_EFF in CD8+ (%)", gate = "hi_hi"),
       mk("CD8_exhausted", "LAG-3", "TIM-3", "CD8", "CD8 exhausted in CD8+ (%)", gate = "hi_hi")
     ))
   }
@@ -2255,9 +2266,9 @@ quadrant_pct_labels <- function(x, y, xcut, ycut, xlim, ylim) {
   yy <- y[ok]
   quads <- list(
     list(lab = "naive", hit = xx >= xcut & yy < ycut, px = (xcut + xlim[2]) / 2, py = (ylim[1] + ycut) / 2),
-    list(lab = "TCM", hit = xx >= xcut & yy >= ycut, px = (xcut + xlim[2]) / 2, py = (ycut + ylim[2]) / 2),
-    list(lab = "TEM", hit = xx < xcut & yy >= ycut, px = (xlim[1] + xcut) / 2, py = (ycut + ylim[2]) / 2),
-    list(lab = "DN", hit = xx < xcut & yy < ycut, px = (xlim[1] + xcut) / 2, py = (ylim[1] + ycut) / 2)
+    list(lab = "T_CM", hit = xx >= xcut & yy >= ycut, px = (xcut + xlim[2]) / 2, py = (ycut + ylim[2]) / 2),
+    list(lab = "T_EM", hit = xx < xcut & yy >= ycut, px = (xlim[1] + xcut) / 2, py = (ycut + ylim[2]) / 2),
+    list(lab = "DN/T_EM", hit = xx < xcut & yy < ycut, px = (xlim[1] + xcut) / 2, py = (ylim[1] + ycut) / 2)
   )
   rows <- lapply(quads, function(q) {
     data.frame(
@@ -2896,7 +2907,7 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
 analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   log_msg("==== Panel ", panel_id, " : ", panel_map$panels[[panel_id]]$focus, " ====")
   if (identical(panel_id, "P1")) {
-    log_msg("P1 gates: singlets → lymphocytes → CD45+ → CD3/CD19/NKp46; CD4+CD8- / CD4-CD8+; CD69/CD25 activation; GZMB/Perforin; IFN-g/TNF-a")
+    log_msg("P1 gates: CD45+ → CD3/CD19/NKp46; CD4/CD8; naive / T_CM / T_EM / T_EFF; CD69/CD25 activation")
   }
   out_dir <- file.path(result_dir, panel_id)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)

@@ -96,7 +96,7 @@ source("Flow_dimred_pipeline.R")
 - `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图；下为 FlowJo 风格 2D 图。门是铺到坐标轴的完整象限/半平面（CD62L/CD44 标四个象限），EV 与 H **各自切阈值**。不是只框 10–90% 命中细胞的小矩形。
-- `gating/<样品>/`：**每个 FCS 单独**的完整圈门图 + `*_per_sample_gate_cuts.csv`。圈门按每个样品单独做完同一套逻辑。P1 按「单细胞 → 淋巴细胞 → CD45+ → CD3/CD19/NKp46 → CD4/CD8 → CD69/CD25 活化、GZMB/Perforin、IFN-γ/TNF-α」分层。
+- `gating/<样品>/`：**每个 FCS 单独**的完整圈门图 + `*_per_sample_gate_cuts.csv`。圈门按每个样品单独做完同一套逻辑。P1 按「单细胞 → 淋巴细胞 → CD45+ → CD3/CD19/NKp46 → CD4/CD8 → naive / T_CM / T_EM / T_EFF，以及 CD69/CD25 活化」分层。图例写 **CD4 T_CM、CD4 T_EM、CD4 T_EFF**（CD8 同理）。
 - `markers/`：各通道在 UMAP 上的着色
 - `*_cluster_marker_heatmap`、`*_cluster_frequency_H_vs_EV`、`*_H_vs_EV_dimred_overview`
 
