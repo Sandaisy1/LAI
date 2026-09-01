@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# JY：只重出 NKT / B 亚群的活化、效应、耗竭（JY-NNK / JY-EVNK）
-# 读本方案 results_flow/P1|P2/*_cell_embeddings.csv，不读 FCS，不重跑 UMAP。
+# JY：只重出各亚群的活化、抑制或耗竭（JY-NNK / JY-EVNK）
+# 读本方案 results_flow/P1|P2|P3/*_cell_embeddings.csv，不读 FCS，不重跑 UMAP。
 # 不要 source Flow_dimred_pipeline.R 或 ICI_* / JZ_*。
 #
 #   setwd("E:/R/fuction of cell-ljy")

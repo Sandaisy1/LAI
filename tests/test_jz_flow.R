@@ -237,8 +237,17 @@ if (!identical(flow_comparison_tag(), "JZ_AB_vs_JZ_EVB")) {
   fail("JZ functional-state files must be tagged JZ_AB_vs_JZ_EVB")
 }
 jz_p1 <- functional_state_specs("P1")
-if (!length(jz_p1) || !identical(jz_p1[[2]]$state, "exhaustion")) {
+jz_nkt_exh <- any(vapply(
+  jz_p1,
+  function(s) identical(s$parent, "NKT") && identical(s$state, "exhaustion"),
+  logical(1)
+))
+if (!isTRUE(jz_nkt_exh)) {
   fail("JZ P1 functional-state must include NKT exhaustion")
+}
+jz_p3_parents <- unique(vapply(functional_state_specs("P3"), function(s) s$parent, character(1)))
+if (!all(c("Macrophage", "Mono_Ly6Chi", "cDC1_CD103") %in% jz_p3_parents)) {
+  fail("JZ P3 functional-state must analyze myeloid subsets")
 }
 
 rm(list = "export_functional_state_from_results", envir = .GlobalEnv)

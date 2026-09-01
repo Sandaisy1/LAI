@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# JZ：只重出 NKT / B 亚群的活化、效应、耗竭（JZ-AB / JZ-EVB）
-# 读本方案 results_flow/P1|P2/*_cell_embeddings.csv，不读 FCS，不重跑 UMAP。
+# JZ：只重出各亚群的活化、抑制或耗竭（JZ-AB / JZ-EVB）
+# 读本方案 results_flow/P1|P2|P3/*_cell_embeddings.csv，不读 FCS，不重跑 UMAP。
 # 不要 source Flow_dimred_pipeline.R 或 ICI_* / JY_*。
 #
 #   setwd("E:/R/fuction of cell-wjz")

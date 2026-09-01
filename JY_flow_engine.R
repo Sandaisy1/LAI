@@ -3899,8 +3899,9 @@ export_p3_activation_stats <- function(cells, out_dir) {
 }
 
 # -----------------------------------------------------------------------------
-# NKT / B 亚群单独的活化、效应、耗竭（图1：上柱状图，下对照/处理等高线）
-# B 的 P2 没有 PD-L1/LAG-3/TIM-3：只报 CD86/CD80/CD40，缺通道 skip，不伪造抑制门。
+# 全部已圈亚群的活化、抑制或耗竭（图1：上空心柱，下对照/处理等高线）
+# P1：CD4/CD8/NK/NKT 各亚群；P2：CD19 及各 B 亚群（无耗竭通道，不伪造）；
+# P3：髓系活化/抑制（不要叫耗竭，不要分析 dump T/B/NK）。缺通道或 n<20 则 skip。
 # -----------------------------------------------------------------------------
 flow_comparison_tag <- function() {
   trt <- gsub("[^A-Za-z0-9]+", "_", as.character(flow_trt_group)[1])
@@ -3923,7 +3924,8 @@ marker_pretty_label <- function(mk) {
     "IFN-g" = "IFN-\u03B3", "TNF-a" = "TNF-\u03B1", GZMB = "Granzyme B",
     Perforin = "Perforin", CD69 = "CD69", "PD-L1" = "PD-L1",
     "LAG-3" = "LAG-3", "TIM-3" = "TIM-3", CD80 = "CD80", CD86 = "CD86",
-    CD40 = "CD40", NKG2D = "NKG2D"
+    CD40 = "CD40", NKG2D = "NKG2D", "IL-6" = "IL-6", "IL-10" = "IL-10",
+    "TGF-b" = "TGF-\u03B2"
   )
   mk <- as.character(mk)[1]
   if (mk %in% names(rec)) rec[[mk]] else mk
@@ -3931,12 +3933,28 @@ marker_pretty_label <- function(mk) {
 
 func_parent_pretty <- function(p) {
   rec <- c(
-    NKT = "NKT cell", Naive_B = "Naive B", Unswitched_B = "Unswitched B",
+    CD4 = "CD4 T", CD4_naive = "CD4 naive", CD4_TCM = "CD4 T_CM",
+    CD4_TSCM = "CD4 T_SCM", CD4_TEM = "CD4 T_EM",
+    CD4_TEM_early = "CD4 T_EM early", CD4_TEM_late = "CD4 T_EM late",
+    CD4_SLEC = "CD4 SLEC", CD4_MPEC = "CD4 MPEC", Treg = "Treg",
+    CD8 = "CD8 T", CD8_naive = "CD8 naive", CD8_TCM = "CD8 T_CM",
+    CD8_TSCM = "CD8 T_SCM", CD8_TEM = "CD8 T_EM",
+    CD8_TEM_early = "CD8 T_EM early", CD8_TEM_late = "CD8 T_EM late",
+    CD8_SLEC = "CD8 SLEC", CD8_MPEC = "CD8 MPEC",
+    NK = "NK cell", NK_immature = "NK immature", NK_DP = "NK DP",
+    NK_mature = "NK mature",
+    NKT = "NKT cell", NKT_CD4 = "CD4 NKT", NKT_DN = "DN NKT",
+    CD19 = "CD19+ B", Naive_B = "Naive B", Unswitched_B = "Unswitched B",
     Switched_B = "Switched B", Atypical_B = "Atypical B",
-    Activated_B = "Activated B"
+    Activated_B = "Activated B", MZ_B = "MZ B", Plasmablast = "Plasmablast",
+    Plasma = "Plasma cell",
+    Neutrophil = "Neutrophil", Eosinophil = "Eosinophil", Mast = "Mast cell",
+    Macrophage = "Macrophage", M1_like_Mac = "M1-like Mac",
+    M2_like_Mac = "M2-like Mac", DC = "DC", cDC1_CD103 = "cDC1",
+    cDC2 = "cDC2", Mono_Ly6Chi = "Ly6C hi mono", Mono_Ly6Clo = "Ly6C lo mono"
   )
   p <- as.character(p)[1]
-  if (p %in% names(rec)) rec[[p]] else p
+  if (p %in% names(rec)) rec[[p]] else gsub("_", " ", p)
 }
 
 functional_parent_mask <- function(cells, parent) {
@@ -3946,43 +3964,119 @@ functional_parent_mask <- function(cells, parent) {
   lin <- if ("lineage" %in% names(cells)) as.character(cells$lineage) else rep("", n)
   cl[is.na(cl)] <- ""
   lin[is.na(lin)] <- ""
+  parent <- as.character(parent)[1]
+  cd4 <- cl == "CD4" | grepl("^CD4_", lin) | lin == "Treg"
+  cd8 <- cl == "CD8" | grepl("^CD8_", lin)
+  nk <- cl == "NK" | lin %in% nk_family()
+  nkt <- cl == "NKT" | lin %in% nkt_family() | grepl("^NKT", lin)
   out <- switch(
-    as.character(parent),
-    NKT = cl == "NKT" | lin %in% nkt_family() | grepl("^NKT", lin),
+    parent,
+    CD4 = cd4,
+    CD8 = cd8,
+    NK = nk,
+    NKT = nkt,
+    Treg = lin == "Treg",
+    CD4_TCM = lin %in% tcm_family("CD4"),
+    CD8_TCM = lin %in% tcm_family("CD8"),
+    CD4_TEM = lin %in% tem_family("CD4"),
+    CD8_TEM = lin %in% tem_family("CD8"),
+    CD19 = parent_mask(cells, "CD19"),
     Naive_B = lin == "Naive_B" | (cl == "Naive_B" & !lin %in% c("MZ_B", "Activated_B")),
     Unswitched_B = lin == "Unswitched_B" | (cl == "Unswitched_B" & !lin %in% c("MZ_B", "Activated_B")),
     Switched_B = lin == "Switched_B" | (cl == "Switched_B" & !lin %in% c("Plasmablast", "Activated_B")),
     Atypical_B = lin == "Atypical_B" | cl == "Atypical_B",
     Activated_B = lin == "Activated_B" | cl == "Activated_B",
-    parent_mask(cells, parent)
+    Macrophage = lin %in% c("Macrophage", "M1_like_Mac", "M2_like_Mac"),
+    DC = lin %in% c("DC", "cDC1_CD103", "cDC2"),
+    Mast = lin %in% c("Mast", "Basophil_mast", "Basophil"),
+    lin == parent
   )
   out[is.na(out)] <- FALSE
   out
 }
 
 func_x_marker <- function(parent, available) {
-  if (identical(as.character(parent), "NKT")) {
-    for (m in c("NKp46", "NK1.1", "CD3")) if (m %in% available) return(m)
-    return(NA_character_)
+  p <- as.character(parent)[1]
+  prefer <- if (p %in% c("CD4", "Treg") || grepl("^CD4_", p)) {
+    c("CD4", "CD3")
+  } else if (identical(p, "CD8") || grepl("^CD8_", p)) {
+    c("CD8", "CD3")
+  } else if (grepl("^NK", p)) {
+    c("NKp46", "NK1.1", "CD3")
+  } else if (p %in% c("CD19", "Plasmablast", "Plasma", "B") || grepl("_B$", p)) {
+    c("CD19", "IgD", "CD27")
+  } else if (p %in% c("Macrophage", "M1_like_Mac", "M2_like_Mac")) {
+    c("F4/80", "CD11B")
+  } else if (p %in% c("DC", "cDC1_CD103", "cDC2")) {
+    c("CD11C", "I-A/I-E", "CD11B")
+  } else if (identical(p, "Neutrophil")) {
+    c("LY6G", "CD11B")
+  } else if (identical(p, "Eosinophil")) {
+    c("Siglec-F", "CD11B")
+  } else if (identical(p, "Mast")) {
+    c("FceRI", "CD11B")
+  } else if (grepl("^Mono_", p)) {
+    c("LY6C", "CD11B")
+  } else {
+    c("CD45", "CD11B")
   }
-  for (m in c("CD19", "IgD", "CD27")) if (m %in% available) return(m)
+  for (m in prefer) if (m %in% available) return(m)
   NA_character_
 }
 
+func_p1_state_parents <- function() {
+  mem <- c("naive", "TCM", "TSCM", "TEM", "TEM_early", "TEM_late", "SLEC", "MPEC")
+  c(
+    "CD4", paste0("CD4_", mem), "Treg",
+    "CD8", paste0("CD8_", mem),
+    "NK", "NK_immature", "NK_DP", "NK_mature",
+    "NKT", "NKT_CD4", "NKT_DN"
+  )
+}
+
+func_p2_state_parents <- function() {
+  c(
+    "CD19", "Naive_B", "Unswitched_B", "Switched_B", "Atypical_B",
+    "Activated_B", "MZ_B", "Plasmablast", "Plasma"
+  )
+}
+
+func_p3_state_parents <- function() {
+  c(
+    "Neutrophil", "Eosinophil", "Mast", "Macrophage", "M1_like_Mac",
+    "M2_like_Mac", "DC", "cDC1_CD103", "cDC2", "Mono_Ly6Chi", "Mono_Ly6Clo"
+  )
+}
+
 functional_state_specs <- function(panel_id) {
+  mk <- function(parent, state, markers) {
+    list(parent = parent, state = state, markers = markers)
+  }
   if (identical(panel_id, "P1")) {
-    return(list(
-      list(parent = "NKT", state = "activation_effector",
-           markers = c("CD69", "IFN-g", "TNF-a", "GZMB")),
-      list(parent = "NKT", state = "exhaustion",
-           markers = c("PD-L1", "LAG-3", "TIM-3"))
-    ))
+    act <- c("CD69", "IFN-g", "TNF-a", "GZMB")
+    exh <- c("PD-L1", "LAG-3", "TIM-3")
+    out <- list()
+    for (p in func_p1_state_parents()) {
+      out[[length(out) + 1]] <- mk(p, "activation_effector", act)
+      out[[length(out) + 1]] <- mk(p, "exhaustion", exh)
+    }
+    return(out)
   }
   if (identical(panel_id, "P2")) {
     return(lapply(
-      c("Naive_B", "Unswitched_B", "Switched_B", "Atypical_B", "Activated_B"),
-      function(p) list(parent = p, state = "activation", markers = c("CD86", "CD80", "CD40"))
+      func_p2_state_parents(),
+      function(p) mk(p, "activation", c("CD86", "CD80", "CD40"))
     ))
+  }
+  if (identical(panel_id, "P3")) {
+    act <- c("CD86", "CD80", "CD40", "TNF-a", "IL-6")
+    sup <- c("IL-10", "TGF-b")
+    out <- list()
+    for (p in func_p3_state_parents()) {
+      out[[length(out) + 1]] <- mk(p, "activation", act)
+      out[[length(out) + 1]] <- mk(p, "suppression", sup)
+    }
+    return(out)
   }
   list()
 }
@@ -4064,10 +4158,12 @@ plot_func_state_bar <- function(sample_df, ylab, pval) {
     ggplot2::theme(
       legend.position = "none",
       axis.title.x = ggplot2::element_blank(),
-      axis.text = ggplot2::element_text(color = "black"),
+      axis.title.y = ggplot2::element_text(color = "black", size = 10, lineheight = 0.92),
+      axis.text = ggplot2::element_text(color = "black", size = 10),
+      axis.text.x = ggplot2::element_text(face = "bold"),
       axis.line = ggplot2::element_line(color = "black", linewidth = 0.4),
       plot.title = ggplot2::element_blank(),
-      plot.margin = ggplot2::margin(4, 6, 2, 8)
+      plot.margin = ggplot2::margin(6, 8, 2, 10)
     ) +
     ggplot2::labs(y = ylab)
 }
@@ -4179,7 +4275,7 @@ export_one_functional_state <- function(cells, panel_id, spec, out_dir) {
     } else {
       NA_real_
     }
-    ylab <- paste0(marker_pretty_label(mk), "\u207A ", parent_lab, " (%)")
+    ylab <- paste0(marker_pretty_label(mk), "\u207A\n", parent_lab, " (%)")
     bar <- plot_func_state_bar(samp_bio, ylab, pv)
     yfl <- axis_fl_label(panel_id, mk)
     xlim <- finite_axis_lim(c(d_ctrl[[xmk]], d_trt[[xmk]]))
@@ -4251,6 +4347,9 @@ export_functional_state_figures <- function(cells, panel_id, out_dir) {
   if (identical(panel_id, "P2")) {
     log_msg("P2 B subsets: no PD-L1/LAG-3/TIM-3 on this panel; skip exhaustion, report CD86/CD80/CD40")
   }
+  if (identical(panel_id, "P3")) {
+    log_msg("P3 myeloid: activation CD86/CD80/CD40/TNF-a/IL-6; suppression IL-10/TGF-b (not exhaustion); skip dump T/B/NK")
+  }
   for (spec in specs) {
     tryCatch(
       export_one_functional_state(cells, panel_id, spec, func_dir),
@@ -4267,7 +4366,7 @@ read_panel_cells_for_functional_state <- function(result_dir, panel_id) {
   read_embed_csv(p)
 }
 
-# 总降维已经跑完时：只读 P1/P2_cell_embeddings.csv，不再读 FCS、不再 UMAP
+# 总降维已经跑完时：只读 P1/P2/P3_cell_embeddings.csv，不再读 FCS、不再 UMAP
 export_functional_state_from_results <- function(result_dir) {
   if (missing(result_dir) || !nzchar(as.character(result_dir)[1])) {
     if (exists("result_dir", envir = .GlobalEnv, inherits = FALSE)) {
@@ -4280,7 +4379,7 @@ export_functional_state_from_results <- function(result_dir) {
     stop("找不到 results_flow：", result_dir, "。请 setwd 到已经出过总结果的数据目录。")
   }
   n_ok <- 0L
-  for (pn in c("P1", "P2")) {
+  for (pn in c("P1", "P2", "P3")) {
     cells <- read_panel_cells_for_functional_state(result_dir, pn)
     csv <- file.path(result_dir, pn, paste0(pn, "_cell_embeddings.csv"))
     if (is.null(cells) || nrow(cells) < 20) {
@@ -4296,11 +4395,11 @@ export_functional_state_from_results <- function(result_dir) {
   }
   if (!n_ok) {
     stop(
-      "没有可读的 P1/P2_cell_embeddings.csv。先跑完该方案的主流程，",
+      "没有可读的 P1/P2/P3_cell_embeddings.csv。先跑完该方案的主流程，",
       "再单独 source 功能状态脚本。"
     )
   }
-  log_msg("Functional-state rerun done. Figures: results_flow/P1|P2/functional_state/")
+  log_msg("Functional-state rerun done. Figures: results_flow/P1|P2|P3/functional_state/")
   invisible(TRUE)
 }
 

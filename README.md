@@ -100,7 +100,7 @@ source("Flow_dimred_pipeline.R")
 - `*_UMAP_by_group` / `*_tSNE_by_group`：EV vs H
 - `*_UMAP_by_cluster` / `*_UMAP_by_lineage`
 - `subset_stats/`：每个亚群一张图，上为 EV（黑）vs H（红）柱状图；下为 FlowJo 风格 2D 图。门是铺到坐标轴的完整象限/半平面（CD62L/CD44 标四个象限），EV 与 H **各自切阈值**。不是只框 10–90% 命中细胞的小矩形。
-- `functional_state/`：NKT 以及 Naive/Unswitched/Switched/Atypical/Activated B **各自单独**看活化或耗竭。图按多列排（上柱状图、下对照在上处理在下的等高线）。P1 NKT：CD69 / IFN-γ / TNF-α / GZMB，以及 PD-L1 / LAG-3 / TIM-3。P2 各 B 亚群：CD86 / CD80 / CD40（该 panel 没有耗竭通道，不伪造）。JY/JZ 同样出在各自 `results_flow/`，组别色仍是对照黑、处理红。总降维已经跑完时不必重跑 UMAP，在对应数据目录 `source("Flow_dimred_functional_state.R")`（JY/JZ 用各自的 `JY_Flow_dimred_functional_state.R` / `JZ_Flow_dimred_functional_state.R`），它只读 `P1_cell_embeddings.csv` / `P2_cell_embeddings.csv`。
+- `functional_state/`：当前圈到的**每一个免疫亚群**各自看活化、抑制或耗竭。图按多列排（上空心柱 + SD + 重复点 + 显著性，下对照在上处理在下的等高线，共用矩形阳性门）。P1：CD4/CD8（naive、T_CM、T_SCM、T_EM 及 early/late、SLEC、MPEC）与 Treg、NK（immature/DP/mature）、NKT（CD4/DN）报 CD69 / IFN-γ / TNF-α / GZMB，以及 PD-L1 / LAG-3 / TIM-3；不要把已经按该标志圈出的 activated/exhausted 标签再当母群。P2：CD19+ 全体以及 Naive / Unswitched / Switched / Atypical / Activated / MZ / Plasmablast / Plasma 报 CD86 / CD80 / CD40（该 panel 没有耗竭通道，不伪造）。P3 只做髓系：活化 CD86 / CD80 / CD40 / TNF-α / IL-6，抑制 IL-10 / TGF-β（不要叫耗竭，也不要用这些当 M1/M2 极化）；P3 的 T/B/NK 是 dump，不做功能状态。JY/JZ 同样出在各自 `results_flow/`，组别色仍是对照黑、处理红。总降维已经跑完时不必重跑 UMAP，在对应数据目录 `source("Flow_dimred_functional_state.R")`（JY/JZ 用各自的 `JY_Flow_dimred_functional_state.R` / `JZ_Flow_dimred_functional_state.R`），它只读 `P1/P2/P3_cell_embeddings.csv`。
 - `gating/<样品>/`：**每个 FCS 单独**的完整圈门图 + `*_per_sample_gate_cuts.csv`。圈门按每个样品单独做完同一套逻辑。P1 分层：naive / **T_CM** / **T_SCM**（CD27+ CD95+）/ **T_EM early·late** / **SLEC** / **MPEC** / **T_EFF** / **exhausted**（PD-L1、LAG-3、TIM-3），以及 CD69 活化。NK 在 CD11b **之前**用 NKp46 圈出，再按 CD69 / 杀伤 / 耗竭 / **CD27 vs CD11b**（immature、DP、mature）拆；NKT 再分成 CD4 NKT 与 DN NKT。NKG2D 不当亚群，与 IFN-g/TNF-a/GZMB 一起出 MFI 表。P2：宽单核门 → CD45+ → CD19+ → IgD vs CD27 的 Naive / Unswitched / Switched；再分 MZ、Plasmablast、Plasma；CD40/CD80/CD86 出 MFI 表，不当第 1 层亚群。P3：CD3/CD19/NK1.1 大类 → 三阴髓系按 CD11B 分；嗜酸要 Siglec-F+CCR3+；肥大细胞 FceRI+CD200R3+；F4/80 high 巨噬 vs Ly6C hi 单核；CD11B− 上 CD11C+MHC-II+ 再分 cDC1/cDC2。
 - `markers/`：各通道在 UMAP 上的着色
 - `*_cluster_marker_heatmap`、`*_annotation_heatmap`（按注释亚群的标志物中位数，另有 `*_annotation_heatmap_major`）、`*_cluster_frequency_H_vs_EV`、`*_H_vs_EV_dimred_overview`
@@ -151,7 +151,7 @@ QC 只去双联体和死细胞，**不要求 CD45+**，也 **不用 P1 紧淋巴
 - `JY_flow_panel_map.json`
 - `JY_Flow_dimred_all_subsets.R`
 - `JY_Flow_dimred_trajectory.R`
-- `JY_Flow_dimred_functional_state.R`（总结果已出时，只补 NKT/B 活化与耗竭）
+- `JY_Flow_dimred_functional_state.R`（总结果已出时，只补各亚群活化 / 抑制 / 耗竭）
 
 ```r
 setwd("E:/R/fuction of cell-ljy")
@@ -173,7 +173,7 @@ source("JY_Flow_dimred_pipeline.R")
 - `JZ_flow_panel_map.json`
 - `JZ_Flow_dimred_all_subsets.R`
 - `JZ_Flow_dimred_trajectory.R`
-- `JZ_Flow_dimred_functional_state.R`（总结果已出时，只补 NKT/B 活化与耗竭）
+- `JZ_Flow_dimred_functional_state.R`（总结果已出时，只补各亚群活化 / 抑制 / 耗竭）
 
 ```r
 setwd("E:/R/fuction of cell-wjz")

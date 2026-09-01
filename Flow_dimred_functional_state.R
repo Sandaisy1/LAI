@@ -1,17 +1,18 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# 免疫细胞亚群：只重出 NKT / B 亚群的活化、效应、耗竭
+# 免疫细胞亚群：只重出各亚群的活化、抑制或耗竭（图1 布局）
 #
 # 不读 FCS，不重跑 UMAP。读取已经写好的
 #   results_flow/P1/P1_cell_embeddings.csv
 #   results_flow/P2/P2_cell_embeddings.csv
+#   results_flow/P3/P3_cell_embeddings.csv
 #
 # 用法（总结果已经出来之后）：
 #   setwd("E:/R/fuction of cell")
 #   source("Flow_dimred_functional_state.R")
 #
 # JY / JZ 请用各自目录里的 JY_Flow_dimred_functional_state.R / JZ_Flow_dimred_functional_state.R
-# 结果：results_flow/P1/functional_state/ 与 P2/functional_state/
+# 结果：results_flow/P1|P2|P3/functional_state/
 # =============================================================================
 
 load_flow_pipeline_functions <- function() {

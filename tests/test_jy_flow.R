@@ -221,11 +221,20 @@ if (!identical(flow_comparison_tag(), "JY_NNK_vs_JY_EVNK")) {
   fail("JY functional-state files must be tagged JY_NNK_vs_JY_EVNK")
 }
 jy_p1 <- functional_state_specs("P1")
-if (!length(jy_p1) || !identical(jy_p1[[1]]$parent, "NKT")) {
-  fail("JY P1 functional-state must analyze NKT")
+jy_p1_parents <- unique(vapply(jy_p1, function(s) s$parent, character(1)))
+if (!all(c("CD4", "CD8", "NK", "NKT", "Treg") %in% jy_p1_parents)) {
+  fail("JY P1 functional-state must analyze CD4/CD8/NK/NKT/Treg")
 }
-if (!"Activated_B" %in% vapply(functional_state_specs("P2"), function(s) s$parent, character(1))) {
-  fail("JY P2 functional-state must include Activated_B")
+jy_p2_parents <- vapply(functional_state_specs("P2"), function(s) s$parent, character(1))
+if (!all(c("Activated_B", "CD19", "MZ_B", "Plasma") %in% jy_p2_parents)) {
+  fail("JY P2 functional-state must include CD19, Activated_B, MZ_B, Plasma")
+}
+jy_p3_parents <- unique(vapply(functional_state_specs("P3"), function(s) s$parent, character(1)))
+if (!all(c("Macrophage", "Neutrophil", "DC") %in% jy_p3_parents)) {
+  fail("JY P3 functional-state must analyze myeloid subsets")
+}
+if (any(c("T", "B", "NK") %in% jy_p3_parents)) {
+  fail("JY P3 must not treat dump T/B/NK as functional-state parents")
 }
 
 # 同一会话里旧引擎已加载时，独立脚本仍要重新 source JY_flow_engine.R
