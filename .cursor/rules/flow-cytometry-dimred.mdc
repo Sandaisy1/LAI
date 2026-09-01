@@ -65,6 +65,7 @@ alwaysApply: false
 # ❌ BAD: 把 *_lineage_split 画成六个大类，或 CD8 亚群全用绿色
 # ❌ BAD: 联合 tSNE 各通道等权，naive CD4 和 naive CD8 揉成一团
 # ❌ BAD: CD3+ 里用 cd4>=cd8 把双阳/双阴塞进 CD4 或 CD8
+# ❌ BAD: 类内只有几百个细胞仍用大画布+小点，颜色糊成一片
 # ✅ GOOD: 仅 unmixed；P1/P2/P3 各自目录；*_major_split 大类 + *_lineage_split 全体细亚群 + dimred_by_major/
 # ✅ GOOD: 左 EV、右 H，共用 tSNE；图注留在右侧不要裁切；缺通道只 skip 该项
 # ✅ GOOD: 每个 panel 出 annotation_heatmap（按注释亚群，不是 cluster 号）
