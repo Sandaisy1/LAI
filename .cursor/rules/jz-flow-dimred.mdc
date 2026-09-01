@@ -31,7 +31,7 @@ QC、分层、图件与原 `Flow_*` 免疫亚群方案一致：
 2. 三个 panel 分开降维。图1 `*_major_split` 大类；`*_lineage_split` 全体细亚群；`dimred_by_major/` 类内再降维
 3. 组别色：JZ-EVB 黑、JZ-AB 红
 4. 比较标题和文件名用 **JZ-AB / JZ-EVB**（`*_JZ_AB_vs_JZ_EVB_*`），不要写成 H vs EV，也不要写成 JY-NNK / JY-EVNK
-5. NKT 与 B 亚群功能状态出在 `results_flow/P1|P2/functional_state/`（NKT：CD69/IFN-γ/TNF-α/GZMB 与 PD-L1/LAG-3/TIM-3；B 亚群：CD86/CD80/CD40）。图为上柱下等高线，JZ-EVB 黑、JZ-AB 红。不要 `source` Flow_* 或 JY_* 来画这些图
+5. NKT 与 B 亚群功能状态出在 `results_flow/P1|P2/functional_state/`（NKT：CD69/IFN-γ/TNF-α/GZMB 与 PD-L1/LAG-3/TIM-3；B 亚群：CD86/CD80/CD40）。图为上柱下等高线，JZ-EVB 黑、JZ-AB 红。不要 `source` Flow_* 或 JY_* 来画这些图。总结果已出时只 `source("JZ_Flow_dimred_functional_state.R")`，读 embeddings，不重跑 UMAP
 
 ```r
 # ❌ BAD: source("Flow_dimred_pipeline.R") 或 source("JY_Flow_dimred_pipeline.R")

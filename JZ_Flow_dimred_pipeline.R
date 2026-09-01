@@ -12,6 +12,8 @@
 # 用法：把本方案全部 JZ_* 文件放到数据目录（不要去 fuction of cell 找原流程）
 #   setwd("E:/R/fuction of cell-wjz")
 #   source("JZ_Flow_dimred_pipeline.R")
+# 总结果已经出来、只补 NKT/B 活化与耗竭：
+#   source("JZ_Flow_dimred_functional_state.R")
 # 无 FCS 时可 Sys.setenv(FLOW_DEMO = "1")
 #
 # 结果：E:/R/fuction of cell-wjz/results_flow/
@@ -70,7 +72,8 @@ load_jz_engine <- function() {
       "  JZ_flow_engine.R\n",
       "  JZ_flow_panel_map.json\n",
       "  JZ_Flow_dimred_all_subsets.R\n",
-      "  JZ_Flow_dimred_trajectory.R"
+      "  JZ_Flow_dimred_trajectory.R\n",
+      "  JZ_Flow_dimred_functional_state.R"
     )
   }
   source(hit, local = FALSE)

@@ -15,6 +15,8 @@
 # 三个 panel 跑完后会自动汇总全亚群频率，并按大类画轨迹：
 #   source("Flow_dimred_all_subsets.R")   # 也可单独重出 results_flow/all_subsets/
 #   source("Flow_dimred_trajectory.R")    # 也可单独重出 P1/P2/P3/trajectory/
+# 总结果已经出来、只补 NKT/B 活化与耗竭：
+#   source("Flow_dimred_functional_state.R")  # 读 *_cell_embeddings.csv，不重跑 UMAP
 # 无 FCS 时可跑演示数据（会在日志里标明 DEMO，不可当正式结果）：
 #   Sys.setenv(FLOW_DEMO = "1")
 #   source("Flow_dimred_pipeline.R")
@@ -4248,6 +4250,49 @@ export_functional_state_figures <- function(cells, panel_id, out_dir) {
     )
   }
   log_msg(panel_id, " functional-state figures: ", func_dir)
+  invisible(TRUE)
+}
+
+read_panel_cells_for_functional_state <- function(result_dir, panel_id) {
+  p <- file.path(result_dir, panel_id, paste0(panel_id, "_cell_embeddings.csv"))
+  if (!file.exists(p)) return(NULL)
+  read_embed_csv(p)
+}
+
+# 总降维已经跑完时：只读 P1/P2_cell_embeddings.csv，不再读 FCS、不再 UMAP
+export_functional_state_from_results <- function(result_dir) {
+  if (missing(result_dir) || !nzchar(as.character(result_dir)[1])) {
+    if (exists("result_dir", envir = .GlobalEnv, inherits = FALSE)) {
+      result_dir <- get("result_dir", envir = .GlobalEnv)
+    } else {
+      result_dir <- file.path(getwd(), "results_flow")
+    }
+  }
+  if (!dir.exists(result_dir)) {
+    stop("找不到 results_flow：", result_dir, "。请 setwd 到已经出过总结果的数据目录。")
+  }
+  n_ok <- 0L
+  for (pn in c("P1", "P2")) {
+    cells <- read_panel_cells_for_functional_state(result_dir, pn)
+    csv <- file.path(result_dir, pn, paste0(pn, "_cell_embeddings.csv"))
+    if (is.null(cells) || nrow(cells) < 20) {
+      log_msg(pn, ": skip functional-state (need ", csv, ")")
+      next
+    }
+    if (!"lineage" %in% names(cells)) {
+      log_msg(pn, ": skip functional-state (embeddings have no lineage column)")
+      next
+    }
+    export_functional_state_figures(cells, pn, file.path(result_dir, pn))
+    n_ok <- n_ok + 1L
+  }
+  if (!n_ok) {
+    stop(
+      "没有可读的 P1/P2_cell_embeddings.csv。先跑完该方案的主流程，",
+      "再单独 source 功能状态脚本。"
+    )
+  }
+  log_msg("Functional-state rerun done. Figures: results_flow/P1|P2/functional_state/")
   invisible(TRUE)
 }
 

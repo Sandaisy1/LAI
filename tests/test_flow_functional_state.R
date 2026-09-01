@@ -166,6 +166,29 @@ for (ly in bar$layers) {
 if (!identical(col_fill, "white")) fail("functional-state bars should be open (white fill)")
 if (!identical(as.integer(pt_fill), 21L)) fail("replicate points should be filled circles (shape 21)")
 
+# 总结果已出：只读 embeddings，不重跑 panel
+td3 <- tempfile("flow_func_rerun")
+dir.create(file.path(td3, "P1"), recursive = TRUE)
+utils::write.csv(nkt, file.path(td3, "P1", "P1_cell_embeddings.csv"), row.names = FALSE)
+dir.create(file.path(td3, "P2"), recursive = TRUE)
+utils::write.csv(b, file.path(td3, "P2", "P2_cell_embeddings.csv"), row.names = FALSE)
+export_functional_state_from_results(td3)
+if (!file.exists(file.path(td3, "P1", "functional_state", "P1_NKT_activation_effector_H_vs_EV.pdf"))) {
+  fail("standalone rerun should write NKT figures from embeddings")
+}
+if (!file.exists(file.path(td3, "P2", "functional_state", "P2_Naive_B_activation_H_vs_EV.pdf"))) {
+  fail("standalone rerun should write Naive_B figures from embeddings")
+}
+empty <- tempfile("flow_func_empty")
+dir.create(empty)
+ok_stop <- tryCatch({
+  export_functional_state_from_results(empty)
+  FALSE
+}, error = function(e) TRUE)
+if (!isTRUE(ok_stop)) fail("rerun without embeddings should stop, not silently succeed")
+
 unlink(td, recursive = TRUE)
 unlink(td2, recursive = TRUE)
+unlink(td3, recursive = TRUE)
+unlink(empty, recursive = TRUE)
 cat("OK: NKT/B functional-state figures\n")

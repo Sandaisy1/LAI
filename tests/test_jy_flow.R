@@ -150,7 +150,8 @@ jy_bundle <- c(
   "JY_flow_engine.R",
   "JY_flow_panel_map.json",
   "JY_Flow_dimred_all_subsets.R",
-  "JY_Flow_dimred_trajectory.R"
+  "JY_Flow_dimred_trajectory.R",
+  "JY_Flow_dimred_functional_state.R"
 )
 for (nm in jy_bundle) {
   if (!file.exists(file.path(root, nm))) {
@@ -213,8 +214,8 @@ if (inherits(keep_tr, "error")) {
   fail(sprintf("jy_keep_cand must accept Windows paths after trajectory: %s", keep_tr$message))
 }
 
-if (!exists("export_functional_state_figures", mode = "function")) {
-  fail("JY engine must ship NKT/B functional-state export (do not source Flow_*)")
+if (!exists("export_functional_state_from_results", mode = "function")) {
+  fail("JY engine must allow rerunning functional-state from embeddings")
 }
 if (!identical(flow_comparison_tag(), "JY_NNK_vs_JY_EVNK")) {
   fail("JY functional-state files must be tagged JY_NNK_vs_JY_EVNK")

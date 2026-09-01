@@ -159,7 +159,8 @@ jz_bundle <- c(
   "JZ_flow_engine.R",
   "JZ_flow_panel_map.json",
   "JZ_Flow_dimred_all_subsets.R",
-  "JZ_Flow_dimred_trajectory.R"
+  "JZ_Flow_dimred_trajectory.R",
+  "JZ_Flow_dimred_functional_state.R"
 )
 for (nm in jz_bundle) {
   if (!file.exists(file.path(root, nm))) {
@@ -229,8 +230,8 @@ if (inherits(keep_win, "error")) {
 }
 if (!isTRUE(keep_win)) fail("jz_keep_cand must keep E:/R/fuction of cell-wjz paths")
 
-if (!exists("export_functional_state_figures", mode = "function")) {
-  fail("JZ engine must ship NKT/B functional-state export (do not source Flow_* / JY_*)")
+if (!exists("export_functional_state_from_results", mode = "function")) {
+  fail("JZ engine must allow rerunning functional-state from embeddings")
 }
 if (!identical(flow_comparison_tag(), "JZ_AB_vs_JZ_EVB")) {
   fail("JZ functional-state files must be tagged JZ_AB_vs_JZ_EVB")
