@@ -241,4 +241,12 @@ if (!length(jz_p1) || !identical(jz_p1[[2]]$state, "exhaustion")) {
   fail("JZ P1 functional-state must include NKT exhaustion")
 }
 
+rm(list = "export_functional_state_from_results", envir = .GlobalEnv)
+jz_engine_loaded <- TRUE
+Sys.setenv(FLOW_FUNCTIONAL_STATE_FROM_PIPELINE = "1", FLOW_FUNCTIONS_ONLY = "1", JZ_FUNCTIONS_ONLY = "1")
+sys.source(file.path(root, "JZ_Flow_dimred_functional_state.R"), envir = .GlobalEnv)
+if (!exists("export_functional_state_from_results", mode = "function")) {
+  fail("JZ functional-state script must reload the engine if the rerun helper is missing")
+}
+
 cat("PASS test_jz_flow.R\n")

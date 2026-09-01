@@ -228,4 +228,13 @@ if (!"Activated_B" %in% vapply(functional_state_specs("P2"), function(s) s$paren
   fail("JY P2 functional-state must include Activated_B")
 }
 
+# 同一会话里旧引擎已加载时，独立脚本仍要重新 source JY_flow_engine.R
+rm(list = "export_functional_state_from_results", envir = .GlobalEnv)
+jy_engine_loaded <- TRUE
+Sys.setenv(FLOW_FUNCTIONAL_STATE_FROM_PIPELINE = "1", FLOW_FUNCTIONS_ONLY = "1", JY_FUNCTIONS_ONLY = "1")
+sys.source(file.path(root, "JY_Flow_dimred_functional_state.R"), envir = .GlobalEnv)
+if (!exists("export_functional_state_from_results", mode = "function")) {
+  fail("JY functional-state script must reload the engine if the rerun helper is missing")
+}
+
 cat("PASS test_jy_flow.R\n")

@@ -41,6 +41,12 @@ load_flow_pipeline_functions <- function() {
   Sys.setenv(FLOW_FUNCTIONS_ONLY = "1")
   source(hit, local = FALSE)
   if (is.na(old)) Sys.unsetenv("FLOW_FUNCTIONS_ONLY") else Sys.setenv(FLOW_FUNCTIONS_ONLY = old)
+  if (!exists("export_functional_state_from_results", mode = "function")) {
+    stop(
+      "当前 Flow_dimred_pipeline.R 太旧，没有 export_functional_state_from_results。\n",
+      "请覆盖最新 Flow_dimred_pipeline.R 与 Flow_dimred_functional_state.R 后新开 R 会话。"
+    )
+  }
   invisible(TRUE)
 }
 

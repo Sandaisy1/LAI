@@ -6,6 +6,9 @@
 #
 #   setwd("E:/R/fuction of cell-wjz")
 #   source("JZ_Flow_dimred_functional_state.R")
+#
+# 若刚才刚跑过主流程，请先关掉 R 再开，或至少覆盖最新 JZ_flow_engine.R。
+# 若 all-subsets 之后出现 Trailing backslash，说明 JZ_Flow_dimred_all_subsets.R 也是旧拷贝。
 # =============================================================================
 
 jz_keep_cand <- function(p) {
@@ -18,7 +21,8 @@ jz_keep_cand <- function(p) {
 }
 
 load_jz_engine_functions <- function() {
-  if (isTRUE(get0("jz_engine_loaded", ifnotfound = FALSE))) {
+  if (exists("export_functional_state_from_results", mode = "function") &&
+      isTRUE(get0("jz_engine_loaded", ifnotfound = FALSE))) {
     return(invisible(TRUE))
   }
   pipe <- "JZ_flow_engine.R"
@@ -45,6 +49,15 @@ load_jz_engine_functions <- function() {
     stop("找不到 JZ_flow_engine.R。JZ 方案不使用 Flow_dimred_pipeline.R。")
   }
   source(hit, local = FALSE)
+  if (!exists("export_functional_state_from_results", mode = "function")) {
+    stop(
+      "当前 JZ_flow_engine.R 太旧，没有 export_functional_state_from_results。\n",
+      "请把最新 JZ_* 整套覆盖到 E:/R/fuction of cell-wjz（尤其是 JZ_flow_engine.R 和 JZ_Flow_dimred_all_subsets.R），",
+      "关掉 R 再开，然后：\n",
+      "  setwd(\"E:/R/fuction of cell-wjz\")\n",
+      "  source(\"JZ_Flow_dimred_functional_state.R\")"
+    )
+  }
   invisible(TRUE)
 }
 

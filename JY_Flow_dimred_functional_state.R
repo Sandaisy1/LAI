@@ -6,6 +6,8 @@
 #
 #   setwd("E:/R/fuction of cell-ljy")
 #   source("JY_Flow_dimred_functional_state.R")
+#
+# 若刚才刚跑过主流程，请先关掉 R 再开，或至少覆盖最新 JY_flow_engine.R。
 # =============================================================================
 
 jy_keep_cand <- function(p) {
@@ -18,7 +20,10 @@ jy_keep_cand <- function(p) {
 }
 
 load_jy_engine_functions <- function() {
-  if (isTRUE(get0("jy_engine_loaded", ifnotfound = FALSE))) {
+  # 同一会话里刚跑过旧主流程时 jy_engine_loaded 已是 TRUE，但函数库是旧的。
+  # 缺 export_functional_state_from_results 时必须再 source 本目录的 JY_flow_engine.R。
+  if (exists("export_functional_state_from_results", mode = "function") &&
+      isTRUE(get0("jy_engine_loaded", ifnotfound = FALSE))) {
     return(invisible(TRUE))
   }
   pipe <- "JY_flow_engine.R"
@@ -45,6 +50,15 @@ load_jy_engine_functions <- function() {
     stop("找不到 JY_flow_engine.R。JY 方案不使用 Flow_dimred_pipeline.R。")
   }
   source(hit, local = FALSE)
+  if (!exists("export_functional_state_from_results", mode = "function")) {
+    stop(
+      "当前 JY_flow_engine.R 太旧，没有 export_functional_state_from_results。\n",
+      "请把最新 JY_* 整套覆盖到 E:/R/fuction of cell-ljy（尤其是 JY_flow_engine.R），",
+      "关掉 R 再开，然后：\n",
+      "  setwd(\"E:/R/fuction of cell-ljy\")\n",
+      "  source(\"JY_Flow_dimred_functional_state.R\")"
+    )
+  }
   invisible(TRUE)
 }
 
