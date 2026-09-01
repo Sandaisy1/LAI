@@ -291,4 +291,13 @@ if (!file.exists(file.path(td_ici_hm, "P1_annotation_heatmap.pdf"))) {
 }
 unlink(td_ici_hm, recursive = TRUE)
 
+cands <- original_flow_pipeline_candidates()
+if (!any(grepl("fuction of cell", cands, ignore.case = TRUE))) {
+  fail("ICI must look for Flow_dimred_pipeline.R under E:/R/fuction of cell")
+}
+hit_pipe <- find_original_flow_pipeline()
+if (is.na(hit_pipe) || !file.exists(hit_pipe)) {
+  fail("ICI must resolve Flow_dimred_pipeline.R from the repo or the immune-subset folder")
+}
+
 cat("PASS test_ici_flow.R\n")

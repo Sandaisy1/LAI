@@ -8,7 +8,7 @@
 #
 # 组别：ZZX-EV（EV-1 / EV-2 / EV-3）vs ZZX-H（H-1 / H-2 / H-3），比较 H vs EV，n=3。
 #
-# 用法：
+# 用法：在 Internation 目录 source 即可。原流程脚本可留在 E:/R/fuction of cell，不必拷过来。
 #   setwd("E:/R/Internation cell immune")
 #   source("ICI_Flow_dimred_pipeline.R")
 # 无 FCS 时可 Sys.setenv(FLOW_DEMO = "1")
@@ -42,26 +42,63 @@ ici_get_script_dir <- function() {
 ici_script_dir <- ici_get_script_dir()
 ici_primary_data_dir <- "E:/R/Internation cell immune"
 
+original_flow_pipeline_candidates <- function() {
+  pipe <- "Flow_dimred_pipeline.R"
+  env_dir <- Sys.getenv("FLOW_PIPELINE_DIR", unset = "")
+  parent_wd <- tryCatch(dirname(normalizePath(getwd(), winslash = "/", mustWork = FALSE)),
+                        error = function(e) "")
+  parent_script <- tryCatch(dirname(ici_script_dir), error = function(e) "")
+  dirs <- unique(c(
+    env_dir,
+    ici_script_dir,
+    getwd(),
+    "E:/R/fuction of cell",
+    "E:/R/function of cell",
+    "E:\\R\\fuction of cell",
+    "E:\\R\\function of cell",
+    if (nzchar(parent_wd)) file.path(parent_wd, "fuction of cell") else character(0),
+    if (nzchar(parent_wd)) file.path(parent_wd, "function of cell") else character(0),
+    parent_script,
+    if (nzchar(parent_script)) file.path(parent_script, "fuction of cell") else character(0),
+    if (nzchar(parent_script)) file.path(parent_script, "function of cell") else character(0)
+  ))
+  dirs <- dirs[nzchar(dirs)]
+  file.path(dirs, pipe)
+}
+
+find_original_flow_pipeline <- function() {
+  cands <- original_flow_pipeline_candidates()
+  hit <- cands[file.exists(cands)][1]
+  if (is.na(hit) || !nzchar(hit)) return(NA_character_)
+  normalizePath(hit, winslash = "/", mustWork = FALSE)
+}
+
 load_original_flow_functions <- function() {
   if (exists("hierarchical_gate", mode = "function") && exists("analyze_one_panel", mode = "function")) {
     return(invisible(TRUE))
   }
-  pipe <- "Flow_dimred_pipeline.R"
-  cands <- c(
-    file.path(ici_script_dir, pipe),
-    file.path(getwd(), pipe),
-    pipe
-  )
-  hit <- cands[file.exists(cands)][1]
-  if (is.na(hit) || !nzchar(hit)) stop("找不到 Flow_dimred_pipeline.R；ICI 脚本要和原流程放在同一仓库")
+  hit <- find_original_flow_pipeline()
+  if (is.na(hit) || !nzchar(hit)) {
+    stop(
+      "找不到 Flow_dimred_pipeline.R。ICI 脚本要调用原流程函数，但当前目录没有这个文件。\n",
+      "它通常在 E:/R/fuction of cell（免疫亚群那套实验），不必和 FCS 放在 Internation 目录里。\n",
+      "已找过：", paste(unique(dirname(original_flow_pipeline_candidates())), collapse = " ; "), "\n",
+      "把该文件拷到 E:/R/Internation cell immune，或设 Sys.setenv(FLOW_PIPELINE_DIR=...)。"
+    )
+  }
   old <- Sys.getenv("FLOW_FUNCTIONS_ONLY", unset = NA)
   Sys.setenv(FLOW_FUNCTIONS_ONLY = "1")
   source(hit, local = FALSE)
   if (is.na(old)) Sys.unsetenv("FLOW_FUNCTIONS_ONLY") else Sys.setenv(FLOW_FUNCTIONS_ONLY = old)
+  if (exists("log_msg", mode = "function")) log_msg("ICI loaded original pipeline: ", hit)
   invisible(TRUE)
 }
 
 load_original_flow_functions()
+original_flow_dir <- tryCatch({
+  p <- find_original_flow_pipeline()
+  if (is.na(p) || !nzchar(p)) ici_script_dir else dirname(p)
+}, error = function(e) ici_script_dir)
 # ICI 没有技术重复、n=3，不要套用免疫亚群分析里「去掉一个极端生物学重复」的规则
 flow_trim_bio_extremes <- FALSE
 
@@ -518,8 +555,20 @@ if (length(lin_rows) > 0) {
   log_msg("Summary table: ", sum_path)
 }
 
-extra <- file.path(ici_script_dir, "Flow_dimred_all_subsets.R")
-if (file.exists(extra)) {
+find_flow_extra <- function(nm) {
+  cands <- unique(c(
+    file.path(original_flow_dir, nm),
+    file.path(ici_script_dir, nm),
+    file.path(getwd(), nm),
+    file.path("E:/R/fuction of cell", nm),
+    file.path("E:/R/function of cell", nm)
+  ))
+  cands <- cands[nzchar(cands)]
+  hit <- cands[file.exists(cands)][1]
+  if (is.na(hit) || !nzchar(hit)) NA_character_ else hit
+}
+extra <- find_flow_extra("Flow_dimred_all_subsets.R")
+if (!is.na(extra) && nzchar(extra)) {
   tryCatch({
     Sys.setenv(FLOW_ALL_SUBSETS_FROM_PIPELINE = "1")
     sys.source(extra, envir = .GlobalEnv)
@@ -528,8 +577,8 @@ if (file.exists(extra)) {
   Sys.unsetenv("FLOW_ALL_SUBSETS_FROM_PIPELINE")
 }
 
-traj <- file.path(ici_script_dir, "Flow_dimred_trajectory.R")
-if (file.exists(traj)) {
+traj <- find_flow_extra("Flow_dimred_trajectory.R")
+if (!is.na(traj) && nzchar(traj)) {
   tryCatch({
     Sys.setenv(FLOW_TRAJECTORY_FROM_PIPELINE = "1")
     sys.source(traj, envir = .GlobalEnv)
@@ -538,6 +587,6 @@ if (file.exists(traj)) {
   Sys.unsetenv("FLOW_TRAJECTORY_FROM_PIPELINE")
 }
 
-log_msg("ICI done. Copy ICI_Flow_dimred_pipeline.R + ICI_flow_panel_map.json into ",
-        ici_primary_data_dir, " and source there.")
+log_msg("ICI done. ICI_Flow_dimred_pipeline.R + ICI_flow_panel_map.json 放在 ",
+        ici_primary_data_dir, "；原 Flow_dimred_pipeline.R 可留在 E:/R/fuction of cell。")
 }

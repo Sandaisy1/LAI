@@ -49,4 +49,5 @@ alwaysApply: false
 # ❌ BAD: 把 His+ CD45+ 的 T/NK 全部改名为 Target
 # ✅ GOOD: 新文件 ICI_Flow_dimred_pipeline.R + ICI_flow_panel_map.json
 # ✅ GOOD: His+ CD45- = 靶细胞；His+ CD45+ 保留免疫亚群
+# ✅ GOOD: Internation 目录可以没有 Flow_dimred_pipeline.R，去 E:/R/fuction of cell 找
 ```
