@@ -106,6 +106,21 @@ source("Flow_dimred_pipeline.R")
 
 无 FCS 时可 `Sys.setenv(FLOW_DEMO = "1")` 导出演示图，不能当正式结果。
 
+## Internation cell immune（另一套实验，找 His+ 靶细胞）
+
+数据在 `E:/R/Internation cell immune`。染色是图 1–3 的 **P1 + P3**（没有 P2），主目的是用 **His-FITC** 找靶细胞。圈门和分析思路与上面相同，但 **不要改** 原来的 `Flow_dimred_pipeline.R` / `flow_panel_map.json`。
+
+组别：**ZZX-EV**（EV-1、EV-2、EV-3）vs **ZZX-H**（H-1、H-2、H-3），比较 H vs EV，n=3。
+
+把 `ICI_Flow_dimred_pipeline.R`、`ICI_flow_panel_map.json` 以及它会 `source` 的原 `Flow_dimred_*.R` 拷到该目录后：
+
+```r
+setwd("E:/R/Internation cell immune")
+source("ICI_Flow_dimred_pipeline.R")
+```
+
+QC 只去双联体和死细胞，**不要求 CD45+**，也 **不用 P1 紧淋巴门**，以免丢掉 His+ CD45− 靶细胞。活细胞里 His+ CD45− 标成 **His+ target**；His+ CD45+ 仍按原来的 T/NK/髓系亚群命名，并另出各亚群内 His+ 比例。结果在同目录 `results_flow/`，靶细胞表和图在 `target_His/`。
+
 若日志出现「没有匹配到任何分析通道」，多半是 Cytek 通道名带 `-A`（如 `BUV496-A`）或 desc 为空，不是文件没找到。用最新脚本再跑；仍失败时日志会列出通道名，并在 `results_flow/00_logs/` 写 `*_channels.csv`。
 
 读真实 FCS 需要 `flowCore`。若日志出现「读 FCS 需要 flowCore」，先在 R 里装好再重新 `source`：
