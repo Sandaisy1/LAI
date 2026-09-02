@@ -97,3 +97,52 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## 血清蛋白质组：两组病人丰度排名气泡图
+
+输入是 DIA-NN 的 `report.pg_matrix`（蛋白组定量）。若该文件蛋白行过少，脚本会用 `report.pr_matrix` 按 `Protein.Group` 取肽段强度中位数，聚合到蛋白。不要用 Cuffdiff RNA-seq 流程处理这些矩阵。
+
+同一目录还需要 `sample_annotation.csv`。若没有且矩阵恰好两列样品（当前数据为 `GP_WJZ_11`、`GP_WJZ_18`），脚本会自动写出该表并按 1-vs-1 继续（不算 p 值）。也可手动复制 `serum_proteomics/sample_annotation.GP_WJZ.csv` 为 `sample_annotation.csv`。默认读取 `E:\天府\实验管理\课题\赵章寻\血清蛋白质组学`（可用 `SERUM_PROTEOMICS_DIR` 覆盖；该盘不存在时回退仓库内 `serum_proteomics/`）。矩阵、注释和结果都在这个目录：
+
+```
+sample_annotation.csv   # 列：sample,group；必须恰好两组病人
+report.pg_matrix        # DIA-NN 蛋白组矩阵（TSV）
+report.pr_matrix        # 可选；pg_matrix 不可用时回退
+```
+
+```r
+# 错误示范：当前目录没有这个文件时会报“无法打开链接”
+# source("serum_proteomics_ranked_bubble.R")
+
+# 推荐：整段粘贴，或 source 启动器（会 setwd 到数据目录）
+source("run_serum_proteomics_bubble.R", encoding = "UTF-8")
+```
+
+若启动器也不在当前目录，在 R 里先切到**仓库根目录**（能看到 `serum_proteomics_ranked_bubble.R` 的地方），或把该 `.R` 复制到数据目录后再：
+
+```r
+setwd("E:/天府/实验管理/课题/赵章寻/血清蛋白质组学")
+source("serum_proteomics_ranked_bubble.R", encoding = "UTF-8")
+# 去除免疫球蛋白重/轻链与胰蛋白酶后再排名（独立脚本）
+source("serum_proteomics_ranked_bubble_no_Ig.R", encoding = "UTF-8")
+```
+
+会去 `E:/天府/实验管理/课题/赵章寻/血清蛋白质组学` 读矩阵，结果写在同目录 `results/`。
+
+```bash
+python3 serum_proteomics_ranked_bubble.py
+```
+
+按 **两样品平均丰度** 降序排名。横轴是丰度排名，纵轴是蛋白丰度值，气泡大小一致。默认 top20 / top30 / top50 以及全部蛋白：
+
+```
+results/serum_proteomics_bubble/
+  protein_abundance_ranking.csv   # 全部蛋白排名（全蛋白图也用这张表）
+  top20_ranked_proteins.csv
+  top20_abundance_rank_bubble.pdf|.png
+  all_abundance_rank_bubble.pdf|.png
+```
+
+去 Ig 结果在 `results/serum_proteomics_bubble_no_Ig/`。全蛋白不要再写 `all_ranked_proteins.csv`。若 Excel 打开了同名 CSV，脚本会改写带时分秒的文件名。
+
+这是蛋白丰度排名气泡图（两样品平均，等大气泡），不是 GO/KEGG 气泡图，也不是两组 FC 图。
