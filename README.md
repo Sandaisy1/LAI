@@ -78,7 +78,7 @@ results/TG_sh1_vs_NTC_rep0/FoldChange/FC_1.5/GO/FC_1.5_GO_BP_dotplot.pdf
 
 # 流式降维（免疫细胞亚群，H vs EV，P1 / P2 / P3）
 
-这是 **`E:/R/fuction of cell`** 的免疫细胞亚群降维。找 His+ 靶细胞是另一套实验，走 `ICI_Flow_dimred_pipeline.R`（`E:/R/Internation cell immune`）。**JY-NNK / JY-EVNK** 走 `JY_Flow_dimred_pipeline.R`（`E:/R/fuction of cell-ljy`）。**JZ-AB / JZ-EVB** 走 `JZ_Flow_dimred_pipeline.R`（`E:/R/fuction of cell-wjz`）。几套不要混用。
+这是 **`E:/R/fuction of cell`** 的免疫细胞亚群降维。找 His+ 靶细胞是另一套实验，走 `ICI_Flow_dimred_pipeline.R`（`E:/R/Internation cell immune`）。**JY-NNK / JY-EVNK** 走 `JY_Flow_dimred_pipeline.R`（`E:/R/fuction of cell-ljy`）。**JZ-AB / JZ-EVB** 走 `JZ_Flow_dimred_pipeline.R`（`E:/R/fuction of cell-wjz`）。**T6 vs T** 走 `T_T6_Flow_dimred_pipeline.R`（`E:/R/flow J`）。几套不要混用。
 
 小鼠流式只用 `*_unmixed.fcs`。分析结果写在同一目录的 `results_flow/`。三个 panel **分开**做 UMAP/tSNE，比较 **ZZX_EV**（EV1/2/3，每管两个技术重复 EV1-1/EV1-2）与 **ZZX_H**（H1/2/3，H1-1/H1-2）。统计：技术重复先平均；三个生物学重复里去掉离中位数更远的最大值或最小值，用剩下 n=2 做均值/SD/检验。tSNE 仍用全部细胞。
 
@@ -191,6 +191,28 @@ source("JZ_Flow_dimred_pipeline.R")
 ```
 
 文件名：`EVB1-1_P1_unmixed.fcs`、`JZ-AB-2-2_P3_unmixed.fcs`、`AB-3-1_P2_unmixed.fcs` 都可以（`JZ-` 可有可无）。**先匹配 EVB 再匹配 AB**。结果在同目录 `results_flow/`，比较标签是 **JZ-AB / JZ-EVB**。
+
+## T-T6（第五套实验，免疫亚群降维，比较 T6 vs T）
+
+数据在 `E:/R/flow J`。圈门、降维、轨迹、功能状态与免疫亚群方案一致，但染色按 `T_T6_flow_panel_map.json`（P1 含 Perforin-FITC；P2 含 IgD-FITC / BLIMP-1-PE，CD80 是 BUV496；P3 含 iNOS-AF488）。这些 FITC/AF488 **不是 His**，不要套 ICI 的 His+ 母群。
+
+组别：**T**（T-1、T-2、T-3）与 **T6**（T6-1、T6-2、T6-3）。比较是 **T6 vs T**（T6 为处理、T 为对照）。三个生物学重复全部保留，**n=3**，不去极端值。T 黑、T6 红。
+
+五套方案完全独立。把下面文件**整套**拷到 `E:/R/flow J`（不要去 `fuction of cell` / `Internation` / `cell-ljy` / `cell-wjz` 找原流程，也不要 `source` `Flow_*`、`ICI_*`、`JY_*` 或 `JZ_*`）：
+
+- `T_T6_Flow_dimred_pipeline.R`（入口）
+- `T_T6_flow_engine.R`
+- `T_T6_flow_panel_map.json`
+- `T_T6_Flow_dimred_all_subsets.R`
+- `T_T6_Flow_dimred_trajectory.R`
+- `T_T6_Flow_dimred_functional_state.R`（总结果已出时，只补各亚群活化 / 抑制 / 耗竭）
+
+```r
+setwd("E:/R/flow J")
+source("T_T6_Flow_dimred_pipeline.R")
+```
+
+文件名：`T-1_P1.fcs`、`T-1_P1_unmixed.fcs`、`T6-2_P3_unmixed.fcs` 都可以。**先匹配 T6 再匹配 T**。结果在同目录 `results_flow/`，比较标签是 **T6 vs T**。P1 功能状态含 Perforin；P2 只报 CD86/CD80/CD40（BLIMP-1 用于浆细胞门）；P3 髓系活化/抑制，iNOS/ARG-1 只作 M1/M2 身份。
 
 若日志出现「没有匹配到任何分析通道」，多半是 Cytek 通道名带 `-A`（如 `BUV496-A`）或 desc 为空，不是文件没找到。用最新脚本再跑；仍失败时日志会列出通道名，并在 `results_flow/00_logs/` 写 `*_channels.csv`。
 

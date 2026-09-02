@@ -6,7 +6,7 @@ alwaysApply: false
 
 # Internation cell immune：找 His+ 靶细胞
 
-写或改 **ICI_** 流式脚本时按本规则。四套方案完全独立、互不 `source`、互不改对方文件。不要改 `Flow_dimred_pipeline.R`、`flow_panel_map.json`、`Flow_dimred_all_subsets.R`、`Flow_dimred_trajectory.R`（那是 `E:/R/fuction of cell` 的免疫亚群实验），也不要改 `JY_*`（`E:/R/fuction of cell-ljy`）或 `JZ_*`（`E:/R/fuction of cell-wjz`）。也不要去那些目录查找原流程。
+写或改 **ICI_** 流式脚本时按本规则。各套方案完全独立、互不 `source`、互不改对方文件。不要改 `Flow_dimred_pipeline.R`、`flow_panel_map.json`、`Flow_dimred_all_subsets.R`、`Flow_dimred_trajectory.R`（那是 `E:/R/fuction of cell` 的免疫亚群实验），也不要改 `JY_*`（`E:/R/fuction of cell-ljy`）、`JZ_*`（`E:/R/fuction of cell-wjz`）或 `T_T6_*`（`E:/R/flow J`）。也不要去那些目录查找原流程。
 
 ## 数据
 

@@ -6,7 +6,7 @@ alwaysApply: false
 
 # JZ：免疫细胞亚群降维（JZ-AB / JZ-EVB）
 
-写或改 **JZ_*** 流式脚本时按本规则。这是第四套完全独立的实验，分析逻辑与 `E:/R/fuction of cell` 的免疫亚群降维一致，但**不要** `source`、查找或改 `Flow_dimred_pipeline.R` / `flow_panel_map.json` / `ICI_*` / `JY_*`。
+写或改 **JZ_*** 流式脚本时按本规则。这是第四套完全独立的实验，分析逻辑与 `E:/R/fuction of cell` 的免疫亚群降维一致，但**不要** `source`、查找或改 `Flow_dimred_pipeline.R` / `flow_panel_map.json` / `ICI_*` / `JY_*` / `T_T6_*`。
 
 ## 数据
 
