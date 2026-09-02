@@ -72,8 +72,11 @@ pick_official_symbol <- function(x) {
 
 is_immunoglobulin_symbol <- function(sym) {
   s <- toupper(trimws(as.character(sym)))
+  s <- sub("^(CON__|SP\\||TR\\|)", "", s)
+  if (grepl("\\|", s)) s <- sub(".*\\|", "", s)
   if (!nzchar(s) || s %in% c("NA", "-", ".")) return(FALSE)
   if (s %in% c("JCHAIN", "IGJ")) return(TRUE)
+  if (grepl("^P0DO[XY][0-9]*$", s)) return(TRUE)
   grepl("^(IGH|IGK|IGL)", s)
 }
 

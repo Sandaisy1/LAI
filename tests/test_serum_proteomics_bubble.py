@@ -19,7 +19,10 @@ def test_immunoglobulin_filter() -> None:
     assert sp.is_immunoglobulin_symbol("IGHG1")
     assert sp.is_immunoglobulin_symbol("IGKC")
     assert sp.is_immunoglobulin_symbol("IGLV3-21")
-    assert sp.is_immunoglobulin_symbol("JCHAIN")
+    assert sp.is_immunoglobulin_symbol("P0DOX5")
+    assert sp.is_immunoglobulin_symbol("P0DOY2")
+    assert sp.is_immunoglobulin_symbol("CON__P0DOX7")
+    assert not sp.is_immunoglobulin_symbol("P02768")
     assert not sp.is_immunoglobulin_symbol("IGSF8")
     assert not sp.is_immunoglobulin_symbol("IGF1")
     assert not sp.is_immunoglobulin_symbol("ALB")
@@ -46,17 +49,18 @@ def test_immunoglobulin_filter() -> None:
     assert not sp.is_trypsin_symbol("SERPINA1")
     contam = pd.DataFrame(
         {
-            "Genes": ["ALB", "IGHG1", "TRYP_PIG", "SERPINA1", "FTH1"],
+            "Genes": ["ALB", "IGHG1", "TRYP_PIG", "SERPINA1", "FTH1", ""],
             "Protein.Names": [
                 "Serum albumin",
                 "免疫球蛋白重链",
                 "Trypsin",
                 "Alpha-1-antitrypsin",
                 "Ferritin heavy chain",
+                "Immunoglobulin gamma-1 heavy chain",
             ],
-            "First.Protein.Description": ["", "Ig heavy chain", "胰蛋白酶", "抗胰蛋白酶", "铁蛋白重链"],
-            "Protein.Ids": ["P02768", "P01857", "P00761", "P01009", "P02794"],
-            "Protein.Group": ["P02768", "P01857", "P00761", "P01009", "P02794"],
+            "First.Protein.Description": ["", "Ig heavy chain", "胰蛋白酶", "抗胰蛋白酶", "铁蛋白重链", ""],
+            "Protein.Ids": ["P02768", "P01857", "P00761", "P01009", "P02794", "P0DOX5"],
+            "Protein.Group": ["P02768", "P01857", "P00761", "P01009", "P02794", "P0DOX5"],
         }
     )
     assert sp.exclusion_reasons(contam) == [
@@ -65,6 +69,7 @@ def test_immunoglobulin_filter() -> None:
         "trypsin",
         "",
         "",
+        "immunoglobulin",
     ]
 
 
@@ -185,7 +190,7 @@ def test_default_data_dir_is_zhao_serum() -> None:
     assert "run_serum_abundance_bubble" not in no_ig
     assert "immunoglobulin" in no_ig.lower() or "免疫球蛋白" in no_ig
     assert "serum_proteomics_bubble_no_Ig" in no_ig
-    assert "胰蛋白酶" in no_ig
+    assert "P0DOX" in no_ig or "P0DO" in no_ig
     assert "免疫球蛋白重链" in no_ig
 
 

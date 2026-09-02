@@ -131,9 +131,14 @@ def normalize_sample_token(name: str) -> str:
 
 def is_immunoglobulin_symbol(sym: object) -> bool:
     s = str(sym).strip().upper()
+    s = re.sub(r"^(CON__|SP\||TR\|)", "", s)
+    s = s.split("|")[-1]
     if s in {"", "-", ".", "NA", "NONE"}:
         return False
     if s in {"JCHAIN", "IGJ"}:
+        return True
+    # UniProt Ig 条目：P0DOX5 重链、P0DOY2 轻链等
+    if re.match(r"^P0DO[XY]\d*$", s):
         return True
     return bool(re.match(r"^(IGH|IGK|IGL)", s))
 
@@ -496,6 +501,7 @@ def write_example_data(directory: Path) -> None:
         ("P00734", "F2", "Prothrombin"),
         ("P02774", "GC", "Vitamin D-binding protein"),
         ("P01857", "IGHG1", "Immunoglobulin heavy constant gamma 1"),
+        ("P0DOX5", "IGHG1", "Immunoglobulin gamma-1 heavy chain"),
         ("P01834", "IGKC", "Immunoglobulin kappa constant"),
         ("P00761", "TRYP_PIG", "Trypsin"),
         ("P02741", "CRP", "C-reactive protein"),
