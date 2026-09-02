@@ -1,17 +1,19 @@
 ---
-description: N / T / T6 蛋白质组差异分析（N vs T、T6 vs T；火山图 + 上调 GO/KEGG）
+description: N / T / T6 蛋白质组（DIA-NN report.pg_matrix；N vs T、T6 vs T）
 globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
 
 # N / T / T6 蛋白质组：差异蛋白、火山图、上调 GO/KEGG
 
-写或改 **蛋白质组** R 分析时按本规则。输入是强度矩阵（Excel/csv），不是 Cuffdiff。不要把 `TG_RNAseq_pipeline.R` 套到这份数据上。
+写或改 **蛋白质组** R 分析时按本规则。输入是 DIA-NN 矩阵，不是 Cuffdiff、也不是 Excel 定量表。不要把 `TG_RNAseq_pipeline.R` 套到这份数据上。
 
 ## 数据
 
 - 目录：`E:/R/protein T T6`（路径含空格；脚本与结果同目录；缺失则回退仓库根）
-- 按列名匹配样品强度（LFQ / intensity / abundance 等）；蛋白 ID（UniProt/accession）与基因符号各留一列
+- 首选 `report.pg_matrix`（可带 `.tsv`）：蛋白组（protein group）定量，差异蛋白、火山图、GO/KEGG 都用这一张
+- `report.pr_matrix` 是前体（precursor）矩阵，**不要**拿来做蛋白水平差异分析
+- 读成制表符分隔；ID 列优先 `Protein.Group` / `Protein.Ids`，基因列优先 `Genes`；样品列常是 raw/dia 路径，用文件名匹配 `N1`、`T6-1` 等
 - 三组**独立保留**，禁止合并或改名：
   - `N`（6）：`N1` `N2` `N3` `N5` `N7` `N10`（没有 N4/N6/N8/N9，不要补）
   - `T`（6）：`T1` `T2` `T3` `T4` `T5` `T6`
@@ -46,7 +48,7 @@ alwaysApply: true
 - 目录：`results/N_vs_T/`、`results/T6_vs_T/`；图标题带比较名
 
 ```r
-# ❌ BAD: 把样品 T6 当作 T6 组；N vs T 时混入 T6-1…T6-7
+# ❌ BAD: 用 report.pr_matrix 做蛋白 DE；把样品 T6 当作 T6 组
 # ❌ BAD: 未标准化就算 FC；GO/KEGG 用下调或全差异集
-# ✅ GOOD: 两组各一目录；limma 后火山图 + 仅上调蛋白 ORA_GO / ORA_KEGG
+# ✅ GOOD: 只读 report.pg_matrix；两组各一目录；limma 后火山图 + 仅上调 ORA
 ```
