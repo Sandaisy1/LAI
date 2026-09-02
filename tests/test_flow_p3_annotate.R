@@ -1,0 +1,191 @@
+# P3 cluster labels + shared P1 palette (run: Rscript tests/test_flow_p3_annotate.R)
+Sys.setenv(FLOW_FUNCTIONS_ONLY = "1")
+file_arg <- grep("^--file=", commandArgs(FALSE), value = TRUE)
+this_file <- if (length(file_arg)) sub("^--file=", "", file_arg[1]) else "tests/test_flow_p3_annotate.R"
+source(file.path(dirname(normalizePath(this_file)), "..", "Flow_dimred_pipeline.R"))
+
+fail <- function(msg) {
+  cat("FAIL:", msg, "\n")
+  quit(status = 1)
+}
+
+mk <- function(...) {
+  pops <- demo_means_p3()
+  extra <- list(...)
+  row <- pops[[1]]
+  row[] <- 0.2
+  for (nm in names(extra)) row[[nm]] <- extra[[nm]]
+  as.data.frame(t(row), stringsAsFactors = FALSE)
+}
+
+lab_of <- function(row) {
+  rownames(row) <- "C1"
+  annotate_clusters(row, "P3")$lineage
+}
+
+expect <- function(got, want, tag) {
+  if (!identical(got, want)) fail(sprintf("%s: got %s, want %s", tag, got, want))
+}
+
+expect(lab_of(mk(CD11B = 3.2, LY6G = 3.3, LY6C = 1.5)), "Neutrophil", "neu")
+expect(lab_of(mk(CD11B = 3.1, LY6C = 3.2, LY6G = 0.2, `F4/80` = 0.4)), "Mono_Ly6Chi", "ly6c-hi")
+expect(lab_of(mk(CD11B = 3.0, LY6C = 0.3, LY6G = 0.2, `F4/80` = 0.4)), "Mono_Ly6Clo", "ly6c-lo")
+expect(lab_of(mk(CD11B = 3.0, `F4/80` = 3.2, `I-A/I-E` = 1.8)), "Macrophage", "mac")
+expect(lab_of(mk(CD11B = 3.0, `F4/80` = 3.0, iNOS = 3.2, CD86 = 2.6)), "M1_like_Mac", "m1")
+expect(lab_of(mk(CD11B = 3.0, `F4/80` = 3.0, CD206 = 3.1, `ARG-1` = 2.8)), "M2_like_Mac", "m2")
+expect(lab_of(mk(CD11C = 3.2, `I-A/I-E` = 3.3, CD80 = 2.2, CD11B = 0.4)), "cDC2", "cdc2")
+expect(lab_of(mk(CD11C = 3.1, CD103 = 3.0, `I-A/I-E` = 3.0, CD11B = 0.4)), "cDC1_CD103", "cdc1")
+expect(lab_of(mk(`Siglec-F` = 3.2, CCR3 = 2.8, CD11B = 2.6, LY6G = 0.2)), "Eosinophil", "eos")
+expect(lab_of(mk(FceRI = 3.1, CD200R3 = 2.8, CD11B = 2.8)), "Mast", "mast")
+# CCR3 或 Siglec-F 单阳都不是嗜酸
+ccr3_only <- lab_of(mk(CCR3 = 3.2, `Siglec-F` = 0.2, CD11B = 2.4, LY6C = 0.3, `F4/80` = 0.4))
+if (identical(ccr3_only, "Eosinophil")) fail("CCR3-only must not be Eosinophil")
+siglec_only <- lab_of(mk(`Siglec-F` = 3.2, CCR3 = 0.2, CD11B = 2.4, LY6C = 0.3, `F4/80` = 0.4))
+if (identical(siglec_only, "Eosinophil")) fail("Siglec-F-only must not be Eosinophil")
+# TNF-a 不得把巨噬打成 M1
+expect(lab_of(mk(CD11B = 3.0, `F4/80` = 3.2, `TNF-a` = 3.0, iNOS = 0.2, `ARG-1` = 0.2)), "Macrophage", "tnfa-not-m1")
+expect(lab_of(mk(CD19 = 3.3, CD3 = 0.2, CD11B = 0.3)), "B", "dump-B")
+expect(lab_of(mk(CD3 = 3.2, CD19 = 0.2, CD11B = 0.3)), "T", "dump-T")
+expect(lab_of(mk(`NK1.1` = 3.2, CD3 = 0.2, CD11B = 0.3)), "NK", "dump-NK")
+# IL-10 / TGF-b 背景不得把巨噬打成 M2
+expect(lab_of(mk(CD11B = 3.0, `F4/80` = 3.2, `IL-10` = 2.8, `TGF-b` = 2.6, CD206 = 0.2, `ARG-1` = 0.2)), "Macrophage", "il10-not-m2")
+
+p2 <- c("Naive B", "Atypical B", "Unswitched memory B", "Switched memory B",
+        "MZ B", "Plasmablast", "Activated B", "Plasma")
+p2_cols <- unname(pal_celltype[p2])
+if (anyNA(p2_cols)) fail("P2 display colors missing for new subset names")
+if (length(unique(p2_cols)) < 6) fail("P2 colors collapsed to a purple ramp")
+if (!identical(unname(pal_celltype[["Naive B"]]), unname(pal_celltype[["CD4 naive"]]))) {
+  fail("P2 Naive B should reuse P1 CD4 naive hue")
+}
+if (!identical(unname(pal_celltype[["Eosinophil"]]), unname(pal_celltype[["CD4 activated"]]))) {
+  fail("P3 Eosinophil should reuse P1 red, not pumpkin orange")
+}
+if (identical(unname(pal_celltype[["Eosinophil"]]), "#D35400")) fail("old P3 orange still in palette")
+if (identical(unname(pal_celltype[["NK"]]), unname(pal_celltype[["CD4 activated"]]))) {
+  fail("P1 NK must not reuse CD4 activated red on the same tSNE")
+}
+if (identical(unname(pal_celltype[["NK activated"]]), unname(pal_celltype[["CD4 activated"]]))) {
+  fail("NK activated must be a distinct hue from CD4 activated")
+}
+if (identical(unname(pal_celltype[["CD4 NKT"]]), unname(pal_celltype[["CD4 T_CM"]]))) {
+  fail("CD4 NKT must not collide with CD4 T_CM")
+}
+cd8_fam <- pal_celltype[c("CD8 activated", "CD8 T_CM", "CD8 T_EM late", "CD8 naive", "CD8 T_EFF", "CD8 exhausted")]
+if (anyNA(cd8_fam)) fail("CD8 family colors missing")
+if (palette_min_rgb_dist(cd8_fam) < 80) fail("CD8 subset colors are too similar (need high-contrast hues, not a green ramp)")
+cd4_fam <- pal_celltype[c("CD4 activated", "CD4 T_EFF", "CD4 T_CM", "CD4 T_EM early", "CD4 T_EM late", "CD4 SLEC",
+                          "CD4 MPEC", "CD4 exhausted", "Treg", "CD4 naive")]
+if (anyNA(cd4_fam)) fail("CD4 family colors missing")
+if (palette_min_rgb_dist(cd4_fam) < 80) fail("CD4 subset colors are too similar (need high-contrast hues, not red/brown)")
+nk_fam <- pal_celltype[c("NK T_EFF", "NK activated", "NK immature", "NK DP", "NK mature", "NK exhausted", "NK")]
+if (anyNA(nk_fam)) fail("NK family colors missing")
+if (palette_min_rgb_dist(nk_fam) < 80) fail("NK subset colors are too similar (need high-contrast hues, not purple/pink)")
+nkt_fam <- pal_celltype[c("CD4 NKT", "DN NKT", "NKT activated", "NKT T_EFF")]
+if (anyNA(nkt_fam)) fail("NKT family colors missing")
+if (palette_min_rgb_dist(nkt_fam) < 80) fail("NKT subset colors are too similar (need high-contrast hues, not yellow/orange)")
+if (identical(unname(pal_celltype[["CD4 naive"]]), unname(pal_celltype[["CD4 MPEC"]]))) {
+  fail("CD4 naive and CD4 MPEC must not share a color")
+}
+
+set.seed(1)
+p2p <- demo_means_p2()
+f2 <- names(p2p[[1]])
+bp <- function(name, n) {
+  m <- matrix(unlist(p2p[[name]]), n, length(f2), byrow = TRUE)
+  colnames(m) <- f2
+  m + matrix(rnorm(n * length(f2), 0, 0.1), n)
+}
+m2 <- rbind(
+  bp("Naive_B", 100), bp("Plasma", 80), bp("Switched_B", 80),
+  bp("Activated_B", 80), bp("Unswitched_B", 80), bp("Plasmablast", 80),
+  bp("MZ_B", 80), bp("Atypical_B", 80)
+)
+h2 <- hierarchical_gate(m2, "P2")
+ok_maj <- c("Naive_B", "Unswitched_B", "Switched_B", "Atypical_B", "Plasma", "other")
+if (!all(h2$major %in% ok_maj)) {
+  fail(sprintf("P2 layer1 should be IgD/CD27 quadrants + CD19- Plasma (no BLIMP on CD19+), got %s",
+               paste(unique(h2$major), collapse = ",")))
+}
+cd19_pos <- which(m2[, "CD19"] > 1.5)
+if (any(h2$major[cd19_pos] %in% c("Plasma"))) {
+  fail("P2 layer1 must not use BLIMP to call Plasma on CD19+")
+}
+need2 <- c("Naive_B", "Unswitched_B", "Switched_B", "Plasma", "Plasmablast")
+miss2 <- setdiff(need2, unique(h2$subset))
+if (length(miss2)) fail(sprintf("P2 missing subsets: %s; got %s", paste(miss2, collapse = ","), paste(unique(h2$subset), collapse = ",")))
+if (length(unique(h2$subset)) < 5) fail(sprintf("P2 subsets too few: %s", paste(unique(h2$subset), collapse = ",")))
+# BLIMP-1 核背景不得把 Memory 整团打成 Plasma
+m2_bg <- m2
+m2_bg[, "BLIMP-1"] <- 2.2 + rnorm(nrow(m2_bg), 0, 0.08)
+h2_bg <- hierarchical_gate(m2_bg, "P2")
+if (mean(h2_bg$subset == "Plasma") > 0.35) {
+  fail(sprintf("P2 BLIMP background collapsed to Plasma: %s", paste(unique(h2_bg$subset), collapse = ",")))
+}
+if (length(unique(h2_bg$subset)) < 4) {
+  fail(sprintf("P2 BLIMP background should still split subsets, got %s", paste(unique(h2_bg$subset), collapse = ",")))
+}
+
+p3p <- demo_means_p3()
+f3 <- names(p3p[[1]])
+bp3 <- function(name, n) {
+  m <- matrix(unlist(p3p[[name]]), n, length(f3), byrow = TRUE)
+  colnames(m) <- f3
+  m + matrix(rnorm(n * length(f3), 0, 0.1), n)
+}
+m3 <- rbind(
+  bp3("Neutrophil", 80), bp3("Eosinophil", 80), bp3("Macrophage", 80),
+  bp3("M1_like", 70), bp3("M2_like", 70), bp3("DC", 80), bp3("cDC1", 70),
+  bp3("Mono_Ly6Chi", 80), bp3("Mast", 80)
+)
+h3 <- hierarchical_gate(m3, "P3")
+if (sum(h3$major == "Myeloid") < 0.8 * nrow(m3)) fail("P3 layer1 should be mostly Myeloid")
+need3 <- c("Neutrophil", "M1_like_Mac", "M2_like_Mac", "Mast", "cDC1_CD103", "cDC2")
+miss3 <- setdiff(need3, unique(h3$subset))
+if (length(miss3)) {
+  fail(sprintf("P3 missing subsets: %s; got %s", paste(miss3, collapse = ","), paste(unique(h3$subset), collapse = ",")))
+}
+if (length(unique(h3$subset)) < 6) fail(sprintf("P3 subsets too few: %s", paste(unique(h3$subset), collapse = ",")))
+# Ly6C 中阳的中性粒不得并成 Ly6C hi 单核
+set.seed(4)
+neu_ly6c <- bp3("Neutrophil", 100)
+neu_ly6c[, "LY6C"] <- 2.8 + rnorm(100, 0, 0.08)
+h_neu <- hierarchical_gate(rbind(neu_ly6c, bp3("Mono_Ly6Chi", 100)), "P3")
+if (mean(h_neu$subset[seq_len(100)] == "Neutrophil") < 0.7) {
+  fail(sprintf("Ly6C-int neutrophils swallowed: %s", paste(unique(h_neu$subset), collapse = ",")))
+}
+# MHCII+ 巨噬不得整团并成 DC，否则后面没有 M1/M2
+set.seed(5)
+mac_mhc <- bp3("Macrophage", 80)
+mac_mhc[, "I-A/I-E"] <- 3.0 + rnorm(80, 0, 0.08)
+h_mac <- hierarchical_gate(rbind(mac_mhc, bp3("DC", 80), bp3("M1_like", 70), bp3("M2_like", 70)), "P3")
+mac_labs <- c("Macrophage", "M1_like_Mac", "M2_like_Mac")
+if (mean(h_mac$subset[seq_len(80)] %in% mac_labs) < 0.5) {
+  fail(sprintf("MHCII macrophages swallowed by DC: %s", paste(unique(h_mac$subset[seq_len(80)]), collapse = ",")))
+}
+if (!all(c("M1_like_Mac", "M2_like_Mac") %in% unique(h_mac$subset))) {
+  fail(sprintf("P3 M1/M2 missing after MHCII macs, got %s", paste(unique(h_mac$subset), collapse = ",")))
+}
+
+set.seed(8)
+cells_act <- data.frame(
+  sample = rep(c("EV1", "EV2", "EV3", "H1", "H2", "H3"), each = 40),
+  bio_sample = rep(c("EV1", "EV2", "EV3", "H1", "H2", "H3"), each = 40),
+  group = rep(c("EV", "EV", "EV", "H", "H", "H"), each = 40),
+  lineage = "Macrophage",
+  CD40 = rnorm(240, 1.1, 0.2),
+  CD80 = rnorm(240, 0.8, 0.2),
+  CD86 = rnorm(240, 1.0, 0.2),
+  `TNF-a` = rnorm(240, 0.6, 0.15),
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+td <- tempfile("p3_act")
+dir.create(td)
+export_p3_activation_stats(cells_act, td)
+if (!file.exists(file.path(td, "P3_APC_activation_by_sample.csv"))) {
+  fail("P3 activation MFI table missing")
+}
+unlink(td, recursive = TRUE)
+
+cat("OK: P3 labels and P1-shared palette\n")

@@ -1,0 +1,453 @@
+# Internation cell immune：His+ 靶细胞 + P1/P3（不改原 Flow_* 流程）
+# run: Rscript tests/test_ici_flow.R
+Sys.setenv(FLOW_FUNCTIONS_ONLY = "1", ICI_FUNCTIONS_ONLY = "1")
+Sys.setenv(ICI_FLOW_DIR = tempfile("ici_flow_"))
+dir.create(Sys.getenv("ICI_FLOW_DIR"), recursive = TRUE, showWarnings = FALSE)
+file_arg <- grep("^--file=", commandArgs(FALSE), value = TRUE)
+this_file <- if (length(file_arg)) sub("^--file=", "", file_arg[1]) else "tests/test_ici_flow.R"
+root <- dirname(dirname(normalizePath(this_file)))
+source(file.path(root, "ICI_Flow_dimred_pipeline.R"))
+
+fail <- function(msg) {
+  cat("FAIL:", msg, "\n")
+  quit(status = 1)
+}
+expect <- function(got, want, tag) {
+  if (!identical(got, want)) {
+    fail(sprintf("%s: got %s, want %s", tag, paste(got, collapse = ","), paste(want, collapse = ",")))
+  }
+}
+
+# 原 flow_panel_map.json 不得被 ICI 染色表改掉（P1 仍是 25 色，FITC=Perforin）
+orig_json <- jsonlite::fromJSON(file.path(root, "flow_panel_map.json"), simplifyVector = FALSE)
+orig_p1 <- vapply(orig_json$panels$P1$markers, function(x) x$marker, character(1))
+if (length(orig_p1) != 25L) {
+  fail(sprintf("original P1 must stay 25 markers, got %s", length(orig_p1)))
+}
+orig_fitc <- orig_json$panels$P1$markers[[match("Perforin", orig_p1)]]$fluorochrome
+expect(orig_fitc, "FITC", "original P1 Perforin remains FITC")
+if ("His" %in% orig_p1) fail("original P1 must not gain His")
+orig_p2 <- vapply(orig_json$panels$P2$markers, function(x) x$marker, character(1))
+if ("His" %in% orig_p2) fail("original P2 must not gain His")
+if (!("IgD" %in% orig_p2)) fail("original P2 still has IgD")
+
+ici_json <- jsonlite::fromJSON(file.path(root, "ICI_flow_panel_map.json"), simplifyVector = FALSE)
+ici_p1 <- vapply(ici_json$panels$P1$markers, function(x) x$marker, character(1))
+ici_p3 <- vapply(ici_json$panels$P3$markers, function(x) x$marker, character(1))
+if (length(ici_p1) != 14L) fail(sprintf("ICI P1 should have 14 markers, got %s", length(ici_p1)))
+if (length(ici_p3) != 20L) fail(sprintf("ICI P3 should have 20 markers, got %s", length(ici_p3)))
+if (is.null(ici_json$panels$P2)) fail("ICI map must include Panel 2 (B + His)")
+ici_p2 <- vapply(ici_json$panels$P2$markers, function(x) x$marker, character(1))
+if (length(ici_p2) != 7L) fail(sprintf("ICI P2 should have 7 markers, got %s", length(ici_p2)))
+if ("IgD" %in% ici_p2) fail("ICI P2 must not include IgD")
+if ("BLIMP-1" %in% ici_p2 || "CD40" %in% ici_p2) fail("ICI P2 must not include BLIMP-1/CD40")
+expect(ici_json$panels$P1$markers[[match("His", ici_p1)]]$fluorochrome, "FITC", "ICI P1 His-FITC")
+expect(ici_json$panels$P2$markers[[match("His", ici_p2)]]$fluorochrome, "FITC", "ICI P2 His-FITC")
+expect(ici_json$panels$P2$markers[[match("IgM", ici_p2)]]$fluorochrome, "RB780", "ICI P2 IgM-RB780")
+expect(ici_json$panels$P2$markers[[match("IgG", ici_p2)]]$fluorochrome, "RB613", "ICI P2 IgG-RB613")
+expect(ici_json$panels$P3$markers[[match("His", ici_p3)]]$fluorochrome, "FITC", "ICI P3 His-FITC")
+expect(ici_json$panels$P3$markers[[match("CD80", ici_p3)]]$fluorochrome, "BUV496", "ICI P3 CD80-BUV496")
+expect(ici_json$panels$P3$markers[[match("NK1.1", ici_p3)]]$fluorochrome, "R718", "ICI P3 NK1.1-R718")
+expect(ici_json$qc$require_cd45, FALSE, "ICI QC must not require CD45")
+expect(ici_json$qc$analysis_parent, "His", "ICI analysis parent is His-FITC+")
+expect(ici_json$qc$require_lymph_scatter, TRUE, "ICI QC uses lymph scatter like immune dimred")
+
+# 当前 session 的 panel_map 应是 ICI 表
+expect(panel_map$panels$P1$markers[[match("His", vapply(panel_map$panels$P1$markers, function(x) x$marker, character(1)))]]$fluorochrome,
+       "FITC", "loaded ICI His-FITC")
+p3_mk <- vapply(panel_map$panels$P3$markers, function(x) x$marker, character(1))
+expect(panel_map$panels$P3$markers[[match("CD80", p3_mk)]]$fluorochrome, "BUV496", "loaded ICI CD80")
+expect(panel_map$panels$P3$markers[[match("NK1.1", p3_mk)]]$fluorochrome, "R718", "loaded ICI NK1.1")
+
+# 通道：His←FITC；P3 CD80←BUV496；P3 NK1.1←R718（Cytek 常把 AF700 写成 R718）
+cytek_p1 <- c(
+  "FSC-A", "SSC-A", "FVS450-A", "V500-A", "BUV496-A", "BUV805-A", "RB744-A",
+  "RB670-A", "RY586-A", "PE-A", "AF700-A", "APC-Cy7-A", "RY703-A", "RB613-A",
+  "PE-EF610-A", "FITC-A"
+)
+map1 <- match_channels(cytek_p1, rep("", length(cytek_p1)), "P1")
+expect(map1$channel[map1$marker == "His"], "FITC-A", "P1 His<-FITC-A")
+expect(map1$channel[map1$marker == "CD4"], "BUV496-A", "P1 CD4<-BUV496-A")
+expect(map1$channel[map1$marker == "NK1.1"], "AF700-A", "P1 NK1.1<-AF700-A")
+
+cytek_p3 <- c(
+  "FSC-A", "SSC-A", "FVS450-A", "V500-A", "BUV805-A", "RB705-A", "RB670-A",
+  "BUV496-A", "APC-Cy7-A", "BV750-A", "R718-A", "BUV737-A", "BV605-A",
+  "RY703-A", "RY775-A", "RB744-A", "RB613-A", "AF647-A", "BUV661-A",
+  "BV786-A", "FITC-A", "PE-EF610-A"
+)
+map3 <- match_channels(cytek_p3, rep("", length(cytek_p3)), "P3")
+expect(map3$channel[map3$marker == "His"], "FITC-A", "P3 His<-FITC-A")
+expect(map3$channel[map3$marker == "CD80"], "BUV496-A", "P3 CD80<-BUV496-A")
+expect(map3$channel[map3$marker == "NK1.1"], "R718-A", "P3 NK1.1<-R718-A")
+expect(map3$channel[map3$marker == "FceRI"], "PE-EF610-A", "P3 FceRI<-PE-EF610-A")
+
+cytek_p2 <- c(
+  "FSC-A", "SSC-A", "FVS450-A", "V500-A", "BV750-A", "BV605-A",
+  "RB613-A", "RB780-A", "FITC-A"
+)
+map2 <- match_channels(cytek_p2, rep("", length(cytek_p2)), "P2")
+expect(map2$channel[map2$marker == "His"], "FITC-A", "P2 His<-FITC-A")
+expect(map2$channel[map2$marker == "IgM"], "RB780-A", "P2 IgM<-RB780-A")
+expect(map2$channel[map2$marker == "IgG"], "RB613-A", "P2 IgG<-RB613-A")
+expect(map2$channel[map2$marker == "CD19"], "BV750-A", "P2 CD19<-BV750-A")
+expect(map2$channel[map2$marker == "CD27"], "BV605-A", "P2 CD27<-BV605-A")
+
+# 文件名：EV-1 / H-3 / ZZX-EV-1；P2 要能解析；不要把 P3 的 3 当成技术重复
+ev <- parse_fcs_filename("EV-1_P1_unmixed.fcs")
+if (is.null(ev) || !identical(ev$group, "EV") || !identical(ev$sample, "EV-1") ||
+    !identical(ev$bio_sample, "EV-1") || !identical(ev$panel, "P1") ||
+    !identical(ev$replicate, "1")) {
+  fail(sprintf("EV-1_P1_unmixed.fcs -> EV-1 P1, got group=%s sample=%s panel=%s",
+               if (is.null(ev)) "NULL" else ev$group,
+               if (is.null(ev)) "NULL" else ev$sample,
+               if (is.null(ev)) "NULL" else ev$panel))
+}
+zzx <- parse_fcs_filename("ZZX-EV-1_P1_unmixed.fcs")
+if (is.null(zzx) || !identical(zzx$group, "EV") || !identical(zzx$sample, "EV-1") ||
+    !identical(zzx$panel, "P1")) {
+  fail("ZZX-EV-1_P1_unmixed.fcs should parse as EV sample EV-1")
+}
+hh <- parse_fcs_filename("H-3_P3_unmixed.fcs")
+if (is.null(hh) || !identical(hh$group, "H") || !identical(hh$sample, "H-3") ||
+    !identical(hh$panel, "P3") || !is.na(hh$tech_rep)) {
+  fail(sprintf("H-3_P3 must be bio H-3 with no tech rep, got sample=%s tech=%s panel=%s",
+               if (is.null(hh)) "NULL" else hh$sample,
+               if (is.null(hh)) "NULL" else hh$tech_rep,
+               if (is.null(hh)) "NULL" else hh$panel))
+}
+h1 <- parse_fcs_filename("ZZX-H-2_P3_unmixed.fcs")
+if (is.null(h1) || !identical(h1$group, "H") || !identical(h1$sample, "H-2")) {
+  fail("ZZX-H-2_P3_unmixed.fcs should parse as H sample H-2")
+}
+p2f <- parse_fcs_filename("ZZX-EV-1_P2_unmixed.fcs")
+if (is.null(p2f) || !identical(p2f$panel, "P2") || !identical(p2f$sample, "EV-1")) {
+  fail("ZZX-EV-1_P2_unmixed.fcs should parse as EV-1 P2")
+}
+if (!is.null(parse_fcs_filename("ZZX_EV1-1_P1_unmixed.fcs")) &&
+    identical(parse_fcs_filename("ZZX_EV1-1_P1_unmixed.fcs")$group, "H")) {
+  fail("EV must not parse as H")
+}
+
+# QC：去粘连体 + 淋巴散射（P1 紧 / P2 宽 / P3 无）+ 活死；不因 CD45- 丢掉小淋巴。大体积细胞走 P1 淋巴门会去掉。
+set.seed(7)
+n_leu <- 200L
+n_large <- 40L
+n_small_neg <- 40L
+n_dead <- 15L
+exprs_qc <- cbind(
+  `FSC-A` = c(
+    rnorm(n_leu, 80000, 4000),
+    rnorm(n_large, 140000, 5000),
+    rnorm(n_small_neg, 80000, 4000),
+    rnorm(n_dead, 80000, 4000)
+  ),
+  `SSC-A` = c(
+    rnorm(n_leu, 20000, 2000),
+    rnorm(n_large, 70000, 4000),
+    rnorm(n_small_neg, 20000, 2000),
+    rnorm(n_dead, 20000, 2000)
+  ),
+  `FSC-H` = c(
+    rnorm(n_leu, 80000, 4000),
+    rnorm(n_large, 140000, 5000),
+    rnorm(n_small_neg, 80000, 4000),
+    rnorm(n_dead, 80000, 4000)
+  ),
+  `L/D` = c(
+    rnorm(n_leu + n_large + n_small_neg, 200, 30),
+    rnorm(n_dead, 8000, 200)
+  ),
+  CD45 = c(
+    rnorm(n_leu, 12000, 800),
+    rnorm(n_large, 80, 20),
+    rnorm(n_small_neg, 80, 20),
+    rnorm(n_dead, 12000, 800)
+  )
+)
+map_qc <- data.frame(
+  marker = c("L/D", "CD45"),
+  channel_index = c(4L, 5L),
+  stringsAsFactors = FALSE
+)
+chn <- colnames(exprs_qc)
+keep_ici <- qc_filter_matrix(exprs_qc, chn, map_qc, "P1")
+keep_cd45 <- qc_filter_matrix_flow(exprs_qc, chn, map_qc, "P1")
+keep_p3 <- qc_filter_matrix(exprs_qc, chn, map_qc, "P3")
+leu_idx <- seq_len(n_leu)
+large_idx <- seq.int(n_leu + 1L, n_leu + n_large)
+small_neg_idx <- seq.int(n_leu + n_large + 1L, n_leu + n_large + n_small_neg)
+dead_idx <- seq.int(n_leu + n_large + n_small_neg + 1L, nrow(exprs_qc))
+if (mean(keep_ici[leu_idx]) < 0.7) {
+  fail(sprintf("ICI P1 QC must keep lymphocytes, kept %s", mean(keep_ici[leu_idx])))
+}
+if (mean(keep_ici[large_idx]) > 0.4) {
+  fail(sprintf("ICI P1 lymph gate must drop large-FSC cells, kept %s", mean(keep_ici[large_idx])))
+}
+if (mean(keep_ici[small_neg_idx]) < 0.7) {
+  fail(sprintf("ICI QC must keep small CD45- live cells (His parent is later), kept %s",
+               mean(keep_ici[small_neg_idx])))
+}
+if (mean(keep_cd45[small_neg_idx]) > 0.4) {
+  fail("CD45+ QC should drop small CD45- cells; ICI must not use that as the parent")
+}
+if (mean(keep_ici[dead_idx]) > 0.3) {
+  fail("ICI QC must drop dead cells")
+}
+if (mean(keep_p3[large_idx]) < 0.5) {
+  fail(sprintf("ICI P3 must not apply a tight lymph gate, kept large cells %s",
+               mean(keep_p3[large_idx])))
+}
+
+# His+ 母群：His- 不进入分析；图上全是 His+，不再单列 His+ target 亚群；His+ CD4 仍是 CD4
+set.seed(11)
+n <- 70L
+mk_block <- function(his, cd45, cd3, cd4, cd8 = 0.2, nkp = 0.2) {
+  cbind(
+    His = rnorm(n, his, 0.12),
+    CD45 = rnorm(n, cd45, 0.12),
+    CD3 = rnorm(n, cd3, 0.12),
+    CD4 = rnorm(n, cd4, 0.12),
+    CD8 = rnorm(n, cd8, 0.08),
+    CD19 = rnorm(n, 0.2, 0.08),
+    CD11B = rnorm(n, 0.2, 0.08),
+    NKp46 = rnorm(n, nkp, 0.08),
+    `NK1.1` = rnorm(n, nkp, 0.08),
+    CD62L = rnorm(n, 3.1, 0.12),
+    CD44 = rnorm(n, 0.3, 0.1),
+    CD25 = rnorm(n, 0.3, 0.1),
+    CD69 = rnorm(n, 0.3, 0.1)
+  )
+}
+mat <- rbind(
+  mk_block(3.2, 0.3, 0.2, 0.2),
+  mk_block(3.2, 3.0, 3.2, 3.0),
+  mk_block(0.3, 3.0, 3.2, 3.0)
+)
+h <- hierarchical_gate(mat, "P1")
+tgt <- seq_len(n)
+his_t <- seq.int(n + 1L, 2L * n)
+his_neg_t <- seq.int(2L * n + 1L, 3L * n)
+if (any(h$major %in% c("Target", "His_target")) || any(h$subset %in% c("Target", "His_target"))) {
+  fail("must not invent a His+ target subset; plotted cells are already His+")
+}
+if (mean(h$major[his_t] == "CD4") < 0.8) {
+  fail(sprintf("His+ CD3+ CD4+ should stay CD4, got %s",
+               paste(unique(h$major[his_t]), collapse = ",")))
+}
+his_parent <- ici_filter_his_parent(mat)
+if (mean(his_parent$keep[c(tgt, his_t)]) < 0.85) {
+  fail("His+ cells must remain in the His-FITC+ parent")
+}
+if (mean(his_parent$keep[his_neg_t]) > 0.2) {
+  fail("His- cells must be dropped from the His-FITC+ parent")
+}
+
+h_t_only <- hierarchical_gate(mk_block(3.2, 3.0, 3.2, 3.0), "P1")
+if (any(h_t_only$major %in% c("Target", "His_target")) || mean(h_t_only$major == "CD4") < 0.85) {
+  fail(sprintf("His+ CD4 tube must stay CD4, got %s",
+               paste(unique(h_t_only$major), collapse = ",")))
+}
+expect(celltype_label("Target", "P1"), "other", "old Target label maps to other")
+if (!isFALSE(flow_trim_bio_extremes)) {
+  fail("ICI must keep n=3; do not drop extreme bio-reps")
+}
+
+# ICI P1 没有 CD19：缺列不得把 is_t 弄成 NA 然后 Panel P1 failed
+mat_no_cd19 <- mat[, setdiff(colnames(mat), "CD19"), drop = FALSE]
+h_no19 <- tryCatch(hierarchical_gate(mat_no_cd19, "P1"), error = function(e) e)
+if (inherits(h_no19, "error")) {
+  fail(sprintf("P1 without CD19 must not crash: %s", h_no19$message))
+}
+if (any(h_no19$major %in% c("Target", "His_target"))) {
+  fail("P1 without CD19 must not invent a His+ target subset")
+}
+if (mean(h_no19$major[his_t] == "CD4") < 0.8) {
+  fail(sprintf("His+ CD45+ T should stay CD4 without CD19, got %s",
+               paste(unique(h_no19$major[his_t]), collapse = ",")))
+}
+
+# ICI P2：CD19 母门 + CD27×IgM/IgG（无 IgD）；未圈中的 His+ 是 other，不是 His+ target
+set.seed(19)
+n2 <- 50L
+p2_block <- function(cd19, cd27, igm, igg, his = 0.3, cd45 = 3.0) {
+  cbind(
+    CD19 = rnorm(n2, cd19, 0.1),
+    CD27 = rnorm(n2, cd27, 0.1),
+    IgM = rnorm(n2, igm, 0.1),
+    IgG = rnorm(n2, igg, 0.1),
+    His = rnorm(n2, his, 0.1),
+    CD45 = rnorm(n2, cd45, 0.1)
+  )
+}
+mat_p2 <- rbind(
+  p2_block(3.2, 0.3, 2.4, 0.2),
+  p2_block(3.1, 3.0, 2.8, 0.2),
+  p2_block(3.0, 2.8, 0.3, 3.1),
+  p2_block(0.2, 0.3, 0.2, 0.2, his = 3.2, cd45 = 0.3)
+)
+hp2 <- hierarchical_gate(mat_p2, "P2")
+if (mean(hp2$subset[seq_len(n2)] %in% c("Naive_B", "MZ_B")) < 0.7) {
+  fail(sprintf("ICI P2 CD27- CD19+ should be Naive_B (or MZ if IgM-high), got %s",
+               paste(unique(hp2$subset[seq_len(n2)]), collapse = ",")))
+}
+if (mean(hp2$subset[seq.int(n2 + 1L, 2L * n2)] %in% c("Unswitched_B", "MZ_B")) < 0.7) {
+  fail(sprintf("ICI P2 CD27+ IgG- should be Unswitched_B (or MZ if IgM-high), got %s",
+               paste(unique(hp2$subset[seq.int(n2 + 1L, 2L * n2)]), collapse = ",")))
+}
+if (mean(hp2$subset[seq.int(2L * n2 + 1L, 3L * n2)] == "Switched_B") < 0.7) {
+  fail(sprintf("ICI P2 CD27+ IgG+ should be Switched_B, got %s",
+               paste(unique(hp2$subset[seq.int(2L * n2 + 1L, 3L * n2)]), collapse = ",")))
+}
+if (any(hp2$major %in% c("Target", "His_target")) || any(hp2$subset %in% c("Target", "His_target"))) {
+  fail("ICI P2 must not invent a His+ target subset")
+}
+if (mean(hp2$subset[seq.int(3L * n2 + 1L, 4L * n2)] %in% c("other", "Other", "Naive_B")) < 0.5 &&
+    mean(hp2$major[seq.int(3L * n2 + 1L, 4L * n2)] == "other") < 0.5) {
+  leftover_p2 <- unique(c(hp2$major[seq.int(3L * n2 + 1L, 4L * n2)],
+                          hp2$subset[seq.int(3L * n2 + 1L, 4L * n2)]))
+  if (any(leftover_p2 %in% c("Target", "His_target", "His+ target"))) {
+    fail("ICI P2 CD19- leftover must not be His+ target")
+  }
+}
+p2_specs <- subset_plot_specs("P2")
+p2_xy <- vapply(p2_specs, function(s) paste(s$x, s$y, sep = "/"), character(1))
+if (any(grepl("IgD", p2_xy))) fail("ICI P2 subset plots must not require IgD")
+if (any(grepl("BLIMP", p2_xy))) fail("ICI P2 subset plots must not require BLIMP-1")
+
+# 缺 CD19 可以不画 B 门，但不能跳过 NK 等其余亚群图
+set.seed(3)
+mk_ici <- function(sample, group, lineage, n, cd3, nk11) {
+  data.frame(
+    sample = rep(sample, n),
+    group = rep(group, n),
+    lineage = rep(lineage, n),
+    cluster_lineage = rep(if (lineage == "NK") "NK" else "CD4", n),
+    CD3 = rnorm(n, cd3, 0.25),
+    `NK1.1` = rnorm(n, nk11, 0.25),
+    NKp46 = rnorm(n, nk11, 0.25),
+    His = rnorm(n, 0.3, 0.1),
+    CD45 = rnorm(n, 3.0, 0.1),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+}
+cells_skip <- rbind(
+  mk_ici("EV-1", "EV", "NK", 80, 0.2, 3.1),
+  mk_ici("EV-1", "EV", "CD4_naive", 120, 3.0, 0.3),
+  mk_ici("EV-2", "EV", "NK", 70, 0.2, 3.1),
+  mk_ici("EV-2", "EV", "CD4_naive", 130, 3.0, 0.3),
+  mk_ici("EV-3", "EV", "NK", 90, 0.2, 3.1),
+  mk_ici("EV-3", "EV", "CD4_naive", 110, 3.0, 0.3),
+  mk_ici("H-1", "H", "NK", 30, 0.2, 3.1),
+  mk_ici("H-1", "H", "CD4_naive", 170, 3.0, 0.3),
+  mk_ici("H-2", "H", "NK", 35, 0.2, 3.1),
+  mk_ici("H-2", "H", "CD4_naive", 165, 3.0, 0.3),
+  mk_ici("H-3", "H", "NK", 28, 0.2, 3.1),
+  mk_ici("H-3", "H", "CD4_naive", 172, 3.0, 0.3)
+)
+td_skip <- tempfile("ici_skip_chan")
+dir.create(td_skip, recursive = TRUE)
+ok_skip <- tryCatch({
+  export_subset_gate_figures(cells_skip, "P1", td_skip)
+  TRUE
+}, error = function(e) {
+  cat("ICI missing-CD19 subset export crashed:", e$message, "\n")
+  FALSE
+})
+if (!isTRUE(ok_skip)) fail("missing CD19 must not abort the rest of ICI subset figures")
+if (!file.exists(file.path(td_skip, "subset_stats", "P1_NK_H_vs_EV.pdf"))) {
+  fail("ICI: missing CD19 must not skip NK subset plots")
+}
+if (file.exists(file.path(td_skip, "subset_stats", "P1_B_H_vs_EV.pdf"))) {
+  fail("ICI: B subset plot should be omitted without CD19, not crash")
+}
+unlink(td_skip, recursive = TRUE)
+
+# Cytek 有时把 AF700 写成 Y710-A
+cytek_p1_y710 <- c(
+  "FSC-A", "SSC-A", "FVS450-A", "V500-A", "BUV496-A", "BUV805-A", "RB744-A",
+  "RB670-A", "RY586-A", "PE-A", "Y710-A", "APC-Cy7-A", "RY703-A", "RB613-A",
+  "PE-EF610-A", "FITC-A"
+)
+map_y <- match_channels(cytek_p1_y710, rep("", length(cytek_p1_y710)), "P1")
+expect(map_y$channel[map_y$marker == "NK1.1"], "Y710-A", "P1 NK1.1<-Y710-A")
+
+if (!identical(dimred_major_of("P1", c("Target", NA_character_, "CD4_naive")),
+               c("other", "other", "CD4"))) {
+  fail("NA lineage must not crash dimred_major_of; old Target maps to other")
+}
+
+cells_hm <- data.frame(
+  lineage = c(rep("Target", 20), rep("CD4_naive", 20), rep("NK", 20)),
+  cluster_lineage = c(rep("Target", 20), rep("CD4", 20), rep("NK", 20)),
+  His = c(rnorm(20, 3.2, 0.1), rnorm(20, 0.3, 0.1), rnorm(20, 0.3, 0.1)),
+  CD45 = c(rnorm(20, 0.3, 0.1), rnorm(20, 3.0, 0.1), rnorm(20, 3.0, 0.1)),
+  CD3 = c(rnorm(20, 0.2, 0.1), rnorm(20, 3.1, 0.1), rnorm(20, 0.2, 0.1)),
+  `NK1.1` = c(rnorm(20, 0.2, 0.1), rnorm(20, 0.2, 0.1), rnorm(20, 3.1, 0.1)),
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+med_ici <- lineage_median_matrix(cells_hm, "P1", "subset")
+if (!is.null(med_ici) && "His+ target" %in% rownames(med_ici)) {
+  fail("ICI annotation heatmap must not invent a His+ target subset")
+}
+if (is.null(med_ici) || !("CD4 naive" %in% rownames(med_ici)) || !("NK" %in% rownames(med_ici))) {
+  fail("ICI annotation heatmap must still show immune subsets")
+}
+td_ici_hm <- tempfile("ici_annot_hm")
+dir.create(td_ici_hm, recursive = TRUE)
+export_annotation_heatmaps(cells_hm, "P1", td_ici_hm)
+if (!file.exists(file.path(td_ici_hm, "P1_annotation_heatmap.pdf"))) {
+  fail("ICI annotation heatmap pdf missing")
+}
+unlink(td_ici_hm, recursive = TRUE)
+
+# 两套方案完全独立：ICI 不得 source / 查找免疫亚群的 Flow_dimred_pipeline.R
+ici_bundle <- c(
+  "ICI_Flow_dimred_pipeline.R",
+  "ICI_flow_engine.R",
+  "ICI_flow_panel_map.json",
+  "ICI_Flow_dimred_all_subsets.R",
+  "ICI_Flow_dimred_trajectory.R",
+  "ICI_Flow_dimred_functional_state.R"
+)
+for (nm in ici_bundle) {
+  if (!file.exists(file.path(root, nm))) {
+    fail(sprintf("target-cell scheme must ship %s (do not borrow Flow_* from fuction of cell)", nm))
+  }
+}
+if (exists("original_flow_pipeline_candidates", mode = "function") ||
+    exists("find_original_flow_pipeline", mode = "function")) {
+  fail("ICI must not look up Flow_dimred_pipeline.R in the immune-subset folder")
+}
+if (exists("load_ici_engine", mode = "function")) {
+  engine_body <- paste(deparse(load_ici_engine), collapse = "\n")
+  if (!grepl("ICI_flow_engine\\.R", engine_body)) {
+    fail("load_ici_engine must load ICI_flow_engine.R")
+  }
+  if (grepl("source\\([^)]*Flow_dimred_pipeline\\.R", engine_body) ||
+      grepl("pipe <- \"Flow_dimred_pipeline\\.R\"", engine_body)) {
+    fail("load_ici_engine must source ICI_flow_engine.R only, never Flow_dimred_pipeline.R")
+  }
+}
+for (nm in ici_bundle[grepl("\\.R$", ici_bundle)]) {
+  txt <- paste(readLines(file.path(root, nm), warn = FALSE), collapse = "\n")
+  if (grepl('source\\([\'"]Flow_dimred_pipeline\\.R[\'"]', txt)) {
+    fail(sprintf("%s must not source Flow_dimred_pipeline.R", nm))
+  }
+}
+engine_txt <- paste(readLines(file.path(root, "ICI_flow_engine.R"), warn = FALSE), collapse = "\n")
+if (grepl("flow_panel_map\\.json", engine_txt) &&
+    !grepl("ICI_flow_panel_map\\.json", engine_txt)) {
+  fail("ICI_flow_engine.R must read ICI_flow_panel_map.json, not flow_panel_map.json")
+}
+if (grepl("E:/R/fuction of cell", engine_txt) &&
+    grepl("flow_primary_data_dir\\s*<-\\s*\"E:/R/fuction of cell\"", engine_txt)) {
+  fail("ICI_flow_engine.R must not use E:/R/fuction of cell as the data directory")
+}
+if (!isFALSE(flow_trim_bio_extremes)) {
+  fail("ICI must keep all n=3 bio-reps (flow_trim_bio_extremes = FALSE)")
+}
+
+cat("PASS test_ici_flow.R\n")

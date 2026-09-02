@@ -1,0 +1,445 @@
+# P1 T/NK subset labels (run: Rscript tests/test_flow_p1_annotate.R)
+Sys.setenv(FLOW_FUNCTIONS_ONLY = "1")
+file_arg <- grep("^--file=", commandArgs(FALSE), value = TRUE)
+this_file <- if (length(file_arg)) sub("^--file=", "", file_arg[1]) else "tests/test_flow_p1_annotate.R"
+source(file.path(dirname(normalizePath(this_file)), "..", "Flow_dimred_pipeline.R"))
+
+fail <- function(msg) {
+  cat("FAIL:", msg, "\n")
+  quit(status = 1)
+}
+expect <- function(got, want, tag) {
+  if (!identical(got, want)) fail(sprintf("%s: got %s, want %s", tag, got, want))
+}
+
+mk <- function(...) {
+  pops <- demo_means_p1()
+  row <- pops[[1]]
+  row[] <- 0.2
+  extra <- list(...)
+  for (nm in names(extra)) row[[nm]] <- extra[[nm]]
+  as.data.frame(t(row), stringsAsFactors = FALSE)
+}
+lab_of <- function(row) {
+  rownames(row) <- "C1"
+  annotate_clusters(row, "P1")$lineage
+}
+
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 3.2, CD44 = 0.3)), "CD4_naive", "cd4-naive")
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 2.8, CD44 = 2.8)), "CD4_TCM", "cd4-tcm")
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.1)), "CD4_TEM_late", "cd4-tem-late")
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 2.8, CD44 = 2.8, CD27 = 3.1, CD95 = 3.0)), "CD4_TSCM", "cd4-tscm")
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.1, CD27 = 3.0, `SCA-1` = 0.3)), "CD4_MPEC", "cd4-mpec")
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.1, `SCA-1` = 3.1)), "CD4_SLEC", "cd4-slec")
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.1, `LAG-3` = 3.0, `TIM-3` = 2.8, `PD-L1` = 2.8)), "CD4_exhausted", "cd4-exh")
+expect(celltype_label("CD4_TCM", "P1"), "CD4 T_CM", "label-cd4-tcm")
+expect(celltype_label("CD4_TSCM", "P1"), "CD4 T_SCM", "label-cd4-tscm")
+expect(celltype_label("CD4_TEM", "P1"), "CD4 T_EM", "label-cd4-tem")
+expect(celltype_label("CD4_effector", "P1"), "CD4 T_EFF", "label-cd4-teff")
+expect(celltype_label("CD8_TCM", "P1"), "CD8 T_CM", "label-cd8-tcm")
+expect(celltype_label("CD8_TEM", "P1"), "CD8 T_EM", "label-cd8-tem")
+expect(celltype_label("CD8_effector", "P1"), "CD8 T_EFF", "label-cd8-teff")
+expect(celltype_label("CD8_SLEC", "P1"), "CD8 SLEC", "label-cd8-slec")
+expect(celltype_label("CD4_MPEC", "P1"), "CD4 MPEC", "label-cd4-mpec")
+expect(lab_of(mk(CD3 = 3.1, CD4 = 3.0, CD25 = 3.2, CD69 = 0.4, CD44 = 1.8)), "Treg", "treg")
+expect(lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD69 = 3.1, CD44 = 2.6, CD62L = 0.4, `TNF-a` = 2.4)), "CD4_activated", "cd4-act")
+expect(
+  lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 3.2, CD44 = 0.3, CD69 = 3.1, CD25 = 2.8)),
+  "CD4_activated", "cd4-act-naive-phenotype"
+)
+expect(
+  lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.0, `IFN-g` = 3.2, `TNF-a` = 3.0, CD69 = 0.4)),
+  "CD4_effector", "cd4-eff"
+)
+expect(lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD8b = 2.9, CD4 = 0.1, CD62L = 3.1, CD44 = 0.3)), "CD8_naive", "cd8-naive")
+expect(
+  lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD4 = 0.1, CD62L = 3.1, CD44 = 0.3, CD69 = 3.1, CD25 = 2.8)),
+  "CD8_activated", "cd8-act-naive-phenotype"
+)
+expect(lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD62L = 2.7, CD44 = 2.6)), "CD8_TCM", "cd8-tcm")
+expect(lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD8b = 2.8, CD44 = 3.0, CD62L = 0.3)), "CD8_TEM_late", "cd8-tem-late")
+expect(lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD4 = 0.1, CD62L = 2.7, CD44 = 2.6, CD27 = 3.1, CD95 = 3.0)), "CD8_TSCM", "cd8-tscm")
+expect(lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD44 = 2.6, CD62L = 0.4, GZMB = 3.0, Perforin = 2.8)), "CD8_effector", "cd8-eff")
+expect(lab_of(mk(CD3 = 3.0, CD8 = 3.0, `LAG-3` = 3.1, `TIM-3` = 2.9, CD44 = 2.8)), "CD8_exhausted", "cd8-exh")
+expect(lab_of(mk(CD3 = 0.1, `NK1.1` = 3.2, NKp46 = 3.0, CD8 = 1.0)), "NK", "nk")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, `NK1.1` = 0.3, CD8 = 0.2)), "NK", "nk-by-nkp46")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, CD11B = 3.0, CD19 = 0.1, CD27 = 0.3)), "NK_mature", "nk-before-cd11b")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, CD27 = 3.0, CD11B = 0.3)), "NK_immature", "nk-immature")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, CD27 = 3.0, CD11B = 2.8)), "NK_DP", "nk-dp")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, CD69 = 3.1, CD11B = 2.4, NKG2D = 3.2)), "NK_activated", "nk-act")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, GZMB = 3.1, Perforin = 2.9, CD69 = 0.4)), "NK_effector", "nk-eff")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, `LAG-3` = 3.0, `TIM-3` = 2.8, `PD-L1` = 2.8, CD11B = 2.6)), "NK_exhausted", "nk-exh")
+expect(lab_of(mk(CD3 = 0.1, NKp46 = 3.1, NKG2D = 3.2, CD69 = 0.3, CD11B = 0.3, CD27 = 0.3)), "NK", "nkg2d-not-act")
+expect(celltype_label("NK_immature", "P1"), "NK immature", "label-nk-im")
+expect(celltype_label("NK_mature", "P1"), "NK mature", "label-nk-mat")
+expect(celltype_label("NK_effector", "P1"), "NK T_EFF", "label-nk-teff")
+expect(lab_of(mk(CD3 = 3.0, `NK1.1` = 2.8, NKp46 = 2.6, CD4 = 0.3, CD44 = 2.4)), "NKT_DN", "nkt-dn")
+expect(lab_of(mk(CD3 = 3.0, `NK1.1` = 2.8, NKp46 = 2.6, CD4 = 3.0, CD8 = 0.2)), "NKT_CD4", "nkt-cd4")
+expect(celltype_label("NKT_CD4", "P1"), "CD4 NKT", "label-nkt-cd4")
+expect(celltype_label("NKT_DN", "P1"), "DN NKT", "label-nkt-dn")
+expect(lab_of(mk(CD19 = 3.3, CD3 = 0.1, CD4 = 0.2, CD8 = 0.2)), "B", "b")
+expect(lab_of(mk(CD11B = 3.2, CD3 = 0.1, CD19 = 0.1, CD4 = 0.2)), "Myeloid", "myeloid")
+
+# CD4/CD8 必须是象限，不能比大小就把双阳/双阴揉进某一边
+set.seed(5)
+mk_tlin <- function(cd4, cd8, n = 50) {
+  cbind(
+    CD3 = rnorm(n, 3.2, 0.1), CD4 = rnorm(n, cd4, 0.12), CD8 = rnorm(n, cd8, 0.12),
+    CD19 = rnorm(n, 0.2, 0.08), CD11B = rnorm(n, 0.2, 0.08),
+    NKp46 = rnorm(n, 0.2, 0.08), `NK1.1` = rnorm(n, 0.2, 0.08)
+  )
+}
+mat_q <- rbind(mk_tlin(3.15, 0.28), mk_tlin(0.28, 3.15), mk_tlin(0.28, 0.28), mk_tlin(3.15, 3.15))
+gq <- gate_major_lineage(mat_q, "P1")
+n_each <- 50L
+if (mean(gq[seq_len(n_each)] == "CD4") < 0.85) fail("CD4+ CD8- T must be CD4")
+if (mean(gq[seq.int(n_each + 1L, 2L * n_each)] == "CD8") < 0.85) fail("CD4- CD8+ T must be CD8")
+if (mean(gq[seq.int(2L * n_each + 1L, 3L * n_each)] %in% c("CD4", "CD8")) > 0.2) {
+  fail("CD4- CD8- T must not be forced into CD4 or CD8")
+}
+if (mean(gq[seq.int(3L * n_each + 1L, 4L * n_each)] %in% c("CD4", "CD8")) > 0.2) {
+  fail("CD4+ CD8+ T must not be forced into CD4 or CD8")
+}
+if (!identical(unname(dr_lineage_marker_weights("P1", c("CD4", "CD8", "CD62L"))[c("CD4", "CD8")]), c(4, 4))) {
+  fail("joint DR must upweight CD4 and CD8 over shared memory markers")
+}
+if (!(dr_lineage_marker_weights("P1", "CD62L")[["CD62L"]] < dr_lineage_marker_weights("P1", "CD4")[["CD4"]])) {
+  fail("CD62L must not outweigh CD4 in the joint embedding")
+}
+set.seed(6)
+n_sep <- 60L
+shared <- cbind(
+  CD3 = rnorm(2L * n_sep, 3.1, 0.08),
+  CD62L = rnorm(2L * n_sep, 3.0, 0.08),
+  CD44 = rnorm(2L * n_sep, 0.35, 0.08),
+  CD27 = rnorm(2L * n_sep, 2.2, 0.08)
+)
+sep <- cbind(
+  shared,
+  CD4 = c(rnorm(n_sep, 3.1, 0.1), rnorm(n_sep, 0.25, 0.1)),
+  CD8 = c(rnorm(n_sep, 0.25, 0.1), rnorm(n_sep, 3.1, 0.1))
+)
+lab_sep <- rep(c("CD4", "CD8"), each = n_sep)
+sc_sep <- scale_markers(sep)
+cent <- function(m) {
+  pc <- stats::prcomp(m, center = FALSE, scale. = FALSE)$x[, 1:2]
+  d4 <- colMeans(pc[lab_sep == "CD4", , drop = FALSE])
+  d8 <- colMeans(pc[lab_sep == "CD8", , drop = FALSE])
+  sqrt(sum((d4 - d8)^2))
+}
+d_unw <- cent(sc_sep)
+d_w <- cent(weight_dr_markers(sc_sep, "P1"))
+if (!(d_w > d_unw * 1.3)) {
+  fail(sprintf("upweighted CD4/CD8 should pull CD4 vs CD8 apart on PCA (weighted=%s unweighted=%s)",
+               signif(d_w, 3), signif(d_unw, 3)))
+}
+
+# IFN-g / GZMB 背景不得把 TEM 并成 activated / effector
+expect(
+  lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.1, CD62L = 0.3, CD44 = 3.1, `IFN-g` = 2.0)),
+  "CD4_TEM_late", "ifng-not-act"
+)
+expect(
+  lab_of(mk(CD3 = 3.3, CD8 = 3.1, CD4 = 0.1, CD62L = 0.3, CD44 = 3.0, GZMB = 0.8, `IFN-g` = 1.8)),
+  "CD8_TEM_late", "ifng-not-eff"
+)
+# NK1.1 背景不得把 CD4 标成 NK
+expect(
+  lab_of(mk(CD3 = 3.2, CD4 = 3.0, CD8 = 0.2, `NK1.1` = 1.4, NKp46 = 1.2, CD62L = 3.0, CD44 = 0.4)),
+  "CD4_naive", "nk-bg-not-nk"
+)
+
+# 分层：先 CD4/CD8，再在类内分亚群；不得出现 NA
+set.seed(42)
+pops <- demo_means_p1()
+feat <- names(pops[[1]])
+bind_pop <- function(name, n) {
+  m <- matrix(unlist(pops[[name]]), n, length(feat), byrow = TRUE)
+  colnames(m) <- feat
+  m + matrix(rnorm(n * length(feat), 0, 0.12), n)
+}
+mat <- rbind(
+  bind_pop("CD4_naive", 80), bind_pop("CD4_TCM", 80), bind_pop("CD4_TSCM", 80),
+  bind_pop("CD4_TEM", 80), bind_pop("CD4_MPEC", 80), bind_pop("CD4_SLEC", 80),
+  bind_pop("Treg", 80), bind_pop("CD4_act", 80), bind_pop("CD4_eff", 80), bind_pop("CD4_exh", 80),
+  bind_pop("CD8_naive", 80), bind_pop("CD8_act", 80), bind_pop("CD8_TCM", 80),
+  bind_pop("CD8_TSCM", 80), bind_pop("CD8_TEM", 80), bind_pop("CD8_MPEC", 80),
+  bind_pop("CD8_SLEC", 80), bind_pop("CD8_eff", 80), bind_pop("CD8_exh", 80)
+)
+h <- hierarchical_gate(mat, "P1")
+if (anyNA(h$subset) || any(!nzchar(h$subset))) fail("hierarchical labels contain NA")
+if (any(h$major == "T") || any(grepl("^T_", h$subset))) fail("T TEM must not be used; assign CD4 or CD8")
+n4 <- sum(h$major == "CD4")
+n8 <- sum(h$major == "CD8")
+if (n4 < 300) fail(sprintf("layer1 CD4 too few: %s", n4))
+if (n8 < 300) fail(sprintf("layer1 CD8 too few: %s", n8))
+if (any(h$major == "CD4" & grepl("^CD8", h$subset))) fail("CD4 parent received CD8 subset")
+if (any(h$major == "CD8" & grepl("^CD4|^Treg$", h$subset))) fail("CD8 parent received CD4 subset")
+cd4_labs <- unique(h$subset[h$major == "CD4"])
+need4 <- c("Treg", "CD4_activated", "CD4_effector", "CD4_naive", "CD4_TCM", "CD4_TSCM",
+           "CD4_MPEC", "CD4_SLEC", "CD4_exhausted")
+miss4 <- setdiff(need4, cd4_labs)
+if (length(miss4)) fail(sprintf("CD4 missing %s (got %s)", paste(miss4, collapse = ","), paste(cd4_labs, collapse = ",")))
+cd8_labs <- unique(h$subset[h$major == "CD8"])
+need8 <- c("CD8_effector", "CD8_activated", "CD8_naive", "CD8_TCM", "CD8_TSCM",
+           "CD8_MPEC", "CD8_SLEC", "CD8_exhausted")
+miss8 <- setdiff(need8, cd8_labs)
+if (length(miss8)) fail(sprintf("CD8 missing %s (got %s)", paste(miss8, collapse = ","), paste(cd8_labs, collapse = ",")))
+
+set.seed(42)
+mat_nk <- rbind(
+  bind_pop("NK_immature", 80), bind_pop("NK_DP", 80), bind_pop("NK_mature", 80),
+  bind_pop("NK_act", 80), bind_pop("NK_eff", 80), bind_pop("NK_exh", 80)
+)
+h_nk <- hierarchical_gate(mat_nk, "P1")
+if (any(h_nk$major == "Myeloid")) fail("CD11b+ NKp46+ cells must not dump to Myeloid")
+if (mean(h_nk$major == "NK") < 0.9) {
+  fail(sprintf("NK pops should be major NK, got %s", paste(unique(h_nk$major), collapse = ",")))
+}
+need_nk <- c("NK_immature", "NK_DP", "NK_mature", "NK_activated", "NK_effector", "NK_exhausted")
+miss_nk <- setdiff(need_nk, unique(h_nk$subset))
+if (length(miss_nk)) {
+  fail(sprintf("NK missing %s (got %s)", paste(miss_nk, collapse = ","), paste(unique(h_nk$subset), collapse = ",")))
+}
+
+set.seed(42)
+mat_nkt <- rbind(bind_pop("NKT_CD4", 80), bind_pop("NKT_DN", 80))
+h_nkt <- hierarchical_gate(mat_nkt, "P1")
+if (mean(h_nkt$major == "NKT") < 0.85) {
+  fail(sprintf("NKT pops should stay NKT not CD4/T, got major=%s subset=%s",
+               paste(unique(h_nkt$major), collapse = ","), paste(unique(h_nkt$subset), collapse = ",")))
+}
+need_nkt <- c("NKT_CD4", "NKT_DN")
+miss_nkt <- setdiff(need_nkt, unique(h_nkt$subset))
+if (length(miss_nkt)) {
+  fail(sprintf("NKT missing %s (got %s)", paste(miss_nkt, collapse = ","), paste(unique(h_nkt$subset), collapse = ",")))
+}
+
+nk_ov <- Filter(function(s) identical(s$lineage, "NK"), subset_plot_specs("P1"))
+if (!length(nk_ov) || !isTRUE(nk_ov[[1]]$use_major)) fail("NK overview should count all NK subsets via major")
+im_sp <- Filter(function(s) identical(s$lineage, "NK_immature"), subset_plot_specs("P1"))
+if (!length(im_sp) || !identical(im_sp[[1]]$x, "CD27") || !identical(im_sp[[1]]$y, "CD11B")) {
+  fail("NK immature figure should be CD27 vs CD11B")
+}
+
+set.seed(4)
+n <- 80
+df_mix <- data.frame(
+  group = rep(c("EV", "H"), each = n),
+  cluster_lineage = rep(rep(c("CD4", "NK"), each = n / 2), 2),
+  lineage = rep(rep(c("CD4_naive", "NK"), each = n / 2), 2),
+  UMAP1 = c(rnorm(n, 0, 0.2), rnorm(n, 0.05, 0.2)),
+  UMAP2 = c(rnorm(n, 0, 0.2), rnorm(n, 0.05, 0.2)),
+  CD3 = c(rnorm(n / 2, 3, 0.1), rnorm(n / 2, 0.2, 0.1), rnorm(n / 2, 3, 0.1), rnorm(n / 2, 0.2, 0.1)),
+  `NK1.1` = c(rnorm(n / 2, 0.2, 0.1), rnorm(n / 2, 3, 0.1), rnorm(n / 2, 0.2, 0.1), rnorm(n / 2, 3, 0.1)),
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+p_sep <- plot_split_lineage(df_mix, "UMAP1", "UMAP2", "P1", "UMAP-1", "UMAP-2", "sep")
+if (!("UMAP1" %in% names(p_sep$data))) fail("main split plot should use the shared embedding")
+x_lab <- paste(deparse(p_sep$mapping$x), collapse = "")
+if (grepl("sep1", x_lab, fixed = TRUE)) {
+  fail("main tSNE/UMAP must not tile each subset into a separate box")
+}
+has_poly <- FALSE
+has_pt <- FALSE
+for (ly in p_sep$layers) {
+  if (inherits(ly$geom, "GeomPolygon")) has_poly <- TRUE
+  if (inherits(ly$geom, "GeomPoint")) has_pt <- TRUE
+}
+if (!isTRUE(has_pt)) fail("figure-1 tSNE should draw colored cells on a shared embedding")
+if (isTRUE(has_poly)) fail("figure-1 tSNE should not split each subset into its own filled tile")
+built <- ggplot2::ggplot_build(p_sep)
+lay <- built$layout$layout
+if (nrow(lay) != 2L) fail("figure-1 must be two panels (EV | H), not a per-subset grid")
+if (!("group" %in% names(lay))) fail("figure-1 facets by experimental group")
+if ("celltype" %in% names(lay) && length(unique(lay$celltype)) > 1L) {
+  fail("figure-1 must not facet by cell type (that is figure 2)")
+}
+if ("lineage" %in% names(lay) && length(unique(lay$lineage)) > 1L) {
+  fail("figure-1 must not facet by lineage")
+}
+cts <- unique(as.character(p_sep$data$celltype))
+if ("CD4 naive" %in% cts) fail("figure-1 should color by major class, not fine subsets")
+if (!("CD4 T" %in% cts && "NK" %in% cts)) {
+  fail(sprintf("figure-1 majors should include CD4 T and NK, got %s", paste(cts, collapse = ",")))
+}
+maj_labs <- c("CD4 T", "CD8 T", "NK", "NKT", "B cell", "Myeloid")
+if (length(unique(unname(pal_major[maj_labs]))) < 6) fail("major-class colors must be distinct")
+if (identical(unname(pal_major[["CD4 T"]]), unname(pal_major[["NK"]]))) {
+  fail("CD4 T and NK must not share a color on the major-class map")
+}
+grob <- ggplot2::ggplotGrob(p_sep)
+if (!any(grepl("guide-box", grob$layout$name))) fail("figure-1 legend (guide-box) is missing")
+leg_w <- grob$widths
+if (!length(leg_w)) fail("figure-1 grob has no widths")
+p_sub <- plot_split_lineage(df_mix, "UMAP1", "UMAP2", "P1", "UMAP-1", "UMAP-2", "sub", color_mode = "subset")
+sub_cts <- unique(as.character(p_sub$data$celltype))
+if (!("CD4 naive" %in% sub_cts)) fail("lineage_split / subset coloring must show fine subsets such as CD4 naive")
+if (!identical(dimred_major_of("P1", "NKT_CD4"), "NKT")) fail("NKT_CD4 is NKT, not CD4")
+if (!identical(major_display_label("CD4"), "CD4 T")) fail("CD4 display is CD4 T")
+if (!identical(celltype_label("Target", "P1"), "His+ target")) fail("Target display is His+ target")
+
+med_ann <- lineage_median_matrix(df_mix, "P1", "subset")
+if (is.null(med_ann) || nrow(med_ann) < 2) fail("annotation heatmap needs >=2 annotated types")
+if (!all(c("CD3", "NK1.1") %in% colnames(med_ann))) fail("annotation heatmap should use lineage markers")
+if (!("CD4 naive" %in% rownames(med_ann) && "NK" %in% rownames(med_ann))) {
+  fail(sprintf("annotation rows should be cell types, got %s", paste(rownames(med_ann), collapse = ",")))
+}
+if (!(med_ann["CD4 naive", "CD3"] > med_ann["NK", "CD3"])) fail("CD4 naive should be CD3-high vs NK")
+if (!(med_ann["NK", "NK1.1"] > med_ann["CD4 naive", "NK1.1"])) fail("NK should be NK1.1-high vs CD4")
+med_maj <- lineage_median_matrix(df_mix, "P1", "major")
+if (is.null(med_maj) || !all(c("CD4 T", "NK") %in% rownames(med_maj))) {
+  fail("major annotation heatmap should have CD4 T and NK")
+}
+td_hm <- tempfile("flow_annot_hm")
+dir.create(td_hm, recursive = TRUE)
+export_annotation_heatmaps(df_mix, "P1", td_hm)
+need_hm <- c("P1_annotation_heatmap.pdf", "P1_annotation_heatmap.png",
+             "P1_annotation_heatmap.csv", "P1_annotation_heatmap_major.pdf")
+miss_hm <- need_hm[!file.exists(file.path(td_hm, need_hm))]
+if (length(miss_hm)) fail(sprintf("missing annotation heatmap: %s", paste(miss_hm, collapse = ", ")))
+unlink(td_hm, recursive = TRUE)
+
+td_dr <- tempfile("flow_major_dr")
+dir.create(td_dr, recursive = TRUE)
+df_dr <- df_mix
+df_dr$tSNE1 <- df_dr$UMAP1
+df_dr$tSNE2 <- df_dr$UMAP2
+export_major_subset_dimred(df_dr, "P1", td_dr)
+need_dr <- c(
+  "P1_CD4_tSNE_subset_H_vs_EV.pdf",
+  "P1_CD4_UMAP_subset_H_vs_EV.pdf",
+  "P1_NK_tSNE_subset_H_vs_EV.pdf"
+)
+miss_dr <- need_dr[!file.exists(file.path(td_dr, "dimred_by_major", need_dr))]
+if (length(miss_dr)) fail(sprintf("missing class dimred: %s", paste(miss_dr, collapse = ", ")))
+unlink(td_dr, recursive = TRUE)
+
+if (!(dr_point_size(120) > 1.7)) fail("few-cell dimred points must be large enough to see")
+if (!(dr_point_size(120) > dr_point_size(8000))) fail("point size must shrink when n is large")
+sz_sparse <- split_dr_save_size(8L, TRUE, n_cells = 180)
+sz_dense <- split_dr_save_size(8L, TRUE, n_cells = 12000)
+if (!(sz_sparse$width < sz_dense$width && sz_sparse$height <= sz_dense$height)) {
+  fail("few-cell class plots must use a smaller canvas, not a huge empty page")
+}
+w_cd4 <- class_dr_marker_weights("CD4", c("CD3", "CD4", "CD62L", "CD44", "CD69"))
+if (!(w_cd4[["CD62L"]] > w_cd4[["CD3"]] && w_cd4[["CD44"]] > w_cd4[["CD4"]])) {
+  fail("CD4 class re-embedding must upweight CD62L/CD44 over lineage channels")
+}
+set.seed(31)
+df_sparse <- data.frame(
+  UMAP1 = c(rnorm(80, 0, 0.4), rnorm(80, 2.2, 0.4)),
+  UMAP2 = c(rnorm(80, 0, 0.4), rnorm(80, 2.0, 0.4)),
+  group = rep(c("EV", "H"), each = 80),
+  lineage = rep(c("CD4_naive", "CD4_TEM_late"), times = 80),
+  stringsAsFactors = FALSE
+)
+p_sp <- plot_split_lineage(df_sparse, "UMAP1", "UMAP2", "P1", "UMAP-1", "UMAP-2",
+                           "sparse", color_mode = "subset")
+sp_sz <- p_sp$layers[[1]]$aes_params$size
+if (is.null(sp_sz) || !is.finite(sp_sz) || sp_sz < 1.5) {
+  fail(sprintf("sparse subset dimred geom size should be large, got %s", sp_sz))
+}
+
+set.seed(8)
+tail_v <- c(rnorm(220, 0.45, 0.12), rnorm(50, 3.1, 0.2))
+cut_t <- axis_pos_cut(tail_v)
+if (!is.finite(cut_t) || cut_t < 1.0 || cut_t > 2.6) {
+  fail(sprintf("CD62L-like tail cut should sit between the origin blob and the tail, got %s", cut_t))
+}
+
+set.seed(9)
+n_q <- 60
+mat_q <- cbind(
+  CD62L = c(rnorm(n_q, 3.2, 0.15), rnorm(n_q, 2.9, 0.15), rnorm(n_q, 0.35, 0.12)),
+  CD44 = c(rnorm(n_q, 0.35, 0.12), rnorm(n_q, 2.9, 0.15), rnorm(n_q, 3.1, 0.15))
+)
+labs_q <- split_memory_3(mat_q, seq_len(nrow(mat_q)), "CD4")
+if (sum(labs_q[seq_len(n_q)] == "CD4_naive") < 40) fail("quadrant must call CD62L+ CD44- naive")
+if (sum(labs_q[seq_len(n_q) + n_q] == "CD4_TCM") < 40) fail("quadrant must call CD62L+ CD44+ TCM")
+if (sum(labs_q[seq_len(n_q) + 2 * n_q] == "CD4_TEM") < 40) fail("quadrant must call CD62L- CD44+ TEM")
+
+set.seed(13)
+mat_dn <- cbind(
+  CD62L = rnorm(90, 0.32, 0.1),
+  CD44 = rnorm(90, 0.28, 0.1)
+)
+labs_dn <- split_memory_3(mat_dn, seq_len(nrow(mat_dn)), "CD4")
+if (mean(labs_dn == "CD4_TEM") < 0.85) {
+  fail("CD62L- CD44- double-negative cells must be assigned TEM, not left ungated")
+}
+
+set.seed(21)
+smear <- c(rnorm(420, 0.48, 0.16), 1.15 + stats::rexp(55, rate = 0.9))
+cut_sm <- axis_pos_cut(smear)
+if (!is.finite(cut_sm) || cut_sm < 0.85 || cut_sm > 2.5) {
+  fail(sprintf("blob+smear cut should sit at the right edge of the origin mass, got %s", cut_sm))
+}
+if (mean(smear >= cut_sm) > 0.35) fail("smear cut must not slice the origin blob in half")
+
+set.seed(10)
+mat_s <- rbind(
+  cbind(CD3 = rnorm(50, 3.1, 0.12), CD4 = rnorm(50, 3.0, 0.12), CD8 = rnorm(50, 0.2, 0.1),
+        CD62L = rnorm(50, 3.2, 0.12), CD44 = rnorm(50, 0.3, 0.1), CD19 = 0.2, CD11B = 0.2, `NK1.1` = 0.2),
+  cbind(CD3 = rnorm(50, 3.1, 0.12), CD4 = rnorm(50, 3.0, 0.12), CD8 = rnorm(50, 0.2, 0.1),
+        CD62L = rnorm(50, 0.3, 0.1), CD44 = rnorm(50, 3.1, 0.12), CD19 = 0.2, CD11B = 0.2, `NK1.1` = 0.2)
+)
+colnames(mat_s)[colnames(mat_s) == "NK1.1"] <- "NK1.1"
+hs <- hierarchical_gate_by_sample(mat_s, rep(c("EV1", "EV2"), each = 50), "P1")
+if (mean(hs$subset[1:50] == "CD4_naive") < 0.6) fail("sample EV1 should be gated naive on its own")
+if (mean(hs$subset[51:100] %in% c("CD4_TEM", "CD4_TEM_late")) < 0.6) {
+  fail("sample EV2 should be gated T_EM / T_EM late on its own")
+}
+
+nv <- Filter(function(s) identical(s$lineage, "CD4_naive"), subset_plot_specs("P1"))
+if (!length(nv) || !identical(nv[[1]]$gate, "quad")) fail("CD4 naive subset figure should use a quadrant gate")
+qr <- quad_gate_rect(c(0, 7), c(0, 6), 2, 1.2, TRUE, FALSE)
+if (qr$xmin < 1.9 || qr$ymin > 0.05 || qr$ymax > 1.25) fail("naive quadrant should be CD62L-high CD44-low")
+tem <- Filter(function(s) identical(s$lineage, "CD4_TEM"), subset_plot_specs("P1"))
+if (!length(tem) || !identical(tem[[1]]$gate, "half_x")) fail("CD4 TEM figure should use the full CD62L- half, including DN")
+tr <- complete_gate_rect(c(0, 7), c(0, 6), 2, 1.2, FALSE, NA)
+if (tr$xmax > 2.05 || tr$ymin > 0.05 || tr$ymax < 5.5) {
+  fail("TEM gate must cover the origin blob and the CD44+ left half, not a 10-90% hit box")
+}
+set.seed(14)
+gx <- c(rnorm(200, 0.45, 0.12), rnorm(40, 3.2, 0.18))
+gy <- c(rnorm(200, 0.40, 0.12), rnorm(40, 0.45, 0.12))
+g_naive <- complete_gate_for(gx, gy, nv[[1]], c(0, 7), c(0, 6))
+if ((g_naive$xmax - g_naive$xmin) < 3) fail("naive gate must span to the axis max, not a quantile box of hit cells")
+
+pm_cells <- data.frame(
+  lineage = c("NK_mature", "NKT_CD4", "CD4_naive", "NK_immature"),
+  cluster_lineage = c("NK", "NKT", "CD4", "NK"),
+  stringsAsFactors = FALSE
+)
+if (!identical(parent_mask(pm_cells, "NK"), c(TRUE, FALSE, FALSE, TRUE))) {
+  fail("NK parent must include NK_* and exclude NKT")
+}
+if (!identical(parent_mask(pm_cells, "NKT"), c(FALSE, TRUE, FALSE, FALSE))) {
+  fail("NKT parent must include NKT_* and exclude NK")
+}
+
+set.seed(16)
+cells_act <- data.frame(
+  sample = rep(c("EV1", "EV2", "EV3", "H1", "H2", "H3"), each = 40),
+  bio_sample = rep(c("EV1", "EV2", "EV3", "H1", "H2", "H3"), each = 40),
+  group = rep(c("EV", "EV", "EV", "H", "H", "H"), each = 40),
+  cluster_lineage = "NK",
+  lineage = "NK_mature",
+  NKG2D = rnorm(240, 2.4, 0.2),
+  `IFN-g` = rnorm(240, 0.6, 0.15),
+  `TNF-a` = rnorm(240, 0.5, 0.15),
+  GZMB = rnorm(240, 0.8, 0.15),
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+td_act <- tempfile("p1_act")
+dir.create(td_act)
+export_p1_activation_stats(cells_act, td_act)
+if (!file.exists(file.path(td_act, "P1_TNK_activation_by_sample.csv"))) {
+  fail("P1 activation MFI table missing")
+}
+unlink(td_act, recursive = TRUE)
+
+cat("OK: P1 T/NK subset labels\n")
