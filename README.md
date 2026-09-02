@@ -111,9 +111,21 @@ report.pr_matrix        # 可选；pg_matrix 不可用时回退
 ```
 
 ```r
-source("serum_proteomics_ranked_bubble.R")
-# 会去 E:/天府/实验管理/课题/赵章寻/血清蛋白质组学 读矩阵，结果写在同目录 results/
+# 错误示范：当前目录没有这个文件时会报“无法打开链接”
+# source("serum_proteomics_ranked_bubble.R")
+
+# 推荐：整段粘贴，或 source 启动器（会 setwd 到数据目录）
+source("run_serum_proteomics_bubble.R", encoding = "UTF-8")
 ```
+
+若启动器也不在当前目录，在 R 里先切到**仓库根目录**（能看到 `serum_proteomics_ranked_bubble.R` 的地方），或把该 `.R` 复制到数据目录后再：
+
+```r
+setwd("E:/天府/实验管理/课题/赵章寻/血清蛋白质组学")
+source("serum_proteomics_ranked_bubble.R", encoding = "UTF-8")
+```
+
+会去 `E:/天府/实验管理/课题/赵章寻/血清蛋白质组学` 读矩阵，结果写在同目录 `results/`。
 
 ```bash
 python3 serum_proteomics_ranked_bubble.py

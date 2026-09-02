@@ -95,6 +95,11 @@ def test_default_data_dir_is_zhao_serum() -> None:
     assert "赵章寻" in joined
     assert "血清蛋白质组学" in joined
     assert "TG_BRCA" not in joined
+    launcher = ROOT / "run_serum_proteomics_bubble.R"
+    text = launcher.read_text(encoding="utf-8")
+    assert "serum_proteomics_ranked_bubble.R" in text
+    assert "天府" in text
+    assert 'encoding = "UTF-8"' in text
 
 
 def test_preprocess_log2_and_filter() -> None:

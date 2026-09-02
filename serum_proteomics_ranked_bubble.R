@@ -4,6 +4,12 @@
 # 输入：DIA-NN report.pg_matrix（首选）或 report.pr_matrix
 # 数据目录：E:/天府/实验管理/课题/赵章寻/血清蛋白质组学
 # 分组：sample_annotation.csv（列 sample,group，恰好两组）
+#
+# 运行（当前工作目录必须能看到这个文件，否则会报“无法打开链接”）：
+#   source("run_serum_proteomics_bubble.R", encoding = "UTF-8")
+# 或：
+#   setwd("E:/天府/实验管理/课题/赵章寻/血清蛋白质组学")  # 先把本文件复制过去
+#   source("serum_proteomics_ranked_bubble.R", encoding = "UTF-8")
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1)
@@ -33,13 +39,22 @@ default_proteomics_dirs <- c(
 
 resolve_proteomics_dir <- function() {
   env_dir <- Sys.getenv("SERUM_PROTEOMICS_DIR", unset = "")
+  script_dir <- tryCatch({
+    ofile <- sys.frame(1)$ofile
+    if (!is.null(ofile) && nzchar(ofile)) {
+      dirname(normalizePath(ofile, winslash = "/", mustWork = FALSE))
+    } else {
+      NA_character_
+    }
+  }, error = function(e) NA_character_)
   candidates <- unique(c(
     env_dir,
     default_proteomics_dirs,
+    script_dir,
     file.path(getwd(), "serum_proteomics"),
     getwd()
   ))
-  candidates <- candidates[nzchar(candidates)]
+  candidates <- candidates[!is.na(candidates) & nzchar(candidates)]
   for (d in candidates) {
     if (!dir.exists(d)) next
     if (file.exists(file.path(d, "report.pg_matrix")) ||
