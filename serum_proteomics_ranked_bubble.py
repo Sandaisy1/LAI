@@ -632,9 +632,11 @@ def run_pipeline(
         if n_use < 1:
             continue
         tag = "all" if n_use == len(ranked) else f"top{n_use}"
-        ranked[ranked["abundance_rank"] <= n_use].to_csv(
-            result_dir / f"{tag}_ranked_proteins.csv", index=False
-        )
+        # all 与 protein_abundance_ranking.csv 是同一张全表，不再重复写 all_ranked_proteins.csv
+        if tag != "all":
+            ranked[ranked["abundance_rank"] <= n_use].to_csv(
+                result_dir / f"{tag}_ranked_proteins.csv", index=False
+            )
         plot_rank_abundance_bubble(
             ranked,
             n_use,

@@ -23,7 +23,7 @@ alwaysApply: false
 
 ## 图
 
-横轴 = **丰度排名**（1 = 最高），纵轴 = **蛋白丰度值**（两样品 log2 平均），**气泡大小一致**。默认 top20 / top30 / top50 以及全蛋白各出一张。点旁可标基因名，不要用 FC 或组别当坐标。
+横轴 = **丰度排名**（1 = 最高），纵轴 = **蛋白丰度值**（两样品 log2 平均），**气泡大小一致**。默认 top20 / top30 / top50 以及全蛋白各出一张。点旁可标基因名，不要用 FC 或组别当坐标。全蛋白表只写 `protein_abundance_ranking.csv`，不要再写一份 `all_ranked_proteins.csv`（Excel 占用时会 `Cannot open file for writing`）。CSV/PDF 写失败时改写带时分秒的文件名。
 
 ```r
 # ❌ BAD: x=log2FC、点大小随丰度变；把两样品当两组做 1-vs-1

@@ -77,6 +77,18 @@ log_msg <- function(...) {
   if (!is.null(log_file)) cat(msg, "\n", file = log_file, append = TRUE)
 }
 
+safe_write_csv <- function(df, path) {
+  tryCatch({
+    readr::write_csv(df, path)
+    path
+  }, error = function(e) {
+    alt <- sub("\\.csv$", paste0("_", format(Sys.time(), "%H%M%S"), ".csv"), path)
+    log_msg("无法写入 ", path, "（请关掉 Excel 里打开的同名文件）。改写: ", alt)
+    readr::write_csv(df, alt)
+    alt
+  })
+}
+
 meta_cols <- c(
   "Protein.Group", "Protein.Ids", "Protein.Names", "Genes",
   "First.Protein.Description", "N.Proteins", "Proteotypic",
@@ -417,7 +429,14 @@ plot_rank_abundance_bubble <- function(df, n, outfile, label_n = 12L,
       )
     }
   }
-  ggplot2::ggsave(outfile, p, width = 8.2, height = 5.4, dpi = 150)
+  tryCatch(
+    ggplot2::ggsave(outfile, p, width = 8.2, height = 5.4, dpi = 150),
+    error = function(e) {
+      alt <- sub("\\.pdf$", paste0("_", format(Sys.time(), "%H%M%S"), ".pdf"), outfile)
+      log_msg("无法写入 ", outfile, "（请关掉已打开的 PDF）。改写: ", alt)
+      ggplot2::ggsave(alt, p, width = 8.2, height = 5.4, dpi = 150)
+    }
+  )
 }
 
 # -----------------------------------------------------------------------------
@@ -446,7 +465,7 @@ run_serum_abundance_bubble <- function(
       keep_cols <- intersect(c("Protein.Group", "Protein.Ids", "Protein.Names", "Genes", "First.Protein.Description"), names(dropped))
       out <- dropped[, keep_cols, drop = FALSE]
       out$reason <- reasons[drop]
-      readr::write_csv(out, drop_path)
+      safe_write_csv(out, drop_path)
     }
     log_msg("去除免疫球蛋白/重链与胰蛋白酶 ", sum(drop), " / ", length(drop), " -> ", drop_path)
     prep$meta <- prep$meta[!drop, , drop = FALSE]
@@ -455,13 +474,15 @@ run_serum_abundance_bubble <- function(
   ranked <- rank_proteins(prep$meta, prep$log2, prep$sample_cols)
   log_msg("按两样品平均丰度排名，蛋白数 ", nrow(ranked))
   rank_path <- file.path(result_dir, "protein_abundance_ranking.csv")
-  readr::write_csv(ranked, rank_path)
+  safe_write_csv(ranked, rank_path)
   log_msg("写出排名表: ", rank_path)
   ns <- unique(c(top_ns[top_ns <= nrow(ranked)], nrow(ranked)))
   for (n_use in ns) {
     if (n_use < 1) next
     tag <- if (n_use == nrow(ranked)) "all" else paste0("top", n_use)
-    readr::write_csv(ranked[ranked$abundance_rank <= n_use, ], file.path(result_dir, paste0(tag, "_ranked_proteins.csv")))
+    if (tag != "all") {
+      safe_write_csv(ranked[ranked$abundance_rank <= n_use, ], file.path(result_dir, paste0(tag, "_ranked_proteins.csv")))
+    }
     plot_rank_abundance_bubble(
       ranked, n_use,
       file.path(result_dir, paste0(tag, "_abundance_rank_bubble.pdf")),

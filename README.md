@@ -137,9 +137,12 @@ python3 serum_proteomics_ranked_bubble.py
 
 ```
 results/serum_proteomics_bubble/
-  protein_abundance_ranking.csv
+  protein_abundance_ranking.csv   # 全部蛋白排名（全蛋白图也用这张表）
+  top20_ranked_proteins.csv
   top20_abundance_rank_bubble.pdf|.png
   all_abundance_rank_bubble.pdf|.png
 ```
+
+去 Ig 结果在 `results/serum_proteomics_bubble_no_Ig/`。全蛋白不要再写 `all_ranked_proteins.csv`。若 Excel 打开了同名 CSV，脚本会改写带时分秒的文件名。
 
 这是蛋白丰度排名气泡图（两样品平均，等大气泡），不是 GO/KEGG 气泡图，也不是两组 FC 图。

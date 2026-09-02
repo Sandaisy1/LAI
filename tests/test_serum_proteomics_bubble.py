@@ -192,6 +192,9 @@ def test_default_data_dir_is_zhao_serum() -> None:
     assert "serum_proteomics_bubble_no_Ig" in no_ig
     assert "P0DOX" in no_ig or "P0DO" in no_ig
     assert "免疫球蛋白重链" in no_ig
+    assert "safe_write_csv" in no_ig
+    assert 'if (tag != "all")' in no_ig
+    assert "all_ranked_proteins.csv" in no_ig  # only mentioned as a file we no longer write
 
 
 if __name__ == "__main__":
