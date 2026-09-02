@@ -201,14 +201,29 @@ normalize_sample_token <- function(x) {
   x
 }
 
+write_annotation_template <- function(path, tokens) {
+  if (length(unique(tokens)) == 2) {
+    anno <- data.frame(sample = unique(tokens), group = unique(tokens), stringsAsFactors = FALSE)
+  } else {
+    anno <- data.frame(sample = tokens, group = "", stringsAsFactors = FALSE)
+  }
+  readr::write_excel_csv(anno, path)
+  log_msg("已写出 ", path)
+}
+
 load_annotation <- function(dir, intensity_cols) {
   anno_path <- file.path(dir, "sample_annotation.csv")
   tokens <- vapply(intensity_cols, normalize_sample_token, character(1), USE.NAMES = FALSE)
   if (!file.exists(anno_path)) {
-    stop(
-      "缺少 sample_annotation.csv（需要列 sample,group，恰好两组病人）。\n",
-      "当前强度列: ", paste(tokens, collapse = ", ")
-    )
+    write_annotation_template(anno_path, tokens)
+    if (length(unique(tokens)) != 2) {
+      stop(
+        "缺少 sample_annotation.csv。已按样品列写出模板，请把 group 填成恰好两组后重新 source。\n",
+        "文件: ", anno_path, "\n",
+        "当前强度列: ", paste(tokens, collapse = ", ")
+      )
+    }
+    log_msg("矩阵恰好两列样品，按 1-vs-1 分组（", paste(unique(tokens), collapse = " vs "), "），不伪造 p 值")
   }
   anno <- readr::read_csv(anno_path, show_col_types = FALSE)
   anno <- as.data.frame(anno)
@@ -217,8 +232,8 @@ load_annotation <- function(dir, intensity_cols) {
     stop("sample_annotation.csv 必须包含 sample, group 两列")
   }
   anno$sample_token <- vapply(anno$sample, normalize_sample_token, character(1))
-  anno$group <- as.character(anno$group)
-  groups <- unique(anno$group)
+  anno$group <- trimws(as.character(anno$group))
+  groups <- unique(anno$group[!is.na(anno$group) & nzchar(anno$group) & !anno$group %in% c("NA", "NaN")])
   if (length(groups) != 2) {
     stop("必须恰好两组病人，当前: ", paste(groups, collapse = ", "))
   }

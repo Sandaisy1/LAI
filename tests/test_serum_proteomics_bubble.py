@@ -21,6 +21,25 @@ def test_pick_official_symbol() -> None:
     assert sp.pick_official_symbol("-") is None
 
 
+def test_missing_annotation_two_samples_autowrite(tmp_path: Path) -> None:
+    info = sp.load_annotation(tmp_path, ["GP_WJZ_11", "GP_WJZ_18"])
+    csv_path = tmp_path / "sample_annotation.csv"
+    assert csv_path.is_file()
+    assert list(info["sample"]) == ["GP_WJZ_11", "GP_WJZ_18"]
+    assert list(info["group"].cat.categories) == ["GP_WJZ_11", "GP_WJZ_18"]
+
+
+def test_missing_annotation_three_samples_writes_template(tmp_path: Path) -> None:
+    try:
+        sp.load_annotation(tmp_path, ["A1", "A2", "B1"])
+    except SystemExit as exc:
+        assert "模板" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit when more than two samples lack groups")
+    text = (tmp_path / "sample_annotation.csv").read_text(encoding="utf-8-sig")
+    assert "A1" in text and "B1" in text
+
+
 def test_annotation_requires_two_groups(tmp_path: Path) -> None:
     (tmp_path / "sample_annotation.csv").write_text(
         "sample,group\nA1,GroupA\nA2,GroupA\n", encoding="utf-8"
@@ -131,7 +150,12 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         test_pick_official_symbol()
-        test_annotation_requires_two_groups(tmp)
+        (tmp / "onegroup").mkdir()
+        test_annotation_requires_two_groups(tmp / "onegroup")
+        (tmp / "two").mkdir()
+        test_missing_annotation_two_samples_autowrite(tmp / "two")
+        (tmp / "three").mkdir()
+        test_missing_annotation_three_samples_writes_template(tmp / "three")
         test_pg_matrix_fallback_to_pr(tmp)
         test_rank_by_abundance_not_raw_fc()
         test_preprocess_log2_and_filter()

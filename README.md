@@ -102,7 +102,7 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 输入是 DIA-NN 的 `report.pg_matrix`（蛋白组定量）。若该文件蛋白行过少，脚本会用 `report.pr_matrix` 按 `Protein.Group` 取肽段强度中位数，聚合到蛋白。不要用 Cuffdiff RNA-seq 流程处理这些矩阵。
 
-默认读取 `E:\天府\实验管理\课题\赵章寻\血清蛋白质组学`（可用环境变量 `SERUM_PROTEOMICS_DIR` 覆盖；该盘不存在时回退仓库内 `serum_proteomics/`）。矩阵、`sample_annotation.csv` 和结果都在这个目录：
+同一目录还需要 `sample_annotation.csv`。若没有且矩阵恰好两列样品（当前数据为 `GP_WJZ_11`、`GP_WJZ_18`），脚本会自动写出该表并按 1-vs-1 继续（不算 p 值）。也可手动复制 `serum_proteomics/sample_annotation.GP_WJZ.csv` 为 `sample_annotation.csv`。默认读取 `E:\天府\实验管理\课题\赵章寻\血清蛋白质组学`（可用 `SERUM_PROTEOMICS_DIR` 覆盖；该盘不存在时回退仓库内 `serum_proteomics/`）。矩阵、注释和结果都在这个目录：
 
 ```
 sample_annotation.csv   # 列：sample,group；必须恰好两组病人

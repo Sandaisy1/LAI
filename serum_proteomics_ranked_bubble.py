@@ -199,22 +199,42 @@ def load_protein_matrix(directory: Path, log_path: Path) -> tuple[pd.DataFrame, 
     return aggregate_pr_to_pg(pr, int_cols)
 
 
-def load_annotation(directory: Path, intensity_cols: list[str]) -> pd.DataFrame:
+def write_annotation_template(path: Path, tokens: list[str]) -> None:
+    uniq = list(dict.fromkeys(tokens))
+    if len(uniq) == 2:
+        df = pd.DataFrame({"sample": uniq, "group": uniq})
+    else:
+        df = pd.DataFrame({"sample": tokens, "group": [""] * len(tokens)})
+    df.to_csv(path, index=False, encoding="utf-8-sig")
+
+
+def load_annotation(
+    directory: Path, intensity_cols: list[str], log_path: Path | None = None
+) -> pd.DataFrame:
     anno_path = directory / "sample_annotation.csv"
     tokens = [normalize_sample_token(c) for c in intensity_cols]
     if not anno_path.is_file():
-        raise SystemExit(
-            "缺少 sample_annotation.csv（需要列 sample,group，恰好两组病人）。\n"
-            f"当前强度列: {', '.join(tokens)}"
+        write_annotation_template(anno_path, tokens)
+        uniq = list(dict.fromkeys(tokens))
+        if len(uniq) != 2:
+            raise SystemExit(
+                "缺少 sample_annotation.csv。已按样品列写出模板，请把 group 填成恰好两组后重跑。\n"
+                f"文件: {anno_path}\n"
+                f"当前强度列: {', '.join(tokens)}"
+            )
+        log(
+            f"矩阵恰好两列样品，按 1-vs-1 分组（{uniq[0]} vs {uniq[1]}），不伪造 p 值",
+            log_path,
         )
     anno = pd.read_csv(anno_path)
     anno.columns = [c.strip().lower() for c in anno.columns]
     if not {"sample", "group"}.issubset(anno.columns):
         raise SystemExit("sample_annotation.csv 必须包含 sample, group 两列")
     anno["sample_token"] = anno["sample"].map(normalize_sample_token)
-    groups = list(dict.fromkeys(anno["group"].astype(str)))
+    anno["group"] = anno["group"].astype(str).str.strip()
+    groups = [g for g in dict.fromkeys(anno["group"]) if g not in {"", "nan", "None"}]
     if len(groups) != 2:
-        raise SystemExit(f"必须恰好两组病人，当前: {', '.join(groups)}")
+        raise SystemExit(f"必须恰好两组病人，当前: {', '.join(groups) if groups else '(空)'}")
 
     token_map = dict(zip(anno["sample_token"], anno["group"].astype(str)))
     raw_map = dict(zip(anno["sample"].astype(str), anno["group"].astype(str)))
@@ -550,7 +570,7 @@ def main() -> None:
     log(f"工作目录: {directory}", log_path)
 
     mat, int_cols = load_protein_matrix(directory, log_path)
-    sample_info = load_annotation(directory, int_cols)
+    sample_info = load_annotation(directory, int_cols, log_path)
     g1, g2 = list(sample_info["group"].cat.categories)
     log(f"组别: {g1} vs {g2}", log_path)
     if sample_info.groupby("group", observed=True).size().min() < 2:
