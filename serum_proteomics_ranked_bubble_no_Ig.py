@@ -13,6 +13,6 @@ if __name__ == "__main__":
     run_pipeline(
         result_subdir="serum_proteomics_bubble_no_Ig",
         drop_immunoglobulin=True,
-        title_prefix="去除免疫球蛋白后 血清蛋白丰度排名气泡图",
-        subtitle="去掉 IGH/IGK/IGL/JCHAIN 等后，两样品平均丰度排名；气泡大小一致",
+        title_prefix="去除免疫球蛋白与胰蛋白酶后 血清蛋白丰度排名气泡图",
+        subtitle="去掉 Ig 重/轻链、JCHAIN 与胰蛋白酶后，两样品平均丰度排名；气泡大小一致",
     )

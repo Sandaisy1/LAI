@@ -123,7 +123,7 @@ source("run_serum_proteomics_bubble.R", encoding = "UTF-8")
 ```r
 setwd("E:/天府/实验管理/课题/赵章寻/血清蛋白质组学")
 source("serum_proteomics_ranked_bubble.R", encoding = "UTF-8")
-# 去除免疫球蛋白后再排名（独立脚本，不必先跑原脚本）
+# 去除免疫球蛋白重/轻链与胰蛋白酶后再排名（独立脚本）
 source("serum_proteomics_ranked_bubble_no_Ig.R", encoding = "UTF-8")
 ```
 

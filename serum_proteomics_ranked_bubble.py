@@ -138,9 +138,24 @@ def is_immunoglobulin_symbol(sym: object) -> bool:
     return bool(re.match(r"^(IGH|IGK|IGL)", s))
 
 
+def is_trypsin_symbol(sym: object) -> bool:
+    s = str(sym).strip().upper().replace("-", "_")
+    s = re.sub(r"^(CON__|SP\||TR\|)", "", s)
+    s = s.split("|")[-1]
+    if s in {
+        "PRSS1", "PRSS2", "PRSS3", "TRY1", "TRY2", "TRY3", "TRYP", "TRYP_PIG",
+        "TRY1_BOVIN", "TRY2_BOVIN", "TRY3_BOVIN",
+        "P00761", "P00760", "P00763", "P07477", "P07478", "P35030",
+    }:
+        return True
+    return bool(re.match(r"^(PRSS[123]|TRY[123]|TRYP)(_|$)", s))
+
+
 def is_immunoglobulin_text(*parts: object) -> bool:
     blob = " ".join("" if p is None else str(p) for p in parts).lower()
     if not blob.strip():
+        return False
+    if "铁蛋白重链" in blob or "ferritin heavy" in blob:
         return False
     if "immunoglobulin superfamily" in blob and not re.search(
         r"\bigh[agmdvejk]|\bigk[cvlj]|\bigl[cvlj]", blob
@@ -149,31 +164,67 @@ def is_immunoglobulin_text(*parts: object) -> bool:
     return bool(
         re.search(
             r"immunoglobulin\s+(heavy|kappa|lambda|alpha|gamma|mu|delta|epsilon)"
+            r"|immunoglobulin heavy chain"
+            r"|ig heavy chain"
+            r"|免疫球蛋白重链"
+            r"|免疫球蛋白"
             r"|\big\s*(heavy|kappa|lambda|gamma|alpha|mu)\b"
-            r"|\big\s+(gamma|alpha|mu|kappa|lambda)\b",
+            r"|\big\s+(gamma|alpha|mu|kappa|lambda)\b"
+            r"|heavy chain c region",
             blob,
         )
     )
 
 
+def is_trypsin_text(*parts: object) -> bool:
+    blob = " ".join("" if p is None else str(p) for p in parts).lower()
+    if not blob.strip():
+        return False
+    if re.search(r"antitrypsin|anti-trypsin|trypsin inhibitor|抗胰蛋白酶", blob):
+        return False
+    if "tryptophan" in blob:
+        return False
+    return bool(re.search(r"\btrypsin(ogen)?\b|胰蛋白酶", blob))
+
+
+def _meta_token_blob(meta: pd.DataFrame, i: int) -> tuple[list[str], tuple]:
+    n_fields = []
+    for col in ("Genes", "Protein.Names", "First.Protein.Description", "Protein.Ids", "Protein.Group"):
+        n_fields.append(str(meta[col].iloc[i]) if col in meta.columns else "")
+    parts = re.split(r"[,;|/ ]+", ",".join(n_fields))
+    return [p for p in parts if p.strip()], tuple(n_fields)
+
+
 def immunoglobulin_mask(meta: pd.DataFrame) -> np.ndarray:
     n = len(meta)
-    gene_raw = meta["Genes"].astype(str) if "Genes" in meta.columns else pd.Series([""] * n)
-    names_ = meta["Protein.Names"].astype(str) if "Protein.Names" in meta.columns else pd.Series([""] * n)
-    desc = (
-        meta["First.Protein.Description"].astype(str)
-        if "First.Protein.Description" in meta.columns
-        else pd.Series([""] * n)
-    )
-    ids = meta["Protein.Ids"].astype(str) if "Protein.Ids" in meta.columns else pd.Series([""] * n)
-    pg = meta["Protein.Group"].astype(str) if "Protein.Group" in meta.columns else pd.Series([""] * n)
     out = np.zeros(n, dtype=bool)
     for i in range(n):
-        parts = re.split(r"[,;|/ ]+", f"{gene_raw.iloc[i]},{names_.iloc[i]},{pg.iloc[i]}")
-        if any(is_immunoglobulin_symbol(p) for p in parts if p.strip()):
-            out[i] = True
-        elif is_immunoglobulin_text(gene_raw.iloc[i], names_.iloc[i], desc.iloc[i], ids.iloc[i], pg.iloc[i]):
-            out[i] = True
+        parts, fields = _meta_token_blob(meta, i)
+        out[i] = any(is_immunoglobulin_symbol(p) for p in parts) or is_immunoglobulin_text(*fields)
+    return out
+
+
+def trypsin_mask(meta: pd.DataFrame) -> np.ndarray:
+    n = len(meta)
+    out = np.zeros(n, dtype=bool)
+    for i in range(n):
+        parts, fields = _meta_token_blob(meta, i)
+        out[i] = any(is_trypsin_symbol(p) for p in parts) or is_trypsin_text(*fields)
+    return out
+
+
+def exclusion_reasons(meta: pd.DataFrame) -> list[str]:
+    """每行原因：immunoglobulin、trypsin，或空字符串。"""
+    ig = immunoglobulin_mask(meta)
+    tr = trypsin_mask(meta)
+    out: list[str] = []
+    for i in range(len(meta)):
+        tags = []
+        if ig[i]:
+            tags.append("immunoglobulin")
+        if tr[i]:
+            tags.append("trypsin")
+        out.append(";".join(tags))
     return out
 
 
@@ -446,6 +497,7 @@ def write_example_data(directory: Path) -> None:
         ("P02774", "GC", "Vitamin D-binding protein"),
         ("P01857", "IGHG1", "Immunoglobulin heavy constant gamma 1"),
         ("P01834", "IGKC", "Immunoglobulin kappa constant"),
+        ("P00761", "TRYP_PIG", "Trypsin"),
         ("P02741", "CRP", "C-reactive protein"),
         ("P05231", "IL6", "Interleukin-6"),
         ("P01375", "TNF", "Tumor necrosis factor"),
@@ -552,14 +604,19 @@ def run_pipeline(
     meta, log2x = preprocess(mat, int_cols)
     log(f"过滤后蛋白数: {len(meta)}", log_path)
     if drop_immunoglobulin:
-        ig = immunoglobulin_mask(meta)
+        reasons = exclusion_reasons(meta)
+        drop = np.array([r != "" for r in reasons])
         drop_cols = [c for c in ("Protein.Group", "Protein.Ids", "Protein.Names", "Genes", "First.Protein.Description") if c in meta.columns]
-        dropped = meta.loc[ig, drop_cols]
-        drop_path = result_dir / "removed_immunoglobulins.csv"
+        dropped = meta.loc[drop, drop_cols].copy()
+        dropped.insert(len(dropped.columns), "reason", [reasons[i] for i, flag in enumerate(drop) if flag])
+        drop_path = result_dir / "removed_Ig_trypsin.csv"
         dropped.to_csv(drop_path, index=False)
-        log(f"去除免疫球蛋白 {int(ig.sum())} / {len(ig)} -> {drop_path}", log_path)
-        meta = meta.loc[~ig].reset_index(drop=True)
-        log2x = log2x[~ig]
+        log(
+            f"去除免疫球蛋白/重链与胰蛋白酶 {int(drop.sum())} / {len(drop)} -> {drop_path}",
+            log_path,
+        )
+        meta = meta.loc[~drop].reset_index(drop=True)
+        log2x = log2x[~drop]
     ranked = rank_proteins(meta, log2x, int_cols)
     ranked.to_csv(result_dir / "protein_abundance_ranking.csv", index=False)
     log(f"写出排名表: {result_dir / 'protein_abundance_ranking.csv'}", log_path)

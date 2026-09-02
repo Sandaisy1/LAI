@@ -109,33 +109,71 @@ is_immunoglobulin_symbol <- function(sym) {
   grepl("^(IGH|IGK|IGL)", s)
 }
 
+is_trypsin_symbol <- function(sym) {
+  s <- toupper(trimws(as.character(sym)))
+  s <- gsub("-", "_", s)
+  s <- sub("^(CON__|SP\\||TR\\|)", "", s)
+  if (grepl("\\|", s)) s <- sub(".*\\|", "", s)
+  if (s %in% c(
+    "PRSS1", "PRSS2", "PRSS3", "TRY1", "TRY2", "TRY3", "TRYP", "TRYP_PIG",
+    "TRY1_BOVIN", "TRY2_BOVIN", "TRY3_BOVIN",
+    "P00761", "P00760", "P00763", "P07477", "P07478", "P35030"
+  )) return(TRUE)
+  grepl("^(PRSS[123]|TRY[123]|TRYP)(_|$)", s)
+}
+
 is_immunoglobulin_text <- function(...) {
   blob <- tolower(paste(..., collapse = " "))
   if (!nzchar(trimws(blob))) return(FALSE)
+  if (grepl("铁蛋白重链|ferritin heavy", blob)) return(FALSE)
   if (grepl("immunoglobulin superfamily", blob) &&
       !grepl("\\bigh[agmdvejk]|\\bigk[cvlj]|\\bigl[cvlj]", blob)) {
     return(FALSE)
   }
   grepl("immunoglobulin\\s+(heavy|kappa|lambda|alpha|gamma|mu|delta|epsilon)", blob) ||
+    grepl("immunoglobulin heavy chain", blob) ||
+    grepl("ig heavy chain", blob) ||
+    grepl("免疫球蛋白重链", blob) ||
+    grepl("免疫球蛋白", blob) ||
     grepl("\\big\\s*(heavy|kappa|lambda|gamma|alpha|mu)\\b", blob) ||
-    grepl("\\big\\s+(gamma|alpha|mu|kappa|lambda)\\b", blob)
+    grepl("\\big\\s+(gamma|alpha|mu|kappa|lambda)\\b", blob) ||
+    grepl("heavy chain c region", blob)
 }
 
-immunoglobulin_mask <- function(meta) {
+is_trypsin_text <- function(...) {
+  blob <- tolower(paste(..., collapse = " "))
+  if (!nzchar(trimws(blob))) return(FALSE)
+  if (grepl("antitrypsin|anti-trypsin|trypsin inhibitor|抗胰蛋白酶", blob)) return(FALSE)
+  if (grepl("tryptophan", blob)) return(FALSE)
+  grepl("\\btrypsin(ogen)?\\b|胰蛋白酶", blob)
+}
+
+exclusion_reasons <- function(meta) {
   n <- nrow(meta)
-  if (n == 0) return(logical(0))
+  if (n == 0) return(character(0))
   gene_raw <- if ("Genes" %in% names(meta)) as.character(meta$Genes) else rep("", n)
   names_ <- if ("Protein.Names" %in% names(meta)) as.character(meta$Protein.Names) else rep("", n)
   desc <- if ("First.Protein.Description" %in% names(meta)) as.character(meta$First.Protein.Description) else rep("", n)
   ids <- if ("Protein.Ids" %in% names(meta)) as.character(meta$Protein.Ids) else rep("", n)
   pg <- if ("Protein.Group" %in% names(meta)) as.character(meta$Protein.Group) else rep("", n)
   vapply(seq_len(n), function(i) {
-    parts <- unlist(strsplit(paste(c(gene_raw[i], names_[i], pg[i]), collapse = ","), "[,;|/ ]+"))
-    parts <- trimws(parts)
+    parts <- trimws(unlist(strsplit(paste(c(gene_raw[i], names_[i], desc[i], ids[i], pg[i]), collapse = ","), "[,;|/ ]+")))
     parts <- parts[nzchar(parts)]
-    any(vapply(parts, is_immunoglobulin_symbol, logical(1))) ||
-      is_immunoglobulin_text(gene_raw[i], names_[i], desc[i], ids[i], pg[i])
-  }, logical(1))
+    tags <- character(0)
+    if (any(vapply(parts, is_immunoglobulin_symbol, logical(1))) ||
+        is_immunoglobulin_text(gene_raw[i], names_[i], desc[i], ids[i], pg[i])) {
+      tags <- c(tags, "immunoglobulin")
+    }
+    if (any(vapply(parts, is_trypsin_symbol, logical(1))) ||
+        is_trypsin_text(gene_raw[i], names_[i], desc[i], ids[i], pg[i])) {
+      tags <- c(tags, "trypsin")
+    }
+    paste(tags, collapse = ";")
+  }, character(1))
+}
+
+immunoglobulin_mask <- function(meta) {
+  grepl("immunoglobulin", exclusion_reasons(meta))
 }
 
 # -----------------------------------------------------------------------------
@@ -397,16 +435,19 @@ run_serum_abundance_bubble <- function(
   int_cols <- attr(mat, "intensity_cols")
   prep <- preprocess(mat, int_cols)
   if (isTRUE(drop_immunoglobulin)) {
-    ig <- immunoglobulin_mask(prep$meta)
-    dropped <- prep$meta[ig, , drop = FALSE]
-    drop_path <- file.path(result_dir, "removed_immunoglobulins.csv")
+    reasons <- exclusion_reasons(prep$meta)
+    drop <- nzchar(reasons)
+    dropped <- prep$meta[drop, , drop = FALSE]
+    drop_path <- file.path(result_dir, "removed_Ig_trypsin.csv")
     if (nrow(dropped) > 0) {
       keep_cols <- intersect(c("Protein.Group", "Protein.Ids", "Protein.Names", "Genes", "First.Protein.Description"), names(dropped))
-      readr::write_csv(dropped[, keep_cols, drop = FALSE], drop_path)
+      out <- dropped[, keep_cols, drop = FALSE]
+      out$reason <- reasons[drop]
+      readr::write_csv(out, drop_path)
     }
-    log_msg("去除免疫球蛋白 ", sum(ig), " / ", length(ig), " -> ", drop_path)
-    prep$meta <- prep$meta[!ig, , drop = FALSE]
-    prep$log2 <- prep$log2[!ig, , drop = FALSE]
+    log_msg("去除免疫球蛋白/重链与胰蛋白酶 ", sum(drop), " / ", length(drop), " -> ", drop_path)
+    prep$meta <- prep$meta[!drop, , drop = FALSE]
+    prep$log2 <- prep$log2[!drop, , drop = FALSE]
   }
   ranked <- rank_proteins(prep$meta, prep$log2, prep$sample_cols)
   log_msg("按两样品平均丰度排名，蛋白数 ", nrow(ranked))

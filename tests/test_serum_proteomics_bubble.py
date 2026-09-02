@@ -36,6 +36,36 @@ def test_immunoglobulin_filter() -> None:
         }
     )
     assert list(sp.immunoglobulin_mask(meta)) == [False, True, False]
+    assert sp.is_immunoglobulin_text("免疫球蛋白重链")
+    assert not sp.is_immunoglobulin_text("铁蛋白重链")
+    assert sp.is_trypsin_symbol("TRYP_PIG")
+    assert sp.is_trypsin_symbol("P00761")
+    assert sp.is_trypsin_symbol("PRSS1")
+    assert sp.is_trypsin_text("胰蛋白酶")
+    assert not sp.is_trypsin_text("Alpha-1-antitrypsin")
+    assert not sp.is_trypsin_symbol("SERPINA1")
+    contam = pd.DataFrame(
+        {
+            "Genes": ["ALB", "IGHG1", "TRYP_PIG", "SERPINA1", "FTH1"],
+            "Protein.Names": [
+                "Serum albumin",
+                "免疫球蛋白重链",
+                "Trypsin",
+                "Alpha-1-antitrypsin",
+                "Ferritin heavy chain",
+            ],
+            "First.Protein.Description": ["", "Ig heavy chain", "胰蛋白酶", "抗胰蛋白酶", "铁蛋白重链"],
+            "Protein.Ids": ["P02768", "P01857", "P00761", "P01009", "P02794"],
+            "Protein.Group": ["P02768", "P01857", "P00761", "P01009", "P02794"],
+        }
+    )
+    assert sp.exclusion_reasons(contam) == [
+        "",
+        "immunoglobulin",
+        "trypsin",
+        "",
+        "",
+    ]
 
 
 def test_pick_official_symbol() -> None:
@@ -155,6 +185,8 @@ def test_default_data_dir_is_zhao_serum() -> None:
     assert "run_serum_abundance_bubble" not in no_ig
     assert "immunoglobulin" in no_ig.lower() or "免疫球蛋白" in no_ig
     assert "serum_proteomics_bubble_no_Ig" in no_ig
+    assert "胰蛋白酶" in no_ig
+    assert "免疫球蛋白重链" in no_ig
 
 
 if __name__ == "__main__":
