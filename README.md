@@ -97,3 +97,36 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## 血清蛋白质组：两组病人丰度排名气泡图
+
+输入是 DIA-NN 的 `report.pg_matrix`（蛋白组定量）。若该文件蛋白行过少，脚本会用 `report.pr_matrix` 按 `Protein.Group` 取肽段强度中位数，聚合到蛋白。不要用 Cuffdiff RNA-seq 流程处理这些矩阵。
+
+把矩阵和注释放在同一目录（可用环境变量 `SERUM_PROTEOMICS_DIR`，或仓库内 `serum_proteomics/`）：
+
+```
+sample_annotation.csv   # 列：sample,group；必须恰好两组病人
+report.pg_matrix        # DIA-NN 蛋白组矩阵（TSV）
+report.pr_matrix        # 可选；pg_matrix 不可用时回退
+```
+
+```r
+# Windows 上与 RNA-seq 相同的工作目录也可以
+setwd("E:/R/TG_BRCA/TG")
+source("serum_proteomics_ranked_bubble.R")
+```
+
+```bash
+python3 serum_proteomics_ranked_bubble.py
+```
+
+无真实矩阵时，Python 脚本会在 `serum_proteomics/` 写出示例数据并出图。预处理为：至少一组检出率 ≥50% → `log2(x+1)` → 样品中位数中心化。按 **全样品平均丰度** 降序排名，默认 top20 / top30 / top50：
+
+```
+results/serum_proteomics_bubble/
+  protein_abundance_ranking.csv
+  top20_abundance_rank_bubble.pdf|.png    # y=蛋白秩，x=log2FC，点大小=平均丰度
+  top20_two_group_abundance_bubble.pdf|.png
+```
+
+这是蛋白丰度排名气泡图，不是 GO/KEGG 气泡图。每组样品不足 2 个时不算 p 值、不伪造 p。

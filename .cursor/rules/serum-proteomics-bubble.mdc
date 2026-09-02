@@ -1,0 +1,35 @@
+---
+description: 两组病人血清蛋白质组（DIA-NN）按蛋白丰度做排名气泡图
+globs: "**/serum_proteomics*.{R,r,py},**/*pg_matrix*,**/*pr_matrix*"
+alwaysApply: false
+---
+
+# 血清蛋白质组：两组病人丰度排名气泡图
+
+写或改血清蛋白质组脚本时按本规则。输入是 **DIA-NN** 矩阵，不是 Cuffdiff，也不是 Excel。RNA-seq 六组比较仍走 `tg-brca-rnaseq.mdc`，不要混用。
+
+## 数据
+
+- 首选 `report.pg_matrix`（蛋白组定量）；行太少或几乎为空时，用 `report.pr_matrix` 按 `Protein.Group` 聚合到蛋白（每样品取肽段强度中位数）
+- 两组病人样本映射必须来自 `sample_annotation.csv`（列：`sample,group`），不要靠猜把病人并成一组
+- 恰好 **两组**；组名以注释表为准（如 `GroupA`/`GroupB` 或 `Control`/`Case`）
+- 物种：人；展示名用 `Genes` 清洗后的官方符号，缺符号则保留 `Protein.Group`
+
+## 预处理（两组样品一次做完再排名）
+
+1. 过滤：至少一组内 ≥50% 样品有非零强度，否则丢掉
+2. 线性强度 `log2(x+1)`，再按样品中位数中心化；不要用未转换的原始强度排名或算 FC
+3. 能估计 p 时（每组 n≥2）用 Welch t-test；1-vs-1 或无重复时不要伪造 p，只按丰度/FC 排名并写日志
+
+## 图（每个 topN 单独出图、单独出表）
+
+按 **全样品平均丰度降序** 排名（不是 GO 气泡图）。默认 top 20 / 30 / 50：
+
+1. **排名气泡图**：y=蛋白（丰度秩），x=`log2FC(组2/组1)`，点大小=平均丰度，颜色=FC 方向
+2. **两组丰度气泡图**：同一蛋白两个点，x=组别，大小=该组平均丰度
+
+```r
+# ❌ BAD: 用 pg_matrix 原始强度直接排名；把两组病人样本名硬编码进脚本
+# ❌ BAD: 把 GO/KEGG 气泡图当成“丰度排名气泡图”
+# ✅ GOOD: 注释表分两组 → log2+中位数中心化 → 按丰度 rank → FoldChange 与气泡大小分开映射
+```
