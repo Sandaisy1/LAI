@@ -1,0 +1,688 @@
+{
+  "species": "mouse",
+  "data_dir": "E:/R/flow J",
+  "file_glob": "*.fcs",
+  "filename_regex": "^(?:TT6[_-]?)?(T6|T)[-_]?([123])(?:[-_]([12]))?[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])(?:[-_ ].*)?\\.fcs$",
+  "groups": [
+    "T",
+    "T6"
+  ],
+  "replicates": [
+    "1",
+    "2",
+    "3"
+  ],
+  "tech_replicates": [
+    "1",
+    "2"
+  ],
+  "cohort": "T-T6",
+  "comparison": "T6_vs_T",
+  "qc": {
+    "viability_marker": "L/D",
+    "leukocyte_marker": "CD45",
+    "exclude_from_dr": [
+      "L/D",
+      "CD45"
+    ],
+    "asinh_cofactor": 150
+  },
+  "fluorochrome_aliases": {
+    "FVS450": [
+      "FVS450",
+      "L/D",
+      "LD",
+      "LIVEDEAD",
+      "LIVE/DEAD",
+      "VIABILITY",
+      "ZOMBIEVIOLET"
+    ],
+    "V500": [
+      "V500",
+      "BV510",
+      "AMCYAN"
+    ],
+    "BUV496": [
+      "BUV496"
+    ],
+    "BUV805": [
+      "BUV805"
+    ],
+    "BUV737": [
+      "BUV737"
+    ],
+    "BUV661": [
+      "BUV661"
+    ],
+    "RB744": [
+      "RB744",
+      "RB745"
+    ],
+    "RB670": [
+      "RB670"
+    ],
+    "RB705": [
+      "RB705"
+    ],
+    "RB613": [
+      "RB613"
+    ],
+    "RB780": [
+      "RB780"
+    ],
+    "RY586": [
+      "RY586"
+    ],
+    "RY703": [
+      "RY703"
+    ],
+    "RY775": [
+      "RY775"
+    ],
+    "BV750": [
+      "BV750"
+    ],
+    "BV711": [
+      "BV711"
+    ],
+    "BV605": [
+      "BV605"
+    ],
+    "BV650": [
+      "BV650"
+    ],
+    "BV421": [
+      "BV421"
+    ],
+    "BV786": [
+      "BV786"
+    ],
+    "R718": [
+      "R718",
+      "APCR700",
+      "APC-R700",
+      "AF700",
+      "ALEXAFLUOR700",
+      "ALEXA700",
+      "Y710",
+      "YG710"
+    ],
+    "AF700": [
+      "AF700",
+      "ALEXAFLUOR700",
+      "ALEXA700",
+      "R718",
+      "APCR700",
+      "APC-R700",
+      "Y710",
+      "YG710"
+    ],
+    "PE": [
+      "PE"
+    ],
+    "PE-CY7": [
+      "PECY7",
+      "PC7"
+    ],
+    "PE-EF610": [
+      "PEEF610",
+      "PEEFLUOR610",
+      "EFLUOR610",
+      "PECF594",
+      "PEDAZZLE594",
+      "YEG610"
+    ],
+    "APC": [
+      "APC"
+    ],
+    "APC-CY7": [
+      "APCCY7",
+      "APCH7"
+    ],
+    "FITC": [
+      "FITC",
+      "AF488",
+      "ALEXAFLUOR488",
+      "ALEXA488"
+    ],
+    "AF647": [
+      "AF647",
+      "ALEXAFLUOR647",
+      "ALEXA647"
+    ],
+    "AF488": [
+      "AF488",
+      "ALEXAFLUOR488",
+      "FITC"
+    ]
+  },
+  "fluorochrome_display": {
+    "FVS450": "FVS450",
+    "V500": "V500",
+    "BUV496": "BUV496",
+    "BUV805": "BUV805",
+    "BUV737": "BUV737",
+    "BUV661": "BUV661",
+    "RB744": "RB744",
+    "RB670": "RB670",
+    "RB705": "RB705",
+    "RB613": "RB613",
+    "RB780": "RB780",
+    "RY586": "RY586",
+    "RY703": "RY703",
+    "RY775": "RY775",
+    "BV750": "BV750",
+    "BV711": "BV711",
+    "BV605": "BV605",
+    "BV650": "BV650",
+    "BV421": "BV421",
+    "BV786": "BV786",
+    "AF700": "AF700",
+    "PE": "PE",
+    "PE-CY7": "PE-Cy7",
+    "PE-EF610": "PE-eFluor 610",
+    "APC": "APC",
+    "APC-CY7": "APC-Cy7",
+    "FITC": "FITC",
+    "AF647": "AF647",
+    "AF488": "AF488",
+    "R718": "R718"
+  },
+  "panels": {
+    "P1": {
+      "name": "T_NK",
+      "focus": "T cells, NK cells, activation and exhaustion",
+      "markers": [
+        {
+          "marker": "L/D",
+          "fluorochrome": "FVS450",
+          "compartment": "viability"
+        },
+        {
+          "marker": "CD45",
+          "fluorochrome": "V500",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD4",
+          "fluorochrome": "BUV496",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD3",
+          "fluorochrome": "BUV805",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD8",
+          "fluorochrome": "RB744",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD19",
+          "fluorochrome": "BV750",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD25",
+          "fluorochrome": "RB670",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD69",
+          "fluorochrome": "RY586",
+          "compartment": "surface"
+        },
+        {
+          "marker": "PD-L1",
+          "fluorochrome": "RB705",
+          "compartment": "surface",
+          "aliases": [
+            "CD274",
+            "B7-H1",
+            "PDL1"
+          ]
+        },
+        {
+          "marker": "CD8b",
+          "fluorochrome": "BV711",
+          "compartment": "surface",
+          "aliases": [
+            "CD8B",
+            "CD8beta"
+          ]
+        },
+        {
+          "marker": "NKp46",
+          "fluorochrome": "PE",
+          "compartment": "surface",
+          "aliases": [
+            "CD335",
+            "NCR1",
+            "NKP46"
+          ]
+        },
+        {
+          "marker": "TNF-a",
+          "fluorochrome": "APC",
+          "compartment": "intracellular",
+          "aliases": [
+            "TNFA",
+            "TNF",
+            "TNFALPHA",
+            "TNF-alpha"
+          ]
+        },
+        {
+          "marker": "CD27",
+          "fluorochrome": "BV605",
+          "compartment": "surface"
+        },
+        {
+          "marker": "SCA-1",
+          "fluorochrome": "BV650",
+          "compartment": "surface",
+          "aliases": [
+            "SCA1",
+            "LY6A"
+          ]
+        },
+        {
+          "marker": "CD95",
+          "fluorochrome": "BUV661",
+          "compartment": "surface",
+          "aliases": [
+            "FAS"
+          ]
+        },
+        {
+          "marker": "LAG-3",
+          "fluorochrome": "BV421",
+          "compartment": "surface",
+          "aliases": [
+            "LAG3",
+            "CD223"
+          ]
+        },
+        {
+          "marker": "TIM-3",
+          "fluorochrome": "BV786",
+          "compartment": "surface",
+          "aliases": [
+            "TIM3",
+            "HAVCR2",
+            "CD366"
+          ]
+        },
+        {
+          "marker": "NK1.1",
+          "fluorochrome": "R718",
+          "compartment": "surface",
+          "aliases": [
+            "NK11",
+            "CD161",
+            "KLRB1C",
+            "PK136",
+            "AF700",
+            "Y710"
+          ]
+        },
+        {
+          "marker": "CD11B",
+          "fluorochrome": "APC-CY7",
+          "compartment": "surface",
+          "aliases": [
+            "CD11b",
+            "ITGAM",
+            "MAC1"
+          ]
+        },
+        {
+          "marker": "IFN-g",
+          "fluorochrome": "BUV737",
+          "compartment": "intracellular",
+          "aliases": [
+            "IFNG",
+            "IFNGAMMA",
+            "IFN-gamma"
+          ]
+        },
+        {
+          "marker": "CD62L",
+          "fluorochrome": "RY703",
+          "compartment": "surface",
+          "aliases": [
+            "SELL",
+            "LECAM1"
+          ]
+        },
+        {
+          "marker": "CD44",
+          "fluorochrome": "RB613",
+          "compartment": "surface"
+        },
+        {
+          "marker": "NKG2D",
+          "fluorochrome": "PE-EF610",
+          "compartment": "surface",
+          "aliases": [
+            "CD314",
+            "KLRK1"
+          ]
+        },
+        {
+          "marker": "GZMB",
+          "fluorochrome": "PE-CY7",
+          "compartment": "intracellular",
+          "aliases": [
+            "GRANZYMEB",
+            "GZMB"
+          ]
+        },
+        {
+          "marker": "Perforin",
+          "fluorochrome": "FITC",
+          "compartment": "intracellular",
+          "aliases": [
+            "PRF1",
+            "PRF"
+          ]
+        }
+      ]
+    },
+    "P2": {
+      "name": "B_cell",
+      "focus": "B-cell subsets and activation",
+      "markers": [
+        {
+          "marker": "L/D",
+          "fluorochrome": "FVS450",
+          "compartment": "viability"
+        },
+        {
+          "marker": "CD45",
+          "fluorochrome": "V500",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD19",
+          "fluorochrome": "BV750",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD27",
+          "fluorochrome": "BV605",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD80",
+          "fluorochrome": "BUV496",
+          "compartment": "surface",
+          "aliases": [
+            "B7-1",
+            "B71"
+          ]
+        },
+        {
+          "marker": "CD86",
+          "fluorochrome": "RB670",
+          "compartment": "surface",
+          "aliases": [
+            "B7-2",
+            "B72"
+          ]
+        },
+        {
+          "marker": "IgG",
+          "fluorochrome": "RB613",
+          "compartment": "surface",
+          "aliases": [
+            "IGG"
+          ]
+        },
+        {
+          "marker": "IgM",
+          "fluorochrome": "RB780",
+          "compartment": "surface",
+          "aliases": [
+            "IGM"
+          ]
+        },
+        {
+          "marker": "CD40",
+          "fluorochrome": "RB705",
+          "compartment": "surface"
+        },
+        {
+          "marker": "IgD",
+          "fluorochrome": "FITC",
+          "compartment": "surface",
+          "aliases": [
+            "IGD"
+          ]
+        },
+        {
+          "marker": "BLIMP-1",
+          "fluorochrome": "PE",
+          "compartment": "nuclear",
+          "aliases": [
+            "BLIMP1",
+            "PRDM1"
+          ]
+        }
+      ]
+    },
+    "P3": {
+      "name": "Myeloid",
+      "focus": "monocytes, macrophages, DCs and myeloid cytokines",
+      "markers": [
+        {
+          "marker": "L/D",
+          "fluorochrome": "FVS450",
+          "compartment": "viability"
+        },
+        {
+          "marker": "CD45",
+          "fluorochrome": "V500",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD3",
+          "fluorochrome": "BUV805",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD40",
+          "fluorochrome": "RB705",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD86",
+          "fluorochrome": "RB670",
+          "compartment": "surface"
+        },
+        {
+          "marker": "CD80",
+          "fluorochrome": "BUV496",
+          "compartment": "surface",
+          "aliases": [
+            "B7-1",
+            "B71"
+          ]
+        },
+        {
+          "marker": "TNF-a",
+          "fluorochrome": "APC",
+          "compartment": "intracellular",
+          "aliases": [
+            "TNFA",
+            "TNF"
+          ]
+        },
+        {
+          "marker": "CD11B",
+          "fluorochrome": "APC-CY7",
+          "compartment": "surface",
+          "aliases": [
+            "CD11b"
+          ]
+        },
+        {
+          "marker": "CD19",
+          "fluorochrome": "BV750",
+          "compartment": "surface"
+        },
+        {
+          "marker": "NK1.1",
+          "fluorochrome": "R718",
+          "compartment": "surface",
+          "aliases": [
+            "NK11",
+            "PK136",
+            "AF700",
+            "Y710"
+          ]
+        },
+        {
+          "marker": "CD11C",
+          "fluorochrome": "BUV737",
+          "compartment": "surface",
+          "aliases": [
+            "CD11c"
+          ]
+        },
+        {
+          "marker": "I-A/I-E",
+          "fluorochrome": "BV605",
+          "compartment": "surface",
+          "aliases": [
+            "IAIE",
+            "MHCII",
+            "MHC-II",
+            "HLA-DR"
+          ]
+        },
+        {
+          "marker": "CD103",
+          "fluorochrome": "RY703",
+          "compartment": "surface"
+        },
+        {
+          "marker": "LY6C",
+          "fluorochrome": "RY775",
+          "compartment": "surface",
+          "aliases": [
+            "LY6C",
+            "GR1"
+          ]
+        },
+        {
+          "marker": "LY6G",
+          "fluorochrome": "RB744",
+          "compartment": "surface",
+          "aliases": [
+            "LY6G"
+          ]
+        },
+        {
+          "marker": "F4/80",
+          "fluorochrome": "RB613",
+          "compartment": "surface",
+          "aliases": [
+            "F480",
+            "ADGRE1",
+            "EMR1"
+          ]
+        },
+        {
+          "marker": "CD206",
+          "fluorochrome": "AF647",
+          "compartment": "surface",
+          "aliases": [
+            "MRC1",
+            "MMR"
+          ]
+        },
+        {
+          "marker": "IL-10",
+          "fluorochrome": "BV421",
+          "compartment": "intracellular",
+          "aliases": [
+            "IL10"
+          ]
+        },
+        {
+          "marker": "TGF-b",
+          "fluorochrome": "PE",
+          "compartment": "intracellular",
+          "aliases": [
+            "TGFB",
+            "TGFB1",
+            "TGF-beta"
+          ]
+        },
+        {
+          "marker": "CD200R3",
+          "fluorochrome": "RB780",
+          "compartment": "surface",
+          "aliases": [
+            "CD200R3"
+          ]
+        },
+        {
+          "marker": "CCR3",
+          "fluorochrome": "BUV661",
+          "compartment": "surface",
+          "aliases": [
+            "CD193"
+          ]
+        },
+        {
+          "marker": "Siglec-F",
+          "fluorochrome": "BV786",
+          "compartment": "surface",
+          "aliases": [
+            "SIGLECF",
+            "SIGLEC5"
+          ]
+        },
+        {
+          "marker": "iNOS",
+          "fluorochrome": "AF488",
+          "compartment": "surface",
+          "aliases": [
+            "NOS2",
+            "INOS"
+          ]
+        },
+        {
+          "marker": "ARG-1",
+          "fluorochrome": "BV711",
+          "compartment": "intracellular",
+          "aliases": [
+            "ARG1",
+            "ARGINASE1"
+          ]
+        },
+        {
+          "marker": "IL-6",
+          "fluorochrome": "BV650",
+          "compartment": "intracellular",
+          "aliases": [
+            "IL6"
+          ]
+        },
+        {
+          "marker": "FceRI",
+          "fluorochrome": "PE-EF610",
+          "compartment": "surface",
+          "aliases": [
+            "FCER1A",
+            "FCERIA",
+            "FCER1"
+          ]
+        }
+      ]
+    }
+  }
+}

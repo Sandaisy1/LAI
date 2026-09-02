@@ -1,0 +1,42 @@
+---
+description: JY 免疫亚群降维（比较 JY-NNK / JY-EVNK，E:/R/fuction of cell-ljy，独立于 Flow_* / ICI_* / JZ_*）
+globs: "**/JY_*.{R,r,Rmd,json}"
+alwaysApply: false
+---
+
+# JY：免疫细胞亚群降维（JY-NNK / JY-EVNK）
+
+写或改 **JY_*** 流式脚本时按本规则。这是第三套完全独立的实验，分析逻辑与 `E:/R/fuction of cell` 的免疫亚群降维一致，但**不要** `source`、查找或改 `Flow_dimred_pipeline.R` / `flow_panel_map.json` / `ICI_*` / `JZ_*` / `T_T6_*`。
+
+## 数据
+
+- 目录：`E:/R/fuction of cell-ljy`（用户拼写是 `fuction`，目录名带 `-ljy`）。把下面整套文件放在该目录，与 FCS、`results_flow/` 同目录：`JY_Flow_dimred_pipeline.R`、`JY_flow_engine.R`、`JY_flow_panel_map.json`、`JY_Flow_dimred_all_subsets.R`、`JY_Flow_dimred_trajectory.R`
+- 只用 `*_unmixed.fcs`
+- 组别：**JY-EVNK**（生物学重复 EVNK-1、EVNK-2、EVNK-3；每个生物学重复两个技术重复，如 EVNK1-1、EVNK1-2）vs **JY-NNK**（NNK-1、NNK-2、NNK-3；技术重复如 NNK1-1、NNK1-2）
+- 文件名：`EVNK1-1_P1_unmixed.fcs` / `JY-NNK-2-2_P3_unmixed.fcs` / `NNK-3-1_P2_unmixed.fcs`（`JY-` 可有可无）。**先匹配 EVNK，再匹配 NNK**，不要把 EVNK 拆成 EV 或 NNK
+- 样品名：生物学重复写成 `EVNK-1`；技术管写成 `EVNK1-1`
+- 染色与原免疫亚群方案相同（P1/P2/P3，`JY_flow_panel_map.json` 是原表的独立副本）。**不是** His 靶细胞表，不要加 His、不要去掉 IgD/BLIMP
+
+## 统计（与原免疫亚群方案相同）
+
+圈门按 **FCS 管（技术重复）** 单独做。比较是 **JY-NNK / JY-EVNK**（NNK 为处理、EVNK 为对照）：先把两个技术重复平均，再在三个生物学重复里**去掉离中位数更远的那个最大值或最小值**，用剩下 **n=2** 做均值/SD/t 检验。不要把 6 个技术管当成 n=6。tSNE/UMAP 仍用全部细胞。
+
+不要套用 ICI 的 n=3、不去极端值。
+
+## 圈门与出图
+
+QC、分层、图件与原 `Flow_*` 免疫亚群方案一致：
+
+1. QC：单细胞 →（P1 紧淋巴 / P2 宽单核 / P3 不加淋巴门）→ 活细胞 → **CD45+**（不要用 ICI 那种只去双联体/死细胞、不要求 CD45 的 QC）
+2. 三个 panel 分开降维。图1 `*_major_split` 大类；`*_lineage_split` 全体细亚群；`dimred_by_major/` 类内再降维
+3. 组别色：JY-EVNK 黑、JY-NNK 红
+4. 比较标题和文件名用 **JY-NNK / JY-EVNK**（`*_JY_NNK_vs_JY_EVNK_*`），不要写成 H vs EV，也不要只写 NNK vs EVNK
+5. 各亚群功能状态出在 `results_flow/P1|P2|P3/functional_state/`。总结果已出时只 `source("JY_Flow_dimred_functional_state.R")`：脚本会从本目录重新加载 `JY_flow_engine.R`（即使当前会话刚跑过主流程），只读 embeddings，不重跑 UMAP。P1：CD4/CD8/NK/NKT 各亚群的 CD69/IFN-γ/TNF-α/GZMB 与 PD-L1/LAG-3/TIM-3；P2：CD19 及各 B 亚群的 CD86/CD80/CD40；P3 髓系：活化 CD86/CD80/CD40/TNF-α/IL-6，抑制 IL-10/TGF-β（不要叫耗竭，不要分析 dump T/B/NK）。图为上柱下等高线，JY-EVNK 黑、JY-NNK 红。不要 `source` Flow_* 来画这些图。
+
+```r
+# ❌ BAD: source("Flow_dimred_pipeline.R")；去 E:/R/fuction of cell 找原流程
+# ❌ BAD: 把 EVNK 解析成 EV 或 NNK；把 EV1-1 认成本方案
+# ❌ BAD: 套 ICI 的 His+ QC / n=3
+# ✅ GOOD: setwd("E:/R/fuction of cell-ljy"); source("JY_Flow_dimred_pipeline.R")
+# ✅ GOOD: 技术重复平均后去掉 1 个极端生物学重复，n=2；降维用全部管子
+```

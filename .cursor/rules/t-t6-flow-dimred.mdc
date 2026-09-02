@@ -1,0 +1,30 @@
+---
+description: T-T6 免疫亚群降维（比较 T6 vs T，E:/R/flow J，独立于 Flow_* / ICI_* / JY_* / JZ_*）
+globs: "**/T_T6_*.{R,r,Rmd,json}"
+alwaysApply: false
+---
+
+# T-T6：免疫细胞亚群降维（T6 vs T）
+
+写或改 **T_T6_*** 流式脚本时按本规则。这是第五套完全独立的实验。分析逻辑与 `E:/R/fuction of cell` 的免疫亚群降维一致，但**不要** `source`、查找或改 `Flow_*` / `ICI_*` / `JY_*` / `JZ_*`。
+
+## 数据
+
+- 目录：`E:/R/flow J`。整套文件与 FCS、`results_flow/` 同目录：`T_T6_Flow_dimred_pipeline.R`、`T_T6_flow_engine.R`、`T_T6_flow_panel_map.json`、`T_T6_Flow_dimred_all_subsets.R`、`T_T6_Flow_dimred_trajectory.R`、`T_T6_Flow_dimred_functional_state.R`
+- 组别：**T**（T-1、T-2、T-3）vs **T6**（T6-1、T6-2、T6-3）。只要 `*_unmixed.fcs`（如 `T-1_P2_unmixed.fcs`）。**不要读 `*_raw.fcs`**：raw 只有 V1-A/N14-A，对不上标志物，读进去会把整个 panel 炸掉。**先匹配 T6，再匹配 T**
+- 染色按用户 P1/P2/P3 表（`T_T6_flow_panel_map.json`）。P1 Perforin-FITC、P2 IgD-FITC、P3 iNOS-AF488 **都不是 His**，不要加 His+ 母群
+- Windows 路径：`gsub("\\", "/", as.character(p), fixed = TRUE)`
+
+## 统计与圈门
+
+- 统计 **n=3**，不去极端生物学重复。T 黑、T6 红。比较标签 **T6 vs T**
+- QC 与原免疫亚群一致：单细胞 →（P1 紧淋巴 / P2 宽单核 / P3 不加淋巴门）→ 活 → **CD45+**
+- 轨迹与功能状态同其他免疫模块。P1 活化含 CD69/IFN-γ/TNF-α/GZMB/**Perforin**；P2 只报 CD86/CD80/CD40（BLIMP-1 用于亚群，不当耗竭）；P3 髓系活化/抑制，iNOS/ARG-1 只作 M1/M2 身份。总结果已出时只 `source("T_T6_Flow_dimred_functional_state.R")`
+
+```r
+# ❌ BAD: source("Flow_dimred_pipeline.R") 或 ICI_* / JY_* / JZ_*；把 T6-1 解析成 T
+# ❌ BAD: 套 ICI 的 His+ 门；把 Perforin-FITC / IgD-FITC 当成 His
+# ❌ BAD: 去掉 1 个生物学重复做成 n=2；把 *_raw.fcs 和 unmixed 一起读
+# ✅ GOOD: setwd("E:/R/flow J"); source("T_T6_Flow_dimred_pipeline.R")
+# ✅ GOOD: 三个生物学重复全留，n=3；降维用全部管子
+```

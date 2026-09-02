@@ -1,0 +1,74 @@
+---
+description: 流式 EV vs H 三 panel 降维（P1/P2/P3，unmixed FCS，导出 UMAP/tSNE 图）
+globs: "**/Flow*.{R,r,Rmd}"
+alwaysApply: false
+---
+
+# 流式 H vs EV：降维与免疫细胞比较
+
+写或改 **Flow_*** 流式脚本时按本规则。输入是 **unmixed FCS**，不是 raw、不是 Cuffdiff。RNA-seq 仍走 `TG_RNAseq_*.R`。找 His+ 靶细胞是另一套实验，走 `ICI_*`（`E:/R/Internation cell immune`）。**JY-NNK / JY-EVNK** 走 `JY_*`（`E:/R/fuction of cell-ljy`）。**JZ-AB / JZ-EVB** 走 `JZ_*`（`E:/R/fuction of cell-wjz`）。**T6 vs T** 走 `T_T6_*`（`E:/R/flow J`）。不要改、不要 `source` 那几套文件，也不要让它们来找本目录的 `Flow_dimred_pipeline.R`。
+
+## 数据
+
+- 目录：`E:/R/fuction of cell`（脚本、FCS 与 `results_flow/` 同目录；缺失则回退 `E:/R/function of cell` / `E:/R/flow J-LJY WJZ ZZX` / 仓库根）
+- 只用 `*_unmixed.fcs`，不要拿 raw 做降维
+- 文件名：`ZZX_EV1-1_P1_unmixed.fcs` / `EV1-1_P1_unmixed.fcs`（`ZZX_` 可有可无；生物学重复 1/2/3，技术重复 `-1`/`-2`）。旧名 `EV1_P1_unmixed.fcs` 仍可用。**先匹配 EV 再匹配 H**
+- 样品：`ZZX_EV` = EV1/EV2/EV3，每管两个技术重复 `EV1-1` `EV1-2`；`ZZX_H` = H1/H2/H3，同样 `H1-1` `H1-2`。圈门按 **FCS 管（技术重复）** 单独做；H vs EV 统计先把两个技术重复平均，再在三个生物学重复里**去掉离中位数更远的那个最大值或最小值**，用剩下 **n=2** 做均值/SD/t 检验。不要把 6 个技术管当成 n=6。tSNE/UMAP 仍用全部细胞，不要先丢掉某个生物学重复再降维
+- 三个 panel **分开分析、分开出图**，禁止把 P1/P2/P3 拼成一张表达矩阵。全亚群总览只汇总各 panel 已圈好的**管内频率**（`Flow_dimred_all_subsets.R` → `results_flow/all_subsets/`），百分数不能跨 panel 加总，也不能拿去再做联合 UMAP
+- 细胞轨迹（`Flow_dimred_trajectory.R`）和降维同一套思路：每个 panel 先画**全体免疫细胞大类**的一棵树（`P1_major_trajectory`；大类不足 2 个则跳过），再按 **panel × 大类** 单独画亚群树（P1 的 CD4/CD8/NK/NKT，P2 的 B，P3 的髓系）。类内 PCA 当 Component 1/2，骨架用 slingshot（若已装）或亚群中心 MST。根节点按惯例取 naive / NK immature / Naive B / Ly6C hi 单核。轨迹是标志物状态连续体，不要当成发育起源证明。出图：细胞点要够大、黑色分支骨架要细，先画线再画点，不要圈很小、线很粗；**图注放右侧并留白，不要顶栏裁切**
+- **`skip trajectory (... subsets= 1)` 不是失败。** 树至少要 2 个亚群节点。某一大类门控后只有一个标签时，日志会写 `only 1 subset, no tree to draw`。真正要看的是 P1 CD4/CD8（以及拆开后的 NK/NKT）、P2 B、P3 Myeloid。`Panel Px failed: missing value where TRUE/FALSE needed` 才是 bug：`parent_mask` / `if (sum(par) < 20)` 遇到 NA 会炸；比较必须把 NA 收成 FALSE，subset 图失败不得炸掉整块 panel
+- 物种：小鼠（NK1.1、F4/80、I-A/I-E、Ly6C/G、Siglec-F、Sca-1）
+- 荧光素→标志物以 `flow_panel_map.json` / `Flow_dimred_pipeline.R` 为准。轴标签写 `标志物-荧光素`（表上的 **PE-eFluor 610**、**APC-Cy7**、**PE-Cy7**）。Cytek unmixed 通道名常是 `BUV496-A`、`APC-Cy7-A`（带 Area 后缀）、`PE-eFluor 610-A` 或 `CD45 V500`；匹配时要去掉 `-A/-H/-W`、按 token 认标志物/荧光素，不要要求整串 equal。对不上时必须把 `$PnN`/`$PnS` 打进日志，不要只报「没有匹配到任何分析通道」
+- **NK1.1 抗体是 AF700**，Cytek unmixed 通道名经常仍是 `R718-A` / `APC-R700-A`（同一 ~700 nm 检测器），两种都要配上，不能只认字面 `AF700-A`
+- Windows 若把 json 存成“文本文档”，真实名常是 `flow_panel_map.json.txt`：脚本要认这个名字，不要只找 `.json`
+
+## 预处理（每个 panel 六个样品一起做一次，再降维）
+
+1. 去碎片 / 双联体（FSC-A vs FSC-H/W）；P1 再按 FSC/SSC 圈淋巴细胞，**P2 用更宽的单核门**（活化 B / 浆母更大）；**P3 不再加淋巴门**（单细胞 → 活细胞 → CD45+）；L/D(FVS450) 去死；CD45+ 白细胞（后续分析的基础）
+2. 荧光通道 asinh（流式 cofactor 约 150，不要用 CyTOF 的 5）
+3. L/D 只用于 QC，**不要**作为 UMAP/tSNE 特征；CD45 门控后默认可排除
+4. 按样品等量下采样再联合 embedding，避免大文件主导；频率统计用 QC 后细胞，不要只用 DR 子集冒充频率
+5. 不要用未门控、未转换的 raw 强度做降维
+
+## 比较与出图（每 panel 必须单独出）
+
+- 比较只有 **H vs EV**。技术重复先平均成三个生物学重复，再在 EV、H 各自去掉 1 个极端生物学重复（最大值或最小值里离中位数更远的那个），用剩下的值算均值、SD 和检验。联合 UMAP/tSNE 仍用全部细胞，用 `group`/`sample` 着色，不要先把重复平均掉再降维。
+- **CD4 T 与 CD8 T 在图1上揉在一起，不是圈门没分。** 标签是 CD4+CD8− / CD4−CD8+ 象限（双阳/双阴不要用「谁更大」塞进某一边）。坐标却是全部荧光通道一起算的 tSNE：naive CD4 和 naive CD8 在 CD62L/CD44/CD27 上几乎一样，CD4/CD8 只占两列，会被冲掉。联合降维必须**加重谱系标志**（CD4/CD8 权重大于共享记忆标志），让大红/大绿分开。类内亚群图仍只拿该大类再降维。
+
+每个非空 panel 必须导出 PDF+PNG。图分三层（免疫细胞亚群降维，ICI 靶细胞寻找用同一套绘图规则）：
+
+1. **图1（全体大类，`*_major_split`）**：左 EV、右 H，共用同一套 tSNE/UMAP，点按 **CD4 T / CD8 T / NK / NKT / B / Myeloid** 着色。图注放右侧并加宽画布。
+2. **全体细亚群（`*_lineage_split` / `*_UMAP_lineage_split`）**：同一套联合 embedding、全体细胞，点按**每一个细亚群**着色，不要只画六个大类。图注多列、稀有亚群落在上层。
+3. **各大类亚群图**（`dimred_by_major/`）：只拿该大类细胞再降维，点按细亚群着色，同样左 EV、右 H。**同一大类内部必须用高对比定性色**（CD8 不要全绿、CD4 不要全红棕、NK 不要全紫、NKT 不要全黄橙）。细胞少时：点随 n 放大、画布缩小、坐标裁掉空白；类内 UMAP 用更小 `min_dist`，并加重 CD62L/CD44 等亚群标志，不要把稀有亚群洒在一张大白图上。
+
+**缺染色通道：这一项可以不分析，但不能跳过后面的亚群/大类/panel。** 日志写 `skip … (missing channels: …)`，继续出其余图。
+
+每个 panel 还必须出 **免疫细胞注释热图**（`*_annotation_heatmap`）：行是标志物、列是已圈好的细胞类型（中位数再按标志物 z-score），不要用 kmeans cluster 号当列名。另出一张大类版 `*_annotation_heatmap_major`。ICI 同样出；ICI 图上细胞已经全是 His+，不要再单列 His+ target 亚群。
+
+**不要**把每个亚群拆成小格子、也不要每种细胞画一个填充 blob（旧图2）。不要虚线凸包。旧函数 `separate_region_plot_coords` / `region_fill_polygon` 已删除，不要再加回来。图注必须完整可见。
+
+**圈门必须每个样品单独走完同一套逻辑**（`hierarchical_gate_by_sample`），不要六个 FCS 共用一个 kmeans 阈值。CD62L/CD44 用完整象限：naive = 62L+44−，**T_CM** = 双阳，**T_EM** = **整个 CD62L− 半平面**（CD44+ 与原点双阴都算 T_EM，不要只框 10–20% 的小矩形）。**T_EFF** = CD8/NK 的 Perforin+ 或 GZMB+，以及 CD4/CD8 里明确的 IFN-γ+ / TNF-α+ 岛。图上写 T_CM / T_EM / T_EFF，不要只写 TCM/TEM。阳性阈值要切在原点主团右侧（抓住 CD62L/CD44 尾巴），不要用全体 q80 把主团切开。每个 FCS 另出 `gating/<样品>/`：2D 十字门铺满坐标轴，CD62L/CD44 标四个象限百分数。subset 图的 EV、H 也各自按本组细胞切完整门，禁止用命中细胞的 10–90% 分位数小框。
+
+**每个亚群**还要出一组论文风格图（`subset_stats/`）：上方 EV（黑）vs H（红）柱状图（均值、**SD** 误差棒、去掉极端值后剩下的重复白心点、显著性 `ns/*/**/*** `；ns 时标出 P 值）。n=2 时柱高看起来不同也会 ns，不要为了出星号改检验。下方 2D 图按 FlowJo：**概率等高线 + 最外圈以外的 outliers**，EV/H 共用坐标轴、同一门框和百分数。不要只用 ggplot `stat_density_2d(ndensity)`（那是峰值等高线，看起来不像文章里的流式图）。
+
+**每个已圈亚群的功能状态**另出 `functional_state/`（不要并进 `subset_stats/` 或 GSEA）。每个母群单独分析，图按多列排：上为对照（黑）vs 处理（红）空心柱 + SD + 实心点 + 显著性，下为对照在上、处理在下的等高线（Y 轴功能标志、X 轴谱系标志、上侧矩形门和百分数）。**不要**把 `CD4_activated` / `NK_exhausted` 这类已经按该标志圈出来的标签再当母群（循环）。P1：CD4/CD8（含 naive、T_CM、T_SCM、T_EM 及 early/late、SLEC、MPEC）与 Treg、NK（immature/DP/mature）、NKT（CD4/DN）报活化/效应 = CD69、IFN-γ、TNF-α、GZMB，耗竭 = PD-L1、LAG-3、TIM-3。P2：CD19+ 全体以及 Naive / Unswitched / Switched / Atypical / Activated / MZ / Plasmablast / Plasma，只报 CD86、CD80、CD40（P2 没有耗竭通道，缺则 skip，不要用 CD40 当 Activated 亚群名）。P3 只做髓系（中性粒、嗜酸、肥大、巨噬、M1/M2、DC/cDC1/cDC2、Ly6C hi/lo 单核），不要分析 dump 的 T/B/NK；活化 = CD86、CD80、CD40、TNF-α、IL-6，抑制 = IL-10、TGF-β（不要叫耗竭，也不要用这些当 M1/M2 极化）。阳性率按母群共用阈值，技术重复平均后再去 1 个极端生物学重复（n=2）。NKG2D 仍不出亚群。总降维已出时用 `source("Flow_dimred_functional_state.R")`：脚本会从本目录重新加载函数库（覆盖会话里旧拷贝），只读 `*_cell_embeddings.csv`，不要为补这些图重跑三个 panel。
+
+- P1：**先清理**（单细胞 → 淋巴细胞 FSC/SSC → CD45+），再圈大类。T = **CD3+** → **CD4+ CD8−** / **CD4− CD8+**。B = **CD19+**（dump）。NK = **CD3− NKp46+**（NKp46 在 CD11b **之前**，成熟 NK 是 CD11b+；NKp46 缺失才退回 NK1.1）。NKT = **CD3+ NKp46+**。CD4/CD8 内：naive = CD62L high CD44 low；**T_CM** = CD62L+ CD44+，其中 **T_SCM** = CD27+ CD95+；**T_EM** = 整个 CD62L−，再分 **T_EM early**（CD27+）/ **T_EM late**（CD27−）、**SLEC**（SCA-1+）、**MPEC**（SCA-1 low 且 CD27+）；耗竭在 T_EM 里用 **PD-L1 / LAG-3 / TIM-3** 高（CD4 和 CD8 都做）。**T_EFF** = CD8/NK 的 Perforin+ 或 GZMB+，以及 CD4/CD8 明确的 IFN-γ+ / TNF-α+。早期活化 = **CD69+**（可同时 naive 表型）；剩余 CD25+ CD69− → Treg。NK 内互斥：CD69+ → **NK activated**；Perforin+/GZMB+ → **NK T_EFF**；PD-L1/LAG-3/TIM-3 高 → **NK exhausted**；剩余按 Hayakawa **CD27 vs CD11b**：CD27+ CD11b− = immature，双阳 = DP，CD27− CD11b+ = mature。**不要用 NKG2D 当亚群**（组成性表达）。NKT 内：CD4+ = **CD4 NKT**，CD4− = **DN NKT**；少数 CD69 / 杀伤岛可标 activated / effector。NKG2D、IFN-g、TNF-a、GZMB 在 CD4/CD8/NK 上出 **MFI**，不是新亚群。B 与髓系在 P1 只 dump。
+- P2：**先清理**（单细胞 → **宽单核** FSC/SSC，不要只圈小淋巴，活化 B / 浆母更大 → FVS450− 活细胞 → CD45+）。再圈 **CD19+** 作为 B 亚群母门。CD19+ 上 **IgD vs CD27 四象限**：Naive = IgD high CD27−；**Unswitched memory** = IgD high CD27+；**Switched memory** = IgD− CD27+；双阴 = Atypical。**不要把 BLIMP-1 放进这一层**，也不要再用 k=2 把 B 只分成 Naive vs Memory。Switched 内：少数 BLIMP+ → **Plasmablast**（CD19+ 或弱阳 / IgD− / CD27+ / BLIMP-1+）；IgG+ 仍是 switched memory。Naive 或 Unswitched 内 IgM 高 → **MZ B**。CD19− 里 IgD− CD27++ BLIMP-1+ → **Plasma**（浆细胞可以是 CD19−，不要只在 CD19+ 里找）。**CD40 / CD80 / CD86 是 Naive、Unswitched、Switched 上的 MFI 或阳性率**，不是新的第 1 层亚群；**不要用 CD40 叫 Activated**（静息 B 也有 CD40）；少数 CD80/CD86 岛才可标 Activated（CD86 早、CD80 晚）。默认剩余是 Naive / Unswitched / Switched，不是 Plasma。
+- P3：**先清理**（单细胞 → FVS450− → CD45+，不要加小淋巴门）。再圈大类：T = **CD3+**；B = **CD3− CD19+**；NK = **CD3− CD19− NK1.1+**；髓系 = **CD3− CD19− NK1.1−**。髓系先按 **CD11B** 分两支，不要一次 kmeans 比大小。**CD11B+**：Ly6G→中性粒（Ly6C 中阳仍是中性粒）；**Siglec-F 且 CCR3**→嗜酸（单阳不算）；**FceRI 且 CD200R3**→肥大细胞；剩余 **F4/80 high** = 组织巨噬，**F4/80 mid/low 且 Ly6C high** = 炎症单核，其余 Ly6C lo。**CD11B−**：CD11C+ 且 MHC-II+ → DC，再 **CD103+ = cDC1**、**CD103− = cDC2**。MHCII+ 巨噬仍在 CD11B+，不能并成 DC。巨噬内 **M1 = iNOS+ ARG-1−**，**M2 = ARG-1+ CD206+ iNOS−**；不用 IL-10/TGF-b/TNF-a/CD86 当极化。**CD40/CD80/CD86** 是 B/DC/巨噬的 MFI，**TNF-a** 是巨噬/DC/T 的读出，都不是新亚群。P3 的 CD80 是 **BUV496**（TNF-a 才是 APC）。
+- 类内 kmeans 只跑该层标志。不要全局 kmeans 后整团贴一个名字，也不要按 rank 在 UMAP 上撒点
+- **P1/P2/P3 共用高对比定性色**：同一张图、同一大类内部色相必须拉开。禁止 CD8 全绿、CD4 全红棕、NK 全紫红、NKT 全黄橙、P2 全紫、P3 全橙。组别色：EV 黑、H 红
+- P3 **CD80 = BUV496**，**TNF-a = APC**（同一管子不能两个 APC）
+
+```r
+# ❌ BAD: 用 raw FCS；把 EV1 解析成 H；三 panel 混降维；只出坐标表不出图
+# ❌ BAD: 把 EV1/EV2/EV3 先平均成一个“EV”再 UMAP
+# ❌ BAD: 只出 UMAP，不出每个亚群的柱状图+等高线
+# ❌ BAD: 把 *_lineage_split 画成六个大类，或 CD8 亚群全用绿色
+# ❌ BAD: 联合 tSNE 各通道等权，naive CD4 和 naive CD8 揉成一团
+# ❌ BAD: CD3+ 里用 cd4>=cd8 把双阳/双阴塞进 CD4 或 CD8
+# ❌ BAD: 类内只有几百个细胞仍用大画布+小点，颜色糊成一片
+# ✅ GOOD: 仅 unmixed；P1/P2/P3 各自目录；*_major_split 大类 + *_lineage_split 全体细亚群 + dimred_by_major/
+# ✅ GOOD: 左 EV、右 H，共用 tSNE；图注留在右侧不要裁切；缺通道只 skip 该项
+# ✅ GOOD: 每个 panel 出 annotation_heatmap（按注释亚群，不是 cluster 号）
+```
