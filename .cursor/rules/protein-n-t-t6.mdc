@@ -1,0 +1,52 @@
+---
+description: N / T / T6 蛋白质组差异分析（N vs T、T6 vs T；火山图 + 上调 GO/KEGG）
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# N / T / T6 蛋白质组：差异蛋白、火山图、上调 GO/KEGG
+
+写或改 **蛋白质组** R 分析时按本规则。输入是强度矩阵（Excel/csv），不是 Cuffdiff。不要把 `TG_RNAseq_pipeline.R` 套到这份数据上。
+
+## 数据
+
+- 目录：`E:/R/protein T T6`（路径含空格；脚本与结果同目录；缺失则回退仓库根）
+- 按列名匹配样品强度（LFQ / intensity / abundance 等）；蛋白 ID（UniProt/accession）与基因符号各留一列
+- 三组**独立保留**，禁止合并或改名：
+  - `N`（6）：`N1` `N2` `N3` `N5` `N7` `N10`（没有 N4/N6/N8/N9，不要补）
+  - `T`（6）：`T1` `T2` `T3` `T4` `T5` `T6`
+  - `T6`（7）：`T6-1` `T6-2` `T6-3` `T6-4` `T6-5` `T6-6` `T6-7`
+- `T` 组的样品 `T6` ≠ `T6` 组；`T6-*` 才属于 T6 组
+- 物种默认人 `org.Hs.eg.db`；无符号的 accession 留在差异表，GO/KEGG 可不映射
+
+## 预处理（三组一起做一次，再做两组比较）
+
+1. 过滤：多数样品缺失或强度过低的蛋白去掉
+2. 强度 log2 后中位数或分位数标准化；有重复用 **limma**（不要对原始强度直接算 FC）
+3. 缺失按组内规则处理并写进日志；不要 silently drop 整组样品
+
+## 两组比较（各自目录、各自出表出图）
+
+对比方向：`A vs B` 的 logFC = A − B，正值 = A 更高。只把**上调**蛋白送 GO/KEGG。
+
+1. `N vs T`（参考为 T）：样品仅 `N1,N2,N3,N5,N7,N10` vs `T1–T6`
+2. `T6 vs T`（参考为 T）：样品仅 `T6-1`–`T6-7` vs `T1–T6`（不要混入 N，也不要把样品 `T6` 放进 T6 组）
+
+脚本：`protein_N_T_T6_pipeline.R`。不要为加蛋白质组而去改 RNA-seq 脚本。
+
+## 显著性与上调
+
+能估计 p（有生物学重复）时先 **p < 0.01**，再取上调（logFC > 0；默认再加 FC ≥ 1.5）。全蛋白差异表仍输出。下调可画在火山图上，但不要拿去做 GO/KEGG。
+
+## 每个比较必须出的结果
+
+差异蛋白表、火山图、GO（上调）、KEGG（上调）。
+
+- ORA 放 `GO/`、`KEGG/`，文件名以 `ORA_` 开头
+- 目录：`results/N_vs_T/`、`results/T6_vs_T/`；图标题带比较名
+
+```r
+# ❌ BAD: 把样品 T6 当作 T6 组；N vs T 时混入 T6-1…T6-7
+# ❌ BAD: 未标准化就算 FC；GO/KEGG 用下调或全差异集
+# ✅ GOOD: 两组各一目录；limma 后火山图 + 仅上调蛋白 ORA_GO / ORA_KEGG
+```
