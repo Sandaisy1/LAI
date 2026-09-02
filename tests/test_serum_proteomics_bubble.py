@@ -151,6 +151,10 @@ def test_default_data_dir_is_zhao_serum() -> None:
     assert "serum_proteomics_ranked_bubble.R" in text
     assert "天府" in text
     assert 'encoding = "UTF-8"' in text
+    no_ig = (ROOT / "serum_proteomics_ranked_bubble_no_Ig.R").read_text(encoding="utf-8")
+    assert "run_serum_abundance_bubble" not in no_ig
+    assert "immunoglobulin" in no_ig.lower() or "免疫球蛋白" in no_ig
+    assert "serum_proteomics_bubble_no_Ig" in no_ig
 
 
 if __name__ == "__main__":

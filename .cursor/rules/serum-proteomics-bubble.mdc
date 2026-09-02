@@ -13,7 +13,7 @@ alwaysApply: false
 - 目录：`E:/天府/实验管理/课题/赵章寻/血清蛋白质组学`
 - 首选 `report.pg_matrix` / `report.pg_matrix.tsv`；过少则 `report.pr_matrix` 按 `Protein.Group` 取肽段中位数
 - 当前两列样品 `GP_WJZ_11`、`GP_WJZ_18`：**先对两列取平均，再按平均丰度排名**。不要做成两组比较的 FC 气泡图，也不要靠气泡大小编码丰度
-- 去免疫球蛋白：另跑 `serum_proteomics_ranked_bubble_no_Ig.R`（不要改原脚本）。去掉 IGH/IGK/IGL/JCHAIN 等后再平均、再排名；结果在 `results/serum_proteomics_bubble_no_Ig/`，并写出 `removed_immunoglobulins.csv`。不要把 IGSF 等超家族当抗体去掉
+- 去免疫球蛋白：单独 source `serum_proteomics_ranked_bubble_no_Ig.R`（独立脚本，不要先 source 原脚本）。去掉 IGH/IGK/IGL/JCHAIN 等后再平均、再排名；结果在 `results/serum_proteomics_bubble_no_Ig/`
 
 ## 预处理
 
