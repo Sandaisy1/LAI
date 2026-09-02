@@ -14,6 +14,8 @@
 # 用法：把本方案全部 ICI_* 文件放到 Internation 目录（不要去 fuction of cell 找原流程）
 #   setwd("E:/R/Internation cell immune")
 #   source("ICI_Flow_dimred_pipeline.R")
+# 总结果已出、只补功能状态图：
+#   source("ICI_Flow_dimred_functional_state.R")
 # 无 FCS 时可 Sys.setenv(FLOW_DEMO = "1")
 #
 # 结果：E:/R/Internation cell immune/results_flow/
@@ -64,7 +66,8 @@ load_ici_engine <- function() {
       "  ICI_flow_engine.R\n",
       "  ICI_flow_panel_map.json\n",
       "  ICI_Flow_dimred_all_subsets.R\n",
-      "  ICI_Flow_dimred_trajectory.R"
+      "  ICI_Flow_dimred_trajectory.R\n",
+      "  ICI_Flow_dimred_functional_state.R"
     )
   }
   source(hit, local = FALSE)

@@ -126,6 +126,7 @@ ICI **P2** 是 7 色：L/D、CD45、CD19、CD27、IgG-RB613、IgM-RB780、His-FI
 - `ICI_flow_panel_map.json`
 - `ICI_Flow_dimred_all_subsets.R`
 - `ICI_Flow_dimred_trajectory.R`
+- `ICI_Flow_dimred_functional_state.R`
 
 免疫亚群那套 `Flow_*` 继续只放在 `E:/R/fuction of cell`，两边互不干扰。
 
@@ -136,7 +137,16 @@ source("ICI_Flow_dimred_pipeline.R")
 
 QC 按免疫降维做 **去粘连体 → 淋巴细胞（P1 紧淋巴 / P2 宽单核 / P3 不加淋巴门）→ 死活排除**，**不要求 CD45+**。随后圈 **His-FITC+** 作为分析母群；图上展示的细胞**全部是 His+**（这批 His-target 细胞），再按原来的 P1/P2/P3 免疫亚群着色。未圈中的叫 other，不要再单列 His+ target 亚群。频率是占 His+ 母群的百分数。His+ 占 QC 后活细胞的比例写在 `target_His/`。
 
-降维和轨迹与免疫亚群方案同一套：`*_major_split` 按大类着色（CD4 T / CD8 T / NK / …），`*_lineage_split` 是全体细亚群，`dimred_by_major/` 再按大类重降维（高对比色）；轨迹先画全体大类树再画各类亚群树。每个 panel 出免疫细胞注释热图 `*_annotation_heatmap`。ICI P1 没有 CD19，缺通道按阴性处理，不要再出现 `NAs are not allowed in subscripted assignments`；缺的染色通道该项可以不分析，但不能跳过该 panel 其余图。结果在同目录 `results_flow/`，His+ 母群表在 `target_His/`。
+降维和轨迹与免疫亚群方案同一套：`*_major_split` 按大类着色（CD4 T / CD8 T / NK / …），`*_lineage_split` 是全体细亚群，`dimred_by_major/` 再按大类重降维（高对比色）；轨迹先画全体大类树再画各类亚群树。每个 panel 出免疫细胞注释热图 `*_annotation_heatmap`。
+
+**功能状态**与免疫降维同一套图1布局（上空心柱、下对照/处理等高线），但**只在 His-FITC+ 母群**上做各亚群。P1 本表有 CD69（IFN-γ / TNF-α / GZMB、耗竭通道缺则 skip）；P2 没有 CD86/CD80/CD40，该项 skip，不伪造；P3 报 CD86/CD80/CD40，TNF-α / IL-6 / IL-10 / TGF-β 缺则 skip。NKG2D 仍只出 MFI。总降维已出时可单独：
+
+```r
+setwd("E:/R/Internation cell immune")
+source("ICI_Flow_dimred_functional_state.R")
+```
+
+ICI P1 没有 CD19，缺通道按阴性处理，不要再出现 `NAs are not allowed in subscripted assignments`；缺的染色通道该项可以不分析，但不能跳过该 panel 其余图。结果在同目录 `results_flow/`，His+ 母群表在 `target_His/`，功能状态图在各 panel 的 `functional_state/`。
 
 ## JY（第三套实验，免疫亚群降维，比较 JY-NNK / JY-EVNK）
 

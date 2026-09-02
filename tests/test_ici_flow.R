@@ -409,7 +409,8 @@ ici_bundle <- c(
   "ICI_flow_engine.R",
   "ICI_flow_panel_map.json",
   "ICI_Flow_dimred_all_subsets.R",
-  "ICI_Flow_dimred_trajectory.R"
+  "ICI_Flow_dimred_trajectory.R",
+  "ICI_Flow_dimred_functional_state.R"
 )
 for (nm in ici_bundle) {
   if (!file.exists(file.path(root, nm))) {
