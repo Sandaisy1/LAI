@@ -196,7 +196,7 @@ export_all_subsets_analysis <- function(result_dir) {
     "This scheme is P1 + P2 + P3. Do not read results from E:/R/fuction of cell.",
     "Numbers below are % of His-FITC+ cells inside each panel tube after QC, not a whole-blood composition.",
     "Do not add P1+P2+P3 percentages together.",
-    "Gating: singlets → lymph/live → His+ parent; then P1 T/NK, P2 B, P3 myeloid (plus His+ target leftover).",
+    "Gating: singlets → lymph/live → His+ parent; then P1 T/NK, P2 B, P3 myeloid. All cells here are His+.",
     "Dump channels (coarse only): P1 B and Myeloid; P3 T, B, NK.",
     "Stats: n=3 biological replicates; no tech-rep averaging; do not drop an extreme bio-rep.",
     paste("Panels found:", paste(unique(freq$panel), collapse = ", "))
@@ -225,7 +225,7 @@ export_all_subsets_analysis <- function(result_dir) {
   focus <- freq_plot[freq_plot$role == "focus", , drop = FALSE]
   stats_f <- stats[stats$role == "focus", , drop = FALSE]
   if (nrow(focus) > 0) {
-    save_gg(plot_all_freq_facet(focus, "Focus subsets only  (P1 T/NK, P2 B, P3 myeloid, His+ target)"),
+    save_gg(plot_all_freq_facet(focus, "Focus subsets only  (P1 T/NK, P2 B, P3 myeloid on His+)"),
             file.path(out_dir, "all_subsets_focus_frequency_H_vs_EV"),
             width = max(11, 1.15 * length(unique(focus$subset_label)) / 2), height = 5.8)
   }

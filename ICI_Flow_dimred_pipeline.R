@@ -188,27 +188,8 @@ qc_filter_matrix_flow <- function(exprs, names, map, panel_id = NA) {
   keep
 }
 
-# 在 His+ 母群上先走免疫亚群门；His+ CD45- 且未命中亚群名的才标 Target
-ici_apply_his <- function(mat, h) {
-  his_pos <- ici_his_positive(mat)
-  if (!any(his_pos)) return(h)
-  cd45_pos <- ici_cd45_positive(mat)
-  named <- ici_is_named_immune(h$major, h$subset)
-  tgt <- his_pos & !cd45_pos & !named
-  tgt[is.na(tgt)] <- FALSE
-  if (any(tgt)) {
-    h$major[tgt] <- "Target"
-    h$subset[tgt] <- "Target"
-  }
-  h
-}
-
-hierarchical_gate_flow <- hierarchical_gate
-hierarchical_gate <- function(mat, panel_id) {
-  mat <- as.matrix(mat)
-  h <- hierarchical_gate_flow(mat, panel_id)
-  ici_apply_his(mat, h)
-}
+# 图上的细胞已经全是 His+，不要再单独标一个 His+ target 亚群。
+# 未圈中的 His+ 与免疫降维一样叫 other / dump，不要改成 Target。
 
 # ICI P2 没有 IgD / BLIMP：CD19 母门后用 CD27 × IgM/IgG 对应原 P2 的 naive / unswitched / switched
 gate_p2_major_flow <- gate_p2_major
@@ -248,52 +229,30 @@ gate_p2_major <- function(mat) {
   p2_assign_cd19neg_plasma(mat, out)
 }
 
-pal_celltype <- c(pal_celltype,
-  "His+ target" = "#00ACC1",
-  "Target" = "#00ACC1"
-)
-
 celltype_label_flow <- celltype_label
 celltype_label <- function(lineage, panel_id) {
   lab <- as.character(lineage)
-  out <- ifelse(lab %in% c("Target", "His_target"), "His+ target", celltype_label_flow(lineage, panel_id))
+  out <- ifelse(lab %in% c("Target", "His_target", "His+ target"), "other",
+                celltype_label_flow(lineage, panel_id))
   unname(out)
-}
-
-parent_mask_flow <- parent_mask
-parent_mask <- function(cells, parent) {
-  if (identical(as.character(parent), "Target") || identical(as.character(parent), "His")) {
-    n <- nrow(cells)
-    lin <- if ("lineage" %in% names(cells)) as.character(cells$lineage) else rep("", n)
-    lin[is.na(lin)] <- ""
-    cl <- if ("cluster_lineage" %in% names(cells)) as.character(cells$cluster_lineage) else rep("", n)
-    cl[is.na(cl)] <- ""
-    return(lin %in% c("Target", "His_target") | cl == "Target")
-  }
-  parent_mask_flow(cells, parent)
 }
 
 subset_plot_specs_flow <- subset_plot_specs
 subset_plot_specs <- function(panel_id) {
-  mk <- function(lineage, x, y, parent, ylab, use_major = FALSE,
-                 gate = "box", x_hi = NA, y_hi = NA) {
-    list(lineage = lineage, x = x, y = y, parent = parent, ylab = ylab,
-         use_major = use_major, gate = gate, x_hi = x_hi, y_hi = y_hi)
-  }
-  his <- list(
-    mk("Target", "His", "CD45", "all", "His+ CD45- of His+ parent (%)", gate = "quad", x_hi = TRUE, y_hi = FALSE)
-  )
   if (identical(panel_id, "P2")) {
-    p2 <- list(
+    mk <- function(lineage, x, y, parent, ylab, use_major = FALSE,
+                   gate = "box", x_hi = NA, y_hi = NA) {
+      list(lineage = lineage, x = x, y = y, parent = parent, ylab = ylab,
+           use_major = use_major, gate = gate, x_hi = x_hi, y_hi = y_hi)
+    }
+    return(list(
       mk("Naive_B", "IgM", "CD27", "CD19", "Naive B in CD19+ (%)", gate = "half_y", y_hi = FALSE),
       mk("Unswitched_B", "IgM", "CD27", "CD19", "Unswitched memory B in CD19+ (%)", gate = "quad", x_hi = TRUE, y_hi = TRUE),
       mk("Switched_B", "IgG", "CD27", "CD19", "Switched memory B in CD19+ (%)", gate = "hi_hi"),
       mk("MZ_B", "IgM", "CD27", "Naive_Unswitched", "MZ B in naive/unswitched (%)", gate = "hi_x", x_hi = TRUE)
-    )
-    return(c(his, p2))
+    ))
   }
-  orig <- tryCatch(subset_plot_specs_flow(panel_id), error = function(e) list())
-  c(his, orig)
+  subset_plot_specs_flow(panel_id)
 }
 
 demo_means_p1 <- function() {
@@ -317,7 +276,7 @@ demo_means_p1 <- function() {
     NK_act = pop(CD3 = 0.1, NKp46 = 3.0, CD69 = 3.1, CD45 = 3.0, His = 3.2),
     NKT_CD4 = pop(CD3 = 3.0, NKp46 = 2.6, CD4 = 3.0, CD45 = 3.0, His = 3.2),
     Myeloid = pop(CD11B = 3.2, CD3 = 0.1, CD45 = 3.0, His = 3.2),
-    Target = pop(His = 3.2, CD45 = 0.3, CD3 = 0.1, CD11B = 0.2, NKp46 = 0.2)
+    Other = pop(His = 3.2, CD45 = 0.3, CD3 = 0.1, CD11B = 0.2, NKp46 = 0.2)
   )
 }
 
@@ -339,7 +298,7 @@ demo_means_p3 <- function() {
     cDC1 = pop(CD11C = 3.1, CD103 = 3.0, `I-A/I-E` = 3.0, CD11B = 0.4, CD45 = 3.0, His = 3.2),
     Eosinophil = pop(`Siglec-F` = 3.2, CCR3 = 2.8, CD11B = 2.6, LY6G = 0.2, CD45 = 3.0, His = 3.2),
     Mast = pop(FceRI = 3.1, CD11B = 2.8, CD45 = 3.0, His = 3.2),
-    Target = pop(His = 3.2, CD45 = 0.3, CD3 = 0.1, CD11B = 0.2, CD19 = 0.1)
+    Other = pop(His = 3.2, CD45 = 0.3, CD3 = 0.1, CD11B = 0.2, CD19 = 0.1)
   )
 }
 
@@ -357,7 +316,7 @@ demo_means_p2 <- function() {
     Unswitched_B = pop(CD19 = 3.1, CD27 = 3.0, IgM = 2.8, IgG = 0.2, CD45 = 3.0, His = 3.2),
     MZ_B = pop(CD19 = 3.1, CD27 = 0.3, IgM = 3.3, IgG = 0.2, CD45 = 3.0, His = 3.2),
     Switched_B = pop(CD19 = 3.0, CD27 = 2.8, IgG = 3.1, IgM = 0.3, CD45 = 3.0, His = 3.2),
-    Target = pop(His = 3.2, CD45 = 0.3, CD19 = 0.2, CD27 = 0.2, IgM = 0.2, IgG = 0.2)
+    Other = pop(His = 3.2, CD45 = 0.3, CD19 = 0.2, CD27 = 0.2, IgM = 0.2, IgG = 0.2)
   )
 }
 
@@ -367,132 +326,36 @@ demo_props <- function(panel_id, group) {
     if (ctrl) {
       return(c(CD4_naive = 0.16, CD4_TCM = 0.08, CD4_TEM = 0.08, Treg = 0.05, CD4_act = 0.06,
                CD8_naive = 0.10, CD8_TEM = 0.08, NK = 0.10, NK_act = 0.04, NKT_CD4 = 0.04,
-               Myeloid = 0.06, Target = 0.15))
+               Myeloid = 0.06, Other = 0.15))
     }
     return(c(CD4_naive = 0.10, CD4_TCM = 0.07, CD4_TEM = 0.08, Treg = 0.05, CD4_act = 0.08,
              CD8_naive = 0.07, CD8_TEM = 0.08, NK = 0.09, NK_act = 0.06, NKT_CD4 = 0.04,
-             Myeloid = 0.05, Target = 0.23))
+             Myeloid = 0.05, Other = 0.23))
   }
   if (panel_id == "P2") {
     if (ctrl) {
-      return(c(Naive_B = 0.28, Unswitched_B = 0.18, MZ_B = 0.10, Switched_B = 0.22, Target = 0.22))
+      return(c(Naive_B = 0.28, Unswitched_B = 0.18, MZ_B = 0.10, Switched_B = 0.22, Other = 0.22))
     }
-    return(c(Naive_B = 0.20, Unswitched_B = 0.16, MZ_B = 0.08, Switched_B = 0.24, Target = 0.32))
+    return(c(Naive_B = 0.20, Unswitched_B = 0.16, MZ_B = 0.08, Switched_B = 0.24, Other = 0.32))
   }
   if (ctrl) {
     return(c(Neutrophil = 0.14, Mono_Ly6Chi = 0.10, Macrophage = 0.12, M2_like = 0.08,
-             DC = 0.08, cDC1 = 0.08, Eosinophil = 0.08, Mast = 0.07, Target = 0.25))
+             DC = 0.08, cDC1 = 0.08, Eosinophil = 0.08, Mast = 0.07, Other = 0.25))
   }
   c(Neutrophil = 0.10, Mono_Ly6Chi = 0.08, Macrophage = 0.10, M2_like = 0.10,
-    DC = 0.09, cDC1 = 0.08, Eosinophil = 0.08, Mast = 0.07, Target = 0.30)
-}
-
-ici_his_mask <- function(cells) {
-  lin <- if ("lineage" %in% names(cells)) as.character(cells$lineage) else rep("", nrow(cells))
-  lin[is.na(lin)] <- ""
-  tgt <- lin == "Target"
-  his <- if ("His" %in% names(cells)) as.numeric(cells$His) else rep(NA_real_, nrow(cells))
-  if (any(is.finite(his)) && !any(tgt)) {
-    cut_his <- axis_pos_cut(his)
-    tgt <- is.finite(his) & is.finite(cut_his) & his >= cut_his
-    cd45 <- if ("CD45" %in% names(cells)) as.numeric(cells$CD45) else rep(NA_real_, nrow(cells))
-    if (any(is.finite(cd45))) {
-      cut45 <- axis_pos_cut(cd45)
-      tgt <- tgt & !(is.finite(cd45) & is.finite(cut45) & cd45 >= cut45)
-    }
-  }
-  tgt[is.na(tgt)] <- FALSE
-  tgt
-}
-
-plot_ici_his_split <- function(cells, x, y, xlab, ylab, title, pal) {
-  plot_df <- cells
-  plot_df$group <- factor(plot_df$group, levels = flow_group_levels)
-  levs <- intersect(names(pal), unique(as.character(plot_df$celltype)))
-  plot_df$celltype <- factor(plot_df$celltype, levels = levs)
-  ggplot2::ggplot(plot_df, ggplot2::aes(x = .data[[x]], y = .data[[y]], color = celltype)) +
-    ggplot2::geom_point(size = 0.72, alpha = 0.92, stroke = 0) +
-    ggplot2::facet_wrap(~group, ncol = 2, scales = "fixed") +
-    ggplot2::scale_color_manual(values = pal[levs], drop = FALSE) +
-    ggplot2::labs(title = title, x = xlab, y = ylab, color = NULL) +
-    ggplot2::coord_fixed(ratio = 1, clip = "off") +
-    theme_split_dr() +
-    ggplot2::theme(
-      axis.text = ggplot2::element_blank(),
-      axis.ticks = ggplot2::element_blank(),
-      panel.border = ggplot2::element_blank(),
-      panel.spacing = ggplot2::unit(1.15, "lines"),
-      legend.key = ggplot2::element_blank(),
-      plot.margin = ggplot2::margin(8, 18, 10, 10)
-    )
+    DC = 0.09, cDC1 = 0.08, Eosinophil = 0.08, Mast = 0.07, Other = 0.30)
 }
 
 export_ici_his_stats <- function(cells, panel_id, out_dir) {
-  if (!nrow(cells) || !("His" %in% names(cells))) return(invisible(NULL))
-  tgt <- ici_his_mask(cells)
-  his <- as.numeric(cells$His)
-  cut_his <- axis_pos_cut(his)
-  his_pos <- is.finite(his) & is.finite(cut_his) & his >= cut_his
-  his_pos[is.na(his_pos)] <- FALSE
-  cd45 <- if ("CD45" %in% names(cells)) as.numeric(cells$CD45) else rep(NA_real_, nrow(cells))
-  cd45_pos <- if (any(is.finite(cd45))) {
-    cut45 <- axis_pos_cut(cd45)
-    is.finite(cd45) & is.finite(cut45) & cd45 >= cut45
-  } else {
-    rep(TRUE, nrow(cells))
-  }
-  smp <- unique(as.character(cells$sample))
-  rows <- list()
-  for (s in smp) {
-    ii <- which(as.character(cells$sample) == s)
-    if (!length(ii)) next
-    grp <- as.character(cells$group[ii[1]])
-    bio <- if ("bio_sample" %in% names(cells)) as.character(cells$bio_sample[ii[1]]) else s
-    n <- length(ii)
-    rows[[length(rows) + 1]] <- data.frame(
-      sample = s, bio_sample = bio, group = grp, panel = panel_id,
-      metric = "His_target_of_His_parent", n_cells = n,
-      percent = 100 * mean(tgt[ii]),
-      stringsAsFactors = FALSE
-    )
-    rows[[length(rows) + 1]] <- data.frame(
-      sample = s, bio_sample = bio, group = grp, panel = panel_id,
-      metric = "His_CD45neg_of_His_parent", n_cells = n,
-      percent = 100 * mean(!cd45_pos[ii]),
-      stringsAsFactors = FALSE
-    )
-  }
-  tab <- do.call(rbind, rows)
+  if (!nrow(cells)) return(invisible(NULL))
   his_dir <- file.path(out_dir, "target_His")
   dir.create(his_dir, recursive = TRUE, showWarnings = FALSE)
-  utils::write.csv(tab, file.path(his_dir, paste0(panel_id, "_His_target_by_sample.csv")), row.names = FALSE)
-  stats <- compare_group_freq(tab, "metric")
-  utils::write.csv(stats, file.path(his_dir, paste0(panel_id, "_His_target_H_vs_EV_stats.csv")), row.names = FALSE)
   lin_tab <- lineage_frequencies(cells)
   lin_tab$his_pos_pct <- 100
-  utils::write.csv(lin_tab, file.path(his_dir, paste0(panel_id, "_subset_pct_of_His_parent_by_sample.csv")), row.names = FALSE)
-  log_msg(panel_id, " His+ parent tables: ", his_dir)
-  pal_his <- c("His+ target" = "#00ACC1", "His+ immune" = "#F9A825")
-  if ("His" %in% names(cells) && "tSNE1" %in% names(cells)) {
-    plot_df <- cells
-    plot_df$celltype <- ifelse(tgt, "His+ target", "His+ immune")
-    n_keys <- length(unique(as.character(plot_df$celltype)))
-    save_split_dr(
-      plot_ici_his_split(plot_df, "tSNE1", "tSNE2", "tSNE-1", "tSNE-2",
-                         paste(panel_id, "  EV | H  His+ parent"), pal_his),
-      file.path(his_dir, paste0(panel_id, "_H_vs_EV_tSNE_His_target")),
-      n_keys
-    )
-    if ("UMAP1" %in% names(cells)) {
-      save_split_dr(
-        plot_ici_his_split(plot_df, "UMAP1", "UMAP2", "UMAP-1", "UMAP-2",
-                           paste(panel_id, "  EV | H  His+ parent"), pal_his),
-        file.path(his_dir, paste0(panel_id, "_H_vs_EV_UMAP_His_target")),
-        n_keys
-      )
-    }
-  }
-  invisible(tab)
+  utils::write.csv(lin_tab, file.path(his_dir, paste0(panel_id, "_subset_pct_of_His_parent_by_sample.csv")),
+                   row.names = FALSE)
+  log_msg(panel_id, " His+ parent subset tables: ", his_dir, " (all plotted cells are His+; no His+ target subset)")
+  invisible(lin_tab)
 }
 
 export_dimred_plots_flow <- export_dimred_plots

@@ -35,13 +35,13 @@ alwaysApply: false
    - P1：T=CD3→CD4/CD8；NK=CD3− NKp46+（在 CD11b 之前）；NKT=CD3+ NKp46+；CD69 活化；CD25 Treg；CD62L/CD44 naive / T_CM / T_EM
    - P2：宽单核思路；**CD19+ 为 B 母门**；无 IgD 时用 **CD27 × IgM/IgG** 对应原 P2：naive = CD27−；unswitched memory = CD27+ IgG−（多为 IgM+）；switched memory = CD27+ IgG+；naive/unswitched 里 IgM 高 → MZ B。不要伪造 IgD 四象限或 BLIMP 浆细胞
    - P3：CD3/CD19/NK1.1 大类；CD11B± 髓系；嗜酸 = Siglec-F **且** CCR3；肥大 = FceRI；F4/80 high 巨噬；Ly6C hi/lo；CD11C+MHCII+ → cDC1/cDC2；CD206 可标 M2-like
-4. His+ 里 **CD45− 且未命中上述免疫亚群名** 的细胞标成 **`Target`**（图上写 **His+ target**，颜色 `#00ACC1`）。**His+ CD45+ 仍用原来的免疫亚群名**，不要改成 Target。
+4. 降维图上的细胞**已经全部是 His+**（也就是这批 His-target 细胞）。按免疫亚群着色（CD4 T / CD8 T / NK / …）。未圈中的叫 `other`，**不要再单列一个 His+ target 亚群**，否则会和母群重复。
 
 ## 导出
 
-- 免疫亚群图仍走本方案 `results_flow/P1/`、`P2/`、`P3/`：与免疫亚群方案同一套绘图规则。**`*_major_split`** 按大类着色（CD4 T / CD8 T / NK / NKT / B / Myeloid，加上 **His+ target**）；**`*_lineage_split`** 是同一套联合 embedding 上**全体细亚群**；细亚群再降维在 `dimred_by_major/`，类内必须高对比色。轨迹同样：先各大类树，再各类亚群树。图注在右侧。
-- 每个 panel 出 **免疫细胞注释热图** `*_annotation_heatmap`（标志物 × 已注释亚群；含 His+ target），以及大类版 `*_annotation_heatmap_major`
-- 靶细胞另出 `target_His/`：His+ 占 QC 后活细胞%、His+ 母群内 Target / CD45− %、亚群占 His+ 母群%、H vs EV 统计、tSNE/UMAP（左 EV 右 H；靶细胞青 / His+ 免疫金，图注右侧）
+- 免疫亚群图仍走本方案 `results_flow/P1/`、`P2/`、`P3/`：与免疫亚群方案同一套绘图规则。**`*_major_split`** 按大类着色（CD4 T / CD8 T / NK / NKT / B / Myeloid）；**`*_lineage_split`** 是同一套联合 embedding 上**全体细亚群**；细亚群再降维在 `dimred_by_major/`，类内必须高对比色。轨迹同样：先各大类树，再各类亚群树。图注在右侧。图例里不要出现 His+ target。
+- 每个 panel 出 **免疫细胞注释热图** `*_annotation_heatmap`（标志物 × 已注释亚群），以及大类版 `*_annotation_heatmap_major`。列是免疫亚群，不是 His+ target。
+- `target_His/` 只写 His+ 占 QC 后活细胞%、亚群占 His+ 母群%、H vs EV 统计。不要再画一张把一部分细胞标成 His+ target 的 UMAP。
 - ICI P1 **没有 CD19**。圈门缺通道必须当阴性，不要留下 NA 在 `out[is_t] <-` 上炸成 `NAs are not allowed in subscripted assignments`
 - **部分染色通道缺失：该项可以不分析（日志 `skip … missing channels`），但不能跳过该 panel 其余亚群图、大类图、热图和靶细胞表。** 例如缺 CD200R3 就不画肥大细胞门，后面的巨噬/DC 图仍要出
 - **NK1.1** 表上是 AF700（P3 写成 R718）；Cytek 通道名还可能是 `R718-A` / `APC-R700-A` / `Y710-A`，都要配上
@@ -51,9 +51,9 @@ alwaysApply: false
 # ❌ BAD: ICI 去 E:/R/fuction of cell 找 / source Flow_dimred_pipeline.R
 # ❌ BAD: QC 只去双联体/死细胞、跳过 P1 淋巴门，再在全部活细胞里找 His
 # ❌ BAD: QC 先切 CD45+ 当分析母群
-# ❌ BAD: 把 His+ CD45+ 的 T/NK 全部改名为 Target
+# ❌ BAD: 把 His+ 母群里一部分细胞再标成 His+ target 亚群
 # ✅ GOOD: Internation 目录放齐全部 ICI_*（含 ICI_flow_engine.R），单独 source ICI_Flow_dimred_pipeline.R
 # ✅ GOOD: 免疫亚群目录只放 Flow_*，单独 source Flow_dimred_pipeline.R
 # ✅ GOOD: ICI P2 用本表 7 色（CD19/CD27/IgM/IgG/His），按原 P2 思路圈 B；缺 IgD/BLIMP 只跳过该项
-# ✅ GOOD: 单细胞 → 淋巴/活 → His+ 母群 → 免疫亚群；His+ CD45- 未命名的才是 Target
+# ✅ GOOD: 单细胞 → 淋巴/活 → His+ 母群 → 免疫亚群；图上全是 His+，未圈中 = other
 ```

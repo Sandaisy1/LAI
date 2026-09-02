@@ -199,7 +199,7 @@ if (mean(keep_p3[large_idx]) < 0.5) {
                mean(keep_p3[large_idx])))
 }
 
-# His+ 母群：His- 不进入分析；His+ CD45- 未命名 → Target；His+ CD45+ T 仍是 CD4
+# His+ 母群：His- 不进入分析；图上全是 His+，不再单列 His+ target 亚群；His+ CD4 仍是 CD4
 set.seed(11)
 n <- 70L
 mk_block <- function(his, cd45, cd3, cd4, cd8 = 0.2, nkp = 0.2) {
@@ -228,20 +228,12 @@ h <- hierarchical_gate(mat, "P1")
 tgt <- seq_len(n)
 his_t <- seq.int(n + 1L, 2L * n)
 his_neg_t <- seq.int(2L * n + 1L, 3L * n)
-if (mean(h$major[tgt] == "Target") < 0.85 || mean(h$subset[tgt] == "Target") < 0.85) {
-  fail(sprintf("His+ CD45- must be Target, got major=%s subset=%s",
-               paste(unique(h$major[tgt]), collapse = ","),
-               paste(unique(h$subset[tgt]), collapse = ",")))
-}
-if (any(h$major[his_t] == "Target") || any(h$subset[his_t] == "Target")) {
-  fail("His+ CD45+ T cells must keep immune labels, not Target")
+if (any(h$major %in% c("Target", "His_target")) || any(h$subset %in% c("Target", "His_target"))) {
+  fail("must not invent a His+ target subset; plotted cells are already His+")
 }
 if (mean(h$major[his_t] == "CD4") < 0.8) {
-  fail(sprintf("His+ CD45+ CD3+ CD4+ should stay CD4, got %s",
+  fail(sprintf("His+ CD3+ CD4+ should stay CD4, got %s",
                paste(unique(h$major[his_t]), collapse = ",")))
-}
-if (any(h$major[his_neg_t] == "Target")) {
-  fail("His- CD45+ T cells must not be labeled Target")
 }
 his_parent <- ici_filter_his_parent(mat)
 if (mean(his_parent$keep[c(tgt, his_t)]) < 0.85) {
@@ -251,13 +243,12 @@ if (mean(his_parent$keep[his_neg_t]) > 0.2) {
   fail("His- cells must be dropped from the His-FITC+ parent")
 }
 
-# 只有 His+ CD45+ T 时也不要改成 Target
 h_t_only <- hierarchical_gate(mk_block(3.2, 3.0, 3.2, 3.0), "P1")
-if (any(h_t_only$major == "Target") || mean(h_t_only$major == "CD4") < 0.85) {
-  fail(sprintf("His+ CD45+ only tube must stay CD4, got %s",
+if (any(h_t_only$major %in% c("Target", "His_target")) || mean(h_t_only$major == "CD4") < 0.85) {
+  fail(sprintf("His+ CD4 tube must stay CD4, got %s",
                paste(unique(h_t_only$major), collapse = ",")))
 }
-expect(celltype_label("Target", "P1"), "His+ target", "label-his-target")
+expect(celltype_label("Target", "P1"), "other", "old Target label maps to other")
 if (!isFALSE(flow_trim_bio_extremes)) {
   fail("ICI must keep n=3; do not drop extreme bio-reps")
 }
@@ -268,15 +259,15 @@ h_no19 <- tryCatch(hierarchical_gate(mat_no_cd19, "P1"), error = function(e) e)
 if (inherits(h_no19, "error")) {
   fail(sprintf("P1 without CD19 must not crash: %s", h_no19$message))
 }
-if (mean(h_no19$major[tgt] == "Target") < 0.85) {
-  fail("His+ CD45- still Target when CD19 channel is absent")
+if (any(h_no19$major %in% c("Target", "His_target"))) {
+  fail("P1 without CD19 must not invent a His+ target subset")
 }
 if (mean(h_no19$major[his_t] == "CD4") < 0.8) {
   fail(sprintf("His+ CD45+ T should stay CD4 without CD19, got %s",
                paste(unique(h_no19$major[his_t]), collapse = ",")))
 }
 
-# ICI P2：CD19 母门 + CD27×IgM/IgG（无 IgD）；His+ CD45- 仍是 Target
+# ICI P2：CD19 母门 + CD27×IgM/IgG（无 IgD）；未圈中的 His+ 是 other，不是 His+ target
 set.seed(19)
 n2 <- 50L
 p2_block <- function(cd19, cd27, igm, igg, his = 0.3, cd45 = 3.0) {
@@ -308,8 +299,16 @@ if (mean(hp2$subset[seq.int(2L * n2 + 1L, 3L * n2)] == "Switched_B") < 0.7) {
   fail(sprintf("ICI P2 CD27+ IgG+ should be Switched_B, got %s",
                paste(unique(hp2$subset[seq.int(2L * n2 + 1L, 3L * n2)]), collapse = ",")))
 }
-if (mean(hp2$major[seq.int(3L * n2 + 1L, 4L * n2)] == "Target") < 0.85) {
-  fail("ICI P2 His+ CD45- must be Target")
+if (any(hp2$major %in% c("Target", "His_target")) || any(hp2$subset %in% c("Target", "His_target"))) {
+  fail("ICI P2 must not invent a His+ target subset")
+}
+if (mean(hp2$subset[seq.int(3L * n2 + 1L, 4L * n2)] %in% c("other", "Other", "Naive_B")) < 0.5 &&
+    mean(hp2$major[seq.int(3L * n2 + 1L, 4L * n2)] == "other") < 0.5) {
+  leftover_p2 <- unique(c(hp2$major[seq.int(3L * n2 + 1L, 4L * n2)],
+                          hp2$subset[seq.int(3L * n2 + 1L, 4L * n2)]))
+  if (any(leftover_p2 %in% c("Target", "His_target", "His+ target"))) {
+    fail("ICI P2 CD19- leftover must not be His+ target")
+  }
 }
 p2_specs <- subset_plot_specs("P2")
 p2_xy <- vapply(p2_specs, function(s) paste(s$x, s$y, sep = "/"), character(1))
@@ -375,8 +374,8 @@ map_y <- match_channels(cytek_p1_y710, rep("", length(cytek_p1_y710)), "P1")
 expect(map_y$channel[map_y$marker == "NK1.1"], "Y710-A", "P1 NK1.1<-Y710-A")
 
 if (!identical(dimred_major_of("P1", c("Target", NA_character_, "CD4_naive")),
-               c("Target", "other", "CD4"))) {
-  fail("NA lineage must not crash dimred_major_of; Target stays Target")
+               c("other", "other", "CD4"))) {
+  fail("NA lineage must not crash dimred_major_of; old Target maps to other")
 }
 
 cells_hm <- data.frame(
@@ -390,11 +389,11 @@ cells_hm <- data.frame(
   stringsAsFactors = FALSE
 )
 med_ici <- lineage_median_matrix(cells_hm, "P1", "subset")
-if (is.null(med_ici) || !("His+ target" %in% rownames(med_ici))) {
-  fail("ICI annotation heatmap must include His+ target")
+if (!is.null(med_ici) && "His+ target" %in% rownames(med_ici)) {
+  fail("ICI annotation heatmap must not invent a His+ target subset")
 }
-if (!(med_ici["His+ target", "His"] > med_ici["CD4 naive", "His"])) {
-  fail("His+ target should be His-high on the annotation heatmap")
+if (is.null(med_ici) || !("CD4 naive" %in% rownames(med_ici)) || !("NK" %in% rownames(med_ici))) {
+  fail("ICI annotation heatmap must still show immune subsets")
 }
 td_ici_hm <- tempfile("ici_annot_hm")
 dir.create(td_ici_hm, recursive = TRUE)

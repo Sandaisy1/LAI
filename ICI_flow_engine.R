@@ -1170,7 +1170,7 @@ dimred_major_of <- function(panel_id, lineage, cluster_lineage = NULL) {
   miss <- is.na(out) | !nzchar(out)
   if (!any(miss)) return(out)
   inf <- s
-  inf[s %in% c("Target", "His_target")] <- "Target"
+  inf[s %in% c("Target", "His_target", "His+ target")] <- "other"
   inf[s %in% nkt_family() | grepl("^NKT", s)] <- "NKT"
   inf[s %in% nk_family() | grepl("^NK_", s) | s == "NK"] <- "NK"
   inf[s %in% c("Treg", "CD4_activated", "CD4_effector", "CD4") | grepl("^CD4_", s)] <- "CD4"
@@ -1191,8 +1191,8 @@ dimred_major_of <- function(panel_id, lineage, cluster_lineage = NULL) {
 major_display_label <- function(major) {
   rec <- c(
     CD4 = "CD4 T", CD8 = "CD8 T", T = "T", NK = "NK", NKT = "NKT",
-    B = "B cell", Myeloid = "Myeloid", Target = "His+ target",
-    His_target = "His+ target", dump = "other", other = "other", Other = "other"
+    B = "B cell", Myeloid = "Myeloid", Target = "other",
+    His_target = "other", dump = "other", other = "other", Other = "other"
   )
   lab <- as.character(major)
   out <- rec[lab]
@@ -1706,7 +1706,7 @@ ici_cd45_positive <- function(mat) {
   ici_axis_positive(mat[, "CD45"])
 }
 
-# 免疫降维方案里已经圈出来的亚群名；His+ CD45- 且未命中这些名字的才标 Target
+# His+ 是分析母群，不是一个与 CD4/NK 并列的亚群名
 ici_is_named_immune <- function(major, subset) {
   lab_ok <- function(x) {
     x <- as.character(x)
@@ -2390,8 +2390,8 @@ celltype_label <- function(lineage, panel_id) {
     Basophil_mast = "Mast",
     Basophil = "Mast",
     Other = "other",
-    Target = "His+ target",
-    His_target = "His+ target"
+    Target = "other",
+    His_target = "other"
   )
   lab <- as.character(lineage)
   out <- rec[lab]
@@ -2569,7 +2569,7 @@ export_major_subset_dimred <- function(cells, panel_id, out_dir) {
     if ("cluster_lineage" %in% names(cells)) cells$cluster_lineage else NULL
   )
   majors <- unique(as.character(cells$dimred_major))
-  majors <- majors[!is.na(majors) & nzchar(majors) & !majors %in% c("other", "dump", "", "Target")]
+  majors <- majors[!is.na(majors) & nzchar(majors) & !majors %in% c("other", "dump", "", "Target", "His_target")]
   class_dir <- file.path(out_dir, "dimred_by_major")
   dir.create(class_dir, recursive = TRUE, showWarnings = FALSE)
   for (mj in majors) {
@@ -2730,7 +2730,7 @@ lineage_median_matrix <- function(cells, panel_id, by = c("subset", "major"), mi
   cls <- vapply(types, function(tp) {
     names(sort(table(class_lab[key == tp]), decreasing = TRUE))[1]
   }, character(1))
-  maj_ord <- c("CD4 T", "CD8 T", "T", "NKT", "NK", "B cell", "Myeloid", "His+ target")
+  maj_ord <- c("CD4 T", "CD8 T", "T", "NKT", "NK", "B cell", "Myeloid")
   ord <- order(match(cls, maj_ord, nomatch = 99L), types)
   med <- med[ord, , drop = FALSE]
   attr(med, "cell_class") <- unname(cls[ord])
@@ -4209,7 +4209,7 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   log_msg("==== Panel ", panel_id, " : ", panel_map$panels[[panel_id]]$focus, " ====")
   log_msg(panel_id, " QC: singlets → lymph scatter (P1 tight / P2 wide / P3 none) → live; parent = His-FITC+ (not CD45+)")
   if (identical(panel_id, "P1")) {
-    log_msg("P1 on His+: T/NK naive / T_CM / T_SCM / T_EM / SLEC / MPEC / T_EFF / exhausted; CD69; leftover His+ CD45- = Target")
+    log_msg("P1 on His+: T/NK naive / T_CM / T_SCM / T_EM / SLEC / MPEC / T_EFF / exhausted; CD69; leftover = other")
   }
   if (identical(panel_id, "P2")) {
     log_msg("P2 on His+: wide mononuclear QC; CD19+ then CD27 x IgM/IgG Naive/Unswitched/Switched; MZ IgM-high")

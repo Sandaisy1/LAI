@@ -43,7 +43,7 @@ alwaysApply: false
 
 **缺染色通道：这一项可以不分析，但不能跳过后面的亚群/大类/panel。** 日志写 `skip … (missing channels: …)`，继续出其余图。
 
-每个 panel 还必须出 **免疫细胞注释热图**（`*_annotation_heatmap`）：行是标志物、列是已圈好的细胞类型（中位数再按标志物 z-score），不要用 kmeans cluster 号当列名。另出一张大类版 `*_annotation_heatmap_major`。ICI 同样出，列里要有 His+ target。
+每个 panel 还必须出 **免疫细胞注释热图**（`*_annotation_heatmap`）：行是标志物、列是已圈好的细胞类型（中位数再按标志物 z-score），不要用 kmeans cluster 号当列名。另出一张大类版 `*_annotation_heatmap_major`。ICI 同样出；ICI 图上细胞已经全是 His+，不要再单列 His+ target 亚群。
 
 **不要**把每个亚群拆成小格子、也不要每种细胞画一个填充 blob（旧图2）。不要虚线凸包。旧函数 `separate_region_plot_coords` / `region_fill_polygon` 已删除，不要再加回来。图注必须完整可见。
 
