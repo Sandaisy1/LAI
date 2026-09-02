@@ -110,6 +110,22 @@ if (is.null(folder) || !identical(folder$group, "T6") || !identical(folder$sampl
   fail("folder T6/1-1_P1_unmixed.fcs should be T6 / T6-1-1")
 }
 
+# 同目录有 unmixed 时必须丢掉 raw，否则 raw 0 通道会把整个 panel 炸掉
+td <- tempfile("tt6_fcs_")
+dir.create(td, recursive = TRUE, showWarnings = FALSE)
+file.create(file.path(td, "T-1_P2_unmixed.fcs"))
+file.create(file.path(td, "T-1_P2_raw.fcs"))
+file.create(file.path(td, "T6-1_P2_unmixed.fcs"))
+file.create(file.path(td, "T6-1_P2_raw.fcs"))
+tab <- list_unmixed_files(td)
+if (any(grepl("raw", tab$file, ignore.case = TRUE))) {
+  fail("list_unmixed_files must skip *_raw.fcs when unmixed is present")
+}
+if (!all(c("T-1_P2_unmixed.fcs", "T6-1_P2_unmixed.fcs") %in% tab$file)) {
+  fail(sprintf("list_unmixed_files should keep unmixed tubes, got %s", paste(tab$file, collapse = ",")))
+}
+unlink(td, recursive = TRUE)
+
 # 不要把其他实验认成本方案
 if (!is.null(parse_fcs_filename("EV1-1_P1_unmixed.fcs"))) {
   fail("original EV1-1_P1 must not parse as T/T6")

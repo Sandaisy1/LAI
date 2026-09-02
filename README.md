@@ -212,7 +212,7 @@ setwd("E:/R/flow J")
 source("T_T6_Flow_dimred_pipeline.R")
 ```
 
-文件名：`T-1_P1.fcs`、`T-1_P1_unmixed.fcs`、`T6-2_P3_unmixed.fcs` 都可以。**先匹配 T6 再匹配 T**。结果在同目录 `results_flow/`，比较标签是 **T6 vs T**。P1 功能状态含 Perforin；P2 只报 CD86/CD80/CD40（BLIMP-1 用于浆细胞门）；P3 髓系活化/抑制，iNOS/ARG-1 只作 M1/M2 身份。
+只要 `*_unmixed.fcs`（`T-1_P1_unmixed.fcs`、`T6-2_P3_unmixed.fcs`）。同目录的 `*_raw.fcs` 不要读：raw 只有检测器名，对不上标志物。**先匹配 T6 再匹配 T**。结果在同目录 `results_flow/`，比较标签是 **T6 vs T**。P1 功能状态含 Perforin；P2 只报 CD86/CD80/CD40（BLIMP-1 用于浆细胞门）；P3 髓系活化/抑制，iNOS/ARG-1 只作 M1/M2 身份。
 
 若日志出现「没有匹配到任何分析通道」，多半是 Cytek 通道名带 `-A`（如 `BUV496-A`）或 desc 为空，不是文件没找到。用最新脚本再跑；仍失败时日志会列出通道名，并在 `results_flow/00_logs/` 写 `*_channels.csv`。
 

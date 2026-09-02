@@ -11,7 +11,7 @@ alwaysApply: false
 ## 数据
 
 - 目录：`E:/R/flow J`。整套文件与 FCS、`results_flow/` 同目录：`T_T6_Flow_dimred_pipeline.R`、`T_T6_flow_engine.R`、`T_T6_flow_panel_map.json`、`T_T6_Flow_dimred_all_subsets.R`、`T_T6_Flow_dimred_trajectory.R`、`T_T6_Flow_dimred_functional_state.R`
-- 组别：**T**（T-1、T-2、T-3）vs **T6**（T6-1、T6-2、T6-3）。文件如 `T-1_P1.fcs` / `T6-1_P1_unmixed.fcs`。**先匹配 T6，再匹配 T**
+- 组别：**T**（T-1、T-2、T-3）vs **T6**（T6-1、T6-2、T6-3）。只要 `*_unmixed.fcs`（如 `T-1_P2_unmixed.fcs`）。**不要读 `*_raw.fcs`**：raw 只有 V1-A/N14-A，对不上标志物，读进去会把整个 panel 炸掉。**先匹配 T6，再匹配 T**
 - 染色按用户 P1/P2/P3 表（`T_T6_flow_panel_map.json`）。P1 Perforin-FITC、P2 IgD-FITC、P3 iNOS-AF488 **都不是 His**，不要加 His+ 母群
 - Windows 路径：`gsub("\\", "/", as.character(p), fixed = TRUE)`
 
@@ -24,7 +24,7 @@ alwaysApply: false
 ```r
 # ❌ BAD: source("Flow_dimred_pipeline.R") 或 ICI_* / JY_* / JZ_*；把 T6-1 解析成 T
 # ❌ BAD: 套 ICI 的 His+ 门；把 Perforin-FITC / IgD-FITC 当成 His
-# ❌ BAD: 去掉 1 个生物学重复做成 n=2
+# ❌ BAD: 去掉 1 个生物学重复做成 n=2；把 *_raw.fcs 和 unmixed 一起读
 # ✅ GOOD: setwd("E:/R/flow J"); source("T_T6_Flow_dimred_pipeline.R")
 # ✅ GOOD: 三个生物学重复全留，n=3；降维用全部管子
 ```

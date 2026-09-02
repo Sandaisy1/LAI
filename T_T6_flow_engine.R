@@ -280,13 +280,15 @@ list_unmixed_files <- function(root) {
   grab <- function(rec, pat) {
     list.files(root, pattern = pat, full.names = TRUE, recursive = rec)
   }
-  files <- unique(c(
-    grab(FALSE, "(?i)unmixed\\.fcs$"),
-    grab(TRUE, "(?i)unmixed\\.fcs$"),
-    grab(FALSE, "(?i)\\.fcs$"),
-    grab(TRUE, "(?i)\\.fcs$")
-  ))
+  # SpectroFlo raw 只有 V1-A / N14-A 检测器名，对不上标志物。
+  # 有 unmixed 就只用 unmixed；没有时才接受 T-1_P1.fcs，但永远不要 raw。
+  unmixed <- unique(c(grab(FALSE, "(?i)unmixed\\.fcs$"), grab(TRUE, "(?i)unmixed\\.fcs$")))
+  files <- unmixed
+  if (!length(files)) {
+    files <- unique(c(grab(FALSE, "(?i)\\.fcs$"), grab(TRUE, "(?i)\\.fcs$")))
+  }
   files <- files[!grepl("(^|\\\\|/)results_flow(\\\\|/|$)", files, ignore.case = TRUE)]
+  files <- files[!grepl("_raw\\.fcs$", files, ignore.case = TRUE)]
   meta <- lapply(files, parse_fcs_filename)
   ok <- !vapply(meta, is.null, logical(1))
   if (any(!ok) && length(files) > 0) {
@@ -305,6 +307,19 @@ list_unmixed_files <- function(root) {
   })
   df <- do.call(rbind, rows)
   df <- df[!duplicated(df$path), , drop = FALSE]
+  df <- df[is.na(df$kind) | !tolower(as.character(df$kind)) %in% "raw", , drop = FALSE]
+  if (nrow(df) && "kind" %in% names(df)) {
+    key <- paste(df$panel, df$sample, df$group, sep = "|")
+    has_un <- tapply(tolower(as.character(df$kind)) == "unmixed", key, any)
+    drop <- tolower(as.character(df$kind)) != "unmixed" & unname(has_un[key])
+    drop[is.na(drop)] <- FALSE
+    if (any(drop)) {
+      log_msg("Prefer unmixed over other FCS for the same tube: ",
+              paste(df$file[drop], collapse = ", "))
+      df <- df[!drop, , drop = FALSE]
+    }
+  }
+  if (!nrow(df)) return(data.frame())
   tech_ord <- ifelse(is.na(df$tech_rep) | !nzchar(df$tech_rep), "0", df$tech_rep)
   df <- df[order(df$panel, df$group, df$replicate, tech_ord), ]
   rownames(df) <- NULL
@@ -4753,13 +4768,27 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
     }
   } else {
     sub <- file_tab[file_tab$panel == panel_id, ]
+    raw_hit <- grepl("_raw\\.fcs$", as.character(sub$file), ignore.case = TRUE) |
+      (!is.na(sub$kind) & tolower(as.character(sub$kind)) == "raw")
+    if (any(raw_hit)) {
+      log_msg(panel_id, " skip raw FCS (detector names only; use unmixed): ",
+              paste(sub$file[raw_hit], collapse = ", "))
+      sub <- sub[!raw_hit, , drop = FALSE]
+    }
     if (nrow(sub) == 0) {
-      log_msg(panel_id, " : no FCS files (need T-1_", panel_id, ".fcs / T6-1_", panel_id, "_unmixed.fcs)")
+      log_msg(panel_id, " : no unmixed FCS files (need T-1_", panel_id, "_unmixed.fcs / T6-1_", panel_id, "_unmixed.fcs)")
       return(NULL)
     }
     for (i in seq_len(nrow(sub))) {
       log_msg("Read ", sub$file[i], "  sample=", sub$sample[i], " bio=", sub$bio_sample[i])
-      rec <- read_fcs_expr(sub$path[i], panel_id)
+      rec <- tryCatch(
+        read_fcs_expr(sub$path[i], panel_id),
+        error = function(e) {
+          log_msg("Skip ", sub$file[i], " (keep other tubes in this panel): ", e$message)
+          NULL
+        }
+      )
+      if (is.null(rec)) next
       keep <- qc_filter_matrix(rec$exprs, rec$names, rec$map, panel_id)
       exprs <- rec$exprs[keep, , drop = FALSE]
       if (nrow(exprs) < 50) {

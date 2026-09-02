@@ -213,6 +213,11 @@ for (pn in panels) {
     }
   )
 }
+n_ok_panels <- sum(vapply(summaries, function(x) !is.null(x), logical(1)))
+if (n_ok_panels < 1L) {
+  log_msg("No panel produced embeddings. Use *_unmixed.fcs only (skip *_raw.fcs). ",
+          "Then rerun T_T6_Flow_dimred_pipeline.R; do not run all-subsets/trajectory first.")
+}
 
 sum_path <- file.path(result_dir, "T6_vs_T_lineage_stats_all_panels.csv")
 lin_rows <- lapply(names(summaries), function(pn) {
@@ -226,24 +231,26 @@ if (length(lin_rows) > 0) {
   log_msg("Summary table: ", sum_path)
 }
 
-extra <- find_tt6_extra("T_T6_Flow_dimred_all_subsets.R")
-if (!is.na(extra) && nzchar(extra)) {
-  tryCatch({
-    Sys.setenv(FLOW_ALL_SUBSETS_FROM_PIPELINE = "1")
-    sys.source(extra, envir = .GlobalEnv)
-    export_all_subsets_analysis(result_dir)
-  }, error = function(e) log_msg("all-subsets summary failed: ", e$message))
-  Sys.unsetenv("FLOW_ALL_SUBSETS_FROM_PIPELINE")
-}
+if (n_ok_panels >= 1L) {
+  extra <- find_tt6_extra("T_T6_Flow_dimred_all_subsets.R")
+  if (!is.na(extra) && nzchar(extra)) {
+    tryCatch({
+      Sys.setenv(FLOW_ALL_SUBSETS_FROM_PIPELINE = "1")
+      sys.source(extra, envir = .GlobalEnv)
+      export_all_subsets_analysis(result_dir)
+    }, error = function(e) log_msg("all-subsets summary failed: ", e$message))
+    Sys.unsetenv("FLOW_ALL_SUBSETS_FROM_PIPELINE")
+  }
 
-traj <- find_tt6_extra("T_T6_Flow_dimred_trajectory.R")
-if (!is.na(traj) && nzchar(traj)) {
-  tryCatch({
-    Sys.setenv(FLOW_TRAJECTORY_FROM_PIPELINE = "1")
-    sys.source(traj, envir = .GlobalEnv)
-    export_all_panel_trajectories(result_dir)
-  }, error = function(e) log_msg("trajectory summary failed: ", e$message))
-  Sys.unsetenv("FLOW_TRAJECTORY_FROM_PIPELINE")
+  traj <- find_tt6_extra("T_T6_Flow_dimred_trajectory.R")
+  if (!is.na(traj) && nzchar(traj)) {
+    tryCatch({
+      Sys.setenv(FLOW_TRAJECTORY_FROM_PIPELINE = "1")
+      sys.source(traj, envir = .GlobalEnv)
+      export_all_panel_trajectories(result_dir)
+    }, error = function(e) log_msg("trajectory summary failed: ", e$message))
+    Sys.unsetenv("FLOW_TRAJECTORY_FROM_PIPELINE")
+  }
 }
 
 log_msg("T-T6 done. Keep T_T6_* files in ", tt6_primary_data_dir,
