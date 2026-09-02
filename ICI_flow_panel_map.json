@@ -1,7 +1,7 @@
 {
   "species": "mouse",
   "experiment": "Internation_cell_immune",
-  "purpose": "find His-tagged target cells; immune subsets use P1 T/NK, P2 B (CD19/CD27/IgM/IgG), P3 myeloid gates with the markers on this sheet",
+  "purpose": "QC singlets/lymph/live, gate His-FITC+, then P1 T/NK, P2 B, P3 myeloid subsets on the His+ parent",
   "data_dir": "E:/R/Internation cell immune",
   "file_glob": "*_unmixed.fcs",
   "filename_regex": "^(?:ZZX[_-]?)?(EV|H)[-_]?([123])(?:[-_]([12]))?[-_ ]+(?:PANEL[-_ ]?)?P?0?([123])[-_ ].*(unmixed|raw)\\.fcs$",
@@ -14,7 +14,9 @@
     "viability_marker": "L/D",
     "leukocyte_marker": "CD45",
     "target_marker": "His",
+    "analysis_parent": "His",
     "require_cd45": false,
+    "require_lymph_scatter": true,
     "exclude_from_dr": ["L/D", "CD45"],
     "asinh_cofactor": 150
   },

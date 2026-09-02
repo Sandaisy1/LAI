@@ -2,6 +2,8 @@
 # =============================================================================
 # Internation cell immune：函数库（不要单独 source 本文件）
 # 这是 E:/R/Internation cell immune 的 His+ 靶细胞方案。
+# 圈门：1）去粘连体 → 淋巴细胞（P1 紧 / P2 宽单核 / P3 不加淋巴门）→ 死活排除；
+#       2）圈 His-FITC+ 作为分析母群；3）在 His+ 上按免疫降维方案做 P1/P2/P3 亚群。
 # 与 E:/R/fuction of cell 的 Flow_dimred_pipeline.R 完全独立，禁止互相 source。
 # 入口：source("ICI_Flow_dimred_pipeline.R")
 # =============================================================================
@@ -700,7 +702,8 @@ qc_cd45_cut <- function(v) {
   as.numeric(stats::quantile(v, 0.08, names = FALSE))
 }
 
-# 清理：单细胞 →（P1 小淋巴；P2 宽单核，活化 B / 浆母更大）→ 活细胞 → CD45+
+# 清理：单细胞 →（P1 小淋巴；P2 宽单核；P3 不加淋巴门）→ 活细胞。
+# 不要在 QC 里切 CD45+：分析母群是随后的 His-FITC+，不是白细胞。
 qc_filter_matrix <- function(exprs, names, map, panel_id = NA) {
   keep <- rep(TRUE, nrow(exprs))
   fsc <- grep("^FSC-A$|^FSC_A$|^FSC\\.A$", names, ignore.case = TRUE)
@@ -736,11 +739,6 @@ qc_filter_matrix <- function(exprs, names, map, panel_id = NA) {
   if (length(ld_idx) && !is.na(ld_idx[1])) {
     ld <- exprs[, ld_idx[1]]
     keep <- keep & ld <= quantile(ld, 0.95, na.rm = TRUE)
-  }
-  cd45_idx <- map$channel_index[map$marker == "CD45"]
-  if (length(cd45_idx) && !is.na(cd45_idx[1])) {
-    cd <- asinh(pmax(as.numeric(exprs[, cd45_idx[1]]), 0) / 150)
-    keep <- keep & cd >= qc_cd45_cut(cd)
   }
   keep[is.na(keep)] <- FALSE
   keep
@@ -910,10 +908,14 @@ make_demo_sample <- function(panel_id, group, sample, n) {
     data.frame(m, true_lineage = lab, stringsAsFactors = FALSE, check.names = FALSE)
   }, pops, sds, counts, names(pops), SIMPLIFY = FALSE)
   df <- do.call(rbind, parts)
-  cd45 <- matrix(rnorm(nrow(df), 3.0, 0.25), ncol = 1, dimnames = list(NULL, "CD45"))
-  ld <- matrix(rnorm(nrow(df), 0.2, 0.15), ncol = 1, dimnames = list(NULL, "L/D"))
-  expr <- cbind(cd45, ld, as.matrix(df[, setdiff(colnames(df), "true_lineage"), drop = FALSE]))
-  list(expr = expr, true_lineage = df$true_lineage, sample = sample, group = group)
+  raw <- as.matrix(df[, setdiff(colnames(df), "true_lineage"), drop = FALSE])
+  if (!"CD45" %in% colnames(raw)) {
+    raw <- cbind(CD45 = rnorm(nrow(raw), 3.0, 0.25), raw)
+  }
+  if (!"L/D" %in% colnames(raw)) {
+    raw <- cbind(`L/D` = rnorm(nrow(raw), 0.2, 0.15), raw)
+  }
+  list(expr = raw, true_lineage = df$true_lineage, sample = sample, group = group)
 }
 
 # -----------------------------------------------------------------------------
@@ -1676,6 +1678,63 @@ axis_pos_cut <- function(v, min_sep = 0.55, min_pos_frac = 0.02, max_pos_frac = 
   }
   # 切不到独立阳性群时把门放在云团上方，整群阴性；不要用 q80 横切主团
   unname(max(q95, q50 + min_sep))
+}
+
+ici_axis_positive <- function(v) {
+  v <- as.numeric(v)
+  n <- length(v)
+  if (!n) return(logical(0))
+  if (!any(is.finite(v))) return(rep(FALSE, n))
+  cut <- axis_pos_cut(v)
+  is.finite(v) & is.finite(cut) & v >= cut
+}
+
+ici_his_positive <- function(mat) {
+  mat <- as.matrix(mat)
+  n <- nrow(mat)
+  if (!n || !"His" %in% colnames(mat)) return(rep(FALSE, n))
+  ici_axis_positive(mat[, "His"])
+}
+
+ici_cd45_positive <- function(mat) {
+  mat <- as.matrix(mat)
+  n <- nrow(mat)
+  if (!n) return(logical(0))
+  if (!"CD45" %in% colnames(mat) || !any(is.finite(mat[, "CD45"]))) {
+    return(rep(TRUE, n))
+  }
+  ici_axis_positive(mat[, "CD45"])
+}
+
+# 免疫降维方案里已经圈出来的亚群名；His+ CD45- 且未命中这些名字的才标 Target
+ici_is_named_immune <- function(major, subset) {
+  lab_ok <- function(x) {
+    x <- as.character(x)
+    x[is.na(x)] <- ""
+    grepl("^(CD4|CD8|NK|NKT|Treg|Naive_B|Unswitched|Switched|Atypical|Memory_B|MZ_B|Activated_B|Plasma|Plasmablast|Neutrophil|Eosinophil|Mast|Macrophage|M1|M2|DC|cDC|Mono_)", x) |
+      x %in% c("CD4", "CD8", "NK", "NKT", "B", "T")
+  }
+  lab_ok(major) | lab_ok(subset)
+}
+
+ici_filter_his_parent <- function(mat, samples = NULL) {
+  mat <- as.matrix(mat)
+  n <- nrow(mat)
+  if (!n || !"His" %in% colnames(mat)) {
+    return(list(keep = rep(TRUE, n), n_qc = n, n_his = n))
+  }
+  keep <- rep(FALSE, n)
+  if (is.null(samples) || length(samples) != n) {
+    keep <- ici_his_positive(mat)
+  } else {
+    samples <- as.character(samples)
+    for (s in unique(samples)) {
+      ii <- which(samples == s)
+      keep[ii] <- ici_his_positive(mat[ii, , drop = FALSE])
+    }
+  }
+  keep[is.na(keep)] <- FALSE
+  list(keep = keep, n_qc = n, n_his = sum(keep))
 }
 
 # 一层：k=2 圈出该标志高的一群；两群分不开、或高群占了多数则整层跳过
@@ -4020,6 +4079,7 @@ downsample_idx <- function(n, cap) {
 
 load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
   markers <- dr_marker_names(panel_id)
+  needed <- unique(c("CD45", "L/D", markers))
   all_expr <- list()
   meta_group <- character()
   meta_sample <- character()
@@ -4027,6 +4087,13 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
   meta_tech <- character()
   meta_true <- character()
   map_used <- NULL
+  pad_needed <- function(mat) {
+    for (m in setdiff(needed, colnames(mat))) {
+      mat <- cbind(mat, NA_real_)
+      colnames(mat)[ncol(mat)] <- m
+    }
+    mat[, needed, drop = FALSE]
+  }
 
   if (use_demo) {
     log_msg(panel_id, " : DEMO synthetic cells (not real FCS)")
@@ -4039,7 +4106,7 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
     for (i in seq_len(nrow(samples))) {
       set.seed(seed_value + i + as.integer(factor(panel_id)) * 10)
       d <- make_demo_sample(panel_id, samples$group[i], samples$sample[i], min(n_cap, 2500))
-      all_expr[[i]] <- d$expr[, c("CD45", "L/D", markers), drop = FALSE]
+      all_expr[[i]] <- pad_needed(d$expr)
       meta_group <- c(meta_group, rep(samples$group[i], nrow(d$expr)))
       meta_sample <- c(meta_sample, rep(samples$sample[i], nrow(d$expr)))
       meta_bio <- c(meta_bio, rep(samples$bio_sample[i], nrow(d$expr)))
@@ -4049,7 +4116,7 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
   } else {
     sub <- file_tab[file_tab$panel == panel_id, ]
     if (nrow(sub) == 0) {
-      log_msg(panel_id, " : no unmixed files (need ZZX_EV1-1_", panel_id, "_unmixed.fcs / EV1-1_", panel_id, "_unmixed.fcs)")
+      log_msg(panel_id, " : no unmixed files (need ZZX_EV1-1_", panel_id, "_unmixed.fcs / EV-1_", panel_id, "_unmixed.fcs)")
       return(NULL)
     }
     for (i in seq_len(nrow(sub))) {
@@ -4058,20 +4125,13 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
       keep <- qc_filter_matrix(rec$exprs, rec$names, rec$map, panel_id)
       exprs <- rec$exprs[keep, , drop = FALSE]
       if (nrow(exprs) < 50) {
-        log_msg("Too few events after QC: ", sub$file[i])
+        log_msg("Too few events after QC (singlets/lymph/live): ", sub$file[i])
         next
       }
-      set.seed(seed_value + i)
-      take <- downsample_idx(nrow(exprs), n_cap)
-      exprs <- exprs[take, , drop = FALSE]
-      mat <- extract_marker_mat(exprs, rec$map, c("CD45", "L/D", markers))
+      mat <- extract_marker_mat(exprs, rec$map, needed)
       miss <- setdiff(markers, colnames(mat))
       if (length(miss) > 0) log_msg("Missing markers in ", sub$file[i], ": ", paste(miss, collapse = ", "))
-      for (m in setdiff(c("CD45", "L/D", markers), colnames(mat))) {
-        mat <- cbind(mat, NA_real_)
-        colnames(mat)[ncol(mat)] <- m
-      }
-      mat <- mat[, c("CD45", "L/D", markers), drop = FALSE]
+      mat <- pad_needed(mat)
       all_expr[[length(all_expr) + 1]] <- mat
       bio <- if ("bio_sample" %in% names(sub)) as.character(sub$bio_sample[i]) else as.character(sub$sample[i])
       tech <- if ("tech_rep" %in% names(sub)) as.character(sub$tech_rep[i]) else NA_character_
@@ -4087,6 +4147,51 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
   expr <- do.call(rbind, all_expr)
   # 演示数据已在 asinh 空间；真实 FCS 再 asinh(x/150)
   tr <- if (use_demo) as.matrix(expr) else asinh_mat(expr)
+  his_hit <- ici_filter_his_parent(tr, meta_sample)
+  qc_rows <- list()
+  smp_u <- unique(as.character(meta_sample))
+  for (s in smp_u) {
+    ii <- which(as.character(meta_sample) == s)
+    n_qc <- length(ii)
+    n_his <- sum(his_hit$keep[ii])
+    qc_rows[[length(qc_rows) + 1]] <- data.frame(
+      sample = s,
+      bio_sample = as.character(meta_bio[ii[1]]),
+      group = as.character(meta_group[ii[1]]),
+      panel = panel_id,
+      n_after_qc = n_qc,
+      n_his_pos = n_his,
+      his_pct_of_live = if (n_qc) 100 * n_his / n_qc else NA_real_,
+      stringsAsFactors = FALSE
+    )
+  }
+  qc_counts <- do.call(rbind, qc_rows)
+  log_msg(panel_id, " His-FITC+ parent after QC: ", his_hit$n_his, " / ", his_hit$n_qc,
+          " (", paste(sprintf("%s %.1f%%", qc_counts$sample, qc_counts$his_pct_of_live), collapse = "; "), ")")
+  if (his_hit$n_his < 50) {
+    log_msg(panel_id, " Too few His+ events after QC")
+    return(NULL)
+  }
+  keep_his <- his_hit$keep
+  tr <- tr[keep_his, , drop = FALSE]
+  meta_group <- meta_group[keep_his]
+  meta_sample <- meta_sample[keep_his]
+  meta_bio <- meta_bio[keep_his]
+  meta_tech <- meta_tech[keep_his]
+  if (length(meta_true) == length(keep_his)) meta_true <- meta_true[keep_his]
+  keep_ds <- rep(FALSE, nrow(tr))
+  for (s in unique(as.character(meta_sample))) {
+    ii <- which(as.character(meta_sample) == s)
+    set.seed(seed_value + sum(utf8ToInt(s)) %% 10000)
+    take <- downsample_idx(length(ii), n_cap)
+    keep_ds[ii[take]] <- TRUE
+  }
+  tr <- tr[keep_ds, , drop = FALSE]
+  meta_group <- meta_group[keep_ds]
+  meta_sample <- meta_sample[keep_ds]
+  meta_bio <- meta_bio[keep_ds]
+  meta_tech <- meta_tech[keep_ds]
+  if (length(meta_true) == length(keep_ds)) meta_true <- meta_true[keep_ds]
   list(
     transformed = tr,
     group = meta_group,
@@ -4095,20 +4200,22 @@ load_panel_cells <- function(panel_id, file_tab, use_demo, n_cap) {
     tech_rep = meta_tech,
     true_lineage = if (length(meta_true)) meta_true else rep(NA_character_, nrow(tr)),
     markers = markers,
-    map = map_used
+    map = map_used,
+    qc_counts = qc_counts
   )
 }
 
 analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   log_msg("==== Panel ", panel_id, " : ", panel_map$panels[[panel_id]]$focus, " ====")
+  log_msg(panel_id, " QC: singlets → lymph scatter (P1 tight / P2 wide / P3 none) → live; parent = His-FITC+ (not CD45+)")
   if (identical(panel_id, "P1")) {
-    log_msg("P1 gates: naive / T_CM / T_SCM / T_EM early-late / SLEC / MPEC / T_EFF / exhausted; CD69 activation")
+    log_msg("P1 on His+: T/NK naive / T_CM / T_SCM / T_EM / SLEC / MPEC / T_EFF / exhausted; CD69; leftover His+ CD45- = Target")
   }
   if (identical(panel_id, "P2")) {
-    log_msg("P2 gates: wide mononuclear FSC/SSC; CD19+ IgD vs CD27 Naive/Unswitched/Switched; MZ IgM-high; plasmablast/plasma BLIMP; CD40/CD80/CD86 as MFI not subsets")
+    log_msg("P2 on His+: wide mononuclear QC; CD19+ then CD27 x IgM/IgG Naive/Unswitched/Switched; MZ IgM-high")
   }
   if (identical(panel_id, "P3")) {
-    log_msg("P3 gates: singlets/live/CD45+; T=CD3+ B=CD19+ NK=NK1.1+; myeloid=triple-neg then CD11B+/-; eos=Siglec-F+CCR3+; mast=FceRI+CD200R3+; F4/80 hi mac vs Ly6C hi mono; DC=CD11C+MHCII+ then cDC1/cDC2; CD80/CD86/CD40/TNF-a as MFI")
+    log_msg("P3 on His+: no extra lymph gate; T=CD3+ B=CD19+ NK=NK1.1+; myeloid=triple-neg then CD11B+/-; eos=Siglec-F+CCR3+; mast=FceRI; F4/80 hi mac vs Ly6C hi mono; DC=CD11C+MHCII+")
   }
   out_dir <- file.path(result_dir, panel_id)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
@@ -4116,6 +4223,12 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   if (is.null(dat)) {
     writeLines("no cells", file.path(out_dir, paste0(panel_id, "_EMPTY.txt")))
     return(invisible(NULL))
+  }
+  if (!is.null(dat$qc_counts) && nrow(dat$qc_counts)) {
+    his_dir <- file.path(out_dir, "target_His")
+    dir.create(his_dir, recursive = TRUE, showWarnings = FALSE)
+    utils::write.csv(dat$qc_counts, file.path(his_dir, paste0(panel_id, "_His_of_live_after_QC.csv")),
+                     row.names = FALSE)
   }
 
   feat <- dat$markers
@@ -4170,6 +4283,12 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
   tsne <- run_tsne(pca_use)
   cl <- cluster_cells(mat, panel_id)
 
+  extra_gate <- setdiff(intersect(c("His", "CD45"), colnames(dat$transformed)), feat)
+  extra_df <- if (length(extra_gate)) {
+    as.data.frame(dat$transformed[ok_row, extra_gate, drop = FALSE], check.names = FALSE)
+  } else {
+    NULL
+  }
   cells <- data.frame(
     sample = smp,
     bio_sample = bio,
@@ -4184,6 +4303,11 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
+  if (!is.null(extra_df) && nrow(extra_df) == nrow(cells)) {
+    for (nm in colnames(extra_df)) {
+      if (!nm %in% names(cells)) cells[[nm]] <- extra_df[[nm]]
+    }
+  }
 
   med_df <- aggregate(cells[, feat, drop = FALSE], by = list(cluster = cells$cluster), FUN = median)
   med <- as.matrix(med_df[, -1, drop = FALSE])
@@ -4191,7 +4315,9 @@ analyze_one_panel <- function(panel_id, file_tab, use_demo) {
 
   annot <- annotate_clusters(med, panel_id)
   log_msg(panel_id, " cluster labels: ", paste(paste(annot$cluster, annot$lineage, sep = "="), collapse = ", "))
-  hier <- hierarchical_gate_by_sample(as.matrix(mat_raw), smp, panel_id)
+  gate_cols <- unique(c(feat, extra_gate))
+  mat_gate <- as.matrix(dat$transformed[ok_row, gate_cols, drop = FALSE])
+  hier <- hierarchical_gate_by_sample(mat_gate, smp, panel_id)
   cells$cluster_lineage <- hier$major
   cells$lineage <- hier$subset
   maj_n <- sort(table(hier$major), decreasing = TRUE)

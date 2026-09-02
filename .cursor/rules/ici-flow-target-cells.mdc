@@ -25,23 +25,23 @@ alwaysApply: false
 
 没有的标志物就不要伪造亚群：P1 不做 T_SCM / SLEC / MPEC / exhausted / T_EFF 细胞因子；P2 不做 IgD 四象限、浆母/浆细胞（无 BLIMP）、也不做 CD40/CD80/CD86 MFI；P3 不做 iNOS M1、不做 CD200R3（肥大细胞只靠 FceRI）。NKG2D 仍只出 MFI。
 
-## 圈门（主目的是靶细胞）
+## 圈门（P1/P2/P3 同一套三步，亚群跟免疫降维方案）
 
-每个 FCS 单独走同一套逻辑，再做 H vs EV（n=3）。不要套用免疫亚群分析里「三个生物学重复去掉一个极端值」的规则。
+每个 FCS 单独走同一套逻辑，再做 H vs EV（n=3）。不要套用免疫亚群分析里「三个生物学重复去掉一个极端值」的规则。分析母群是 **His-FITC+**，不是 CD45+。
 
-1. QC：**只去双联体和死细胞**。不要要求 CD45+，也不要 P1 紧淋巴 FSC/SSC 门——否则 His+ CD45− 和大体积靶细胞会被丢掉
-2. 活细胞里：**His+ CD45− → `Target`**（图上写 **His+ target**，颜色 `#00ACC1`）
-3. **His+ CD45+ 仍用原来的免疫亚群名**，不要改成 Target；另外统计各亚群内 His+ 比例
-4. 其余 CD45+ 按原 P1/P2/P3 分层，只用本表有的标志物
+1. **去除粘连体，圈定淋巴细胞，死活排除**（物理门与免疫降维相同，按 panel）：去碎片 / 双联体（FSC-A vs FSC-H/W）；**P1** 再按 FSC/SSC 圈紧淋巴；**P2** 用更宽的单核门；**P3 不再加淋巴门**（单细胞 → 活细胞）；L/D(FVS450) 去死。**不要在 QC 里要求 CD45+**。
+2. **圈定 His-FITC 阳性细胞群**：在 QC 后的活细胞里按管切 His+，后续降维、频率和亚群都只在 His+ 母群上做。
+3. **在 FITC 阳性细胞群上**，P1/P2/P3 各类亚群遵循免疫细胞降维分析方案，只用本表有的标志物：
    - P1：T=CD3→CD4/CD8；NK=CD3− NKp46+（在 CD11b 之前）；NKT=CD3+ NKp46+；CD69 活化；CD25 Treg；CD62L/CD44 naive / T_CM / T_EM
    - P2：宽单核思路；**CD19+ 为 B 母门**；无 IgD 时用 **CD27 × IgM/IgG** 对应原 P2：naive = CD27−；unswitched memory = CD27+ IgG−（多为 IgM+）；switched memory = CD27+ IgG+；naive/unswitched 里 IgM 高 → MZ B。不要伪造 IgD 四象限或 BLIMP 浆细胞
    - P3：CD3/CD19/NK1.1 大类；CD11B± 髓系；嗜酸 = Siglec-F **且** CCR3；肥大 = FceRI；F4/80 high 巨噬；Ly6C hi/lo；CD11C+MHCII+ → cDC1/cDC2；CD206 可标 M2-like
+4. His+ 里 **CD45− 且未命中上述免疫亚群名** 的细胞标成 **`Target`**（图上写 **His+ target**，颜色 `#00ACC1`）。**His+ CD45+ 仍用原来的免疫亚群名**，不要改成 Target。
 
 ## 导出
 
 - 免疫亚群图仍走本方案 `results_flow/P1/`、`P2/`、`P3/`：与免疫亚群方案同一套绘图规则。**`*_major_split`** 按大类着色（CD4 T / CD8 T / NK / NKT / B / Myeloid，加上 **His+ target**）；**`*_lineage_split`** 是同一套联合 embedding 上**全体细亚群**；细亚群再降维在 `dimred_by_major/`，类内必须高对比色。轨迹同样：先各大类树，再各类亚群树。图注在右侧。
 - 每个 panel 出 **免疫细胞注释热图** `*_annotation_heatmap`（标志物 × 已注释亚群；含 His+ target），以及大类版 `*_annotation_heatmap_major`
-- 靶细胞另出 `target_His/`：His+ 占活细胞%、His+ CD45− %、亚群内 His+、H vs EV 统计、tSNE/UMAP（左 EV 右 H；靶细胞青 / His+ CD45+ 金 / His− 灰，图注右侧）
+- 靶细胞另出 `target_His/`：His+ 占 QC 后活细胞%、His+ 母群内 Target / CD45− %、亚群占 His+ 母群%、H vs EV 统计、tSNE/UMAP（左 EV 右 H；靶细胞青 / His+ 免疫金，图注右侧）
 - ICI P1 **没有 CD19**。圈门缺通道必须当阴性，不要留下 NA 在 `out[is_t] <-` 上炸成 `NAs are not allowed in subscripted assignments`
 - **部分染色通道缺失：该项可以不分析（日志 `skip … missing channels`），但不能跳过该 panel 其余亚群图、大类图、热图和靶细胞表。** 例如缺 CD200R3 就不画肥大细胞门，后面的巨噬/DC 图仍要出
 - **NK1.1** 表上是 AF700（P3 写成 R718）；Cytek 通道名还可能是 `R718-A` / `APC-R700-A` / `Y710-A`，都要配上
@@ -49,10 +49,11 @@ alwaysApply: false
 ```r
 # ❌ BAD: 改 Flow_dimred_pipeline.R 或 flow_panel_map.json 来适配这套染色
 # ❌ BAD: ICI 去 E:/R/fuction of cell 找 / source Flow_dimred_pipeline.R
-# ❌ BAD: QC 先切 CD45+ / 小淋巴，再在剩余细胞里找 His
+# ❌ BAD: QC 只去双联体/死细胞、跳过 P1 淋巴门，再在全部活细胞里找 His
+# ❌ BAD: QC 先切 CD45+ 当分析母群
 # ❌ BAD: 把 His+ CD45+ 的 T/NK 全部改名为 Target
 # ✅ GOOD: Internation 目录放齐全部 ICI_*（含 ICI_flow_engine.R），单独 source ICI_Flow_dimred_pipeline.R
 # ✅ GOOD: 免疫亚群目录只放 Flow_*，单独 source Flow_dimred_pipeline.R
 # ✅ GOOD: ICI P2 用本表 7 色（CD19/CD27/IgM/IgG/His），按原 P2 思路圈 B；缺 IgD/BLIMP 只跳过该项
-# ✅ GOOD: His+ CD45- = 靶细胞；His+ CD45+ 保留免疫亚群
+# ✅ GOOD: 单细胞 → 淋巴/活 → His+ 母群 → 免疫亚群；His+ CD45- 未命名的才是 Target
 ```

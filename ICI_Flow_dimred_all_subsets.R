@@ -194,9 +194,9 @@ export_all_subsets_analysis <- function(result_dir) {
 
   note <- c(
     "This scheme is P1 + P2 + P3. Do not read results from E:/R/fuction of cell.",
-    "Numbers below are % of cells inside each panel tube, not a whole-blood composition.",
+    "Numbers below are % of His-FITC+ cells inside each panel tube after QC, not a whole-blood composition.",
     "Do not add P1+P2+P3 percentages together.",
-    "Focus subsets: P1 T/NK (+ His+ target), P2 B (+ His+ target), P3 myeloid (+ His+ target).",
+    "Gating: singlets → lymph/live → His+ parent; then P1 T/NK, P2 B, P3 myeloid (plus His+ target leftover).",
     "Dump channels (coarse only): P1 B and Myeloid; P3 T, B, NK.",
     "Stats: n=3 biological replicates; no tech-rep averaging; do not drop an extreme bio-rep.",
     paste("Panels found:", paste(unique(freq$panel), collapse = ", "))

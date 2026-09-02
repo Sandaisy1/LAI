@@ -49,6 +49,8 @@ expect(ici_json$panels$P3$markers[[match("His", ici_p3)]]$fluorochrome, "FITC", 
 expect(ici_json$panels$P3$markers[[match("CD80", ici_p3)]]$fluorochrome, "BUV496", "ICI P3 CD80-BUV496")
 expect(ici_json$panels$P3$markers[[match("NK1.1", ici_p3)]]$fluorochrome, "R718", "ICI P3 NK1.1-R718")
 expect(ici_json$qc$require_cd45, FALSE, "ICI QC must not require CD45")
+expect(ici_json$qc$analysis_parent, "His", "ICI analysis parent is His-FITC+")
+expect(ici_json$qc$require_lymph_scatter, TRUE, "ICI QC uses lymph scatter like immune dimred")
 
 # 当前 session 的 panel_map 应是 ICI 表
 expect(panel_map$panels$P1$markers[[match("His", vapply(panel_map$panels$P1$markers, function(x) x$marker, character(1)))]]$fluorochrome,
@@ -127,17 +129,41 @@ if (!is.null(parse_fcs_filename("ZZX_EV1-1_P1_unmixed.fcs")) &&
   fail("EV must not parse as H")
 }
 
-# QC：只去双联体和死细胞，不要因为 CD45- 丢掉 His+ 靶细胞；P1 不要紧淋巴门
+# QC：去粘连体 + 淋巴散射（P1 紧 / P2 宽 / P3 无）+ 活死；不因 CD45- 丢掉小淋巴。大体积细胞走 P1 淋巴门会去掉。
 set.seed(7)
-n_leu <- 80L
-n_tgt <- 80L
-n_dead <- 8L
+n_leu <- 200L
+n_large <- 40L
+n_small_neg <- 40L
+n_dead <- 15L
 exprs_qc <- cbind(
-  `FSC-A` = c(rnorm(n_leu, 80000, 4000), rnorm(n_tgt, 110000, 5000), rnorm(n_dead, 80000, 4000)),
-  `SSC-A` = c(rnorm(n_leu, 20000, 2000), rnorm(n_tgt, 45000, 3000), rnorm(n_dead, 20000, 2000)),
-  `FSC-H` = c(rnorm(n_leu, 80000, 4000), rnorm(n_tgt, 110000, 5000), rnorm(n_dead, 80000, 4000)),
-  `L/D` = c(rnorm(n_leu + n_tgt, 200, 30), rnorm(n_dead, 8000, 200)),
-  CD45 = c(rnorm(n_leu, 12000, 800), rnorm(n_tgt, 80, 20), rnorm(n_dead, 12000, 800))
+  `FSC-A` = c(
+    rnorm(n_leu, 80000, 4000),
+    rnorm(n_large, 140000, 5000),
+    rnorm(n_small_neg, 80000, 4000),
+    rnorm(n_dead, 80000, 4000)
+  ),
+  `SSC-A` = c(
+    rnorm(n_leu, 20000, 2000),
+    rnorm(n_large, 70000, 4000),
+    rnorm(n_small_neg, 20000, 2000),
+    rnorm(n_dead, 20000, 2000)
+  ),
+  `FSC-H` = c(
+    rnorm(n_leu, 80000, 4000),
+    rnorm(n_large, 140000, 5000),
+    rnorm(n_small_neg, 80000, 4000),
+    rnorm(n_dead, 80000, 4000)
+  ),
+  `L/D` = c(
+    rnorm(n_leu + n_large + n_small_neg, 200, 30),
+    rnorm(n_dead, 8000, 200)
+  ),
+  CD45 = c(
+    rnorm(n_leu, 12000, 800),
+    rnorm(n_large, 80, 20),
+    rnorm(n_small_neg, 80, 20),
+    rnorm(n_dead, 12000, 800)
+  )
 )
 map_qc <- data.frame(
   marker = c("L/D", "CD45"),
@@ -146,16 +172,34 @@ map_qc <- data.frame(
 )
 chn <- colnames(exprs_qc)
 keep_ici <- qc_filter_matrix(exprs_qc, chn, map_qc, "P1")
-keep_orig <- qc_filter_matrix_flow(exprs_qc, chn, map_qc, "P1")
-tgt_idx <- seq.int(n_leu + 1L, n_leu + n_tgt)
-if (mean(keep_ici[tgt_idx]) < 0.7) {
-  fail(sprintf("ICI QC must keep His+ CD45- / large-FSC targets, kept %s", mean(keep_ici[tgt_idx])))
+keep_cd45 <- qc_filter_matrix_flow(exprs_qc, chn, map_qc, "P1")
+keep_p3 <- qc_filter_matrix(exprs_qc, chn, map_qc, "P3")
+leu_idx <- seq_len(n_leu)
+large_idx <- seq.int(n_leu + 1L, n_leu + n_large)
+small_neg_idx <- seq.int(n_leu + n_large + 1L, n_leu + n_large + n_small_neg)
+dead_idx <- seq.int(n_leu + n_large + n_small_neg + 1L, nrow(exprs_qc))
+if (mean(keep_ici[leu_idx]) < 0.7) {
+  fail(sprintf("ICI P1 QC must keep lymphocytes, kept %s", mean(keep_ici[leu_idx])))
 }
-if (mean(keep_orig[tgt_idx]) > 0.4) {
-  fail("original QC (CD45+ and P1 lymph gate) should drop most CD45- large cells")
+if (mean(keep_ici[large_idx]) > 0.4) {
+  fail(sprintf("ICI P1 lymph gate must drop large-FSC cells, kept %s", mean(keep_ici[large_idx])))
+}
+if (mean(keep_ici[small_neg_idx]) < 0.7) {
+  fail(sprintf("ICI QC must keep small CD45- live cells (His parent is later), kept %s",
+               mean(keep_ici[small_neg_idx])))
+}
+if (mean(keep_cd45[small_neg_idx]) > 0.4) {
+  fail("CD45+ QC should drop small CD45- cells; ICI must not use that as the parent")
+}
+if (mean(keep_ici[dead_idx]) > 0.3) {
+  fail("ICI QC must drop dead cells")
+}
+if (mean(keep_p3[large_idx]) < 0.5) {
+  fail(sprintf("ICI P3 must not apply a tight lymph gate, kept large cells %s",
+               mean(keep_p3[large_idx])))
 }
 
-# His+ CD45- → Target；His+ CD45+ CD3+ 仍是 T，不要改成 Target
+# His+ 母群：His- 不进入分析；His+ CD45- 未命名 → Target；His+ CD45+ T 仍是 CD4
 set.seed(11)
 n <- 70L
 mk_block <- function(his, cd45, cd3, cd4, cd8 = 0.2, nkp = 0.2) {
@@ -198,6 +242,13 @@ if (mean(h$major[his_t] == "CD4") < 0.8) {
 }
 if (any(h$major[his_neg_t] == "Target")) {
   fail("His- CD45+ T cells must not be labeled Target")
+}
+his_parent <- ici_filter_his_parent(mat)
+if (mean(his_parent$keep[c(tgt, his_t)]) < 0.85) {
+  fail("His+ cells must remain in the His-FITC+ parent")
+}
+if (mean(his_parent$keep[his_neg_t]) > 0.2) {
+  fail("His- cells must be dropped from the His-FITC+ parent")
 }
 
 # 只有 His+ CD45+ T 时也不要改成 Target
