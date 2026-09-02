@@ -1,9 +1,9 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# 两组病人血清蛋白质组：按蛋白丰度做排名气泡图
+# 两组样品取平均丰度，按排名画等大气泡图（x=丰度排名，y=蛋白丰度值）
 # 输入：DIA-NN report.pg_matrix（首选）或 report.pr_matrix
 # 数据目录：E:/天府/实验管理/课题/赵章寻/血清蛋白质组学
-# 分组：sample_annotation.csv（列 sample,group，恰好两组）
+# 样品：GP_WJZ_11、GP_WJZ_18 取平均后再排名
 #
 # 运行（当前工作目录必须能看到这个文件，否则会报“无法打开链接”）：
 #   source("run_serum_proteomics_bubble.R", encoding = "UTF-8")
@@ -257,139 +257,92 @@ load_annotation <- function(dir, intensity_cols) {
 }
 
 # -----------------------------------------------------------------------------
-# 过滤 + log2 + 样品中位数中心化
+# 过滤 + log2 + 样品中位数中心化；两样品后面再取平均
 # -----------------------------------------------------------------------------
-preprocess <- function(mat, sample_info) {
-  int_cols <- sample_info$column
+preprocess <- function(mat, int_cols) {
   raw <- as.matrix(mat[, int_cols, drop = FALSE])
   storage.mode(raw) <- "double"
   raw[!is.finite(raw) | raw < 0] <- NA_real_
-
-  keep <- rep(FALSE, nrow(raw))
-  for (g in levels(sample_info$group)) {
-    cols <- sample_info$column[sample_info$group == g]
-    frac <- rowMeans(is.finite(raw[, cols, drop = FALSE]) & raw[, cols, drop = FALSE] > 0, na.rm = FALSE)
-    keep <- keep | (frac >= min_detect_frac)
-  }
-  log_msg("过滤前 ", nrow(raw), " 蛋白，过滤后 ", sum(keep))
+  frac <- rowMeans(is.finite(raw) & raw > 0)
+  keep <- frac >= min_detect_frac
+  log_msg("过滤前 ", nrow(raw), " 蛋白，过滤后 ", sum(keep),
+          "；样品: ", paste(int_cols, collapse = ", "))
   mat <- mat[keep, , drop = FALSE]
   raw <- raw[keep, , drop = FALSE]
-
   log2x <- log2(raw + 1)
   med <- apply(log2x, 2, median, na.rm = TRUE)
   log2x <- sweep(log2x, 2, med - median(med, na.rm = TRUE), "-")
-  list(meta = mat, log2 = log2x)
+  list(meta = mat, log2 = log2x, sample_cols = int_cols)
 }
 
 # -----------------------------------------------------------------------------
-# 两组统计：丰度排名 + FC；有重复才算 p
+# 两样品平均丰度，再按该值降序排名
 # -----------------------------------------------------------------------------
-rank_proteins <- function(meta, log2x, sample_info) {
-  g <- levels(sample_info$group)
-  g1 <- g[1]
-  g2 <- g[2]
-  c1 <- sample_info$column[sample_info$group == g1]
-  c2 <- sample_info$column[sample_info$group == g2]
-  m1 <- rowMeans(log2x[, c1, drop = FALSE], na.rm = TRUE)
-  m2 <- rowMeans(log2x[, c2, drop = FALSE], na.rm = TRUE)
+rank_proteins <- function(meta, log2x, sample_cols) {
   mean_ab <- rowMeans(log2x, na.rm = TRUE)
-  log2fc <- m2 - m1
-  n1 <- length(c1)
-  n2 <- length(c2)
-  pval <- rep(NA_real_, length(mean_ab))
-  if (n1 >= 2 && n2 >= 2) {
-    for (i in seq_along(mean_ab)) {
-      a <- log2x[i, c1]
-      b <- log2x[i, c2]
-      a <- a[is.finite(a)]
-      b <- b[is.finite(b)]
-      if (length(a) >= 2 && length(b) >= 2 && (sd(a) > 0 || sd(b) > 0)) {
-        pval[i] <- tryCatch(t.test(b, a, var.equal = FALSE)$p.value, error = function(e) NA_real_)
-      }
-    }
-  } else {
-    log_msg("每组样品不足 2，不伪造 p 值，只按丰度/FC 排名")
-  }
   gene_raw <- if ("Genes" %in% names(meta)) meta$Genes else NA_character_
-  pg <- if ("Protein.Group" %in% names(meta)) meta$Protein.Group else rownames(meta)
+  pg <- if ("Protein.Group" %in% names(meta)) meta$Protein.Group else seq_len(nrow(meta))
   gene <- vapply(as.character(gene_raw), pick_official_symbol, character(1), USE.NAMES = FALSE)
   gene[is.na(gene) | !nzchar(gene)] <- as.character(pg[is.na(gene) | !nzchar(gene)])
   gene[duplicated(gene)] <- paste0(gene[duplicated(gene)], "_", which(duplicated(gene)))
-
   out <- data.frame(
     Protein.Group = as.character(pg),
     gene = gene,
-    description = if ("First.Protein.Description" %in% names(meta)) as.character(meta$First.Protein.Description) else NA_character_,
-    mean_log2 = as.numeric(mean_ab),
-    mean_group1 = as.numeric(m1),
-    mean_group2 = as.numeric(m2),
-    log2FC = as.numeric(log2fc),
-    FoldChange = 2^as.numeric(log2fc),
-    pvalue = pval,
+    description = if ("First.Protein.Description" %in% names(meta)) {
+      as.character(meta$First.Protein.Description)
+    } else {
+      NA_character_
+    },
+    mean_abundance = as.numeric(mean_ab),
     stringsAsFactors = FALSE
   )
-  names(out)[names(out) == "mean_group1"] <- paste0("mean_", g1)
-  names(out)[names(out) == "mean_group2"] <- paste0("mean_", g2)
-  out$abundance_rank <- rank(-out$mean_log2, ties.method = "first")
-  out$fc_rank <- rank(-abs(out$log2FC), ties.method = "first")
-  out$neglog10p <- ifelse(is.finite(out$pvalue) & out$pvalue > 0, -log10(out$pvalue), NA_real_)
-  out <- out[order(out$abundance_rank), ]
-  attr(out, "group1") <- g1
-  attr(out, "group2") <- g2
-  out
+  for (i in seq_along(sample_cols)) {
+    out[[paste0("sample_", normalize_sample_token(sample_cols[[i]]))]] <- as.numeric(log2x[, i])
+  }
+  out$abundance_rank <- rank(-out$mean_abundance, ties.method = "first")
+  out[order(out$abundance_rank), ]
 }
 
 # -----------------------------------------------------------------------------
-# 作图
+# 作图：x=丰度排名，y=蛋白丰度值，气泡大小一致
 # -----------------------------------------------------------------------------
 theme_bubble <- function() {
   ggplot2::theme_bw(base_size = 12) +
     ggplot2::theme(
       panel.grid.minor = ggplot2::element_blank(),
-      plot.title = ggplot2::element_text(face = "bold", hjust = 0),
-      axis.text.y = ggplot2::element_text(size = 9, face = "italic")
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0)
     )
 }
 
-plot_ranked_fc_bubble <- function(df, n, g1, g2, outfile) {
+plot_rank_abundance_bubble <- function(df, n, outfile, label_n = 12L) {
   sub <- df[df$abundance_rank <= n, ]
-  sub <- sub[order(sub$abundance_rank, decreasing = TRUE), ]
-  sub$gene <- factor(sub$gene, levels = sub$gene)
+  sub <- sub[order(sub$abundance_rank), ]
+  lab <- sub[sub$abundance_rank <= min(as.integer(label_n), n), ]
   title <- paste0("血清蛋白丰度排名气泡图 (top", n, ")")
-  subtitle <- paste0("x = log2FC(", g2, " / ", g1, ")；点大小 = 平均 log2 丰度")
-  p <- ggplot2::ggplot(sub, ggplot2::aes(x = .data$log2FC, y = .data$gene, size = .data$mean_log2, color = .data$log2FC)) +
-    ggplot2::geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
-    ggplot2::geom_point(alpha = 0.88) +
-    ggplot2::scale_size_continuous(name = "mean log2\nabundance", range = c(2.5, 11)) +
-    ggplot2::scale_color_gradient2(
-      name = "log2FC",
-      low = "#2166AC", mid = "grey75", high = "#B2182B", midpoint = 0
+  p <- ggplot2::ggplot(sub, ggplot2::aes(x = .data$abundance_rank, y = .data$mean_abundance)) +
+    ggplot2::geom_line(color = "#9ECAE1", size = 0.45) +
+    ggplot2::geom_point(size = 2.8, color = "#2C7FB8", alpha = 0.92) +
+    ggplot2::labs(
+      title = title,
+      subtitle = "两样品平均丰度后排名；气泡大小一致",
+      x = "丰度排名",
+      y = "蛋白丰度值"
     ) +
-    ggplot2::labs(title = title, subtitle = subtitle, x = paste0("log2 Fold Change (", g2, " / ", g1, ")"), y = paste0("Protein (abundance rank 1–", n, ")")) +
     theme_bubble()
-  ggplot2::ggsave(outfile, p, width = 8.5, height = max(4.5, 0.28 * n + 2.2), dpi = 150, limitsize = FALSE)
-}
-
-plot_two_group_bubble <- function(df, n, g1, g2, outfile) {
-  sub <- df[df$abundance_rank <= n, ]
-  sub <- sub[order(sub$abundance_rank, decreasing = TRUE), ]
-  long <- tidyr::pivot_longer(
-    sub,
-    cols = c(paste0("mean_", g1), paste0("mean_", g2)),
-    names_to = "group",
-    values_to = "group_mean"
-  )
-  long$group <- sub("^mean_", "", long$group)
-  long$group <- factor(long$group, levels = c(g1, g2))
-  long$gene <- factor(long$gene, levels = unique(sub$gene))
-  title <- paste0("两组病人血清丰度气泡图 (top", n, ")")
-  p <- ggplot2::ggplot(long, ggplot2::aes(x = .data$group, y = .data$gene, size = .data$group_mean, color = .data$group)) +
-    ggplot2::geom_point(alpha = 0.88) +
-    ggplot2::scale_size_continuous(name = "group mean\nlog2 abundance", range = c(2.5, 11)) +
-    ggplot2::scale_color_manual(values = setNames(c("#4C78A8", "#F58518"), c(g1, g2)), name = "Group") +
-    ggplot2::labs(title = title, subtitle = "同一蛋白两个点 = 两组平均丰度；按全样品平均丰度降序", x = NULL, y = paste0("Protein (abundance rank 1–", n, ")")) +
-    theme_bubble()
-  ggplot2::ggsave(outfile, p, width = 7.2, height = max(4.5, 0.28 * n + 2.2), dpi = 150, limitsize = FALSE)
+  if (nrow(lab) > 0) {
+    if (requireNamespace("ggrepel", quietly = TRUE)) {
+      p <- p + ggrepel::geom_text_repel(
+        data = lab, ggplot2::aes(label = .data$gene),
+        size = 3, fontface = "italic", max.overlaps = 40, min.segment.length = 0
+      )
+    } else {
+      p <- p + ggplot2::geom_text(
+        data = lab, ggplot2::aes(label = .data$gene),
+        vjust = -0.9, size = 3, fontface = "italic", check_overlap = TRUE
+      )
+    }
+  }
+  ggplot2::ggsave(outfile, p, width = 8.2, height = 5.4, dpi = 150)
 }
 
 # -----------------------------------------------------------------------------
@@ -397,30 +350,23 @@ plot_two_group_bubble <- function(df, n, g1, g2, outfile) {
 # -----------------------------------------------------------------------------
 log_msg("工作目录: ", project_dir)
 mat <- load_protein_matrix(project_dir)
-sample_info <- load_annotation(project_dir, attr(mat, "intensity_cols"))
-log_msg("组别: ", paste(levels(sample_info$group), collapse = " vs "))
-prep <- preprocess(mat, sample_info)
-ranked <- rank_proteins(prep$meta, prep$log2, sample_info)
-g1 <- attr(ranked, "group1")
-g2 <- attr(ranked, "group2")
+int_cols <- attr(mat, "intensity_cols")
+prep <- preprocess(mat, int_cols)
+ranked <- rank_proteins(prep$meta, prep$log2, prep$sample_cols)
+log_msg("按两样品平均丰度排名，蛋白数 ", nrow(ranked))
 
 rank_path <- file.path(result_dir, "protein_abundance_ranking.csv")
 readr::write_csv(ranked, rank_path)
 log_msg("写出排名表: ", rank_path)
 
-for (n in top_ns) {
-  n_use <- min(n, nrow(ranked))
+ns <- unique(c(top_ns[top_ns <= nrow(ranked)], nrow(ranked)))
+for (n_use in ns) {
   if (n_use < 1) next
-  tag <- paste0("top", n_use)
-  sub_path <- file.path(result_dir, paste0(tag, "_ranked_proteins.csv"))
-  readr::write_csv(ranked[ranked$abundance_rank <= n_use, ], sub_path)
-  plot_ranked_fc_bubble(
-    ranked, n_use, g1, g2,
+  tag <- if (n_use == nrow(ranked)) "all" else paste0("top", n_use)
+  readr::write_csv(ranked[ranked$abundance_rank <= n_use, ], file.path(result_dir, paste0(tag, "_ranked_proteins.csv")))
+  plot_rank_abundance_bubble(
+    ranked, n_use,
     file.path(result_dir, paste0(tag, "_abundance_rank_bubble.pdf"))
-  )
-  plot_two_group_bubble(
-    ranked, n_use, g1, g2,
-    file.path(result_dir, paste0(tag, "_two_group_abundance_bubble.pdf"))
   )
   log_msg("完成 ", tag)
 }

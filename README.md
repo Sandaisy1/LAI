@@ -131,13 +131,13 @@ source("serum_proteomics_ranked_bubble.R", encoding = "UTF-8")
 python3 serum_proteomics_ranked_bubble.py
 ```
 
-无真实矩阵时，Python 脚本会在 `serum_proteomics/` 写出示例数据并出图。预处理为：至少一组检出率 ≥50% → `log2(x+1)` → 样品中位数中心化。按 **全样品平均丰度** 降序排名，默认 top20 / top30 / top50：
+按 **两样品平均丰度** 降序排名。横轴是丰度排名，纵轴是蛋白丰度值，气泡大小一致。默认 top20 / top30 / top50 以及全部蛋白：
 
 ```
 results/serum_proteomics_bubble/
   protein_abundance_ranking.csv
-  top20_abundance_rank_bubble.pdf|.png    # y=蛋白秩，x=log2FC，点大小=平均丰度
-  top20_two_group_abundance_bubble.pdf|.png
+  top20_abundance_rank_bubble.pdf|.png
+  all_abundance_rank_bubble.pdf|.png
 ```
 
-这是蛋白丰度排名气泡图，不是 GO/KEGG 气泡图。每组样品不足 2 个时不算 p 值、不伪造 p。
+这是蛋白丰度排名气泡图（两样品平均，等大气泡），不是 GO/KEGG 气泡图，也不是两组 FC 图。

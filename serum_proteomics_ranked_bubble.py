@@ -252,16 +252,12 @@ def load_annotation(
     return info
 
 
-def preprocess(mat: pd.DataFrame, int_cols: list[str], sample_info: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray]:
+def preprocess(mat: pd.DataFrame, int_cols: list[str]) -> tuple[pd.DataFrame, np.ndarray]:
     raw = np.array(mat[int_cols].to_numpy(dtype=float), copy=True)
     raw[~np.isfinite(raw) | (raw < 0)] = np.nan
-    keep = np.zeros(raw.shape[0], dtype=bool)
-    for group in sample_info["group"].cat.categories:
-        cols = sample_info.loc[sample_info["group"] == group, "column"]
-        idx = [int_cols.index(c) for c in cols]
-        detected = np.isfinite(raw[:, idx]) & (raw[:, idx] > 0)
-        frac = np.nanmean(detected, axis=1)
-        keep |= frac >= MIN_DETECT_FRAC
+    detected = np.isfinite(raw) & (raw > 0)
+    frac = np.nanmean(detected, axis=1)
+    keep = frac >= MIN_DETECT_FRAC
     mat = mat.loc[keep].reset_index(drop=True)
     raw = raw[keep]
     log2x = np.log2(raw + 1.0)
@@ -297,21 +293,10 @@ def welch_p(a: np.ndarray, b: np.ndarray) -> float:
         return float(math.erfc(abs(t) / math.sqrt(2)))
 
 
-def rank_proteins(meta: pd.DataFrame, log2x: np.ndarray, sample_info: pd.DataFrame) -> pd.DataFrame:
-    groups = list(sample_info["group"].cat.categories)
-    g1, g2 = groups
-    col_index = {c: i for i, c in enumerate(sample_info["column"])}
-    i1 = [col_index[c] for c in sample_info.loc[sample_info["group"] == g1, "column"]]
-    i2 = [col_index[c] for c in sample_info.loc[sample_info["group"] == g2, "column"]]
-    m1 = np.nanmean(log2x[:, i1], axis=1)
-    m2 = np.nanmean(log2x[:, i2], axis=1)
+def rank_proteins(
+    meta: pd.DataFrame, log2x: np.ndarray, sample_names: list[str] | None = None
+) -> pd.DataFrame:
     mean_ab = np.nanmean(log2x, axis=1)
-    log2fc = m2 - m1
-    n1, n2 = len(i1), len(i2)
-    pvals = np.full(mean_ab.shape[0], np.nan)
-    if n1 >= 2 and n2 >= 2:
-        for i in range(mean_ab.shape[0]):
-            pvals[i] = welch_p(log2x[i, i1], log2x[i, i2])
     genes_raw = meta["Genes"] if "Genes" in meta.columns else pd.Series([None] * len(meta))
     pgs = meta["Protein.Group"] if "Protein.Group" in meta.columns else pd.Series(range(len(meta)))
     genes = []
@@ -331,120 +316,53 @@ def rank_proteins(meta: pd.DataFrame, log2x: np.ndarray, sample_info: pd.DataFra
             "description": meta["First.Protein.Description"].astype(str).to_numpy()
             if "First.Protein.Description" in meta.columns
             else [""] * len(meta),
-            "mean_log2": mean_ab,
-            f"mean_{g1}": m1,
-            f"mean_{g2}": m2,
-            "log2FC": log2fc,
-            "FoldChange": np.power(2.0, log2fc),
-            "pvalue": pvals,
+            "mean_abundance": mean_ab,
         }
     )
-    out["abundance_rank"] = out["mean_log2"].rank(ascending=False, method="first").astype(int)
-    out["fc_rank"] = out["log2FC"].abs().rank(ascending=False, method="first").astype(int)
-    out["neglog10p"] = np.where(
-        np.isfinite(out["pvalue"]) & (out["pvalue"] > 0),
-        -np.log10(out["pvalue"]),
-        np.nan,
-    )
-    out.attrs["group1"] = g1
-    out.attrs["group2"] = g2
+    names = sample_names or [f"sample{i+1}" for i in range(log2x.shape[1])]
+    for i, name in enumerate(names):
+        out[f"sample_{normalize_sample_token(name)}"] = log2x[:, i]
+    out["abundance_rank"] = out["mean_abundance"].rank(ascending=False, method="first").astype(int)
     return out.sort_values("abundance_rank").reset_index(drop=True)
 
 
-def _size_scale(values: np.ndarray, lo: float = 28.0, hi: float = 220.0) -> np.ndarray:
-    v = np.asarray(values, dtype=float)
-    vmin, vmax = np.nanmin(v), np.nanmax(v)
-    if not np.isfinite(vmin) or vmin == vmax:
-        return np.full(v.shape, (lo + hi) / 2.0)
-    return lo + (v - vmin) / (vmax - vmin) * (hi - lo)
-
-
-def plot_ranked_fc_bubble(df: pd.DataFrame, n: int, g1: str, g2: str, outfile: Path) -> None:
-    sub = df[df["abundance_rank"] <= n].sort_values("abundance_rank", ascending=False)
-    y = np.arange(len(sub))
-    fig_h = max(4.5, 0.28 * n + 2.2)
-    fig, ax = plt.subplots(figsize=(8.5, fig_h))
-    ax.axvline(0, linestyle="--", color="0.5", linewidth=0.9)
-    sc = ax.scatter(
-        sub["log2FC"],
-        y,
-        s=_size_scale(sub["mean_log2"].to_numpy()),
-        c=sub["log2FC"],
-        cmap="RdBu_r",
-        vmin=-max(abs(sub["log2FC"].min()), abs(sub["log2FC"].max()), 0.2),
-        vmax=max(abs(sub["log2FC"].min()), abs(sub["log2FC"].max()), 0.2),
+def plot_rank_abundance_bubble(df: pd.DataFrame, n: int, outfile: Path, label_n: int = 12) -> None:
+    sub = df[df["abundance_rank"] <= n].sort_values("abundance_rank")
+    fig, ax = plt.subplots(figsize=(8.2, 5.4))
+    ax.plot(sub["abundance_rank"], sub["mean_abundance"], color="#9ECAE1", linewidth=0.9, zorder=2)
+    ax.scatter(
+        sub["abundance_rank"],
+        sub["mean_abundance"],
+        s=42,
+        c="#2C7FB8",
+        alpha=0.92,
         edgecolors="white",
-        linewidths=0.6,
+        linewidths=0.4,
         zorder=3,
     )
-    ax.set_yticks(y)
-    ax.set_yticklabels(sub["gene"], fontstyle="italic")
-    ax.set_xlabel(f"log2 Fold Change ({g2} / {g1})")
-    ax.set_ylabel(f"Protein (abundance rank 1–{n})")
+    lab = sub[sub["abundance_rank"] <= min(label_n, n)]
+    for _, row in lab.iterrows():
+        ax.annotate(
+            row["gene"],
+            (row["abundance_rank"], row["mean_abundance"]),
+            textcoords="offset points",
+            xytext=(4, 6),
+            fontsize=8,
+            fontstyle="italic",
+            color="0.2",
+        )
+    ax.set_xlabel("丰度排名")
+    ax.set_ylabel("蛋白丰度值")
     ax.set_title(f"血清蛋白丰度排名气泡图 (top{n})", loc="left")
     ax.text(
         0.0,
         1.02,
-        f"x = log2FC({g2} / {g1})；点大小 = 平均 log2 丰度",
+        "两样品平均丰度后排名；气泡大小一致",
         transform=ax.transAxes,
         fontsize=9,
-        color="0.3",
+        color="0.35",
     )
-    cbar = fig.colorbar(sc, ax=ax, fraction=0.035, pad=0.02)
-    cbar.set_label("log2FC")
-    ax.grid(axis="x", linestyle=":", alpha=0.4)
-    fig.tight_layout()
-    fig.savefig(outfile, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-
-
-def plot_two_group_bubble(df: pd.DataFrame, n: int, g1: str, g2: str, outfile: Path) -> None:
-    sub = df[df["abundance_rank"] <= n].sort_values("abundance_rank", ascending=False)
-    y = np.arange(len(sub))
-    fig_h = max(4.5, 0.28 * n + 2.2)
-    fig, ax = plt.subplots(figsize=(7.2, fig_h))
-    colors = {g1: "#4C78A8", g2: "#F58518"}
-    x_pos = {g1: 0.0, g2: 1.0}
-    all_means = np.concatenate(
-        [sub[f"mean_{g1}"].to_numpy(), sub[f"mean_{g2}"].to_numpy()]
-    )
-    lo, hi = 28.0, 220.0
-    vmin, vmax = float(np.nanmin(all_means)), float(np.nanmax(all_means))
-
-    def sizes(vals: np.ndarray) -> np.ndarray:
-        if not np.isfinite(vmin) or vmin == vmax:
-            return np.full(vals.shape, (lo + hi) / 2.0)
-        return lo + (vals - vmin) / (vmax - vmin) * (hi - lo)
-
-    for group in (g1, g2):
-        vals = sub[f"mean_{group}"].to_numpy()
-        ax.scatter(
-            np.full(len(sub), x_pos[group]),
-            y,
-            s=sizes(vals),
-            c=colors[group],
-            edgecolors="white",
-            linewidths=0.6,
-            label=group,
-            zorder=3,
-        )
-    ax.set_xticks([0, 1])
-    ax.set_xticklabels([g1, g2])
-    ax.set_yticks(y)
-    ax.set_yticklabels(sub["gene"], fontstyle="italic")
-    ax.set_xlim(-0.55, 1.55)
-    ax.set_ylabel(f"Protein (abundance rank 1–{n})")
-    ax.set_title(f"两组病人血清丰度气泡图 (top{n})", loc="left")
-    ax.text(
-        0.0,
-        1.02,
-        "同一蛋白两个点 = 两组平均丰度；按全样品平均丰度降序",
-        transform=ax.transAxes,
-        fontsize=9,
-        color="0.3",
-    )
-    ax.legend(frameon=False, loc="lower right")
-    ax.grid(axis="y", linestyle=":", alpha=0.35)
+    ax.grid(linestyle=":", alpha=0.4)
     fig.tight_layout()
     fig.savefig(outfile, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -570,28 +488,22 @@ def main() -> None:
     log(f"工作目录: {directory}", log_path)
 
     mat, int_cols = load_protein_matrix(directory, log_path)
-    sample_info = load_annotation(directory, int_cols, log_path)
-    g1, g2 = list(sample_info["group"].cat.categories)
-    log(f"组别: {g1} vs {g2}", log_path)
-    if sample_info.groupby("group", observed=True).size().min() < 2:
-        log("每组样品不足 2，不伪造 p 值，只按丰度/FC 排名", log_path)
-
-    meta, log2x = preprocess(mat, int_cols, sample_info)
+    log(f"样品列: {', '.join(int_cols)}；两列取平均后按丰度排名", log_path)
+    meta, log2x = preprocess(mat, int_cols)
     log(f"过滤后蛋白数: {len(meta)}", log_path)
-    ranked = rank_proteins(meta, log2x, sample_info)
+    ranked = rank_proteins(meta, log2x, int_cols)
     ranked.to_csv(result_dir / "protein_abundance_ranking.csv", index=False)
     log(f"写出排名表: {result_dir / 'protein_abundance_ranking.csv'}", log_path)
 
-    for n in TOP_NS:
-        n_use = min(n, len(ranked))
+    ns = sorted({min(n, len(ranked)) for n in TOP_NS if n <= len(ranked)} | {len(ranked)})
+    for n_use in ns:
         if n_use < 1:
             continue
-        tag = f"top{n_use}"
+        tag = "all" if n_use == len(ranked) else f"top{n_use}"
         ranked[ranked["abundance_rank"] <= n_use].to_csv(
             result_dir / f"{tag}_ranked_proteins.csv", index=False
         )
-        plot_ranked_fc_bubble(ranked, n_use, g1, g2, result_dir / f"{tag}_abundance_rank_bubble.png")
-        plot_two_group_bubble(ranked, n_use, g1, g2, result_dir / f"{tag}_two_group_abundance_bubble.png")
+        plot_rank_abundance_bubble(ranked, n_use, result_dir / f"{tag}_abundance_rank_bubble.png")
         log(f"完成 {tag}", log_path)
     log(f"全部完成 -> {result_dir}", log_path)
 

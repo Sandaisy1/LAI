@@ -1,37 +1,31 @@
 ---
-description: 两组病人血清蛋白质组（DIA-NN）按蛋白丰度做排名气泡图
+description: 血清蛋白质组：两样品平均丰度排名气泡图（等大）
 globs: "**/serum_proteomics*.{R,r,py},**/run_serum_proteomics*.R,**/*pg_matrix*,**/*pr_matrix*"
 alwaysApply: false
 ---
 
-# 血清蛋白质组：两组病人丰度排名气泡图
+# 血清蛋白丰度排名气泡图
 
-写或改血清蛋白质组脚本时按本规则。输入是 **DIA-NN** 矩阵，不是 Cuffdiff，也不是 Excel。RNA-seq 六组比较仍走 `tg-brca-rnaseq.mdc`，不要混用。
+写或改血清蛋白质组脚本时按本规则。输入是 **DIA-NN** 矩阵，不是 Cuffdiff。RNA-seq 仍走 `tg-brca-rnaseq.mdc`。
 
 ## 数据
 
-- 目录：`E:/天府/实验管理/课题/赵章寻/血清蛋白质组学`（矩阵与结果同目录；可用 `SERUM_PROTEOMICS_DIR` 覆盖；缺失则回退仓库 `serum_proteomics/`）
-- 首选 `report.pg_matrix`（蛋白组定量）；行太少或几乎为空时，用 `report.pr_matrix` 按 `Protein.Group` 聚合到蛋白（每样品取肽段强度中位数）
-- 分组：同一目录 `sample_annotation.csv`（列 `sample,group`）。若缺失且矩阵**恰好两列样品**（如 `GP_WJZ_11` vs `GP_WJZ_18`），写出该表、每列当作一组（1-vs-1，不伪造 p）。多于两列时只写模板并停止，不要把两列病人合并成一组
-- 运行：不要只 `source("serum_proteomics_ranked_bubble.R")`（工作目录里通常没有这个文件，会报无法打开链接）。用 `source("run_serum_proteomics_bubble.R", encoding = "UTF-8")`，或先把 `.R` 复制到数据目录再 `setwd` 后 source
-- 恰好 **两组**；组名以注释表为准（如 `GroupA`/`GroupB` 或 `Control`/`Case`）
-- 物种：人；展示名用 `Genes` 清洗后的官方符号，缺符号则保留 `Protein.Group`
+- 目录：`E:/天府/实验管理/课题/赵章寻/血清蛋白质组学`
+- 首选 `report.pg_matrix` / `report.pg_matrix.tsv`；过少则 `report.pr_matrix` 按 `Protein.Group` 取肽段中位数
+- 当前两列样品 `GP_WJZ_11`、`GP_WJZ_18`：**先对两列取平均，再按平均丰度排名**。不要做成两组比较的 FC 气泡图，也不要靠气泡大小编码丰度
+- 运行：工作目录须能看到 `.R` 文件；`source(..., encoding = "UTF-8")`
 
-## 预处理（两组样品一次做完再排名）
+## 预处理
 
-1. 过滤：至少一组内 ≥50% 样品有非零强度，否则丢掉
-2. 线性强度 `log2(x+1)`，再按样品中位数中心化；不要用未转换的原始强度排名或算 FC
-3. 能估计 p 时（每组 n≥2）用 Welch t-test；1-vs-1 或无重复时不要伪造 p，只按丰度/FC 排名并写日志
+1. 过滤：至少 50% 样品有非零强度
+2. `log2(x+1)` 后按样品中位数中心化，再对两样品取平均，得到每个蛋白的丰度值
+3. 不要用未标准化的原始强度排名
 
-## 图（每个 topN 单独出图、单独出表）
+## 图
 
-按 **全样品平均丰度降序** 排名（不是 GO 气泡图）。默认 top 20 / 30 / 50：
-
-1. **排名气泡图**：y=蛋白（丰度秩），x=`log2FC(组2/组1)`，点大小=平均丰度，颜色=FC 方向
-2. **两组丰度气泡图**：同一蛋白两个点，x=组别，大小=该组平均丰度
+横轴 = **丰度排名**（1 = 最高），纵轴 = **蛋白丰度值**（两样品 log2 平均），**气泡大小一致**。默认 top20 / top30 / top50 以及全蛋白各出一张。点旁可标基因名，不要用 FC 或组别当坐标。
 
 ```r
-# ❌ BAD: 用 pg_matrix 原始强度直接排名；把两组病人样本名硬编码进脚本
-# ❌ BAD: 把 GO/KEGG 气泡图当成“丰度排名气泡图”
-# ✅ GOOD: 注释表分两组 → log2+中位数中心化 → 按丰度 rank → FoldChange 与气泡大小分开映射
+# ❌ BAD: x=log2FC、点大小随丰度变；把两样品当两组做 1-vs-1
+# ✅ GOOD: abundance = mean(样品1, 样品2) → rank → geom_point(size 固定)
 ```

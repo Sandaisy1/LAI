@@ -79,7 +79,7 @@ def test_pg_matrix_fallback_to_pr(tmp_path: Path) -> None:
     assert float(hp["S1"]) == 60.0  # median of 50 and 70
 
 
-def test_rank_by_abundance_not_raw_fc() -> None:
+def test_rank_by_mean_of_two_samples() -> None:
     meta = pd.DataFrame(
         {
             "Protein.Group": ["P1", "P2", "P3"],
@@ -87,25 +87,34 @@ def test_rank_by_abundance_not_raw_fc() -> None:
             "First.Protein.Description": ["h", "m", "l"],
         }
     )
-    # columns: A1 A2 B1 B2 ; HIGH has largest mean, LOW has largest |FC|
     log2x = np.array(
         [
-            [10.0, 10.2, 10.1, 10.3],
-            [8.0, 8.1, 8.4, 8.5],
-            [4.0, 4.1, 7.0, 7.2],
+            [10.0, 10.2],
+            [8.0, 8.4],
+            [4.0, 7.0],
         ]
     )
-    sample_info = pd.DataFrame(
+    ranked = sp.rank_proteins(meta, log2x, ["GP_WJZ_11", "GP_WJZ_18"])
+    assert list(ranked.sort_values("abundance_rank")["gene"]) == ["HIGH", "MID", "LOW"]
+    assert ranked.loc[ranked["gene"] == "HIGH", "abundance_rank"].iloc[0] == 1
+    np.testing.assert_allclose(
+        ranked.loc[ranked["gene"] == "MID", "mean_abundance"].iloc[0], 8.2
+    )
+
+
+def test_preprocess_log2_and_filter() -> None:
+    mat = pd.DataFrame(
         {
-            "column": ["A1", "A2", "B1", "B2"],
-            "sample": ["A1", "A2", "B1", "B2"],
-            "group": pd.Categorical(["GroupA", "GroupA", "GroupB", "GroupB"], ordered=True),
+            "Protein.Group": ["P1", "P2"],
+            "Genes": ["ALB", "ZZZ"],
+            "GP_WJZ_11": [100.0, np.nan],
+            "GP_WJZ_18": [110.0, np.nan],
         }
     )
-    ranked = sp.rank_proteins(meta, log2x, sample_info)
-    assert list(ranked.sort_values("abundance_rank")["gene"]) == ["HIGH", "MID", "LOW"]
-    assert ranked.loc[ranked["gene"] == "LOW", "fc_rank"].iloc[0] == 1
-    assert ranked.loc[ranked["gene"] == "HIGH", "abundance_rank"].iloc[0] == 1
+    kept, log2x = sp.preprocess(mat, ["GP_WJZ_11", "GP_WJZ_18"])
+    assert list(kept["Genes"]) == ["ALB"]
+    assert log2x.shape == (1, 2)
+    assert np.isfinite(log2x).all()
 
 
 def test_default_data_dir_is_zhao_serum() -> None:
@@ -121,31 +130,6 @@ def test_default_data_dir_is_zhao_serum() -> None:
     assert 'encoding = "UTF-8"' in text
 
 
-def test_preprocess_log2_and_filter() -> None:
-    mat = pd.DataFrame(
-        {
-            "Protein.Group": ["P1", "P2"],
-            "Genes": ["ALB", "ZZZ"],
-            "A1": [100.0, np.nan],
-            "A2": [110.0, np.nan],
-            "B1": [90.0, np.nan],
-            "B2": [95.0, np.nan],
-        }
-    )
-    sample_info = pd.DataFrame(
-        {
-            "column": ["A1", "A2", "B1", "B2"],
-            "sample": ["A1", "A2", "B1", "B2"],
-            "group": pd.Categorical(["GroupA", "GroupA", "GroupB", "GroupB"], ordered=True),
-        }
-    )
-    kept, log2x = sp.preprocess(mat, ["A1", "A2", "B1", "B2"], sample_info)
-    assert list(kept["Genes"]) == ["ALB"]
-    assert log2x.shape == (1, 4)
-    # log2(x+1) then median-centered; all finite
-    assert np.isfinite(log2x).all()
-
-
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -157,7 +141,7 @@ if __name__ == "__main__":
         (tmp / "three").mkdir()
         test_missing_annotation_three_samples_writes_template(tmp / "three")
         test_pg_matrix_fallback_to_pr(tmp)
-        test_rank_by_abundance_not_raw_fc()
+        test_rank_by_mean_of_two_samples()
         test_preprocess_log2_and_filter()
         test_default_data_dir_is_zhao_serum()
     print("all tests passed")
