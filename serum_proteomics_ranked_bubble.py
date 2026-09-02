@@ -129,6 +129,54 @@ def normalize_sample_token(name: str) -> str:
     return re.sub(r"\.(raw|wiff|mzML|d)$", "", name, flags=re.IGNORECASE)
 
 
+def is_immunoglobulin_symbol(sym: object) -> bool:
+    s = str(sym).strip().upper()
+    if s in {"", "-", ".", "NA", "NONE"}:
+        return False
+    if s in {"JCHAIN", "IGJ"}:
+        return True
+    return bool(re.match(r"^(IGH|IGK|IGL)", s))
+
+
+def is_immunoglobulin_text(*parts: object) -> bool:
+    blob = " ".join("" if p is None else str(p) for p in parts).lower()
+    if not blob.strip():
+        return False
+    if "immunoglobulin superfamily" in blob and not re.search(
+        r"\bigh[agmdvejk]|\bigk[cvlj]|\bigl[cvlj]", blob
+    ):
+        return False
+    return bool(
+        re.search(
+            r"immunoglobulin\s+(heavy|kappa|lambda|alpha|gamma|mu|delta|epsilon)"
+            r"|\big\s*(heavy|kappa|lambda|gamma|alpha|mu)\b"
+            r"|\big\s+(gamma|alpha|mu|kappa|lambda)\b",
+            blob,
+        )
+    )
+
+
+def immunoglobulin_mask(meta: pd.DataFrame) -> np.ndarray:
+    n = len(meta)
+    gene_raw = meta["Genes"].astype(str) if "Genes" in meta.columns else pd.Series([""] * n)
+    names_ = meta["Protein.Names"].astype(str) if "Protein.Names" in meta.columns else pd.Series([""] * n)
+    desc = (
+        meta["First.Protein.Description"].astype(str)
+        if "First.Protein.Description" in meta.columns
+        else pd.Series([""] * n)
+    )
+    ids = meta["Protein.Ids"].astype(str) if "Protein.Ids" in meta.columns else pd.Series([""] * n)
+    pg = meta["Protein.Group"].astype(str) if "Protein.Group" in meta.columns else pd.Series([""] * n)
+    out = np.zeros(n, dtype=bool)
+    for i in range(n):
+        parts = re.split(r"[,;|/ ]+", f"{gene_raw.iloc[i]},{names_.iloc[i]},{pg.iloc[i]}")
+        if any(is_immunoglobulin_symbol(p) for p in parts if p.strip()):
+            out[i] = True
+        elif is_immunoglobulin_text(gene_raw.iloc[i], names_.iloc[i], desc.iloc[i], ids.iloc[i], pg.iloc[i]):
+            out[i] = True
+    return out
+
+
 def pick_official_symbol(value: object) -> str | None:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return None
@@ -326,7 +374,14 @@ def rank_proteins(
     return out.sort_values("abundance_rank").reset_index(drop=True)
 
 
-def plot_rank_abundance_bubble(df: pd.DataFrame, n: int, outfile: Path, label_n: int = 12) -> None:
+def plot_rank_abundance_bubble(
+    df: pd.DataFrame,
+    n: int,
+    outfile: Path,
+    label_n: int = 12,
+    title_prefix: str = "血清蛋白丰度排名气泡图",
+    subtitle: str = "两样品平均丰度后排名；气泡大小一致",
+) -> None:
     sub = df[df["abundance_rank"] <= n].sort_values("abundance_rank")
     fig, ax = plt.subplots(figsize=(8.2, 5.4))
     ax.plot(sub["abundance_rank"], sub["mean_abundance"], color="#9ECAE1", linewidth=0.9, zorder=2)
@@ -353,11 +408,11 @@ def plot_rank_abundance_bubble(df: pd.DataFrame, n: int, outfile: Path, label_n:
         )
     ax.set_xlabel("丰度排名")
     ax.set_ylabel("蛋白丰度值")
-    ax.set_title(f"血清蛋白丰度排名气泡图 (top{n})", loc="left")
+    ax.set_title(f"{title_prefix} (top{n})", loc="left")
     ax.text(
         0.0,
         1.02,
-        "两样品平均丰度后排名；气泡大小一致",
+        subtitle,
         transform=ax.transAxes,
         fontsize=9,
         color="0.35",
@@ -476,13 +531,18 @@ def write_example_data(directory: Path) -> None:
             writer.writerow({"sample": s, "group": "GroupB"})
 
 
-def main() -> None:
+def run_pipeline(
+    result_subdir: str = "serum_proteomics_bubble",
+    drop_immunoglobulin: bool = False,
+    title_prefix: str = "血清蛋白丰度排名气泡图",
+    subtitle: str = "两样品平均丰度后排名；气泡大小一致",
+) -> Path:
     directory = resolve_proteomics_dir()
     if find_matrix(directory, "report.pg_matrix") is None and find_matrix(directory, "report.pr_matrix") is None:
         directory = Path.cwd() / "serum_proteomics"
         directory.mkdir(parents=True, exist_ok=True)
         write_example_data(directory)
-    result_dir = directory / "results" / "serum_proteomics_bubble"
+    result_dir = directory / "results" / result_subdir
     result_dir.mkdir(parents=True, exist_ok=True)
     log_path = result_dir / f"log_{datetime.now():%Y%m%d_%H%M%S}.txt"
     log(f"工作目录: {directory}", log_path)
@@ -491,6 +551,15 @@ def main() -> None:
     log(f"样品列: {', '.join(int_cols)}；两列取平均后按丰度排名", log_path)
     meta, log2x = preprocess(mat, int_cols)
     log(f"过滤后蛋白数: {len(meta)}", log_path)
+    if drop_immunoglobulin:
+        ig = immunoglobulin_mask(meta)
+        drop_cols = [c for c in ("Protein.Group", "Protein.Ids", "Protein.Names", "Genes", "First.Protein.Description") if c in meta.columns]
+        dropped = meta.loc[ig, drop_cols]
+        drop_path = result_dir / "removed_immunoglobulins.csv"
+        dropped.to_csv(drop_path, index=False)
+        log(f"去除免疫球蛋白 {int(ig.sum())} / {len(ig)} -> {drop_path}", log_path)
+        meta = meta.loc[~ig].reset_index(drop=True)
+        log2x = log2x[~ig]
     ranked = rank_proteins(meta, log2x, int_cols)
     ranked.to_csv(result_dir / "protein_abundance_ranking.csv", index=False)
     log(f"写出排名表: {result_dir / 'protein_abundance_ranking.csv'}", log_path)
@@ -503,9 +572,20 @@ def main() -> None:
         ranked[ranked["abundance_rank"] <= n_use].to_csv(
             result_dir / f"{tag}_ranked_proteins.csv", index=False
         )
-        plot_rank_abundance_bubble(ranked, n_use, result_dir / f"{tag}_abundance_rank_bubble.png")
+        plot_rank_abundance_bubble(
+            ranked,
+            n_use,
+            result_dir / f"{tag}_abundance_rank_bubble.png",
+            title_prefix=title_prefix,
+            subtitle=subtitle,
+        )
         log(f"完成 {tag}", log_path)
     log(f"全部完成 -> {result_dir}", log_path)
+    return result_dir
+
+
+def main() -> None:
+    run_pipeline()
 
 
 if __name__ == "__main__":

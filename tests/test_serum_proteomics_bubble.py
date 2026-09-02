@@ -15,6 +15,29 @@ import pandas as pd
 import serum_proteomics_ranked_bubble as sp
 
 
+def test_immunoglobulin_filter() -> None:
+    assert sp.is_immunoglobulin_symbol("IGHG1")
+    assert sp.is_immunoglobulin_symbol("IGKC")
+    assert sp.is_immunoglobulin_symbol("IGLV3-21")
+    assert sp.is_immunoglobulin_symbol("JCHAIN")
+    assert not sp.is_immunoglobulin_symbol("IGSF8")
+    assert not sp.is_immunoglobulin_symbol("IGF1")
+    assert not sp.is_immunoglobulin_symbol("ALB")
+    meta = pd.DataFrame(
+        {
+            "Genes": ["ALB", "IGHG1", "IGSF8"],
+            "Protein.Names": [
+                "Serum albumin",
+                "Immunoglobulin heavy constant gamma 1",
+                "Immunoglobulin superfamily member 8",
+            ],
+            "First.Protein.Description": ["Serum albumin", "Ig gamma-1", "IgSF member"],
+            "Protein.Group": ["P02768", "P01857", "Q969P0"],
+        }
+    )
+    assert list(sp.immunoglobulin_mask(meta)) == [False, True, False]
+
+
 def test_pick_official_symbol() -> None:
     assert sp.pick_official_symbol("SAA2,SAA2-SAA4,SAA4") == "SAA2"
     assert sp.pick_official_symbol("ALB") == "ALB"
@@ -134,6 +157,7 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         test_pick_official_symbol()
+        test_immunoglobulin_filter()
         (tmp / "onegroup").mkdir()
         test_annotation_requires_two_groups(tmp / "onegroup")
         (tmp / "two").mkdir()

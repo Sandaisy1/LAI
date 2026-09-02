@@ -67,19 +67,15 @@ resolve_proteomics_dir <- function() {
   normalizePath(getwd(), winslash = "/", mustWork = FALSE)
 }
 
-project_dir <- resolve_proteomics_dir()
-result_dir <- file.path(project_dir, "results", "serum_proteomics_bubble")
-dir.create(result_dir, recursive = TRUE, showWarnings = FALSE)
+top_ns <- c(20L, 30L, 50L)
+min_detect_frac <- 0.5
 
-log_file <- file.path(result_dir, paste0("log_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".txt"))
+log_file <- NULL
 log_msg <- function(...) {
   msg <- paste0(format(Sys.time(), "%H:%M:%S"), " | ", paste(..., collapse = ""))
   cat(msg, "\n")
-  cat(msg, "\n", file = log_file, append = TRUE)
+  if (!is.null(log_file)) cat(msg, "\n", file = log_file, append = TRUE)
 }
-
-top_ns <- c(20L, 30L, 50L)
-min_detect_frac <- 0.5
 
 meta_cols <- c(
   "Protein.Group", "Protein.Ids", "Protein.Names", "Genes",
@@ -104,6 +100,42 @@ pick_official_symbol <- function(x) {
     2
   }, numeric(1))
   parts[which.max(score)]
+}
+
+is_immunoglobulin_symbol <- function(sym) {
+  s <- toupper(trimws(as.character(sym)))
+  if (!nzchar(s) || s %in% c("NA", "-", ".")) return(FALSE)
+  if (s %in% c("JCHAIN", "IGJ")) return(TRUE)
+  grepl("^(IGH|IGK|IGL)", s)
+}
+
+is_immunoglobulin_text <- function(...) {
+  blob <- tolower(paste(..., collapse = " "))
+  if (!nzchar(trimws(blob))) return(FALSE)
+  if (grepl("immunoglobulin superfamily", blob) &&
+      !grepl("\\bigh[agmdvejk]|\\bigk[cvlj]|\\bigl[cvlj]", blob)) {
+    return(FALSE)
+  }
+  grepl("immunoglobulin\\s+(heavy|kappa|lambda|alpha|gamma|mu|delta|epsilon)", blob) ||
+    grepl("\\big\\s*(heavy|kappa|lambda|gamma|alpha|mu)\\b", blob) ||
+    grepl("\\big\\s+(gamma|alpha|mu|kappa|lambda)\\b", blob)
+}
+
+immunoglobulin_mask <- function(meta) {
+  n <- nrow(meta)
+  if (n == 0) return(logical(0))
+  gene_raw <- if ("Genes" %in% names(meta)) as.character(meta$Genes) else rep("", n)
+  names_ <- if ("Protein.Names" %in% names(meta)) as.character(meta$Protein.Names) else rep("", n)
+  desc <- if ("First.Protein.Description" %in% names(meta)) as.character(meta$First.Protein.Description) else rep("", n)
+  ids <- if ("Protein.Ids" %in% names(meta)) as.character(meta$Protein.Ids) else rep("", n)
+  pg <- if ("Protein.Group" %in% names(meta)) as.character(meta$Protein.Group) else rep("", n)
+  vapply(seq_len(n), function(i) {
+    parts <- unlist(strsplit(paste(c(gene_raw[i], names_[i], pg[i]), collapse = ","), "[,;|/ ]+"))
+    parts <- trimws(parts)
+    parts <- parts[nzchar(parts)]
+    any(vapply(parts, is_immunoglobulin_symbol, logical(1))) ||
+      is_immunoglobulin_text(gene_raw[i], names_[i], desc[i], ids[i], pg[i])
+  }, logical(1))
 }
 
 # -----------------------------------------------------------------------------
@@ -314,17 +346,19 @@ theme_bubble <- function() {
     )
 }
 
-plot_rank_abundance_bubble <- function(df, n, outfile, label_n = 12L) {
+plot_rank_abundance_bubble <- function(df, n, outfile, label_n = 12L,
+                                       title_prefix = "血清蛋白丰度排名气泡图",
+                                       subtitle = "两样品平均丰度后排名；气泡大小一致") {
   sub <- df[df$abundance_rank <= n, ]
   sub <- sub[order(sub$abundance_rank), ]
   lab <- sub[sub$abundance_rank <= min(as.integer(label_n), n), ]
-  title <- paste0("血清蛋白丰度排名气泡图 (top", n, ")")
+  title <- paste0(title_prefix, " (top", n, ")")
   p <- ggplot2::ggplot(sub, ggplot2::aes(x = .data$abundance_rank, y = .data$mean_abundance)) +
     ggplot2::geom_line(color = "#9ECAE1", size = 0.45) +
     ggplot2::geom_point(size = 2.8, color = "#2C7FB8", alpha = 0.92) +
     ggplot2::labs(
       title = title,
-      subtitle = "两样品平均丰度后排名；气泡大小一致",
+      subtitle = subtitle,
       x = "丰度排名",
       y = "蛋白丰度值"
     ) +
@@ -346,29 +380,56 @@ plot_rank_abundance_bubble <- function(df, n, outfile, label_n = 12L) {
 }
 
 # -----------------------------------------------------------------------------
-# 主流程
+# 主流程（去 Ig 脚本可设 SERUM_PROTEOMICS_SKIP_MAIN 后自行调用）
 # -----------------------------------------------------------------------------
-log_msg("工作目录: ", project_dir)
-mat <- load_protein_matrix(project_dir)
-int_cols <- attr(mat, "intensity_cols")
-prep <- preprocess(mat, int_cols)
-ranked <- rank_proteins(prep$meta, prep$log2, prep$sample_cols)
-log_msg("按两样品平均丰度排名，蛋白数 ", nrow(ranked))
-
-rank_path <- file.path(result_dir, "protein_abundance_ranking.csv")
-readr::write_csv(ranked, rank_path)
-log_msg("写出排名表: ", rank_path)
-
-ns <- unique(c(top_ns[top_ns <= nrow(ranked)], nrow(ranked)))
-for (n_use in ns) {
-  if (n_use < 1) next
-  tag <- if (n_use == nrow(ranked)) "all" else paste0("top", n_use)
-  readr::write_csv(ranked[ranked$abundance_rank <= n_use, ], file.path(result_dir, paste0(tag, "_ranked_proteins.csv")))
-  plot_rank_abundance_bubble(
-    ranked, n_use,
-    file.path(result_dir, paste0(tag, "_abundance_rank_bubble.pdf"))
-  )
-  log_msg("完成 ", tag)
+run_serum_abundance_bubble <- function(
+  result_subdir = "serum_proteomics_bubble",
+  drop_immunoglobulin = FALSE,
+  title_prefix = "血清蛋白丰度排名气泡图",
+  subtitle = "两样品平均丰度后排名；气泡大小一致"
+) {
+  project_dir <- resolve_proteomics_dir()
+  result_dir <- file.path(project_dir, "results", result_subdir)
+  dir.create(result_dir, recursive = TRUE, showWarnings = FALSE)
+  log_file <<- file.path(result_dir, paste0("log_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".txt"))
+  log_msg("工作目录: ", project_dir)
+  mat <- load_protein_matrix(project_dir)
+  int_cols <- attr(mat, "intensity_cols")
+  prep <- preprocess(mat, int_cols)
+  if (isTRUE(drop_immunoglobulin)) {
+    ig <- immunoglobulin_mask(prep$meta)
+    dropped <- prep$meta[ig, , drop = FALSE]
+    drop_path <- file.path(result_dir, "removed_immunoglobulins.csv")
+    if (nrow(dropped) > 0) {
+      keep_cols <- intersect(c("Protein.Group", "Protein.Ids", "Protein.Names", "Genes", "First.Protein.Description"), names(dropped))
+      readr::write_csv(dropped[, keep_cols, drop = FALSE], drop_path)
+    }
+    log_msg("去除免疫球蛋白 ", sum(ig), " / ", length(ig), " -> ", drop_path)
+    prep$meta <- prep$meta[!ig, , drop = FALSE]
+    prep$log2 <- prep$log2[!ig, , drop = FALSE]
+  }
+  ranked <- rank_proteins(prep$meta, prep$log2, prep$sample_cols)
+  log_msg("按两样品平均丰度排名，蛋白数 ", nrow(ranked))
+  rank_path <- file.path(result_dir, "protein_abundance_ranking.csv")
+  readr::write_csv(ranked, rank_path)
+  log_msg("写出排名表: ", rank_path)
+  ns <- unique(c(top_ns[top_ns <= nrow(ranked)], nrow(ranked)))
+  for (n_use in ns) {
+    if (n_use < 1) next
+    tag <- if (n_use == nrow(ranked)) "all" else paste0("top", n_use)
+    readr::write_csv(ranked[ranked$abundance_rank <= n_use, ], file.path(result_dir, paste0(tag, "_ranked_proteins.csv")))
+    plot_rank_abundance_bubble(
+      ranked, n_use,
+      file.path(result_dir, paste0(tag, "_abundance_rank_bubble.pdf")),
+      title_prefix = title_prefix,
+      subtitle = subtitle
+    )
+    log_msg("完成 ", tag)
+  }
+  log_msg("全部完成 -> ", result_dir)
+  invisible(result_dir)
 }
 
-log_msg("全部完成 -> ", result_dir)
+if (!exists("SERUM_PROTEOMICS_SKIP_MAIN") || !isTRUE(SERUM_PROTEOMICS_SKIP_MAIN)) {
+  run_serum_abundance_bubble()
+}
