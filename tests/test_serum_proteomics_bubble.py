@@ -89,6 +89,14 @@ def test_rank_by_abundance_not_raw_fc() -> None:
     assert ranked.loc[ranked["gene"] == "HIGH", "abundance_rank"].iloc[0] == 1
 
 
+def test_default_data_dir_is_zhao_serum() -> None:
+    joined = " ".join(str(p) for p in sp.DEFAULT_PROTEOMICS_DIRS)
+    assert r"天府" in joined or "天府" in joined
+    assert "赵章寻" in joined
+    assert "血清蛋白质组学" in joined
+    assert "TG_BRCA" not in joined
+
+
 def test_preprocess_log2_and_filter() -> None:
     mat = pd.DataFrame(
         {
@@ -122,4 +130,5 @@ if __name__ == "__main__":
         test_pg_matrix_fallback_to_pr(tmp)
         test_rank_by_abundance_not_raw_fc()
         test_preprocess_log2_and_filter()
+        test_default_data_dir_is_zhao_serum()
     print("all tests passed")

@@ -102,7 +102,7 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 输入是 DIA-NN 的 `report.pg_matrix`（蛋白组定量）。若该文件蛋白行过少，脚本会用 `report.pr_matrix` 按 `Protein.Group` 取肽段强度中位数，聚合到蛋白。不要用 Cuffdiff RNA-seq 流程处理这些矩阵。
 
-把矩阵和注释放在同一目录（可用环境变量 `SERUM_PROTEOMICS_DIR`，或仓库内 `serum_proteomics/`）：
+默认读取 `E:\天府\实验管理\课题\赵章寻\血清蛋白质组学`（可用环境变量 `SERUM_PROTEOMICS_DIR` 覆盖；该盘不存在时回退仓库内 `serum_proteomics/`）。矩阵、`sample_annotation.csv` 和结果都在这个目录：
 
 ```
 sample_annotation.csv   # 列：sample,group；必须恰好两组病人
@@ -111,9 +111,8 @@ report.pr_matrix        # 可选；pg_matrix 不可用时回退
 ```
 
 ```r
-# Windows 上与 RNA-seq 相同的工作目录也可以
-setwd("E:/R/TG_BRCA/TG")
 source("serum_proteomics_ranked_bubble.R")
+# 会去 E:/天府/实验管理/课题/赵章寻/血清蛋白质组学 读矩阵，结果写在同目录 results/
 ```
 
 ```bash

@@ -87,11 +87,17 @@ def log(msg: str, log_path: Path | None = None) -> None:
             fh.write(line + "\n")
 
 
+DEFAULT_PROTEOMICS_DIRS = (
+    Path(r"E:\天府\实验管理\课题\赵章寻\血清蛋白质组学"),
+    Path("E:/天府/实验管理/课题/赵章寻/血清蛋白质组学"),
+)
+
+
 def resolve_proteomics_dir() -> Path:
     env = os.environ.get("SERUM_PROTEOMICS_DIR", "")
     candidates = [
         Path(env) if env else None,
-        Path("E:/R/TG_BRCA/TG"),
+        *DEFAULT_PROTEOMICS_DIRS,
         Path.cwd() / "serum_proteomics",
         Path.cwd(),
     ]

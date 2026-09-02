@@ -10,8 +10,9 @@ alwaysApply: false
 
 ## 数据
 
+- 目录：`E:/天府/实验管理/课题/赵章寻/血清蛋白质组学`（矩阵与结果同目录；可用 `SERUM_PROTEOMICS_DIR` 覆盖；缺失则回退仓库 `serum_proteomics/`）
 - 首选 `report.pg_matrix`（蛋白组定量）；行太少或几乎为空时，用 `report.pr_matrix` 按 `Protein.Group` 聚合到蛋白（每样品取肽段强度中位数）
-- 两组病人样本映射必须来自 `sample_annotation.csv`（列：`sample,group`），不要靠猜把病人并成一组
+- 两组病人样本映射必须来自**同一目录**的 `sample_annotation.csv`（列：`sample,group`），不要靠猜把病人并成一组；不要去 `E:/R/TG_BRCA/TG` 找 Cuffdiff
 - 恰好 **两组**；组名以注释表为准（如 `GroupA`/`GroupB` 或 `Control`/`Case`）
 - 物种：人；展示名用 `Genes` 清洗后的官方符号，缺符号则保留 `Protein.Group`
 

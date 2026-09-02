@@ -2,6 +2,7 @@
 # =============================================================================
 # 两组病人血清蛋白质组：按蛋白丰度做排名气泡图
 # 输入：DIA-NN report.pg_matrix（首选）或 report.pr_matrix
+# 数据目录：E:/天府/实验管理/课题/赵章寻/血清蛋白质组学
 # 分组：sample_annotation.csv（列 sample,group，恰好两组）
 # =============================================================================
 
@@ -25,12 +26,16 @@ for (p in cran_required) {
 # -----------------------------------------------------------------------------
 # 路径
 # -----------------------------------------------------------------------------
+default_proteomics_dirs <- c(
+  "E:/天府/实验管理/课题/赵章寻/血清蛋白质组学",
+  "E:\\天府\\实验管理\\课题\\赵章寻\\血清蛋白质组学"
+)
+
 resolve_proteomics_dir <- function() {
   env_dir <- Sys.getenv("SERUM_PROTEOMICS_DIR", unset = "")
   candidates <- unique(c(
     env_dir,
-    "E:/R/TG_BRCA/TG",
-    "E:\\R\\TG_BRCA\\TG",
+    default_proteomics_dirs,
     file.path(getwd(), "serum_proteomics"),
     getwd()
   ))
