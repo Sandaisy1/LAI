@@ -19,7 +19,7 @@ alwaysApply: true
   - `T`（6）：`T1` `T2` `T3` `T4` `T5` `T6`
   - `T6`（7）：`T6-1` `T6-2` `T6-3` `T6-4` `T6-5` `T6-6` `T6-7`
 - `T` 组的样品 `T6` ≠ `T6` 组；`T6-*` 才属于 T6 组
-- 物种默认人 `org.Hs.eg.db`；无符号的 accession 留在差异表，GO/KEGG 可不映射
+- 按 `Genes` 自动判断人（`org.Hs.eg.db` / hsa）或小鼠（`org.Mm.eg.db` / mmu）。火山图和表必须标基因符号，不要把 `P01804` 这类 UniProt 当基因名
 
 ## 预处理（三组一起做一次，再做两组比较）
 

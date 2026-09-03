@@ -27,7 +27,7 @@ cran_required <- c(
   "dplyr", "tidyr", "tibble", "stringr", "ggplot2", "ggrepel", "matrixStats"
 )
 bioc_required <- c("limma", "AnnotationDbi", "org.Hs.eg.db")
-bioc_ora <- c("clusterProfiler", "enrichplot", "GO.db")
+bioc_ora <- c("clusterProfiler", "enrichplot", "GO.db", "org.Mm.eg.db")
 
 install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
   miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
@@ -57,9 +57,10 @@ if (!isTRUE(as.logical(Sys.getenv("PROTEIN_NT_T6_SKIP_INSTALL", "false")))) {
   install_if_missing(bioc_required, bioc = TRUE, required = TRUE)
   install_if_missing(bioc_ora, bioc = TRUE, required = FALSE)
 }
-if (!requireNamespace("org.Hs.eg.db", quietly = TRUE) ||
-    !requireNamespace("AnnotationDbi", quietly = TRUE)) {
-  stop("GO/KEGG 需要 org.Hs.eg.db 与 AnnotationDbi，请先安装后再跑脚本，不要跳过富集。")
+if (!requireNamespace("AnnotationDbi", quietly = TRUE) ||
+    (!requireNamespace("org.Hs.eg.db", quietly = TRUE) &&
+     !requireNamespace("org.Mm.eg.db", quietly = TRUE))) {
+  stop("GO/KEGG 需要 AnnotationDbi，以及 org.Hs.eg.db 或 org.Mm.eg.db。")
 }
 for (p in c(cran_required, bioc_required, bioc_ora)) {
   if (requireNamespace(p, quietly = TRUE)) {
@@ -69,6 +70,9 @@ for (p in c(cran_required, bioc_required, bioc_ora)) {
 has_clusterProfiler <- requireNamespace("clusterProfiler", quietly = TRUE)
 has_enrichplot <- requireNamespace("enrichplot", quietly = TRUE)
 has_godb <- requireNamespace("GO.db", quietly = TRUE)
+org_db <- if (requireNamespace("org.Hs.eg.db", quietly = TRUE)) org.Hs.eg.db else org.Mm.eg.db
+kegg_org <- "hsa"
+species_name <- "human"
 
 # -----------------------------------------------------------------------------
 # 1. 路径与参数
@@ -462,11 +466,12 @@ plot_volcano <- function(de, title, outfile) {
   df$set[df$pvalue < P_CUTOFF & df$log2FC >= lfc] <- "Up"
   df$set <- factor(df$set, levels = c("NS", "Down", "Up"))
   lab_n <- min(12, sum(df$set == "Up", na.rm = TRUE))
-  up <- df[df$set == "Up", , drop = FALSE]
-  up <- up[order(up$pvalue, -up$log2FC), , drop = FALSE]
   df$label <- NA_character_
-  if (nrow(up) > 0 && lab_n > 0) {
-    df$label[match(utils::head(up$gene, lab_n), df$gene)] <- utils::head(up$gene, lab_n)
+  up_idx <- which(df$set == "Up")
+  if (length(up_idx) > 0 && lab_n > 0) {
+    up_idx <- up_idx[order(df$pvalue[up_idx], -df$log2FC[up_idx])]
+    lab_i <- utils::head(up_idx, lab_n)
+    df$label[lab_i] <- df$gene[lab_i]
   }
   p <- ggplot2::ggplot(df, ggplot2::aes(x = log2FC, y = y, color = set)) +
     ggplot2::geom_point(alpha = 0.7, size = 1.4) +
@@ -479,17 +484,156 @@ plot_volcano <- function(de, title, outfile) {
   save_gg(p, outfile, width = 8, height = 6)
 }
 
-map_ids_orgdb <- function(keys, keytype, column) {
+map_ids_orgdb <- function(keys, keytype, column, db = org_db) {
   keys <- unique(as.character(keys[!is.na(keys) & nzchar(keys)]))
-  if (length(keys) == 0) return(setNames(character(), character()))
+  if (length(keys) == 0 || is.null(db)) return(setNames(character(), character()))
   mapped <- tryCatch(
     suppressMessages(suppressWarnings(AnnotationDbi::mapIds(
-      org.Hs.eg.db, keys = keys, column = column, keytype = keytype, multiVals = "first"
+      db, keys = keys, column = column, keytype = keytype, multiVals = "first"
     ))),
     error = function(e) setNames(rep(NA_character_, length(keys)), keys)
   )
   mapped <- mapped[!is.na(mapped) & nzchar(as.character(mapped))]
   setNames(as.character(mapped), names(mapped))
+}
+
+guess_species <- function(genes) {
+  g <- genes[!is.na(genes) & nzchar(genes) & !is_uniprot_acc(genes)]
+  g <- g[!grepl("\\|", g)]
+  if (length(g) < 8) return("human")
+  mouse_like <- mean(grepl("^[A-Z][a-z]", g))
+  human_like <- mean(grepl("^[A-Z0-9-]+$", g) & !grepl("[a-z]", g))
+  if (mouse_like >= 0.35 && mouse_like > human_like) "mouse" else "human"
+}
+
+setup_species <- function(genes) {
+  sp <- guess_species(genes)
+  if (sp == "mouse") {
+    if (!requireNamespace("org.Mm.eg.db", quietly = TRUE) &&
+        !isTRUE(as.logical(Sys.getenv("PROTEIN_NT_T6_SKIP_INSTALL", "false")))) {
+      install_if_missing("org.Mm.eg.db", bioc = TRUE, required = FALSE)
+    }
+    if (requireNamespace("org.Mm.eg.db", quietly = TRUE)) {
+      suppressPackageStartupMessages(library(org.Mm.eg.db))
+      org_db <<- org.Mm.eg.db
+      kegg_org <<- "mmu"
+      species_name <<- "mouse"
+    } else {
+      log_msg("基因名像小鼠，但未安装 org.Mm.eg.db，暂用人库")
+      sp <- "human"
+    }
+  }
+  if (sp == "human") {
+    org_db <<- org.Hs.eg.db
+    kegg_org <<- "hsa"
+    species_name <<- "human"
+  }
+  log_msg("物种: ", species_name, " / KEGG=", kegg_org)
+}
+
+is_uniprot_label <- function(x) {
+  if (is.na(x) || !nzchar(x)) return(TRUE)
+  is_uniprot_acc(x) || grepl("^(sp|tr)\\|", x, ignore.case = TRUE)
+}
+
+pretty_uniprot_entry <- function(entry) {
+  entry <- sub("_[A-Z0-9]+$", "", as.character(entry))
+  if (!nzchar(entry)) return(NA_character_)
+  if (identical(species_name, "mouse") && grepl("^[A-Z0-9]+$", entry)) {
+    return(paste0(substring(entry, 1, 1), tolower(substring(entry, 2))))
+  }
+  entry
+}
+
+uniprot_web_symbols <- function(accs) {
+  accs <- unique(as.character(accs[is_uniprot_acc(accs)]))
+  if (length(accs) == 0) return(setNames(character(), character()))
+  out <- setNames(character(), character())
+  chunks <- split(accs, ceiling(seq_along(accs) / 80))
+  for (ch in chunks) {
+    url <- paste0(
+      "https://rest.uniprot.org/uniprotkb/accessions?accessions=",
+      paste(ch, collapse = ","),
+      "&fields=accession,gene_primary,id&format=tsv"
+    )
+    tmp <- tempfile(fileext = ".tsv")
+    ok <- tryCatch({
+      utils::download.file(url, tmp, quiet = TRUE, mode = "wb")
+      TRUE
+    }, error = function(e) {
+      log_msg("UniProt 查询失败: ", e$message)
+      FALSE
+    })
+    if (!isTRUE(ok) || !file.exists(tmp) || isTRUE(file.info(tmp)$size == 0)) next
+    tab <- tryCatch(
+      utils::read.delim(tmp, check.names = FALSE, stringsAsFactors = FALSE),
+      error = function(e) NULL
+    )
+    if (is.null(tab) || nrow(tab) == 0) next
+    nms <- names(tab)
+    acc_col <- nms[1]
+    gene_col <- grep("gene", nms, ignore.case = TRUE, value = TRUE)[1]
+    id_col <- nms[grepl("entry name|entryname", nms, ignore.case = TRUE)][1]
+    if (is.na(id_col)) id_col <- nms[length(nms)]
+    for (i in seq_len(nrow(tab))) {
+      acc <- as.character(tab[[acc_col]][i])
+      g <- if (!is.na(gene_col)) as.character(tab[[gene_col]][i]) else NA_character_
+      if (is.na(g) || !nzchar(trimws(g)) || trimws(g) %in% c("NA", "None")) {
+        g <- pretty_uniprot_entry(tab[[id_col]][i])
+      } else {
+        g <- strsplit(trimws(g), "[ ;/]+")[[1]][1]
+      }
+      if (!is.na(g) && nzchar(g) && !is_uniprot_acc(g)) out[acc] <- g
+    }
+  }
+  out
+}
+
+resolve_display_symbols <- function(gene, protein_id) {
+  gene <- as.character(gene)
+  protein_id <- as.character(protein_id)
+  need <- vapply(gene, is_uniprot_label, logical(1))
+  if (!any(need)) return(gene)
+  accs <- unique(c(
+    vapply(protein_id[need], first_accession, character(1), USE.NAMES = FALSE),
+    unlist(lapply(gene[need], function(x) {
+      toks <- extract_tokens(x)
+      toks[is_uniprot_acc(toks)]
+    }))
+  ))
+  accs <- unique(sub("-[0-9]+$", "", accs[is_uniprot_acc(accs)]))
+  to_sym <- map_ids_orgdb(accs, "UNIPROT", "SYMBOL")
+  left <- setdiff(accs, names(to_sym))
+  if (length(left) > 0) to_sym <- c(to_sym, map_ids_orgdb(left, "ACCNUM", "SYMBOL"))
+  alt_db <- NULL
+  if (identical(kegg_org, "mmu") && requireNamespace("org.Hs.eg.db", quietly = TRUE)) alt_db <- org.Hs.eg.db
+  if (identical(kegg_org, "hsa") && requireNamespace("org.Mm.eg.db", quietly = TRUE)) alt_db <- org.Mm.eg.db
+  left <- setdiff(accs, names(to_sym))
+  if (length(left) > 0 && !is.null(alt_db)) {
+    to_sym <- c(to_sym, map_ids_orgdb(left, "UNIPROT", "SYMBOL", db = alt_db))
+  }
+  left <- setdiff(accs, names(to_sym))
+  if (length(left) > 0) {
+    web <- uniprot_web_symbols(left)
+    if (length(web) > 0) {
+      log_msg("UniProt 网站补全基因名: ", paste(paste0(names(web), "→", unname(web)), collapse = ", "))
+      to_sym <- c(to_sym, web)
+    }
+  }
+  for (i in which(need)) {
+    acc <- first_accession(protein_id[i])
+    if (!is.na(acc) && acc %in% names(to_sym)) {
+      gene[i] <- unname(to_sym[[acc]])
+      next
+    }
+    toks <- extract_tokens(c(gene[i], protein_id[i]))
+    hit <- intersect(sub("-[0-9]+$", "", toks), names(to_sym))
+    if (length(hit) > 0) gene[i] <- unname(to_sym[[hit[1]]])
+  }
+  nfix <- sum(need & !vapply(gene, is_uniprot_label, logical(1)))
+  log_msg("UniProt 显示名已改成基因符号: ", nfix, " / ", sum(need),
+          "（例如不要在火山图上标 P01804）")
+  gene
 }
 
 map_token_to_entrez <- function(tokens) {
@@ -560,7 +704,7 @@ go_term_name <- function(ids) {
 kegg_pathway_names <- function(ids) {
   ids <- unique(as.character(ids))
   out <- setNames(ids, ids)
-  cache <- file.path(log_dir, "kegg_hsa_pathway_names.tsv")
+  cache <- file.path(log_dir, paste0("kegg_", kegg_org, "_pathway_names.tsv"))
   tab <- NULL
   if (file.exists(cache)) {
     tab <- tryCatch(utils::read.delim(cache, header = FALSE, stringsAsFactors = FALSE), error = function(e) NULL)
@@ -568,7 +712,7 @@ kegg_pathway_names <- function(ids) {
   if (is.null(tab)) {
     tmp <- tempfile()
     ok <- tryCatch({
-      utils::download.file("https://rest.kegg.jp/list/pathway/hsa", tmp, quiet = TRUE, mode = "wb")
+      utils::download.file(paste0("https://rest.kegg.jp/list/pathway/", kegg_org), tmp, quiet = TRUE, mode = "wb")
       TRUE
     }, error = function(e) FALSE)
     if (ok && file.exists(tmp) && file.info(tmp)$size > 0) {
@@ -578,12 +722,12 @@ kegg_pathway_names <- function(ids) {
   }
   if (!is.null(tab) && ncol(tab) >= 2) {
     kid <- sub("^path:", "", tab[[1]])
-    kid <- sub("^hsa", "", kid)
+    kid <- sub(paste0("^", kegg_org), "", kid)
     names_k <- setNames(as.character(tab[[2]]), kid)
     hit <- intersect(ids, names(names_k))
     out[hit] <- unname(names_k[hit])
-    hit2 <- intersect(ids, paste0("hsa", names(names_k)))
-    out[hit2] <- unname(names_k[sub("^hsa", "", hit2)])
+    hit2 <- intersect(ids, paste0(kegg_org, names(names_k)))
+    out[hit2] <- unname(names_k[sub(paste0("^", kegg_org), "", hit2)])
   }
   out
 }
@@ -627,12 +771,12 @@ ora_hyper <- function(query, universe, term2gene, term2name = NULL, min_term = 2
 build_go_term2gene <- function(universe, ont) {
   tab <- tryCatch(
     suppressMessages(AnnotationDbi::select(
-      org.Hs.eg.db, keys = universe, keytype = "ENTREZID",
+      org_db, keys = universe, keytype = "ENTREZID",
       columns = c("GOALL", "ONTOLOGYALL")
     )),
     error = function(e) {
       suppressMessages(AnnotationDbi::select(
-        org.Hs.eg.db, keys = universe, keytype = "ENTREZID",
+        org_db, keys = universe, keytype = "ENTREZID",
         columns = c("GO", "ONTOLOGY")
       ))
     }
@@ -647,7 +791,7 @@ build_go_term2gene <- function(universe, ont) {
 build_kegg_term2gene <- function(universe) {
   tab <- tryCatch(
     suppressMessages(AnnotationDbi::select(
-      org.Hs.eg.db, keys = universe, keytype = "ENTREZID", columns = "PATH"
+      org_db, keys = universe, keytype = "ENTREZID", columns = "PATH"
     )),
     error = function(e) NULL
   )
@@ -655,7 +799,7 @@ build_kegg_term2gene <- function(universe) {
     tab <- tab[!is.na(tab$PATH) & nzchar(tab$PATH), , drop = FALSE]
     if (nrow(tab) > 0) {
       return(data.frame(
-        term = paste0("hsa", tab$PATH),
+        term = paste0(kegg_org, tab$PATH),
         gene = as.character(tab$ENTREZID),
         stringsAsFactors = FALSE
       ))
@@ -663,7 +807,7 @@ build_kegg_term2gene <- function(universe) {
   }
   tmp <- tempfile()
   ok <- tryCatch({
-    utils::download.file("https://rest.kegg.jp/link/pathway/hsa", tmp, quiet = TRUE, mode = "wb")
+    utils::download.file(paste0("https://rest.kegg.jp/link/pathway/", kegg_org), tmp, quiet = TRUE, mode = "wb")
     TRUE
   }, error = function(e) FALSE)
   if (!ok || !file.exists(tmp) || file.info(tmp)$size == 0) {
@@ -671,7 +815,7 @@ build_kegg_term2gene <- function(universe) {
   }
   raw <- utils::read.delim(tmp, header = FALSE, stringsAsFactors = FALSE)
   term <- sub("^path:", "", raw[[1]])
-  gene <- sub("^hsa:", "", raw[[2]])
+  gene <- sub(paste0("^", kegg_org, ":"), "", raw[[2]])
   keep <- gene %in% universe
   data.frame(term = term[keep], gene = gene[keep], stringsAsFactors = FALSE)
 }
@@ -724,7 +868,7 @@ plot_ora_object <- function(x, stub, title) {
 }
 
 run_local_go_kegg <- function(query, universe, go_dir, kg_dir, label) {
-  log_msg(label, " 使用 org.Hs.eg.db 本地超几何检验做 GO / KEGG（不上 clusterProfiler 也出图）")
+  log_msg(label, " 使用 ", species_name, " 注释库做本地 GO / KEGG")
   for (ont in c("BP", "MF", "CC")) {
     t2g <- build_go_term2gene(universe, ont)
     names_go <- go_term_name(unique(t2g$term))
@@ -765,7 +909,7 @@ run_up_ora <- function(up_genes, universe_genes, outdir, label,
     for (ont in c("BP", "MF", "CC")) {
       ego <- tryCatch(
         clusterProfiler::enrichGO(
-          gene = query, universe = universe, OrgDb = org.Hs.eg.db, keyType = "ENTREZID",
+          gene = query, universe = universe, OrgDb = org_db, keyType = "ENTREZID",
           ont = ont, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
         ),
         error = function(e) {
@@ -781,7 +925,7 @@ run_up_ora <- function(up_genes, universe_genes, outdir, label,
     }
     ek <- tryCatch(
       clusterProfiler::enrichKEGG(
-        gene = query, universe = universe, organism = "hsa",
+        gene = query, universe = universe, organism = kegg_org,
         pvalueCutoff = 1, qvalueCutoff = 1
       ),
       error = function(e) {
@@ -791,7 +935,7 @@ run_up_ora <- function(up_genes, universe_genes, outdir, label,
     )
     if (!is.null(ek) && nrow(as.data.frame(ek)) > 0) {
       ek <- tryCatch(
-        clusterProfiler::setReadable(ek, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"),
+        clusterProfiler::setReadable(ek, OrgDb = org_db, keyType = "ENTREZID"),
         error = function(e) ek
       )
       plot_ora_object(ek, file.path(kg_dir, "ORA_KEGG"),
@@ -820,6 +964,7 @@ analyze_comparison <- function(comp_name, test_group, log_mat, gene_map, sample_
   tt <- run_limma(log_mat, sample_info, test_group, comp_name)
   tt$gene <- gene_map[tt$protein_id]
   tt$gene[is.na(tt$gene) | !nzchar(tt$gene)] <- tt$protein_id
+  tt$gene <- resolve_display_symbols(tt$gene, tt$protein_id)
   tt$significant <- tt$pvalue < P_CUTOFF
   tt$up <- tt$significant & tt$log2FC > 0 & tt$FC >= FC_CUTOFF
   tt$down <- tt$significant & tt$log2FC < 0 & tt$FC <= 1 / FC_CUTOFF
@@ -857,6 +1002,8 @@ if (isTRUE(as.logical(Sys.getenv("PROTEIN_NT_T6_FUNCTIONS_ONLY", "false")))) {
 } else {
 pg_path <- find_pg_matrix(project_dir)
 dat <- read_pg_matrix(pg_path)
+setup_species(dat$gene)
+dat$gene <- resolve_display_symbols(dat$gene, dat$protein_id)
 utils::write.csv(dat$sample_info, file.path(log_dir, "sample_map.csv"), row.names = FALSE)
 log_msg(
   "样品计数 N=", sum(dat$sample_info$group == "N"),
