@@ -227,21 +227,43 @@ pick_gene_column <- function(nms) {
   NA_character_
 }
 
-pick_official_symbol <- function(x) {
+is_uniprot_acc <- function(x) {
+  grepl("^[OPQ][0-9][A-Z0-9]{3}[0-9](-[0-9]+)?$", x, ignore.case = TRUE) |
+    grepl("^[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9]([A-Z][A-Z0-9]{2}[0-9]){0,2}(-[0-9]+)?$", x, ignore.case = TRUE)
+}
+
+extract_tokens <- function(x) {
   x <- trimws(as.character(x)[1])
-  if (length(x) != 1 || is.na(x) || x %in% c("", "-", ".", "NA")) return(NA_character_)
-  parts <- unlist(strsplit(x, "[,;|/]+"))
+  if (length(x) != 1 || is.na(x) || x %in% c("", "-", ".", "NA")) return(character())
+  parts <- unlist(strsplit(x, "[,;[:space:]]+"))
   parts <- trimws(parts)
-  parts <- parts[nzchar(parts) & !parts %in% c("-", ".", "NA")]
-  if (length(parts) == 0) return(NA_character_)
-  parts[1]
+  parts <- parts[nzchar(parts) & !parts %in% c("-", ".", "NA", "sp", "tr", "SP", "TR")]
+  extra <- character()
+  for (p in parts) {
+    if (grepl("\\|", p)) extra <- c(extra, trimws(unlist(strsplit(p, "\\|", fixed = TRUE))))
+    extra <- c(extra, sub("-[0-9]+$", "", p))
+    found <- regmatches(p, gregexpr("[A-NR-Z0-9]{6,10}(?:-[0-9]+)?", p, ignore.case = TRUE))[[1]]
+    extra <- c(extra, found)
+  }
+  out <- unique(c(parts, extra))
+  out <- out[nzchar(out) & !out %in% c("sp", "tr", "SP", "TR")]
+  out
+}
+
+pick_official_symbol <- function(x) {
+  toks <- extract_tokens(x)
+  if (length(toks) == 0) return(NA_character_)
+  not_acc <- toks[!is_uniprot_acc(toks) & !grepl("^[0-9]+$", toks)]
+  if (length(not_acc) > 0) return(not_acc[1])
+  toks[1]
 }
 
 first_accession <- function(x) {
-  x <- trimws(as.character(x)[1])
-  if (is.na(x) || !nzchar(x)) return(NA_character_)
-  parts <- unlist(strsplit(x, "[;|,]+"))
-  trimws(parts[1])
+  toks <- extract_tokens(x)
+  if (length(toks) == 0) return(NA_character_)
+  acc <- toks[is_uniprot_acc(toks)]
+  if (length(acc) > 0) return(sub("-[0-9]+$", "", acc[1]))
+  toks[1]
 }
 
 # -----------------------------------------------------------------------------
@@ -457,44 +479,71 @@ plot_volcano <- function(de, title, outfile) {
 }
 
 map_ids_orgdb <- function(keys, keytype, column) {
-  keys <- unique(keys[!is.na(keys) & nzchar(keys)])
+  keys <- unique(as.character(keys[!is.na(keys) & nzchar(keys)]))
   if (length(keys) == 0) return(setNames(character(), character()))
   mapped <- tryCatch(
-    AnnotationDbi::mapIds(
+    suppressMessages(suppressWarnings(AnnotationDbi::mapIds(
       org.Hs.eg.db, keys = keys, column = column, keytype = keytype, multiVals = "first"
-    ),
+    ))),
     error = function(e) setNames(rep(NA_character_, length(keys)), keys)
   )
-  mapped <- mapped[!is.na(mapped) & nzchar(mapped)]
-  mapped
+  mapped <- mapped[!is.na(mapped) & nzchar(as.character(mapped))]
+  setNames(as.character(mapped), names(mapped))
 }
 
-map_to_entrez <- function(symbols) {
-  symbols <- unique(symbols[!is.na(symbols) & nzchar(symbols)])
-  if (length(symbols) == 0) return(data.frame(gene = character(), entrez = character()))
-  if (isTRUE(has_clusterProfiler)) {
-    m <- tryCatch(
-      clusterProfiler::bitr(symbols, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db),
-      error = function(e) data.frame(SYMBOL = character(), ENTREZID = character())
-    )
-    if (nrow(m) == 0) {
-      m <- tryCatch(
-        clusterProfiler::bitr(symbols, fromType = "UNIPROT", toType = "ENTREZID", OrgDb = org.Hs.eg.db),
-        error = function(e) data.frame(UNIPROT = character(), ENTREZID = character())
-      )
-      if (nrow(m) > 0) names(m)[1] <- "SYMBOL"
+map_token_to_entrez <- function(tokens) {
+  tokens <- unique(as.character(tokens[!is.na(tokens) & nzchar(tokens)]))
+  if (length(tokens) == 0) return(setNames(character(), character()))
+  acc <- tokens[is_uniprot_acc(tokens)]
+  acc_base <- unique(c(acc, sub("-[0-9]+$", "", acc)))
+  sym <- setdiff(tokens, unique(c(acc, acc_base)))
+  mapped <- character()
+  if (length(sym) > 0) mapped <- c(mapped, map_ids_orgdb(sym, "SYMBOL", "ENTREZID"))
+  left <- setdiff(acc_base, names(mapped))
+  if (length(left) > 0) mapped <- c(mapped, map_ids_orgdb(left, "UNIPROT", "ENTREZID"))
+  left <- setdiff(acc_base, names(mapped))
+  if (length(left) > 0) mapped <- c(mapped, map_ids_orgdb(left, "ACCNUM", "ENTREZID"))
+  left <- setdiff(sym, names(mapped))
+  if (length(left) > 0) mapped <- c(mapped, map_ids_orgdb(left, "ALIAS", "ENTREZID"))
+  mapped[!duplicated(names(mapped))]
+}
+
+map_to_entrez <- function(symbols, protein_ids = NULL) {
+  symbols <- as.character(symbols)
+  if (is.null(protein_ids)) protein_ids <- rep(NA_character_, length(symbols))
+  protein_ids <- as.character(protein_ids)
+  if (length(protein_ids) != length(symbols)) {
+    toks <- unique(c(unlist(lapply(symbols, extract_tokens)), unlist(lapply(protein_ids, extract_tokens))))
+    mapped <- map_token_to_entrez(toks)
+    if (length(mapped) == 0) {
+      return(data.frame(gene = character(), entrez = character(), stringsAsFactors = FALSE))
     }
-    if (nrow(m) > 0) {
-      m <- m[!duplicated(m[[1]]), ]
-      return(data.frame(gene = m[[1]], entrez = as.character(m[[2]]), stringsAsFactors = FALSE))
-    }
+    return(data.frame(gene = names(mapped), entrez = unname(mapped), stringsAsFactors = FALSE))
   }
-  sym <- map_ids_orgdb(symbols, "SYMBOL", "ENTREZID")
-  left <- setdiff(symbols, names(sym))
-  uni <- if (length(left) > 0) map_ids_orgdb(left, "UNIPROT", "ENTREZID") else character()
-  all_map <- c(sym, uni)
-  if (length(all_map) == 0) return(data.frame(gene = character(), entrez = character()))
-  data.frame(gene = names(all_map), entrez = as.character(unname(all_map)), stringsAsFactors = FALSE)
+  token_lists <- lapply(seq_along(symbols), function(i) {
+    unique(c(extract_tokens(symbols[i]), extract_tokens(protein_ids[i])))
+  })
+  tok_map <- map_token_to_entrez(unique(unlist(token_lists)))
+  entrez <- vapply(token_lists, function(toks) {
+    hit <- unname(tok_map[intersect(toks, names(tok_map))])
+    if (length(hit) == 0) NA_character_ else hit[1]
+  }, character(1))
+  keep <- !is.na(entrez)
+  n_acc <- sum(vapply(token_lists[keep], function(toks) {
+    any(is_uniprot_acc(intersect(toks, names(tok_map)))) &&
+      !any(intersect(toks, names(tok_map)) %in% toks[!is_uniprot_acc(toks)])
+  }, logical(1)))
+  log_msg(
+    "ID 映射：输入 ", length(symbols), " → Entrez ", sum(keep),
+    "（其中至少 ", sum(keep) - n_acc, " 条靠基因符号，", n_acc, " 条靠 UniProt；未映射 ",
+    sum(!keep), "）"
+  )
+  if (sum(keep) == 0) {
+    return(data.frame(gene = character(), entrez = character(), stringsAsFactors = FALSE))
+  }
+  label <- ifelse(is.na(symbols[keep]) | !nzchar(symbols[keep]), protein_ids[keep], symbols[keep])
+  out <- data.frame(gene = as.character(label), entrez = as.character(entrez[keep]), stringsAsFactors = FALSE)
+  out[!duplicated(out$entrez), , drop = FALSE]
 }
 
 go_term_name <- function(ids) {
@@ -689,16 +738,20 @@ run_local_go_kegg <- function(query, universe, go_dir, kg_dir, label) {
               paste(label, "| ORA KEGG | upregulated"))
 }
 
-run_up_ora <- function(up_genes, universe_genes, outdir, label) {
+run_up_ora <- function(up_genes, universe_genes, outdir, label,
+                       up_proteins = NULL, bg_proteins = NULL) {
   go_dir <- file.path(outdir, "GO")
   kg_dir <- file.path(outdir, "KEGG")
   dir.create(go_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(kg_dir, recursive = TRUE, showWarnings = FALSE)
 
-  mp_up <- map_to_entrez(up_genes)
-  mp_bg <- map_to_entrez(universe_genes)
+  log_msg(label, " 映射上调蛋白（基因符号 + UniProt）")
+  mp_up <- map_to_entrez(up_genes, up_proteins)
+  log_msg(label, " 映射背景蛋白（基因符号 + UniProt）")
+  mp_bg <- map_to_entrez(universe_genes, bg_proteins)
   query <- unique(mp_up$entrez)
   universe <- unique(mp_bg$entrez)
+  utils::write.csv(mp_up, file.path(outdir, "ID_map_upregulated.csv"), row.names = FALSE)
   log_msg(label, " 上调蛋白 ", length(up_genes), " → Entrez ", length(query),
           "；背景 ", length(universe_genes), " → Entrez ", length(universe))
   if (length(query) < 3) {
@@ -788,7 +841,10 @@ analyze_comparison <- function(comp_name, test_group, log_mat, gene_map, sample_
     paste0(comp_name, " | volcano | p < ", P_CUTOFF, ", FC >= ", FC_CUTOFF),
     file.path(outdir, paste0(comp_name, "_volcano"))
   )
-  run_up_ora(up$gene, tt$gene, outdir, paste(comp_name, "upregulated"))
+  run_up_ora(
+    up$gene, tt$gene, outdir, paste(comp_name, "upregulated"),
+    up_proteins = up$protein_id, bg_proteins = tt$protein_id
+  )
   invisible(tt)
 }
 
