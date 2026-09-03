@@ -98,18 +98,18 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
 
-## 去掉 NTC_rep1、另存一份原始格式
+## 去掉 NTC_rep1（单独运行）
 
-不改原来的四样品 Cuffdiff 文件。新脚本 `TG_RNAseq_drop_NTC_rep1.R` 读取 `E:/R/TG_BRCA/TG`，删除 `NTC_rep1`，把剩下的 `NTC_rep0`、`TG_sh1`、`TG_sh5` 按 Cuffdiff 原格式写到：
+这是**另一份脚本**，不要和 `TG_RNAseq_pipeline.R` 一起 `source`。只运行 `TG_RNAseq_drop_NTC_rep1.R`：读取 `E:/R/TG_BRCA/TG`，删除 `NTC_rep1`，把 `NTC_rep0`、`TG_sh1`、`TG_sh5` 按 Cuffdiff 原格式写到 `without_NTC_rep1/`（不覆盖原文件）。
 
-```
-E:/R/TG_BRCA/TG/without_NTC_rep1/
-```
+命令行：
 
-```r
-setwd("E:/R/TG_BRCA/TG")
-source("TG_RNAseq_drop_NTC_rep1.R")
+```bat
+cd /d E:\R\TG_BRCA\TG
+Rscript TG_RNAseq_drop_NTC_rep1.R
 ```
 
-随后若要用这份三样品数据做分析，把工作目录或环境变量 `TG_RNASEQ_DIR` 指到 `without_NTC_rep1`。
+或在 RStudio **只打开这一份文件**，点 Source。
+
+随后分析三样品数据时，把工作目录或 `TG_RNASEQ_DIR` 指到 `E:/R/TG_BRCA/TG/without_NTC_rep1`。
 

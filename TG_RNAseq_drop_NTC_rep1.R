@@ -1,38 +1,68 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# 从 Cuffdiff 原始结果中删除 NTC_rep1，其余样品按原格式另存。
-# 不覆盖 E:/R/TG_BRCA/TG 里的原文件。
+# 单独运行：从 Cuffdiff 原始结果中删除 NTC_rep1，其余按原格式另存。
+# 不要 source("TG_RNAseq_pipeline.R")，也不要和主分析放在同一次运行里。
 #
 # 输出目录：<数据目录>/without_NTC_rep1/
-# 保留：NTC_rep0、TG_sh1、TG_sh5
+# 保留：NTC_rep0、TG_sh1、TG_sh5（原目录不覆盖）
 #
-# 用法：
-#   setwd("E:/R/TG_BRCA/TG")
-#   source("TG_RNAseq_drop_NTC_rep1.R")
+# 单独运行（任选一种）：
+#   Rscript TG_RNAseq_drop_NTC_rep1.R
+#   或在 RStudio 只打开本文件，点 Source
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1)
 
+this_script_dir <- function() {
+  args <- commandArgs(trailingOnly = FALSE)
+  hit <- grep("^--file=", args, value = TRUE)
+  if (length(hit) > 0) {
+    p <- sub("^--file=", "", hit[1])
+    if (nzchar(p) && file.exists(p)) {
+      return(dirname(normalizePath(p, winslash = "/", mustWork = FALSE)))
+    }
+  }
+  ofile <- NULL
+  if (sys.nframe() > 0) {
+    for (i in sys.nframe():1) {
+      if (!is.null(sys.frame(i)$ofile)) {
+        ofile <- sys.frame(i)$ofile
+        break
+      }
+    }
+  }
+  if (!is.null(ofile) && nzchar(ofile) && file.exists(ofile)) {
+    return(dirname(normalizePath(ofile, winslash = "/", mustWork = FALSE)))
+  }
+  normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+}
+
+has_cuffdiff <- function(d) {
+  dir.exists(d) && (
+    file.exists(file.path(d, "genes.read_group_tracking")) ||
+      file.exists(file.path(d, "genes.fpkm_tracking")) ||
+      file.exists(file.path(d, "genes.count_tracking")) ||
+      file.exists(file.path(d, "read_groups.info"))
+  )
+}
+
 resolve_project_dir <- function() {
+  script_dir <- this_script_dir()
   env_dir <- Sys.getenv("TG_RNASEQ_DIR", unset = "")
   candidates <- c(
     env_dir,
     "E:/R/TG_BRCA/TG",
     "E:\\R\\TG_BRCA\\TG",
+    script_dir,
     getwd()
   )
   candidates <- unique(candidates[nzchar(candidates)])
   for (d in candidates) {
-    if (dir.exists(d) && (
-      file.exists(file.path(d, "genes.read_group_tracking")) ||
-      file.exists(file.path(d, "genes.fpkm_tracking")) ||
-      file.exists(file.path(d, "genes.count_tracking")) ||
-      file.exists(file.path(d, "read_groups.info"))
-    )) {
+    if (has_cuffdiff(d)) {
       return(normalizePath(d, winslash = "/", mustWork = FALSE))
     }
   }
-  stop("未找到 Cuffdiff 原始数据目录。请把工作目录设为 E:/R/TG_BRCA/TG")
+  stop("未找到 Cuffdiff 原始数据。请把本脚本放到 E:/R/TG_BRCA/TG 后单独运行：Rscript TG_RNAseq_drop_NTC_rep1.R")
 }
 
 norm_key <- function(x) toupper(gsub("[^A-Za-z0-9]", "", as.character(x)))
@@ -257,8 +287,9 @@ fpkm_file_for_diff <- function(fname) {
 }
 
 # -----------------------------------------------------------------------------
-# 主流程
+# 主流程（本文件单独执行时自动跑；不依赖 TG_RNAseq_pipeline.R）
 # -----------------------------------------------------------------------------
+drop_ntc_rep1_run <- function() {
 project_dir <- resolve_project_dir()
 out_dir <- file.path(project_dir, "without_NTC_rep1")
 if (identical(normalizePath(out_dir, winslash = "/", mustWork = FALSE),
@@ -409,3 +440,7 @@ readme <- c(
 writeLines(readme, file.path(out_dir, "00_REMOVED_NTC_rep1.txt"))
 log_msg("Wrote ", length(written), " files")
 log_msg("Done. New raw data: ", out_dir)
+invisible(out_dir)
+}
+
+drop_ntc_rep1_run()

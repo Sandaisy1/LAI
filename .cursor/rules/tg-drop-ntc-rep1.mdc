@@ -6,6 +6,7 @@ alwaysApply: false
 
 # Drop NTC_rep1 from raw Cuffdiff (separate from the 4-sample analysis)
 
+- Standalone: run **only** `Rscript TG_RNAseq_drop_NTC_rep1.R` (or Source this file). Do not `source` the analysis pipeline with it.
 - Input: `E:/R/TG_BRCA/TG` Cuffdiff files. **Do not overwrite** the originals.
 - Output: `without_NTC_rep1/` in the same parent folder, same Cuffdiff filenames/columns.
 - Keep `NTC_rep0`, `TG_sh1`, `TG_sh5`.
