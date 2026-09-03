@@ -97,3 +97,19 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## 去掉 NTC_rep1、另存一份原始格式
+
+不改原来的四样品 Cuffdiff 文件。新脚本 `TG_RNAseq_drop_NTC_rep1.R` 读取 `E:/R/TG_BRCA/TG`，删除 `NTC_rep1`，把剩下的 `NTC_rep0`、`TG_sh1`、`TG_sh5` 按 Cuffdiff 原格式写到：
+
+```
+E:/R/TG_BRCA/TG/without_NTC_rep1/
+```
+
+```r
+setwd("E:/R/TG_BRCA/TG")
+source("TG_RNAseq_drop_NTC_rep1.R")
+```
+
+随后若要用这份三样品数据做分析，把工作目录或环境变量 `TG_RNASEQ_DIR` 指到 `without_NTC_rep1`。
+
