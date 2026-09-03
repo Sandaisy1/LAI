@@ -109,9 +109,12 @@ setwd("E:/R/protein T T6")
 source("protein_N_T_T6_pipeline.R")
 ```
 
-只读 `report.pg_matrix`，不要用 `report.pr_matrix`。两组比较：`N vs T`、`T6 vs T`。结果在：
+只读 `report.pg_matrix`，不要用 `report.pr_matrix`。两组比较：`N vs T`、`T6 vs T`。每组都出差异表、火山图，以及上调蛋白的 GO（BP/MF/CC）和 KEGG：
 
 ```
-results/N_vs_T/
-results/T6_vs_T/
+results/N_vs_T/N_vs_T_volcano.pdf
+results/N_vs_T/GO/ORA_GO_BP_dotplot.pdf
+results/N_vs_T/KEGG/ORA_KEGG_barplot.pdf
+results/T6_vs_T/GO/
+results/T6_vs_T/KEGG/
 ```
