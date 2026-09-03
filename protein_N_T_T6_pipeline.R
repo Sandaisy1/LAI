@@ -13,6 +13,7 @@
 #   1) N vs T   （N1,N2,N3,N5,N7,N10 vs T1–T6；参考为 T）
 #   2) T6 vs T  （T6-1–T6-7 vs T1–T6；样品 T6 属于 T 组，不属于 T6 组）
 # 每个比较：全表 + 火山图 + 仅上调蛋白的 GO / KEGG。
+# 上调：p < 0.05 且 FC >= 1.5（不要用 0.01）。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -77,7 +78,7 @@ T_SAMPLES  <- c("T1", "T2", "T3", "T4", "T5", "T6")
 T6_SAMPLES <- c("T6-1", "T6-2", "T6-3", "T6-4", "T6-5", "T6-6", "T6-7")
 ALL_SAMPLES <- c(N_SAMPLES, T_SAMPLES, T6_SAMPLES)
 
-P_CUTOFF <- 0.01
+P_CUTOFF <- 0.05
 FC_CUTOFF <- 1.5
 MIN_DETECTED_FRAC <- 0.5
 
