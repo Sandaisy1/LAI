@@ -166,11 +166,11 @@ is_annotation_col <- function(nm) {
   low <- tolower(gsub("[^A-Za-z0-9]", "", nm))
   low %in% c(
     "proteingroup", "proteinids", "proteinnames", "genes",
-    "firstproteindescription", "proteinid", "majorityproteinids",
-    "fastaheaders", "nproteins", "nsequences", "nproteotypicsequences",
-    "firstproteinids", "organisms", "organism", "proteindescription",
-    "pgmaxlfq", "nfiles"
-  ) || grepl("^(protein|gene|fasta|organism|description|nproteins|nsequences)", low)
+    "firstproteindescription", "firstprotein", "proteinid",
+    "majorityproteinids", "fastaheaders", "nproteins", "nsequences",
+    "nproteotypicsequences", "firstproteinids", "organisms", "organism",
+    "proteindescription", "pgmaxlfq", "nfiles"
+  ) || grepl("^(protein|gene|fasta|organism|description|nproteins|nsequences|firstprotein)", low)
 }
 
 match_t6_id <- function(token) {
@@ -202,13 +202,24 @@ match_n_id <- function(token) {
 }
 
 classify_sample_col <- function(col) {
-  token <- basename_token(col)
-  t6 <- match_t6_id(token)
-  if (!is.na(t6)) return(list(id = t6, group = "T6"))
-  tt <- match_t_id(token)
-  if (!is.na(tt)) return(list(id = tt, group = "T"))
-  nn <- match_n_id(token)
-  if (!is.na(nn)) return(list(id = nn, group = "N"))
+  col <- as.character(col)[1]
+  segs <- unique(c(
+    basename_token(col),
+    rev(unlist(strsplit(gsub("\\\\", "/", col), "/")))
+  ))
+  segs <- segs[nzchar(segs)]
+  for (token in segs) {
+    t6 <- match_t6_id(token)
+    if (!is.na(t6)) return(list(id = t6, group = "T6"))
+  }
+  for (token in segs) {
+    tt <- match_t_id(token)
+    if (!is.na(tt)) return(list(id = tt, group = "T"))
+  }
+  for (token in segs) {
+    nn <- match_n_id(token)
+    if (!is.na(nn)) return(list(id = nn, group = "N"))
+  }
   list(id = NA_character_, group = NA_character_)
 }
 
@@ -230,6 +241,32 @@ pick_gene_column <- function(nms) {
     if (length(hit) > 0) return(nms[hit[1]])
   }
   NA_character_
+}
+
+pick_name_column <- function(nms) {
+  low <- tolower(nms)
+  for (k in c("protein.names", "protein.name", "names")) {
+    hit <- which(low == k)
+    if (length(hit) > 0) return(nms[hit[1]])
+  }
+  NA_character_
+}
+
+# CUL4B_MOUSE / PTPRF_MOUSE → Cul4b / Ptprf；不要留下 P01804
+symbol_from_entry_name <- function(x) {
+  toks <- unlist(strsplit(as.character(x)[1], "[;,]"))
+  toks <- trimws(toks)
+  toks <- toks[nzchar(toks) & !toks %in% c("-", ".", "NA")]
+  if (length(toks) == 0) return(NA_character_)
+  p <- toks[1]
+  if (!grepl("_", p)) return(NA_character_)
+  species <- toupper(sub(".*_", "", p))
+  base <- sub("_[A-Za-z0-9]+$", "", p)
+  if (!nzchar(base) || is_uniprot_acc(base)) return(NA_character_)
+  if (species %in% c("MOUSE", "RAT")) {
+    return(paste0(substring(base, 1, 1), tolower(substring(base, 2))))
+  }
+  base
 }
 
 is_uniprot_acc <- function(x) {
@@ -284,12 +321,19 @@ read_pg_matrix <- function(path) {
   nms <- names(raw)
   id_col <- pick_id_column(nms)
   gene_col <- pick_gene_column(nms)
-  log_msg("蛋白 ID 列: ", id_col, if (is.na(gene_col)) "" else paste0("; 基因列: ", gene_col))
+  name_col <- pick_name_column(nms)
+  log_msg(
+    "DIA-NN 列: ID=", id_col,
+    if (is.na(name_col)) "" else paste0("; Protein.Names=", name_col),
+    if (is.na(gene_col)) "" else paste0("; Genes=", gene_col),
+    "；样品列按 Windows 路径/文件名匹配 N1、T6-1 等"
+  )
 
   sample_info <- list()
   used_ids <- character()
+  skip_cols <- unique(c(id_col, gene_col, name_col))
   for (col in nms) {
-    if (identical(col, id_col) || identical(col, gene_col) || is_annotation_col(col)) next
+    if (col %in% skip_cols || is_annotation_col(col)) next
     if (!is.numeric(raw[[col]])) {
       suppressWarnings(num <- as.numeric(raw[[col]]))
       if (mean(is.na(num)) > 0.5) next
@@ -338,7 +382,21 @@ read_pg_matrix <- function(path) {
   } else {
     rep(NA_character_, nrow(raw))
   }
-  gene[is.na(gene) | !nzchar(gene)] <- protein_id[is.na(gene) | !nzchar(gene)]
+  name_sym <- if (!is.na(name_col)) {
+    vapply(raw[[name_col]], symbol_from_entry_name, character(1), USE.NAMES = FALSE)
+  } else {
+    rep(NA_character_, nrow(raw))
+  }
+  protein_names <- if (!is.na(name_col)) as.character(raw[[name_col]]) else rep(NA_character_, nrow(raw))
+  need_name <- is.na(gene) | !nzchar(gene) | is_uniprot_acc(gene)
+  gene[need_name & !is.na(name_sym) & nzchar(name_sym)] <- name_sym[need_name & !is.na(name_sym) & nzchar(name_sym)]
+  still <- is.na(gene) | !nzchar(gene)
+  gene[still] <- protein_id[still]
+  log_msg(
+    "基因名来源: Genes 列 ", sum(!need_name, na.rm = TRUE),
+    "；Protein.Names ", sum(need_name & !is.na(name_sym) & nzchar(name_sym), na.rm = TRUE),
+    "；仍是 accession ", sum(vapply(gene, is_uniprot_acc, logical(1)), na.rm = TRUE)
+  )
 
   mat <- as.matrix(raw[, sample_info$column, drop = FALSE])
   storage.mode(mat) <- "double"
@@ -354,19 +412,25 @@ read_pg_matrix <- function(path) {
   mat <- mat[ord, , drop = FALSE]
   protein_id <- protein_id[ord]
   gene <- gene[ord]
+  protein_names <- protein_names[ord]
   keep <- keep[ord]
   mat <- mat[keep, , drop = FALSE]
   protein_id <- protein_id[keep]
   gene <- gene[keep]
+  protein_names <- protein_names[keep]
   dup <- duplicated(protein_id)
   if (any(dup)) {
     mat <- mat[!dup, , drop = FALSE]
     protein_id <- protein_id[!dup]
     gene <- gene[!dup]
+    protein_names <- protein_names[!dup]
   }
   rownames(mat) <- protein_id
 
-  list(mat = mat, gene = gene, protein_id = protein_id, sample_info = sample_info)
+  list(
+    mat = mat, gene = gene, protein_id = protein_id,
+    protein_names = protein_names, sample_info = sample_info
+  )
 }
 
 # -----------------------------------------------------------------------------
@@ -497,7 +561,16 @@ map_ids_orgdb <- function(keys, keytype, column, db = org_db) {
   setNames(as.character(mapped), names(mapped))
 }
 
-guess_species <- function(genes) {
+guess_species <- function(genes, protein_names = NULL) {
+  if (!is.null(protein_names)) {
+    pn <- protein_names[!is.na(protein_names) & nzchar(protein_names)]
+    if (length(pn) >= 8) {
+      n_m <- mean(grepl("_MOUSE", pn, ignore.case = TRUE))
+      n_h <- mean(grepl("_HUMAN", pn, ignore.case = TRUE))
+      if (n_m > 0.3 && n_m > n_h) return("mouse")
+      if (n_h > 0.3 && n_h > n_m) return("human")
+    }
+  }
   g <- genes[!is.na(genes) & nzchar(genes) & !is_uniprot_acc(genes)]
   g <- g[!grepl("\\|", g)]
   if (length(g) < 8) return("human")
@@ -506,8 +579,8 @@ guess_species <- function(genes) {
   if (mouse_like >= 0.35 && mouse_like > human_like) "mouse" else "human"
 }
 
-setup_species <- function(genes) {
-  sp <- guess_species(genes)
+setup_species <- function(genes, protein_names = NULL) {
+  sp <- guess_species(genes, protein_names)
   if (sp == "mouse") {
     if (!requireNamespace("org.Mm.eg.db", quietly = TRUE) &&
         !isTRUE(as.logical(Sys.getenv("PROTEIN_NT_T6_SKIP_INSTALL", "false")))) {
@@ -1002,7 +1075,7 @@ if (isTRUE(as.logical(Sys.getenv("PROTEIN_NT_T6_FUNCTIONS_ONLY", "false")))) {
 } else {
 pg_path <- find_pg_matrix(project_dir)
 dat <- read_pg_matrix(pg_path)
-setup_species(dat$gene)
+setup_species(dat$gene, dat$protein_names)
 dat$gene <- resolve_display_symbols(dat$gene, dat$protein_id)
 utils::write.csv(dat$sample_info, file.path(log_dir, "sample_map.csv"), row.names = FALSE)
 log_msg(
