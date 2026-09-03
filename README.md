@@ -1,5 +1,7 @@
 # TG BRCA 细胞 RNA-seq 分析
 
+蛋白质组脚本在仓库根目录：[`protein_N_T_T6_pipeline.R`](protein_N_T_T6_pipeline.R)。数据目录是 `E:/R/protein T T6`，输入为 DIA-NN `report.pg_matrix`。用法见文末。
+
 针对 `NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5` 四个样品的 RNA-seq 分析。两个 NTC **不在 1-vs-1 比较里合并**。
 
 ## 数据位置
@@ -97,3 +99,19 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## 蛋白质组（N / T / T6）
+
+脚本：仓库根目录的 `protein_N_T_T6_pipeline.R`（也可复制到数据目录）。
+
+```r
+setwd("E:/R/protein T T6")
+source("protein_N_T_T6_pipeline.R")
+```
+
+只读 `report.pg_matrix`，不要用 `report.pr_matrix`。两组比较：`N vs T`、`T6 vs T`。结果在：
+
+```
+results/N_vs_T/
+results/T6_vs_T/
+```
