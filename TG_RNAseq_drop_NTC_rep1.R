@@ -39,8 +39,8 @@ norm_key <- function(x) toupper(gsub("[^A-Za-z0-9]", "", as.character(x)))
 
 is_ntc_name <- function(x) {
   n <- norm_key(x)
-  grepl("NTC|SHNC|NEGCTRL", n) ||
-    grepl("CTRL|CONTROL", n) ||
+  grepl("NTC|SHNC|NEGCTRL", n) |
+    grepl("CTRL|CONTROL", n) |
     grepl("^NC[0-9]*$", n)
 }
 
@@ -105,7 +105,7 @@ log_msg <- function(...) {
 }
 
 is_cuffdiff_file <- function(fname) {
-  grepl("\\.(info|diff)$", fname, ignore.case = TRUE) ||
+  grepl("\\.(info|diff)$", fname, ignore.case = TRUE) |
     grepl("tracking$", fname, ignore.case = TRUE)
 }
 
@@ -160,9 +160,9 @@ filter_long_by_ntc_rep1 <- function(df) {
 
 name_is_dropped_condition <- function(x, dropped_conditions) {
   z <- as.character(x)
-  z %in% dropped_conditions ||
-    norm_key(z) %in% norm_key(dropped_conditions) ||
-    (is_ntc_name(z) && grepl("REP1", norm_key(z)))
+  z %in% dropped_conditions |
+    norm_key(z) %in% norm_key(dropped_conditions) |
+    (is_ntc_name(z) & grepl("REP1", norm_key(z)))
 }
 
 filter_diff_by_dropped_conditions <- function(df, dropped_conditions) {
@@ -311,11 +311,12 @@ files <- list.files(project_dir, full.names = FALSE)
 files <- files[is_cuffdiff_file(files)]
 files <- files[!grepl("^without_NTC_rep1$", files)]
 file_rank <- function(fname) {
-  if (identical(fname, "read_groups.info")) return(1L)
-  if (grepl("read_group_tracking$", fname)) return(2L)
-  if (grepl("fpkm_tracking$|count_tracking$", fname)) return(3L)
-  if (grepl("\\.diff$", fname)) return(4L)
-  5L
+  r <- rep(5L, length(fname))
+  r[grepl("\\.diff$", fname)] <- 4L
+  r[grepl("fpkm_tracking$|count_tracking$", fname)] <- 3L
+  r[grepl("read_group_tracking$", fname)] <- 2L
+  r[fname == "read_groups.info"] <- 1L
+  r
 }
 files <- files[order(file_rank(files), files)]
 
