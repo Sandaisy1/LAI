@@ -25,9 +25,10 @@ options(clusterProfiler.download.method = "auto")
 cran_required <- c(
   "dplyr", "tidyr", "tibble", "stringr", "ggplot2", "ggrepel", "matrixStats"
 )
-bioc_required <- c("limma", "clusterProfiler", "org.Hs.eg.db", "enrichplot", "AnnotationDbi")
+bioc_required <- c("limma")
+bioc_ora <- c("clusterProfiler", "org.Hs.eg.db", "enrichplot", "AnnotationDbi")
 
-install_if_missing <- function(pkgs, bioc = FALSE) {
+install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
   miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
   if (length(miss) == 0) return(invisible(TRUE))
   if (bioc) {
@@ -45,15 +46,25 @@ install_if_missing <- function(pkgs, bioc = FALSE) {
     )
   }
   still <- miss[!vapply(miss, requireNamespace, logical(1), quietly = TRUE)]
-  if (length(still) > 0) stop("缺少必需 R 包: ", paste(still, collapse = ", "))
+  if (length(still) > 0 && required) stop("缺少必需 R 包: ", paste(still, collapse = ", "))
+  if (length(still) > 0) message("可选包未安装，相关分析将跳过: ", paste(still, collapse = ", "))
   invisible(TRUE)
 }
 
-install_if_missing(cran_required, bioc = FALSE)
-install_if_missing(bioc_required, bioc = TRUE)
-for (p in c(cran_required, bioc_required)) {
-  suppressPackageStartupMessages(library(p, character.only = TRUE))
+if (!isTRUE(as.logical(Sys.getenv("PROTEIN_NT_T6_SKIP_INSTALL", "false")))) {
+  install_if_missing(cran_required, bioc = FALSE, required = TRUE)
+  install_if_missing(bioc_required, bioc = TRUE, required = TRUE)
+  install_if_missing(bioc_ora, bioc = TRUE, required = FALSE)
 }
+for (p in c(cran_required, bioc_required, bioc_ora)) {
+  if (requireNamespace(p, quietly = TRUE)) {
+    suppressPackageStartupMessages(library(p, character.only = TRUE))
+  }
+}
+has_ora <- all(vapply(
+  c("clusterProfiler", "org.Hs.eg.db", "enrichplot"),
+  requireNamespace, logical(1), quietly = TRUE
+))
 
 # -----------------------------------------------------------------------------
 # 1. 路径与参数
@@ -510,6 +521,12 @@ run_up_ora <- function(up_genes, outdir, label) {
   kg_dir <- file.path(outdir, "KEGG")
   dir.create(go_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(kg_dir, recursive = TRUE, showWarnings = FALSE)
+  if (!isTRUE(has_ora)) {
+    log_msg(label, " 跳过 GO/KEGG：未安装 clusterProfiler / org.Hs.eg.db / enrichplot")
+    note_empty(file.path(go_dir, "ORA_GO"), "ORA packages not installed")
+    note_empty(file.path(kg_dir, "ORA_KEGG"), "ORA packages not installed")
+    return(invisible(NULL))
+  }
 
   mp <- map_to_entrez(up_genes)
   entrez <- unique(mp$entrez)
@@ -601,8 +618,11 @@ analyze_comparison <- function(comp_name, test_group, log_mat, gene_map, sample_
 }
 
 # -----------------------------------------------------------------------------
-# 8. 主流程
+# 8. 主流程（PROTEIN_NT_T6_FUNCTIONS_ONLY=true 时只加载函数）
 # -----------------------------------------------------------------------------
+if (isTRUE(as.logical(Sys.getenv("PROTEIN_NT_T6_FUNCTIONS_ONLY", "false")))) {
+  log_msg("仅加载函数，不跑主流程")
+} else {
 pg_path <- find_pg_matrix(project_dir)
 dat <- read_pg_matrix(pg_path)
 utils::write.csv(dat$sample_info, file.path(log_dir, "sample_map.csv"), row.names = FALSE)
@@ -622,3 +642,4 @@ analyze_comparison("T6_vs_T", "T6", prep$log_mat, gene_map, dat$sample_info)
 log_msg("完成。结果在: ", result_dir)
 log_msg("  results/N_vs_T/")
 log_msg("  results/T6_vs_T/")
+}
