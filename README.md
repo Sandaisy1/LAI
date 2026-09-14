@@ -116,6 +116,14 @@ setwd("E:/R/Protein TIF serum")
 source("Protein_TIF_Serum_pipeline.R")
 ```
 
+或在命令行一键运行（把流程脚本拷到数据目录，或直接指定路径）：
+
+```bat
+Rscript run_protein_tif_serum.R "E:/R/Protein TIF serum"
+```
+
+没有真实矩阵时，仓库里的 `demo_protein_tif_serum/` 可先跑通流程（演示数据，不是实验结果）。
+
 结果在 `results_protein/`：
 
 ```

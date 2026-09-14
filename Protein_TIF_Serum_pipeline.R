@@ -54,8 +54,15 @@ install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
 }
 
 install_if_missing(cran_required, bioc = FALSE, required = TRUE)
-install_if_missing(bioc_required, bioc = TRUE, required = TRUE)
-install_if_missing(bioc_optional, bioc = TRUE, required = FALSE)
+# limma 做血清 3 vs 3；GO/KEGG 缺包时仍跑差异、火山图和排名图
+install_if_missing("limma", bioc = TRUE, required = TRUE)
+if (Sys.getenv("PROTEIN_SKIP_OPTIONAL_BIOC", unset = "0") != "1") {
+  install_if_missing(
+    c("clusterProfiler", "org.Hs.eg.db", "enrichplot", "AnnotationDbi"),
+    bioc = TRUE, required = FALSE
+  )
+  install_if_missing(bioc_optional, bioc = TRUE, required = FALSE)
+}
 
 safe_library <- function(pkgs) {
   for (p in pkgs) {
@@ -64,19 +71,33 @@ safe_library <- function(pkgs) {
     }
   }
 }
-safe_library(c(cran_required, bioc_required, bioc_optional))
+safe_library(c(cran_required, bioc_required, bioc_optional, "GO.db"))
 has_pkg <- function(p) requireNamespace(p, quietly = TRUE)
 
 # -----------------------------------------------------------------------------
 # 1. 路径与参数
 # -----------------------------------------------------------------------------
+script_dir <- local({
+  file_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+  if (length(file_arg) > 0) {
+    return(dirname(normalizePath(sub("^--file=", "", file_arg[1]), winslash = "/", mustWork = FALSE)))
+  }
+  if (file.exists("Protein_TIF_Serum_pipeline.R")) {
+    return(normalizePath(getwd(), winslash = "/", mustWork = FALSE))
+  }
+  normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+})
+
 resolve_project_dir <- function() {
   env_dir <- Sys.getenv("PROTEIN_TIF_SERUM_DIR", unset = "")
   candidates <- c(
     env_dir,
     "E:/R/Protein TIF serum",
     "E:\\R\\Protein TIF serum",
-    getwd()
+    getwd(),
+    script_dir,
+    file.path(script_dir, "demo_protein_tif_serum"),
+    file.path(getwd(), "demo_protein_tif_serum")
   )
   candidates <- unique(candidates[nzchar(candidates)])
   needed <- c("TIF_report.pg_matrix", "Serum_report.pg_matrix")
@@ -592,21 +613,129 @@ plot_pca <- function(log_mat, sample_info, outfile) {
 # -----------------------------------------------------------------------------
 map_to_entrez <- function(symbols) {
   symbols <- unique(symbols[!is.na(symbols) & nzchar(symbols)])
-  if (length(symbols) == 0) return(data.frame(gene = character(), entrez = character()))
+  empty <- data.frame(gene = character(), entrez = character())
+  if (length(symbols) == 0 || !has_pkg("org.Hs.eg.db") || !has_pkg("AnnotationDbi")) return(empty)
   m <- tryCatch(
-    clusterProfiler::bitr(symbols, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db),
-    error = function(e) data.frame(SYMBOL = character(), ENTREZID = character())
+    AnnotationDbi::select(org.Hs.eg.db, keys = symbols, keytype = "SYMBOL", columns = "ENTREZID"),
+    error = function(e) NULL
   )
-  if (nrow(m) == 0) {
+  if (is.null(m) || !nrow(m) || all(is.na(m$ENTREZID))) {
     m <- tryCatch(
-      clusterProfiler::bitr(symbols, fromType = "UNIPROT", toType = "ENTREZID", OrgDb = org.Hs.eg.db),
-      error = function(e) data.frame(UNIPROT = character(), ENTREZID = character())
+      AnnotationDbi::select(org.Hs.eg.db, keys = symbols, keytype = "UNIPROT", columns = "ENTREZID"),
+      error = function(e) NULL
     )
-    if (nrow(m) > 0) names(m)[1] <- "SYMBOL"
+    if (!is.null(m) && nrow(m) > 0) names(m)[names(m) %in% c("UNIPROT", "SYMBOL")][1] <- "SYMBOL"
   }
-  if (nrow(m) == 0) return(data.frame(gene = character(), entrez = character()))
+  if (is.null(m) || nrow(m) == 0) return(empty)
+  m <- m[!is.na(m$ENTREZID) & nzchar(m$ENTREZID), , drop = FALSE]
+  if (nrow(m) == 0) return(empty)
   m <- m[!duplicated(m[[1]]), ]
-  data.frame(gene = m[[1]], entrez = m[[2]], stringsAsFactors = FALSE)
+  data.frame(gene = as.character(m[[1]]), entrez = as.character(m$ENTREZID), stringsAsFactors = FALSE)
+}
+
+ora_hyper <- function(query, term2gene, min_size = 5, max_size = 500) {
+  universe <- unique(as.character(term2gene$gene))
+  query <- unique(intersect(as.character(query), universe))
+  k <- length(query)
+  n_uni <- length(universe)
+  if (k < 3 || n_uni < 20) return(NULL)
+  split_terms <- split(as.character(term2gene$gene), as.character(term2gene$term))
+  rows <- lapply(names(split_terms), function(term) {
+    genes <- unique(intersect(split_terms[[term]], universe))
+    m <- length(genes)
+    if (m < min_size || m > max_size) return(NULL)
+    overlap <- intersect(query, genes)
+    x <- length(overlap)
+    if (x < 2) return(NULL)
+    p <- stats::phyper(x - 1, m, n_uni - m, k, lower.tail = FALSE)
+    data.frame(
+      ID = term, Count = x, Size = m,
+      GeneRatio = x / k, BgRatio = m / n_uni, pvalue = p,
+      geneID = paste(overlap, collapse = "/"),
+      stringsAsFactors = FALSE
+    )
+  })
+  df <- do.call(rbind, rows[!vapply(rows, is.null, logical(1))])
+  if (is.null(df) || nrow(df) == 0) return(NULL)
+  df$p.adjust <- stats::p.adjust(df$pvalue, method = "BH")
+  df[order(df$pvalue), , drop = FALSE]
+}
+
+go_term2gene <- function(ont) {
+  xx <- as.list(org.Hs.egGO2ALLEGS)
+  ont_map <- AnnotationDbi::Ontology(GO.db::GOTERM)
+  keep <- names(xx)[!is.na(ont_map[names(xx)]) & ont_map[names(xx)] == ont]
+  term <- rep(keep, lengths(xx[keep]))
+  gene <- unlist(xx[keep], use.names = FALSE)
+  data.frame(term = term, gene = as.character(gene), stringsAsFactors = FALSE)
+}
+
+kegg_term2gene <- function() {
+  cache <- file.path(log_dir, "kegg_hsa_pathway_link.tsv")
+  if (!file.exists(cache)) {
+    ok <- tryCatch({
+      utils::download.file("https://rest.kegg.jp/link/hsa/pathway", cache, quiet = TRUE, mode = "wb")
+      TRUE
+    }, error = function(e) {
+      log_msg("KEGG download failed: ", e$message)
+      FALSE
+    })
+    if (!ok) return(NULL)
+  }
+  raw <- tryCatch(utils::read.delim(cache, header = FALSE, stringsAsFactors = FALSE), error = function(e) NULL)
+  if (is.null(raw) || ncol(raw) < 2) return(NULL)
+  names(raw)[1:2] <- c("term", "gene")
+  raw$term <- sub("^path:", "", raw$term)
+  raw$gene <- sub("^hsa:", "", raw$gene)
+  raw
+}
+
+kegg_term_names <- function(ids) {
+  cache <- file.path(log_dir, "kegg_hsa_pathway_list.tsv")
+  if (!file.exists(cache)) {
+    tryCatch(
+      utils::download.file("https://rest.kegg.jp/list/pathway/hsa", cache, quiet = TRUE, mode = "wb"),
+      error = function(e) log_msg("KEGG list download failed: ", e$message)
+    )
+  }
+  nms <- setNames(ids, ids)
+  if (!file.exists(cache)) return(nms)
+  raw <- tryCatch(utils::read.delim(cache, header = FALSE, stringsAsFactors = FALSE), error = function(e) NULL)
+  if (is.null(raw) || ncol(raw) < 2) return(nms)
+  raw[[1]] <- sub("^path:", "", raw[[1]])
+  hit <- match(ids, raw[[1]])
+  nms[!is.na(hit)] <- raw[[2]][hit[!is.na(hit)]]
+  nms
+}
+
+go_term_names <- function(ids) {
+  nms <- tryCatch(AnnotationDbi::Term(GO.db::GOTERM[ids]), error = function(e) NULL)
+  if (is.null(nms)) return(setNames(ids, ids))
+  out <- as.character(nms)
+  names(out) <- names(nms)
+  out[ids]
+}
+
+plot_simple_ora <- function(df, stub, title) {
+  if (is.null(df) || nrow(df) == 0) {
+    note_empty(stub, "no enrichment terms")
+    return(invisible(NULL))
+  }
+  utils::write.csv(df, paste0(stub, ".csv"), row.names = FALSE)
+  top <- utils::head(df, 15)
+  top$Description <- factor(top$Description, levels = rev(unique(top$Description)))
+  p_bar <- ggplot2::ggplot(top, ggplot2::aes(x = Count, y = Description, fill = -log10(pmax(p.adjust, 1e-300)))) +
+    ggplot2::geom_col() +
+    ggplot2::scale_fill_gradient(low = "#FEE0D2", high = "#CB181D") +
+    ggplot2::theme_bw(base_size = 12) +
+    ggplot2::labs(title = title, x = "Gene count", y = NULL, fill = "-log10(padj)")
+  save_gg(p_bar, paste0(stub, "_barplot"), 9, 7)
+  p_dot <- ggplot2::ggplot(top, ggplot2::aes(x = GeneRatio, y = Description, size = Count, color = p.adjust)) +
+    ggplot2::geom_point() +
+    ggplot2::scale_color_gradient(low = "#CB181D", high = "#2171B5") +
+    ggplot2::theme_bw(base_size = 12) +
+    ggplot2::labs(title = title, x = "GeneRatio", y = NULL)
+  save_gg(p_dot, paste0(stub, "_dotplot"), 9, 7)
 }
 
 enrich_or_relax <- function(fun_strict, fun_relax, label) {
@@ -664,6 +793,12 @@ run_up_ora <- function(up, outdir, label) {
   kg_dir <- file.path(outdir, "KEGG")
   dir.create(go_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(kg_dir, recursive = TRUE, showWarnings = FALSE)
+  if (!has_pkg("org.Hs.eg.db") || !has_pkg("AnnotationDbi")) {
+    log_msg("ORA skipped (need org.Hs.eg.db): ", label)
+    note_empty(file.path(go_dir, "ORA_GO"), "org.Hs.eg.db not installed")
+    note_empty(file.path(kg_dir, "ORA_KEGG"), "org.Hs.eg.db not installed")
+    return(invisible(NULL))
+  }
 
   genes <- unique(c(up$gene[!is.na(up$gene) & nzchar(up$gene)], up$uniprot))
   mp <- map_to_entrez(genes)
@@ -676,45 +811,77 @@ run_up_ora <- function(up, outdir, label) {
     return(invisible(NULL))
   }
 
-  for (ont in c("BP", "MF", "CC")) {
-    ego <- enrich_or_relax(
-      function() clusterProfiler::enrichGO(
-        gene = entrez, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = ont,
-        pAdjustMethod = "BH", pvalueCutoff = 0.05, qvalueCutoff = 0.2, readable = TRUE
+  if (has_pkg("clusterProfiler") && has_pkg("enrichplot")) {
+    for (ont in c("BP", "MF", "CC")) {
+      ego <- enrich_or_relax(
+        function() clusterProfiler::enrichGO(
+          gene = entrez, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = ont,
+          pAdjustMethod = "BH", pvalueCutoff = 0.05, qvalueCutoff = 0.2, readable = TRUE
+        ),
+        function() clusterProfiler::enrichGO(
+          gene = entrez, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = ont,
+          pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
+        ),
+        paste("enrichGO", ont)
+      )
+      plot_ora_object(
+        ego, file.path(go_dir, paste0("ORA_GO_", ont)),
+        title_maybe_relaxed(ego, paste(label, "| upregulated ORA GO", ont)),
+        fold_change = fc_sym
+      )
+    }
+    ek <- enrich_or_relax(
+      function() clusterProfiler::enrichKEGG(
+        gene = entrez, organism = "hsa", pvalueCutoff = 0.05, qvalueCutoff = 0.2
       ),
-      function() clusterProfiler::enrichGO(
-        gene = entrez, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = ont,
-        pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
+      function() clusterProfiler::enrichKEGG(
+        gene = entrez, organism = "hsa", pvalueCutoff = 1, qvalueCutoff = 1
       ),
-      paste("enrichGO", ont)
+      "enrichKEGG"
     )
+    if (!is.null(ek) && nrow(as.data.frame(ek)) > 0) {
+      ek <- tryCatch(
+        clusterProfiler::setReadable(ek, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"),
+        error = function(e) ek
+      )
+    }
     plot_ora_object(
-      ego, file.path(go_dir, paste0("ORA_GO_", ont)),
-      title_maybe_relaxed(ego, paste(label, "| upregulated ORA GO", ont)),
+      ek, file.path(kg_dir, "ORA_KEGG"),
+      title_maybe_relaxed(ek, paste(label, "| upregulated ORA KEGG")),
       fold_change = fc_sym
     )
+    return(invisible(TRUE))
   }
 
-  ek <- enrich_or_relax(
-    function() clusterProfiler::enrichKEGG(
-      gene = entrez, organism = "hsa", pvalueCutoff = 0.05, qvalueCutoff = 0.2
-    ),
-    function() clusterProfiler::enrichKEGG(
-      gene = entrez, organism = "hsa", pvalueCutoff = 1, qvalueCutoff = 1
-    ),
-    "enrichKEGG"
-  )
-  if (!is.null(ek) && nrow(as.data.frame(ek)) > 0) {
-    ek <- tryCatch(
-      clusterProfiler::setReadable(ek, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"),
-      error = function(e) ek
-    )
+  log_msg("clusterProfiler 不可用，改用 org.Hs.eg.db 超几何检验做上调 GO/KEGG: ", label)
+  if (!has_pkg("GO.db")) {
+    note_empty(file.path(go_dir, "ORA_GO"), "GO.db not installed")
+  } else {
+    for (ont in c("BP", "MF", "CC")) {
+      t2g <- tryCatch(go_term2gene(ont), error = function(e) {
+        log_msg("GO term map failed (", ont, "): ", e$message)
+        NULL
+      })
+      df <- if (is.null(t2g)) NULL else ora_hyper(entrez, t2g)
+      if (!is.null(df) && nrow(df) > 0) {
+        nms <- go_term_names(df$ID)
+        df$Description <- ifelse(is.na(nms), df$ID, unname(nms))
+      }
+      plot_simple_ora(df, file.path(go_dir, paste0("ORA_GO_", ont)),
+                      paste(label, "| upregulated ORA GO", ont))
+    }
   }
-  plot_ora_object(
-    ek, file.path(kg_dir, "ORA_KEGG"),
-    title_maybe_relaxed(ek, paste(label, "| upregulated ORA KEGG")),
-    fold_change = fc_sym
-  )
+  t2g_k <- tryCatch(kegg_term2gene(), error = function(e) {
+    log_msg("KEGG term map failed: ", e$message)
+    NULL
+  })
+  dfk <- if (is.null(t2g_k)) NULL else ora_hyper(entrez, t2g_k)
+  if (!is.null(dfk) && nrow(dfk) > 0) {
+    nms <- kegg_term_names(dfk$ID)
+    dfk$Description <- ifelse(is.na(nms), dfk$ID, unname(nms))
+  }
+  plot_simple_ora(dfk, file.path(kg_dir, "ORA_KEGG"),
+                  paste(label, "| upregulated ORA KEGG"))
 }
 
 write_de_tables <- function(de, up, outdir) {
