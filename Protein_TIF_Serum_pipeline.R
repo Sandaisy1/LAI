@@ -5,8 +5,11 @@
 # 分析：
 #   1) 组织间质液 T vs N：差异蛋白、火山图、上调 GO、上调 KEGG
 #   2) 血清 T vs N：同上
-#   3) TIF T vs N 有、血清 T vs N 无的蛋白，并绘制排名图
+#   3) TIF T vs N 有、血清 T vs N 无的蛋白，并绘制热图
 # T6 不并入 T vs N；TIF 与血清分开标准化，不混样本。
+# 在 R 控制台运行：
+#   setwd("E:/R/Protein TIF serum")
+#   source("Protein_TIF_Serum_pipeline.R")
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
