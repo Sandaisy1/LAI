@@ -1060,6 +1060,11 @@ analyze_tn <- function(norm, comp_name) {
 tif_specific_proteins <- function(tif_res, serum_res) {
   outdir <- file.path(result_dir, "TIF_specific_vs_Serum")
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  unlink(list.files(
+    outdir,
+    pattern = "heatmap_TIF_specific|rankplot_|TIF_detected_not_in_Serum|TIF_up_not_detected|TIF_specific_vs_Serum\\.xlsx",
+    full.names = TRUE
+  ))
   if (is.null(tif_res) || is.null(serum_res)) {
     writeLines("need both TIF and Serum T vs N results", file.path(outdir, "SKIPPED.txt"))
     return(invisible(NULL))
