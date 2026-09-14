@@ -22,7 +22,7 @@ alwaysApply: true
 
 1. TIF `T vs N`：差异蛋白表、火山图、上调 GO、上调 KEGG
 2. 血清 `T vs N`：同上
-3. TIF T vs N **有**、血清 T vs N **无** 的蛋白，并画热图
+3. TIF T vs N **上调**、血清 T vs N **不上调** 的蛋白，并画热图
 
 脚本：`Protein_TIF_Serum_pipeline.R`
 
@@ -32,11 +32,12 @@ alwaysApply: true
 2. 过滤多数样品缺失的蛋白
 3. 血清 3 vs 3 用 limma 估 p；TIF 无重复则不伪造 p，按 FC 排名
 4. 能估 p 时先 **p < 0.01**，再取上调；GO/KEGG 只用上调蛋白 ORA（`GO/`、`KEGG/`，文件名 `ORA_`）
-5. TIF 特有：按基因符号对齐；TIF 上调且血清不上调（或血清未检出）；热图用 TIF 的 T vs N 样品，另出一张 TIF vs 血清对照（血清未检出为灰色）
+5. TIF 特有：按基因符号对齐；必须是 TIF T vs N **上调** 且血清 T vs N **不上调**（不是“检出/未检出”）；热图只用这一批蛋白，TIF 的 T vs N 样品一张，TIF vs 血清对照一张（未检出为灰色）
 
 ```r
 # ❌ BAD: 把 T6 并进 T；用 pr_matrix 做蛋白 DE；GO 用上调+下调
 # ❌ BAD: TIF 与血清混样本后算 FC；无重复却伪造 p
 # ✅ GOOD: 两套 pg_matrix 分开标准化；T vs N 不含 T6；只对上调做 GO/KEGG
-# ✅ GOOD: 第3条出 TIF 特有蛋白热图，不要用混样本去重新算 FC
+# ❌ BAD: 第3条用“TIF 检出、血清未检出”代替上调差集；热图混入血清上调蛋白
+# ✅ GOOD: 第3条热图 = TIF 上调 − 血清上调；不要用混样本去重新算 FC
 ```

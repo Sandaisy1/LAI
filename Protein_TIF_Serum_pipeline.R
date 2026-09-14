@@ -5,7 +5,7 @@
 # 分析：
 #   1) 组织间质液 T vs N：差异蛋白、火山图、上调 GO、上调 KEGG
 #   2) 血清 T vs N：同上
-#   3) TIF T vs N 有、血清 T vs N 无的蛋白，并绘制热图
+#   3) TIF T vs N 上调、血清 T vs N 不上调的蛋白，并绘制热图
 # T6 不并入 T vs N；TIF 与血清分开标准化，不混样本。
 # 在 R 控制台运行：
 #   setwd("E:/R/Protein TIF serum")
@@ -1055,7 +1055,7 @@ analyze_tn <- function(norm, comp_name) {
 }
 
 # -----------------------------------------------------------------------------
-# 8. TIF 有、血清无
+# 8. TIF 上调有、血清上调无
 # -----------------------------------------------------------------------------
 tif_specific_proteins <- function(tif_res, serum_res) {
   outdir <- file.path(result_dir, "TIF_specific_vs_Serum")
@@ -1065,15 +1065,14 @@ tif_specific_proteins <- function(tif_res, serum_res) {
     return(invisible(NULL))
   }
 
-  tif_de <- tif_res$de
-  serum_de <- serum_res$de
   tif_up <- tif_res$up
   serum_up <- serum_res$up
+  serum_de <- serum_res$de
 
-  serum_keys <- unique(c(serum_de$gene_key, serum_de$gene, serum_de$uniprot))
-  serum_keys <- serum_keys[!is.na(serum_keys) & nzchar(serum_keys)]
   serum_up_keys <- unique(c(serum_up$gene_key, serum_up$gene, serum_up$uniprot))
   serum_up_keys <- serum_up_keys[!is.na(serum_up_keys) & nzchar(serum_up_keys)]
+  serum_detected_keys <- unique(c(serum_de$gene_key, serum_de$gene, serum_de$uniprot))
+  serum_detected_keys <- serum_detected_keys[!is.na(serum_detected_keys) & nzchar(serum_detected_keys)]
 
   key_match <- function(df, pool) {
     if (nrow(df) == 0) return(logical(0))
@@ -1082,63 +1081,51 @@ tif_specific_proteins <- function(tif_res, serum_res) {
     })
   }
 
-  tif_up_not_serum_up <- tif_up[!key_match(tif_up, serum_up_keys), , drop = FALSE]
-  tif_up_not_serum_detected <- tif_up[!key_match(tif_up, serum_keys), , drop = FALSE]
-  tif_detected_not_serum <- tif_de[!key_match(tif_de, serum_keys), , drop = FALSE]
-
+  in_serum_up <- key_match(tif_up, serum_up_keys)
+  tif_up_not_serum_up <- tif_up[!in_serum_up, , drop = FALSE]
+  tif_and_serum_up <- tif_up[in_serum_up, , drop = FALSE]
   if (nrow(tif_up_not_serum_up) > 0) {
     tif_up_not_serum_up <- tif_up_not_serum_up[order(tif_up_not_serum_up$log2FC, decreasing = TRUE), ]
     tif_up_not_serum_up$rank <- seq_len(nrow(tif_up_not_serum_up))
+    tif_up_not_serum_up$detected_in_serum <- key_match(tif_up_not_serum_up, serum_detected_keys)
   }
 
   utils::write.csv(tif_up_not_serum_up, file.path(outdir, "TIF_up_not_in_Serum_up.csv"), row.names = FALSE)
-  utils::write.csv(tif_up_not_serum_detected, file.path(outdir, "TIF_up_not_detected_in_Serum.csv"), row.names = FALSE)
-  utils::write.csv(tif_detected_not_serum, file.path(outdir, "TIF_detected_not_in_Serum.csv"), row.names = FALSE)
+  utils::write.csv(tif_and_serum_up, file.path(outdir, "TIF_up_AND_Serum_up_excluded.csv"), row.names = FALSE)
   tryCatch(writexl::write_xlsx(
     list(
       TIF_up_not_Serum_up = tif_up_not_serum_up,
-      TIF_up_not_detected_in_Serum = tif_up_not_serum_detected,
-      TIF_detected_not_in_Serum = tif_detected_not_serum
+      both_up_excluded = tif_and_serum_up
     ),
-    file.path(outdir, "TIF_specific_vs_Serum.xlsx")
+    file.path(outdir, "TIF_up_not_in_Serum_up.xlsx")
   ), error = function(e) log_msg("TIF-specific xlsx failed: ", e$message))
 
   writeLines(
-    c("TIF-specific definition:",
-      "1) TIF_up_not_in_Serum_up: TIF T vs N upregulated, gene not upregulated in Serum T vs N (main heatmap).",
-      "2) TIF_up_not_detected_in_Serum: TIF upregulated and gene not quantified in Serum T vs N matrix.",
-      "3) TIF_detected_not_in_Serum: quantified in TIF T/N but not in Serum T/N.",
-      "Heatmaps: heatmap_*_TIF_samples (TIF T vs N only); heatmap_*_TIF_vs_Serum (grey = missing in that assay)."),
+    c("Definition (item 3):",
+      "Proteins upregulated in TIF T vs N, and NOT upregulated in Serum T vs N.",
+      paste("TIF upregulated:", nrow(tif_up)),
+      paste("Serum upregulated:", nrow(serum_up)),
+      paste("Both upregulated (excluded from heatmap):", nrow(tif_and_serum_up)),
+      paste("TIF up only (heatmap):", nrow(tif_up_not_serum_up)),
+      "Heatmaps: heatmap_TIF_up_not_Serum_up_TIF_samples (TIF T/N);",
+      "          heatmap_TIF_up_not_Serum_up_TIF_vs_Serum (grey = not detected in that assay)."),
     file.path(outdir, "00_README.txt")
   )
 
-  hm_df <- tif_up_not_serum_up
-  hm_title <- "TIF-specific proteins (in TIF T vs N, not in Serum T vs N)"
-  if (nrow(hm_df) < 2 && nrow(tif_detected_not_serum) >= 2) {
-    hm_df <- tif_detected_not_serum
-    hm_title <- "TIF-detected proteins absent from Serum T vs N"
-  }
+  hm_title <- "TIF T vs N upregulated, not in Serum T vs N upregulated"
   tryCatch(
-    plot_tif_specific_heatmap(tif_res, serum_res, hm_df, outdir, "TIF_specific", hm_title),
+    plot_tif_specific_heatmap(
+      tif_res, serum_res, tif_up_not_serum_up, outdir,
+      "TIF_up_not_Serum_up", hm_title
+    ),
     error = function(e) {
       while (grDevices::dev.cur() > 1) grDevices::dev.off()
       log_msg("TIF-specific heatmap failed: ", e$message)
     }
   )
-  plot_rank(
-    tif_up_not_serum_up,
-    "TIF-specific upregulated proteins (not upregulated in Serum T vs N)",
-    file.path(outdir, "rankplot_TIF_specific_up")
-  )
-  if (nrow(tif_up_not_serum_up) == 0 && nrow(tif_detected_not_serum) > 0) {
-    plot_rank(
-      tif_detected_not_serum,
-      "TIF-detected proteins absent from Serum T vs N",
-      file.path(outdir, "rankplot_TIF_detected_not_in_Serum")
-    )
-  }
-  log_msg("TIF-specific upregulated (not Serum up): ", nrow(tif_up_not_serum_up))
-  log_msg("TIF upregulated not detected in Serum: ", nrow(tif_up_not_serum_detected))
+  log_msg("TIF upregulated: ", nrow(tif_up),
+          " | Serum upregulated: ", nrow(serum_up),
+          " | TIF up not Serum up (heatmap): ", nrow(tif_up_not_serum_up))
 }
 
 # -----------------------------------------------------------------------------

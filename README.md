@@ -109,7 +109,7 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 1. TIF `T vs N`：差异蛋白、火山图、上调 GO、上调 KEGG
 2. 血清 `T vs N`：同上
-3. TIF T vs N 有、血清 T vs N 无的蛋白，并画热图
+3. TIF T vs N **上调**、血清 T vs N **不上调** 的蛋白，并画热图
 
 **在 R / RStudio 控制台运行**（不要输入 `Rscript`，那是 Windows 命令）：
 
@@ -137,6 +137,6 @@ results_protein/
   TIF_specific_vs_Serum/
 ```
 
-第 3 组热图在 `TIF_specific_vs_Serum/heatmap_TIF_specific_TIF_samples`（只用 TIF 的 T、N）和 `heatmap_TIF_specific_TIF_vs_Serum`（灰色表示该蛋白在该样品未检出）。
+第 3 组只比较两组**上调蛋白**：`TIF_up − Serum_up`。热图在 `TIF_specific_vs_Serum/heatmap_TIF_up_not_Serum_up_TIF_samples`（TIF 的 T、N）和 `heatmap_TIF_up_not_Serum_up_TIF_vs_Serum`（灰色表示该蛋白在该样品未检出）。两边都上调的蛋白写在 `TIF_up_AND_Serum_up_excluded.csv`，不进热图。
 
 列名识别失败时，可在数据目录放 `sample_map.csv`（列：`file,assay,group,replicate`），`file` 匹配原始列名即可。样本名会先匹配 `T6` 再匹配 `T`，避免把 `T6` 当成 `T`。
