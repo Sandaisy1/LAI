@@ -1,0 +1,43 @@
+---
+description: TIF/血清蛋白质组 T vs N（火山图、上调 GO/KEGG、TIF 特有蛋白热图）
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# TIF / 血清蛋白质组：T vs N
+
+写或改蛋白质组 R 分析时必须按本规则。输入是 DIA-NN `*_report.pg_matrix`，不是 Excel，不要用 `*.pr_matrix` 做蛋白水平差异分析。不要套用 RNA-seq 的 Cuffdiff / 六组比较流程。
+
+## 数据
+
+- 目录：`E:/R/Protein TIF serum`（脚本与结果同目录；缺失则回退仓库根）
+- 组织间质液：`TIF_report.pg_matrix` 或 `TIF_report.pg_matrix.tsv`，组别 `N`、`T`、`T6`
+- 血清：`Serum_report.pg_matrix` 或 `Serum_report.pg_matrix.tsv`，`N`=`N1,N3,N7`，`T`=`T1,T3,T5`，`T6`=`T6-1,T6-2,T6-3`
+- 样本名**先匹配 T6，再匹配 T**，避免 `T6` 被当成 `T`；`TIF` 文件名前缀不能当成组别 T
+- 物种：人 `org.Hs.eg.db`；`Genes` 可能是 `SAA2;SAA4`，清洗为一个官方符号
+
+## 只做三组分析（各自目录）
+
+禁止把 TIF 与血清拼成一张矩阵，禁止把 `T6` 并进 T vs N。
+
+1. TIF `T vs N`：差异蛋白表、火山图、上调 GO、上调 KEGG
+2. 血清 `T vs N`：同上
+3. 先取 TIF T vs N **上调蛋白**，再去掉也出现在血清 T vs N **上调名单**里的蛋白；热图只画剩下这些蛋白在 **TIF 的 T、N 样品**上，不要画到血清样品上
+
+脚本：`Protein_TIF_Serum_pipeline.R`
+
+## 预处理与显著性
+
+1. 强度 `0` 当缺失；log2 后按样品中位数标准化，再用标准化值算 FC
+2. 过滤多数样品缺失的蛋白
+3. 血清 3 vs 3 用 limma 估 p；TIF 无重复则不伪造 p，按 FC 排名
+4. 能估 p 时先 **p < 0.01**，再取上调；GO/KEGG 只用上调蛋白 ORA（`GO/`、`KEGG/`，文件名 `ORA_`）
+5. 第3条：热图蛋白 = TIF 上调名单 − 血清上调名单（按基因符号/UniProt 对齐）。只画 TIF 的 T vs N 样品；禁止把这批蛋白画到血清热图上（“不存在于血清上调”不是“血清未检出”）
+
+```r
+# ❌ BAD: 把 T6 并进 T；用 pr_matrix 做蛋白 DE；GO 用上调+下调
+# ❌ BAD: TIF 与血清混样本后算 FC；无重复却伪造 p
+# ✅ GOOD: 两套 pg_matrix 分开标准化；T vs N 不含 T6；只对上调做 GO/KEGG
+# ❌ BAD: 第3条热图带上血清样品，或用“血清未检出”代替“不在血清上调名单”
+# ✅ GOOD: 第3条热图 = TIF 上调 − 血清上调，只画 TIF 的 T、N
+```

@@ -97,3 +97,46 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+# TIF / 血清蛋白质组（T vs N）
+
+数据在 `E:/R/Protein TIF serum`，输入是 DIA-NN 蛋白矩阵（不要用 `*.pr_matrix` 做蛋白水平差异）。Windows 资源管理器常把后缀藏起来，文件类型若是「TSV 文件」，实际名字是 `TIF_report.pg_matrix.tsv` / `Serum_report.pg_matrix.tsv`，脚本两种都认：
+
+- `TIF_report.pg_matrix`：组织间质液，组别 `N`、`T`、`T6`
+- `Serum_report.pg_matrix`：血清，`N`=`N1,N3,N7`，`T`=`T1,T3,T5`，`T6`=`T6-1,T6-2,T6-3`
+
+只做三件事，**T6 不进入 T vs N**，TIF 与血清分开标准化：
+
+1. TIF `T vs N`：差异蛋白、火山图、上调 GO、上调 KEGG
+2. 血清 `T vs N`：同上
+3. 先找 TIF T vs N **上调**蛋白，再去掉也在血清 T vs N **上调名单**里的蛋白，只对剩下的蛋白画 **TIF T/N 热图**
+
+**在 R / RStudio 控制台运行**（不要输入 `Rscript`，那是 Windows 命令）：
+
+```r
+setwd("E:/R/Protein TIF serum")
+source("Protein_TIF_Serum_pipeline.R")
+```
+
+先把 `Protein_TIF_Serum_pipeline.R` 拷到 `E:/R/Protein TIF serum`。
+
+若在 **Windows 命令提示符** 或 PowerShell 里运行，才用：
+
+```bat
+Rscript run_protein_tif_serum.R "E:/R/Protein TIF serum"
+```
+
+没有真实矩阵时，仓库里的 `demo_protein_tif_serum/` 可先跑通流程（演示数据，不是实验结果）。
+
+结果在 `results_protein/`：
+
+```
+results_protein/
+  TIF_T_vs_N/
+  Serum_T_vs_N/
+  TIF_specific_vs_Serum/
+```
+
+第 3 组：`TIF 上调名单 − 血清上调名单`。热图 `TIF_specific_vs_Serum/heatmap_TIF_up_absent_from_Serum_up` 只用 TIF 的 T、N，不把这些蛋白画到血清样品上。两边都上调的蛋白在 `TIF_up_AND_Serum_up_excluded.csv`。
+
+列名识别失败时，可在数据目录放 `sample_map.csv`（列：`file,assay,group,replicate`），`file` 匹配原始列名即可。样本名会先匹配 `T6` 再匹配 `T`，避免把 `T6` 当成 `T`。
