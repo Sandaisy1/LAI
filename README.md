@@ -109,7 +109,7 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 1. TIF `T vs N`：差异蛋白、火山图、上调 GO、上调 KEGG
 2. 血清 `T vs N`：同上
-3. TIF T vs N 有、血清 T vs N 无的蛋白，并画排名图
+3. TIF T vs N 有、血清 T vs N 无的蛋白，并画热图
 
 ```r
 setwd("E:/R/Protein TIF serum")
@@ -132,5 +132,7 @@ results_protein/
   Serum_T_vs_N/
   TIF_specific_vs_Serum/
 ```
+
+第 3 组热图在 `TIF_specific_vs_Serum/heatmap_TIF_specific_TIF_samples`（只用 TIF 的 T、N）和 `heatmap_TIF_specific_TIF_vs_Serum`（灰色表示该蛋白在该样品未检出）。
 
 列名识别失败时，可在数据目录放 `sample_map.csv`（列：`file,assay,group,replicate`），`file` 匹配原始列名即可。样本名会先匹配 `T6` 再匹配 `T`，避免把 `T6` 当成 `T`。

@@ -523,33 +523,158 @@ plot_volcano <- function(de, highlight, title, outfile) {
 plot_heatmap <- function(de, up, title, outfile) {
   mat <- attr(de, "log_mat")
   si <- attr(de, "sample_info")
-  genes <- intersect(up$protein, rownames(mat))
-  if (length(genes) > 200) genes <- genes[seq_len(200)]
-  if (length(genes) < 2) {
-    log_msg("Heatmap skipped (<2 proteins): ", title)
+  if (is.null(mat) || is.null(si) || nrow(up) == 0) {
+    log_msg("Heatmap skipped (empty): ", title)
     return(invisible(NULL))
   }
-  sub <- mat[genes, , drop = FALSE]
-  rownames(sub) <- de$gene_key[match(rownames(sub), de$protein)]
-  ann <- data.frame(Group = si$group, row.names = si$sample)
+  plot_heatmap_matrix(
+    mat, si, up$protein, up$gene_key, title, outfile,
+    scale_rows = TRUE, cluster_cols = FALSE
+  )
+}
+
+plot_heatmap_matrix <- function(mat, sample_info, proteins, labels, title, outfile,
+                                scale_rows = TRUE, cluster_cols = FALSE,
+                                extra_ann = NULL, na_col = "grey85",
+                                fixed_col_order = FALSE, gaps_col = NULL) {
+  proteins <- as.character(proteins)
+  labels <- as.character(labels)
+  keep_idx <- which(proteins %in% rownames(mat))
+  if (length(keep_idx) < 2) {
+    log_msg("Heatmap skipped (<2 proteins): ", title)
+    note_empty(outfile, "fewer than 2 proteins for heatmap")
+    return(invisible(NULL))
+  }
+  if (length(keep_idx) > 200) keep_idx <- keep_idx[seq_len(200)]
+  sub <- mat[proteins[keep_idx], , drop = FALSE]
+  rn <- labels[keep_idx]
+  rn[is.na(rn) | !nzchar(rn)] <- proteins[keep_idx][is.na(rn) | !nzchar(rn)]
+  rownames(sub) <- make.unique(rn)
+  sample_info <- sample_info[match(colnames(sub), sample_info$sample), , drop = FALSE]
+  assay_col <- intersect(c("assay", "Assay"), names(sample_info))[1]
+  if (!isTRUE(fixed_col_order)) {
+    if (!is.na(assay_col) && length(assay_col) == 1) {
+      ord <- order(
+        factor(sample_info[[assay_col]], levels = c("TIF", "Serum")),
+        factor(sample_info$group, levels = c("N", "T", "T6")),
+        sample_info$sample
+      )
+      sub <- sub[, ord, drop = FALSE]
+      sample_info <- sample_info[ord, , drop = FALSE]
+    } else if ("group" %in% names(sample_info)) {
+      ord <- order(factor(sample_info$group, levels = c("N", "T", "T6")), sample_info$sample)
+      sub <- sub[, ord, drop = FALSE]
+      sample_info <- sample_info[ord, , drop = FALSE]
+    }
+  }
+  ann <- data.frame(Group = sample_info$group, row.names = sample_info$sample)
+  if (!is.null(extra_ann)) {
+    extra_ann <- extra_ann[match(colnames(sub), rownames(extra_ann)), , drop = FALSE]
+    ann <- cbind(ann, extra_ann)
+  }
   pal <- c(N = "#4C78A8", T = "#E45756", T6 = "#54A24B")
+  ann_colors <- list(Group = pal[names(pal) %in% unique(ann$Group)])
+  if ("Assay" %in% names(ann)) {
+    ann_colors$Assay <- c(TIF = "#8C564B", Serum = "#17BECF")
+  }
+  if (isTRUE(scale_rows)) {
+    ok <- rowSums(is.finite(sub)) >= 2
+    if (sum(ok) < 2) {
+      log_msg("Heatmap skipped (too many missing): ", title)
+      return(invisible(NULL))
+    }
+    sub <- sub[ok, , drop = FALSE]
+  }
   draw_hm <- function() {
-    pheatmap::pheatmap(
-      sub, scale = "row", annotation_col = ann,
-      annotation_colors = list(Group = pal[names(pal) %in% unique(ann$Group)]),
+    args <- list(
+      mat = sub, scale = if (isTRUE(scale_rows)) "row" else "none",
+      annotation_col = ann, annotation_colors = ann_colors,
+      cluster_cols = cluster_cols, cluster_rows = TRUE,
       show_rownames = nrow(sub) <= 80, fontsize_row = 6, main = title,
-      color = colorRampPalette(rev(RColorBrewer::brewer.pal(9, "RdBu")))(100)
+      color = colorRampPalette(rev(RColorBrewer::brewer.pal(9, "RdBu")))(100),
+      na_col = na_col, border_color = NA, gaps_col = gaps_col, angle_col = 45
+    )
+    tryCatch(
+      do.call(pheatmap::pheatmap, args),
+      error = function(e) {
+        args$cluster_rows <- FALSE
+        do.call(pheatmap::pheatmap, args)
+      }
     )
   }
-  grDevices::pdf(paste0(outfile, ".pdf"), width = 8, height = max(6, min(18, 0.18 * nrow(sub) + 3)))
+  grDevices::pdf(paste0(outfile, ".pdf"), width = max(8, 1.1 * ncol(sub) + 4),
+                 height = max(6, min(18, 0.18 * nrow(sub) + 3)))
   on.exit({
     while (grDevices::dev.cur() > 1) grDevices::dev.off()
   }, add = TRUE)
   tryCatch(draw_hm(), error = function(e) log_msg("heatmap pdf failed: ", e$message))
   grDevices::dev.off()
-  grDevices::png(paste0(outfile, ".png"), width = 2400, height = max(1800, 40 * nrow(sub) + 400), res = 300)
+  grDevices::png(paste0(outfile, ".png"), width = max(2400, 80 * ncol(sub) + 800),
+                 height = max(1800, 40 * nrow(sub) + 400), res = 300)
   tryCatch(draw_hm(), error = function(e) log_msg("heatmap png failed: ", e$message))
   grDevices::dev.off()
+}
+
+plot_tif_specific_heatmap <- function(tif_res, serum_res, prot_df, outdir, tag, title) {
+  if (is.null(prot_df) || nrow(prot_df) < 2) {
+    note_empty(file.path(outdir, paste0("heatmap_", tag)), "fewer than 2 TIF-specific proteins")
+    return(invisible(NULL))
+  }
+  tif_mat <- attr(tif_res$de, "log_mat")
+  tif_si <- attr(tif_res$de, "sample_info")
+  plot_heatmap_matrix(
+    tif_mat, tif_si, prot_df$protein, prot_df$gene_key,
+    paste(title, "| TIF T vs N samples"),
+    file.path(outdir, paste0("heatmap_", tag, "_TIF_samples")),
+    scale_rows = TRUE, cluster_cols = FALSE
+  )
+
+  serum_mat <- attr(serum_res$de, "log_mat")
+  serum_si <- attr(serum_res$de, "sample_info")
+  tif_keys <- prot_df$gene_key
+  serum_idx <- match(tif_keys, serum_res$de$gene_key)
+  if (all(is.na(serum_idx))) {
+    serum_idx <- match(prot_df$gene, serum_res$de$gene)
+  }
+  if (all(is.na(serum_idx))) {
+    serum_idx <- match(prot_df$uniprot, serum_res$de$uniprot)
+  }
+  combined <- matrix(NA_real_, nrow = nrow(prot_df), ncol = ncol(tif_mat) + ncol(serum_mat))
+  colnames(combined) <- c(colnames(tif_mat), colnames(serum_mat))
+  rownames(combined) <- make.unique(as.character(prot_df$protein))
+  combined[, colnames(tif_mat)] <- tif_mat[prot_df$protein, , drop = FALSE]
+  hit <- !is.na(serum_idx)
+  if (any(hit)) {
+    combined[hit, colnames(serum_mat)] <- as.matrix(serum_mat[serum_res$de$protein[serum_idx[hit]], , drop = FALSE])
+  }
+  si_c <- rbind(
+    data.frame(sample = tif_si$sample, group = tif_si$group, assay = "TIF", stringsAsFactors = FALSE),
+    data.frame(sample = serum_si$sample, group = serum_si$group, assay = "Serum", stringsAsFactors = FALSE)
+  )
+  extra <- data.frame(Assay = si_c$assay, row.names = si_c$sample)
+  # z-score within each assay so TIF/serum are not mixed on one scale
+  for (assay_nm in c("TIF", "Serum")) {
+    cols <- si_c$sample[si_c$assay == assay_nm]
+    block <- combined[, cols, drop = FALSE]
+    zs <- t(scale(t(block)))
+    zs[!is.finite(zs)] <- NA_real_
+    combined[, cols] <- zs
+  }
+  col_order <- c(
+    tif_si$sample[order(factor(tif_si$group, levels = c("N", "T")), tif_si$sample)],
+    serum_si$sample[order(factor(serum_si$group, levels = c("N", "T")), serum_si$sample)]
+  )
+  col_order <- col_order[col_order %in% colnames(combined)]
+  combined <- combined[, col_order, drop = FALSE]
+  si_c <- si_c[match(col_order, si_c$sample), , drop = FALSE]
+  extra <- extra[col_order, , drop = FALSE]
+  plot_heatmap_matrix(
+    combined, si_c, rownames(combined), prot_df$gene_key,
+    paste(title, "| TIF vs Serum (grey = not detected in that assay)"),
+    file.path(outdir, paste0("heatmap_", tag, "_TIF_vs_Serum")),
+    scale_rows = FALSE, cluster_cols = FALSE, extra_ann = extra, na_col = "grey85",
+    fixed_col_order = TRUE, gaps_col = sum(si_c$assay == "TIF")
+  )
 }
 
 plot_rank <- function(df, title, outfile, n = rank_plot_n) {
@@ -977,12 +1102,26 @@ tif_specific_proteins <- function(tif_res, serum_res) {
 
   writeLines(
     c("TIF-specific definition:",
-      "1) TIF_up_not_in_Serum_up: TIF T vs N upregulated, gene not upregulated in Serum T vs N (main ranking plot).",
+      "1) TIF_up_not_in_Serum_up: TIF T vs N upregulated, gene not upregulated in Serum T vs N (main heatmap).",
       "2) TIF_up_not_detected_in_Serum: TIF upregulated and gene not quantified in Serum T vs N matrix.",
-      "3) TIF_detected_not_in_Serum: quantified in TIF T/N but not in Serum T/N."),
+      "3) TIF_detected_not_in_Serum: quantified in TIF T/N but not in Serum T/N.",
+      "Heatmaps: heatmap_*_TIF_samples (TIF T vs N only); heatmap_*_TIF_vs_Serum (grey = missing in that assay)."),
     file.path(outdir, "00_README.txt")
   )
 
+  hm_df <- tif_up_not_serum_up
+  hm_title <- "TIF-specific proteins (in TIF T vs N, not in Serum T vs N)"
+  if (nrow(hm_df) < 2 && nrow(tif_detected_not_serum) >= 2) {
+    hm_df <- tif_detected_not_serum
+    hm_title <- "TIF-detected proteins absent from Serum T vs N"
+  }
+  tryCatch(
+    plot_tif_specific_heatmap(tif_res, serum_res, hm_df, outdir, "TIF_specific", hm_title),
+    error = function(e) {
+      while (grDevices::dev.cur() > 1) grDevices::dev.off()
+      log_msg("TIF-specific heatmap failed: ", e$message)
+    }
+  )
   plot_rank(
     tif_up_not_serum_up,
     "TIF-specific upregulated proteins (not upregulated in Serum T vs N)",
