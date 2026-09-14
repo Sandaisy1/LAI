@@ -100,7 +100,7 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 # TIF / 血清蛋白质组（T vs N）
 
-数据在 `E:/R/Protein TIF serum`，输入是 DIA-NN 蛋白矩阵（不要用 `*.pr_matrix` 做蛋白水平差异）：
+数据在 `E:/R/Protein TIF serum`，输入是 DIA-NN 蛋白矩阵（不要用 `*.pr_matrix` 做蛋白水平差异）。Windows 资源管理器常把后缀藏起来，文件类型若是「TSV 文件」，实际名字是 `TIF_report.pg_matrix.tsv` / `Serum_report.pg_matrix.tsv`，脚本两种都认：
 
 - `TIF_report.pg_matrix`：组织间质液，组别 `N`、`T`、`T6`
 - `Serum_report.pg_matrix`：血清，`N`=`N1,N3,N7`，`T`=`T1,T3,T5`，`T6`=`T6-1,T6-2,T6-3`

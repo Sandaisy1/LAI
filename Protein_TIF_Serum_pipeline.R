@@ -91,6 +91,35 @@ script_dir <- local({
   normalizePath(getwd(), winslash = "/", mustWork = FALSE)
 })
 
+find_pg_matrix <- function(dir, assay = c("TIF", "Serum")) {
+  assay <- toupper(match.arg(assay))
+  if (!dir.exists(dir)) return(NA_character_)
+  stems <- c(
+    paste0(assay, "_report.pg_matrix"),
+    paste0(tolower(assay), "_report.pg_matrix"),
+    paste0(assay, ".pg_matrix")
+  )
+  exts <- c("", ".tsv", ".txt", ".csv")
+  for (stem in stems) {
+    for (ext in exts) {
+      p <- file.path(dir, paste0(stem, ext))
+      if (file.exists(p) && !grepl("pr[_\\.]?matrix", basename(p), ignore.case = TRUE)) {
+        return(normalizePath(p, winslash = "/", mustWork = FALSE))
+      }
+    }
+  }
+  files <- list.files(dir, full.names = TRUE, ignore.case = TRUE)
+  if (length(files) == 0) return(NA_character_)
+  bn <- basename(files)
+  hit <- grepl("pg([._])?matrix", bn, ignore.case = TRUE) &
+    !grepl("pr([._])?matrix", bn, ignore.case = TRUE) &
+    grepl(assay, bn, ignore.case = TRUE)
+  if (!any(hit)) return(NA_character_)
+  prefer <- hit & grepl("report", bn, ignore.case = TRUE)
+  pick <- if (any(prefer)) which(prefer)[1] else which(hit)[1]
+  normalizePath(files[pick], winslash = "/", mustWork = FALSE)
+}
+
 resolve_project_dir <- function() {
   env_dir <- Sys.getenv("PROTEIN_TIF_SERUM_DIR", unset = "")
   candidates <- c(
@@ -103,16 +132,16 @@ resolve_project_dir <- function() {
     file.path(getwd(), "demo_protein_tif_serum")
   )
   candidates <- unique(candidates[nzchar(candidates)])
-  needed <- c("TIF_report.pg_matrix", "Serum_report.pg_matrix")
-  for (d in candidates) {
-    if (dir.exists(d) && all(file.exists(file.path(d, needed)))) {
-      return(normalizePath(d, winslash = "/", mustWork = FALSE))
-    }
+  score_dir <- function(d) {
+    if (!dir.exists(d)) return(0L)
+    as.integer(!is.na(find_pg_matrix(d, "TIF"))) + as.integer(!is.na(find_pg_matrix(d, "Serum")))
   }
-  for (d in candidates) {
-    if (dir.exists(d) && any(file.exists(file.path(d, needed)))) {
-      return(normalizePath(d, winslash = "/", mustWork = FALSE))
-    }
+  scores <- vapply(candidates, score_dir, integer(1))
+  if (any(scores == 2L)) {
+    return(normalizePath(candidates[which(scores == 2L)[1]], winslash = "/", mustWork = FALSE))
+  }
+  if (any(scores == 1L)) {
+    return(normalizePath(candidates[which(scores == 1L)[1]], winslash = "/", mustWork = FALSE))
   }
   normalizePath(getwd(), winslash = "/", mustWork = FALSE)
 }
@@ -1137,10 +1166,27 @@ tif_specific_proteins <- function(tif_res, serum_res) {
 # 9. 主流程
 # -----------------------------------------------------------------------------
 log_msg("Project dir: ", project_dir)
-tif_path <- file.path(project_dir, "TIF_report.pg_matrix")
-serum_path <- file.path(project_dir, "Serum_report.pg_matrix")
-if (!file.exists(tif_path)) stop("缺少 TIF_report.pg_matrix: ", tif_path)
-if (!file.exists(serum_path)) stop("缺少 Serum_report.pg_matrix: ", serum_path)
+tif_path <- find_pg_matrix(project_dir, "TIF")
+serum_path <- find_pg_matrix(project_dir, "Serum")
+listed <- paste(list.files(project_dir), collapse = ", ")
+if (is.na(tif_path) || !file.exists(tif_path)) {
+  stop(
+    "找不到 TIF 蛋白矩阵 (pg_matrix)。已查目录: ", project_dir, "\n",
+    "当前文件: ", listed, "\n",
+    "资源管理器若显示“TSV 文件”，实际文件名往往是 TIF_report.pg_matrix.tsv ，脚本现已支持该后缀。",
+    call. = FALSE
+  )
+}
+if (is.na(serum_path) || !file.exists(serum_path)) {
+  stop(
+    "找不到 Serum 蛋白矩阵 (pg_matrix)。已查目录: ", project_dir, "\n",
+    "当前文件: ", listed, "\n",
+    "资源管理器若显示“TSV 文件”，实际文件名往往是 Serum_report.pg_matrix.tsv 。",
+    call. = FALSE
+  )
+}
+log_msg("TIF matrix: ", tif_path)
+log_msg("Serum matrix: ", serum_path)
 
 tif_raw <- read_pg_matrix(tif_path, "TIF")
 serum_raw <- read_pg_matrix(serum_path, "Serum")
