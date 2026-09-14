@@ -111,12 +111,16 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 2. 血清 `T vs N`：同上
 3. TIF T vs N 有、血清 T vs N 无的蛋白，并画热图
 
+**在 R / RStudio 控制台运行**（不要输入 `Rscript`，那是 Windows 命令）：
+
 ```r
 setwd("E:/R/Protein TIF serum")
 source("Protein_TIF_Serum_pipeline.R")
 ```
 
-或在命令行一键运行（把流程脚本拷到数据目录，或直接指定路径）：
+先把 `Protein_TIF_Serum_pipeline.R` 拷到 `E:/R/Protein TIF serum`。
+
+若在 **Windows 命令提示符** 或 PowerShell 里运行，才用：
 
 ```bat
 Rscript run_protein_tif_serum.R "E:/R/Protein TIF serum"
