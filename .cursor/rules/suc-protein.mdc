@@ -1,0 +1,58 @@
+---
+description: SUC 蛋白质组 A–F 类筛选与 GO/KEGG/通路/GSEA 作图（DIA-NN + mitochondria）
+globs: "**/{SUC_protein*,*protein*}*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# SUC-protein：蛋白质组 A–F 类分析
+
+写或改 **SUC 蛋白质组** R 分析时必须按本规则。不要套用 TG BRCA RNA-seq（Cuffdiff）流程。
+
+## 数据
+
+- 目录：`E:/R/SUC-protein`（脚本与结果同目录；缺失则回退仓库根）
+- 首选 DIA-NN `report.pg_matrix`；否则 `report.pr_matrix` 按 Protein.Group 汇总
+- 关注通路：同目录 `mitochondria` 文本（GO ID 或通路名）
+- 16 个样品独立保留，名称 `1`–`16`，禁止合并
+- 物种：人 `org.Hs.eg.db`；`Genes` 可能是 `GENE1;GENE2`，清洗为一个官方符号
+
+## 预处理（16 个样品一起做一次，再分 A–F）
+
+1. 过滤低丰度（多数样品缺失/强度≈0，或行总和过低）
+2. 标准化：log2(强度+伪计数) 后分位数标准化
+3. 不要用未过滤、未标准化的原始值算 FC
+4. 1-vs-1 无法估计 p：不要伪造 p，按 FC/排名分层并写日志
+
+## 六类蛋白（每类单独出表、单独作图）
+
+`X vs Y` 的 FC = 样品X / 样品Y。无变化：`1/1.25 < FC < 1.25`，与上/下调档位独立，不要随 FC 阈值收紧。
+
+1. A：2 vs 1 上调，且 3 vs 4 无变化
+2. B：5 vs 6 下调，且 7 vs 8 无变化
+3. C：9 vs 10 上调，且 11 vs 12 无变化
+4. D：13 vs 14 下调，且 15 vs 16 无变化
+5. E：同一档位下 A ∩ B（不要把 A、B 并成一组再筛选）
+6. F：同一档位下 C ∩ D
+
+脚本：`SUC_protein_pipeline.R`。不要为加蛋白质组而改 `TG_RNAseq_*.R`。
+
+## 两套分层（六类都要跑，阈值一个都不能少）
+
+1. FoldChange：上调 FC ≥ 1 / 1.25 / 1.5 / 2；下调 FC ≤ 1、1/1.25、1/1.5、1/2
+2. 排名：候选池内按效应 FC 取 top 50 / 75 / 100 / 150 / 200 / 250 / 300
+
+目录：`FoldChange/FC_1.5/`、`TopRank/top100/`。文件名和图标题必须带档位与类标签（A–F）。
+
+## 每个非空子集必须出的图
+
+差异蛋白表、火山图、热图、GO、通路富集、KEGG、GSEA。口中的「GWAS」按 **GSEA** 实现（不是 SNP 关联）。
+
+- ORA 放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头（不要写进 GSEA/）
+- GSEA 放 `GSEA/`，文件名以 `GSEA_` 开头；全蛋白 GSEA 只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
+- mitochondria 假说放 `Focused_mitochondria/`；全库表另出 `*_FOCUS_mitochondria.csv`（保留原始 p 与 `genome_wide_rank`），不要为凸显假说去改全库 p 值
+
+```r
+# ❌ BAD: 把样品 1 与 2 当重复；跳过 FC>=1 或 top75；用原始强度算 FC
+# ❌ BAD: 只出 GSEA，或把 ORA 写进 GSEA/；把 mitochondria 条目的全库 p 改小
+# ✅ GOOD: 六类各自目录；每类 × (4 个 FC + 7 个 topN) 都出齐表和图
+```

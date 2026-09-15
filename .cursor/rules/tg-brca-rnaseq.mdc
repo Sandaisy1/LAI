@@ -6,7 +6,7 @@ alwaysApply: true
 
 # TG BRCA RNA-seq：显著性与变化倍数分析
 
-写或改本仓库 R 分析时必须按本规则。输入是 Cuffdiff，不是 Excel。
+写或改 **TG BRCA RNA-seq**（Cuffdiff）时必须按本规则。SUC 蛋白质组见 `suc-protein.mdc`，不要把本规则套到 `E:/R/SUC-protein`。输入是 Cuffdiff，不是 Excel。
 
 ## 数据
 
