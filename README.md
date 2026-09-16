@@ -109,16 +109,25 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 1. TIF `T vs N`：差异蛋白、火山图、上调 GO、上调 KEGG
 2. 血清 `T vs N`：同上
-3. 先找 TIF T vs N **上调**蛋白，再去掉也在血清 T vs N **上调名单**里的蛋白，只对剩下的蛋白画 **TIF T/N 热图**
+3. 先找 TIF T vs N **上调**蛋白，再去掉也在血清 T vs N **上调名单**里的蛋白
 
-**在 R / RStudio 控制台运行**（不要输入 `Rscript`，那是 Windows 命令）：
+有两份**互不 source** 的脚本，拷到数据目录后在 R 控制台运行（不要输入 `Rscript`）：
+
+**热图版**（结果 `results_protein/`）：
 
 ```r
 setwd("E:/R/Protein TIF serum")
 source("Protein_TIF_Serum_pipeline.R")
 ```
 
-先把 `Protein_TIF_Serum_pipeline.R` 拷到 `E:/R/Protein TIF serum`。
+**独立排名图版**（结果 `results_protein_standalone/`，第 3 条画排名图）：
+
+```r
+setwd("E:/R/Protein TIF serum")
+source("Protein_TIF_Serum_TVsN_standalone.R")
+```
+
+独立脚本不读取、不修改 `Protein_TIF_Serum_pipeline.R`。
 
 若在 **Windows 命令提示符** 或 PowerShell 里运行，才用：
 
@@ -128,15 +137,22 @@ Rscript run_protein_tif_serum.R "E:/R/Protein TIF serum"
 
 没有真实矩阵时，仓库里的 `demo_protein_tif_serum/` 可先跑通流程（演示数据，不是实验结果）。
 
-结果在 `results_protein/`：
+结果目录：
 
 ```
-results_protein/
+results_protein/                  # Protein_TIF_Serum_pipeline.R
   TIF_T_vs_N/
   Serum_T_vs_N/
-  TIF_specific_vs_Serum/
+  TIF_specific_vs_Serum/          # 热图
+results_protein_standalone/       # Protein_TIF_Serum_TVsN_standalone.R
+  TIF_T_vs_N/
+  Serum_T_vs_N/
+  TIF_specific_vs_Serum/          # 排名图
 ```
 
-第 3 组：`TIF 上调名单 − 血清上调名单`。热图 `TIF_specific_vs_Serum/heatmap_TIF_up_absent_from_Serum_up` 只用 TIF 的 T、N，不把这些蛋白画到血清样品上。两边都上调的蛋白在 `TIF_up_AND_Serum_up_excluded.csv`。
+第 3 组：`TIF 上调名单 − 血清上调名单`。两边都上调的蛋白在 `TIF_up_AND_Serum_up_excluded.csv`。
+
+- 热图版：`TIF_specific_vs_Serum/heatmap_TIF_up_absent_from_Serum_up` 只用 TIF 的 T、N
+- 独立排名图版：`results_protein_standalone/TIF_specific_vs_Serum/rank_TIF_up_absent_from_Serum_up`（lollipop + rank vs log2FC）
 
 列名识别失败时，可在数据目录放 `sample_map.csv`（列：`file,assay,group,replicate`），`file` 匹配原始列名即可。样本名会先匹配 `T6` 再匹配 `T`，避免把 `T6` 当成 `T`。
