@@ -10,7 +10,7 @@
 # 三件事：
 #   1) 组织间质液 T vs N：差异蛋白、火山图、上调 GO、上调 KEGG
 #   2) 血清 T vs N：同上
-#   3) TIF T vs N 上调名单有、血清 T vs N 上调名单没有的蛋白 → 排名图
+#   3) TIF T vs N 有、血清 T vs N 全表（上调+下调）都没有的蛋白 → 排名图
 #
 # 在 R / RStudio 控制台运行（不要输入 Rscript）：
 #   setwd("E:/R/Protein TIF serum")
@@ -568,57 +568,40 @@ plot_rank <- function(df, title, outfile, n = rank_plot_n) {
   }
   x <- df[order(df$log2FC, decreasing = TRUE), , drop = FALSE]
   x$rank <- seq_len(nrow(x))
+  x$direction <- ifelse(!is.na(x$log2FC) & x$log2FC >= 0, "TIF T > N", "TIF T < N")
   plot_df <- utils::head(x, n)
   plot_df$label <- factor(plot_df$gene_key, levels = rev(unique(plot_df$gene_key)))
-  has_serum_flag <- "in_Serum_DE" %in% names(plot_df)
-  if (has_serum_flag) {
-    plot_df$serum_status <- ifelse(
-      !is.na(plot_df$in_Serum_DE) & plot_df$in_Serum_DE,
-      "in Serum DE, not upregulated",
-      "not in Serum T vs N DE"
+  col_vals <- c("TIF T > N" = "#D62828", "TIF T < N" = "#1D4E89")
+  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = log2FC, y = label, color = direction)) +
+    ggplot2::geom_vline(xintercept = 0, linetype = 2, color = "grey50") +
+    ggplot2::geom_segment(
+      ggplot2::aes(x = 0, xend = log2FC, y = label, yend = label),
+      linewidth = 0.6
+    ) +
+    ggplot2::geom_point(size = 2.6) +
+    ggplot2::scale_color_manual(values = col_vals) +
+    ggplot2::theme_bw(base_size = 12) +
+    ggplot2::labs(
+      title = title,
+      subtitle = paste0("Showing top ", nrow(plot_df), " / ", nrow(x),
+                        " by TIF log2FC; serum T vs N (up or down) absent"),
+      x = "TIF log2 Fold Change (T / N)",
+      y = "Ranked protein (1 = highest TIF FC at top)",
+      color = NULL
     )
-    col_vals <- c(
-      "in Serum DE, not upregulated" = "#F77F00",
-      "not in Serum T vs N DE" = "#D62828"
-    )
-    p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = log2FC, y = label, color = serum_status)) +
-      ggplot2::geom_segment(
-        ggplot2::aes(x = 0, xend = log2FC, y = label, yend = label),
-        linewidth = 0.6
-      ) +
-      ggplot2::geom_point(size = 2.6) +
-      ggplot2::scale_color_manual(values = col_vals) +
-      ggplot2::theme_bw(base_size = 12) +
-      ggplot2::labs(
-        title = title,
-        subtitle = paste0("Showing top ", nrow(plot_df), " / ", nrow(x), " by TIF log2FC"),
-        x = "TIF log2 Fold Change (T / N)",
-        y = "Ranked protein (1 = highest TIF FC at top)",
-        color = NULL
-      )
-  } else {
-    p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = log2FC, y = label)) +
-      ggplot2::geom_segment(ggplot2::aes(x = 0, xend = log2FC, y = label, yend = label), color = "grey70") +
-      ggplot2::geom_point(size = 2.6, color = "#D62828") +
-      ggplot2::theme_bw(base_size = 12) +
-      ggplot2::labs(
-        title = title,
-        subtitle = paste0("Showing top ", nrow(plot_df), " / ", nrow(x), " by TIF log2FC"),
-        x = "TIF log2 Fold Change (T / N)",
-        y = "Ranked protein (1 = highest TIF FC at top)"
-      )
-  }
   save_gg(p, outfile, width = 9, height = max(6, min(18, 0.22 * nrow(plot_df) + 2)))
 
-  p2 <- ggplot2::ggplot(x, ggplot2::aes(x = rank, y = log2FC)) +
+  p2 <- ggplot2::ggplot(x, ggplot2::aes(x = rank, y = log2FC, color = direction)) +
     ggplot2::geom_hline(yintercept = 0, linetype = 2, color = "grey50") +
-    ggplot2::geom_line(color = "#D62828") +
-    ggplot2::geom_point(size = 1.2, color = "#D62828") +
+    ggplot2::geom_line(color = "grey55") +
+    ggplot2::geom_point(size = 1.2) +
+    ggplot2::scale_color_manual(values = col_vals) +
     ggplot2::theme_bw(base_size = 12) +
     ggplot2::labs(
       title = paste(title, "| rank vs log2FC"),
       x = "Rank (1 = highest TIF FC)",
-      y = "TIF log2FC (T / N)"
+      y = "TIF log2FC (T / N)",
+      color = NULL
     )
   save_gg(p2, paste0(outfile, "_rank_vs_log2FC"), width = 8, height = 5)
   invisible(x)
@@ -938,7 +921,7 @@ analyze_tn <- function(norm, comp_name) {
 }
 
 # -----------------------------------------------------------------------------
-# 8. 第3条：TIF T vs N 有、血清 T vs N 无 → 排名图
+# 8. 第3条：TIF T vs N 有、血清 T vs N 全表（上调+下调）无 → 排名图
 # -----------------------------------------------------------------------------
 norm_id <- function(x) {
   x <- toupper(trimws(as.character(x)))
@@ -968,94 +951,70 @@ row_in_pool <- function(df, pool) {
 tif_specific_rank <- function(tif_res, serum_res) {
   outdir <- file.path(result_dir, "TIF_specific_vs_Serum")
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  unlink(list.files(outdir, full.names = TRUE))
   if (is.null(tif_res) || is.null(serum_res)) {
     writeLines("need both TIF and Serum T vs N tables", file.path(outdir, "SKIPPED.txt"))
     return(invisible(NULL))
   }
 
-  tif_up <- tif_res$up
-  serum_up <- serum_res$up
   tif_de <- tif_res$de
   serum_de <- serum_res$de
-
-  serum_up_pool <- protein_id_pool(serum_up)
   serum_de_pool <- protein_id_pool(serum_de)
-
-  in_serum_up <- row_in_pool(tif_up, serum_up_pool)
-  tif_up_not_serum_up <- tif_up[!in_serum_up, , drop = FALSE]
-  tif_and_serum_up <- tif_up[in_serum_up, , drop = FALSE]
-  if (nrow(tif_up_not_serum_up) > 0) {
-    tif_up_not_serum_up <- tif_up_not_serum_up[order(tif_up_not_serum_up$log2FC, decreasing = TRUE), ]
-    tif_up_not_serum_up$rank <- seq_len(nrow(tif_up_not_serum_up))
-    tif_up_not_serum_up$in_Serum_upregulated <- FALSE
-    tif_up_not_serum_up$in_Serum_DE <- row_in_pool(tif_up_not_serum_up, serum_de_pool)
+  in_serum <- row_in_pool(tif_de, serum_de_pool)
+  tif_only <- tif_de[!in_serum, , drop = FALSE]
+  tif_and_serum <- tif_de[in_serum, , drop = FALSE]
+  if (nrow(tif_only) > 0) {
+    tif_only <- tif_only[order(tif_only$log2FC, decreasing = TRUE), ]
+    tif_only$rank <- seq_len(nrow(tif_only))
+    tif_only$in_Serum_T_vs_N <- FALSE
+    tif_only$TIF_direction <- ifelse(tif_only$log2FC >= 0, "TIF_T_gt_N", "TIF_T_lt_N")
+  }
+  if (nrow(tif_and_serum) > 0) {
+    tif_and_serum$in_Serum_T_vs_N <- TRUE
   }
 
-  in_serum_de <- row_in_pool(tif_de, serum_de_pool)
-  tif_de_not_serum_de <- tif_de[!in_serum_de, , drop = FALSE]
-  if (nrow(tif_de_not_serum_de) > 0) {
-    tif_de_not_serum_de <- tif_de_not_serum_de[order(tif_de_not_serum_de$log2FC, decreasing = TRUE), ]
-    tif_de_not_serum_de$rank <- seq_len(nrow(tif_de_not_serum_de))
-  }
-
-  utils::write.csv(tif_up, file.path(outdir, "00_TIF_T_vs_N_upregulated.csv"), row.names = FALSE)
-  utils::write.csv(serum_up, file.path(outdir, "00_Serum_T_vs_N_upregulated.csv"), row.names = FALSE)
-  utils::write.csv(tif_up_not_serum_up, file.path(outdir, "TIF_up_not_in_Serum_up.csv"), row.names = FALSE)
-  utils::write.csv(tif_and_serum_up, file.path(outdir, "TIF_up_AND_Serum_up_excluded.csv"), row.names = FALSE)
-  utils::write.csv(tif_de_not_serum_de, file.path(outdir, "TIF_detected_not_in_Serum_DE.csv"), row.names = FALSE)
+  utils::write.csv(tif_de, file.path(outdir, "00_TIF_T_vs_N_DE.csv"), row.names = FALSE)
+  utils::write.csv(serum_de, file.path(outdir, "00_Serum_T_vs_N_DE.csv"), row.names = FALSE)
+  utils::write.csv(tif_only, file.path(outdir, "TIF_present_not_in_Serum_TN.csv"), row.names = FALSE)
+  utils::write.csv(tif_and_serum, file.path(outdir, "TIF_also_in_Serum_TN_excluded.csv"), row.names = FALSE)
   tryCatch(writexl::write_xlsx(
     list(
-      TIF_up = tif_up,
-      Serum_up = serum_up,
-      TIF_up_not_in_Serum_up = tif_up_not_serum_up,
-      both_up_excluded = tif_and_serum_up,
-      TIF_detected_not_in_Serum_DE = tif_de_not_serum_de
+      TIF_T_vs_N_DE = tif_de,
+      Serum_T_vs_N_DE = serum_de,
+      TIF_present_not_in_Serum_TN = tif_only,
+      overlap_excluded = tif_and_serum
     ),
-    file.path(outdir, "TIF_up_not_in_Serum_up.xlsx")
+    file.path(outdir, "TIF_present_not_in_Serum_TN.xlsx")
   ), error = function(e) log_msg("TIF-specific xlsx failed: ", e$message))
 
   writeLines(
     c("Item 3 (standalone ranking script):",
-      "Main set = TIF T vs N upregulated minus Serum T vs N upregulated",
-      "  (match by gene / UniProt / protein group).",
-      "Ranking plots: rank_TIF_up_absent_from_Serum_up*.",
-      "in_Serum_DE = TRUE means the protein was quantified in Serum T vs N",
-      "  but was not in the Serum upregulated list.",
-      "TIF_detected_not_in_Serum_DE.csv = proteins quantified in TIF T vs N",
-      "  but not quantified in Serum T vs N (detection-only set).",
+      "Set = proteins present in TIF T vs N DE table",
+      "      minus proteins present in Serum T vs N DE table",
+      "      (Serum exclusion uses the FULL table: up AND down).",
+      "Match by gene / UniProt / protein group.",
+      "Ranking plots: rank_TIF_present_absent_from_Serum_TN*.",
       "T6 is never used. TIF and Serum are never mixed for DE.",
-      paste("TIF upregulated:", nrow(tif_up)),
-      paste("Serum upregulated:", nrow(serum_up)),
-      paste("In both upregulated lists (excluded):", nrow(tif_and_serum_up)),
-      paste("TIF up, absent from Serum up (ranked):", nrow(tif_up_not_serum_up)),
-      paste("TIF detected, absent from Serum DE:", nrow(tif_de_not_serum_de))),
+      paste("TIF T vs N proteins:", nrow(tif_de)),
+      paste("Serum T vs N proteins (up+down):", nrow(serum_de)),
+      paste("Present in both (excluded):", nrow(tif_and_serum)),
+      paste("TIF present, absent from Serum T vs N:", nrow(tif_only))),
     file.path(outdir, "00_README.txt")
   )
 
   tryCatch(
     plot_rank(
-      tif_up_not_serum_up,
-      "TIF T vs N up, absent from Serum T vs N up",
-      file.path(outdir, "rank_TIF_up_absent_from_Serum_up")
+      tif_only,
+      "TIF T vs N present, absent from Serum T vs N (up or down)",
+      file.path(outdir, "rank_TIF_present_absent_from_Serum_TN")
     ),
     error = function(e) log_msg("ranking plot failed: ", e$message)
   )
 
-  if (nrow(tif_de_not_serum_de) > 0) {
-    tryCatch(
-      plot_rank(
-        tif_de_not_serum_de,
-        "TIF T vs N detected, absent from Serum T vs N DE",
-        file.path(outdir, "rank_TIF_detected_absent_from_Serum_DE")
-      ),
-      error = function(e) log_msg("detection ranking plot failed: ", e$message)
-    )
-  }
-
-  log_msg("Item 3: TIF up=", nrow(tif_up),
-          " Serum up=", nrow(serum_up),
-          " TIF up not in Serum up=", nrow(tif_up_not_serum_up),
-          " TIF detected not in Serum DE=", nrow(tif_de_not_serum_de))
+  log_msg("Item 3: TIF T vs N n=", nrow(tif_de),
+          " Serum T vs N n=", nrow(serum_de),
+          " overlap excluded=", nrow(tif_and_serum),
+          " TIF present not in Serum T vs N=", nrow(tif_only))
 }
 
 # -----------------------------------------------------------------------------

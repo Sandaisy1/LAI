@@ -1,5 +1,5 @@
 ---
-description: TIF/血清蛋白质组 T vs N（火山图、上调 GO/KEGG；热图脚本与独立排名图脚本分开）
+description: TIF/血清蛋白质组 T vs N（火山图、上调 GO/KEGG；第3条为 TIF 有而血清 T vs N 全表无）
 globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
@@ -22,11 +22,11 @@ alwaysApply: true
 
 1. TIF `T vs N`：差异蛋白表、火山图、上调 GO、上调 KEGG
 2. 血清 `T vs N`：同上
-3. 先取 TIF T vs N **上调蛋白**，再去掉也出现在血清 T vs N **上调名单**里的蛋白
+3. 取 TIF T vs N **有的蛋白**（完整差异表），去掉也出现在血清 T vs N **完整差异表**里的蛋白（**无论上调还是下调**）
 
 两份脚本独立运行，不要互相 `source()`：
 
-- `Protein_TIF_Serum_pipeline.R`：第 3 条画 **TIF T/N 热图**，结果 `results_protein/`
+- `Protein_TIF_Serum_pipeline.R`：第 3 条画 **TIF T/N 热图**（并出排名图），结果 `results_protein/`
 - `Protein_TIF_Serum_TVsN_standalone.R`：第 3 条画 **排名图**，结果 `results_protein_standalone/`
 
 ## 预处理与显著性
@@ -35,13 +35,13 @@ alwaysApply: true
 2. 过滤多数样品缺失的蛋白
 3. 血清 3 vs 3 用 limma 估 p；TIF 无重复则不伪造 p，按 FC 排名
 4. 能估 p 时先 **p < 0.01**，再取上调；GO/KEGG 只用上调蛋白 ORA（`GO/`、`KEGG/`，文件名 `ORA_`）
-5. 第3条蛋白 = TIF 上调名单 − 血清上调名单（按基因符号/UniProt 对齐）。热图脚本只画 TIF 的 T vs N 样品；独立脚本按 TIF log2FC 画排名图。禁止把这批蛋白画到血清样品上（“不存在于血清上调”不是“血清未检出”）
+5. 第3条蛋白 = TIF T vs N 全表 − 血清 T vs N 全表（按基因符号/UniProt 对齐）。血清侧不要只用上调名单。热图只画 TIF 的 T vs N 样品；独立脚本按 TIF log2FC 画排名图。禁止把这批蛋白画到血清样品上
 
 ```r
 # ❌ BAD: 把 T6 并进 T；用 pr_matrix 做蛋白 DE；GO 用上调+下调
 # ❌ BAD: TIF 与血清混样本后算 FC；无重复却伪造 p
-# ❌ BAD: 独立脚本 source 热图脚本，或把两套结果写进同一目录互相覆盖
+# ❌ BAD: 第3条只用血清上调名单排除，或把蛋白画到血清样品上
 # ✅ GOOD: 两套 pg_matrix 分开标准化；T vs N 不含 T6；只对上调做 GO/KEGG
-# ✅ GOOD: 热图脚本第3条 = TIF 上调 − 血清上调，只画 TIF 的 T、N
-# ✅ GOOD: 独立脚本第3条 = 同一差集，画排名图（lollipop + rank vs log2FC）
+# ✅ GOOD: 第3条 = TIF T vs N 有 − 血清 T vs N 全表（上调+下调）都无
+# ✅ GOOD: 热图只画 TIF 的 T、N；排名图按 TIF log2FC
 ```

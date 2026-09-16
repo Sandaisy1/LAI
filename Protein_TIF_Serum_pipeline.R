@@ -5,7 +5,7 @@
 # 分析：
 #   1) 组织间质液 T vs N：差异蛋白、火山图、上调 GO、上调 KEGG
 #   2) 血清 T vs N：同上
-#   3) TIF T vs N 上调名单有、血清 T vs N 上调名单没有的蛋白；热图只画 TIF 的 T、N
+#   3) TIF T vs N 有、血清 T vs N 全表（上调+下调）都没有的蛋白；热图只画 TIF 的 T、N
 # T6 不并入 T vs N；TIF 与血清分开标准化，不混样本。
 # 在 R 控制台运行：
 #   setwd("E:/R/Protein TIF serum")
@@ -657,9 +657,9 @@ plot_heatmap_matrix <- function(mat, sample_info, proteins, labels, title, outfi
   grDevices::dev.off()
 }
 
-plot_tif_up_not_serum_up_heatmap <- function(tif_res, prot_df, outdir, tag, title) {
+plot_tif_specific_heatmap <- function(tif_res, prot_df, outdir, tag, title) {
   if (is.null(prot_df) || nrow(prot_df) < 2) {
-    note_empty(file.path(outdir, paste0("heatmap_", tag)), "fewer than 2 proteins: TIF up not in Serum up")
+    note_empty(file.path(outdir, paste0("heatmap_", tag)), "fewer than 2 proteins: TIF present not in Serum T vs N")
     return(invisible(NULL))
   }
   tif_mat <- attr(tif_res$de, "log_mat")
@@ -1054,7 +1054,7 @@ analyze_tn <- function(norm, comp_name) {
 }
 
 # -----------------------------------------------------------------------------
-# 8. 第3条：TIF T vs N 上调名单有、血清 T vs N 上调名单没有
+# 8. 第3条：TIF T vs N 有、血清 T vs N 全表（上调+下调）无
 # -----------------------------------------------------------------------------
 norm_id <- function(x) {
   x <- toupper(trimws(as.character(x)))
@@ -1086,63 +1086,77 @@ tif_specific_proteins <- function(tif_res, serum_res) {
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   unlink(list.files(outdir, full.names = TRUE))
   if (is.null(tif_res) || is.null(serum_res)) {
-    writeLines("need both TIF and Serum T vs N upregulated tables", file.path(outdir, "SKIPPED.txt"))
+    writeLines("need both TIF and Serum T vs N tables", file.path(outdir, "SKIPPED.txt"))
     return(invisible(NULL))
   }
 
-  tif_up <- tif_res$up
-  serum_up <- serum_res$up
-  serum_up_pool <- protein_id_pool(serum_up)
-  in_serum_up <- row_in_pool(tif_up, serum_up_pool)
-  tif_up_not_serum_up <- tif_up[!in_serum_up, , drop = FALSE]
-  tif_and_serum_up <- tif_up[in_serum_up, , drop = FALSE]
-  if (nrow(tif_up_not_serum_up) > 0) {
-    tif_up_not_serum_up <- tif_up_not_serum_up[order(tif_up_not_serum_up$log2FC, decreasing = TRUE), ]
-    tif_up_not_serum_up$rank <- seq_len(nrow(tif_up_not_serum_up))
-    tif_up_not_serum_up$in_Serum_upregulated <- FALSE
+  tif_de <- tif_res$de
+  serum_de <- serum_res$de
+  serum_de_pool <- protein_id_pool(serum_de)
+  in_serum <- row_in_pool(tif_de, serum_de_pool)
+  tif_only <- tif_de[!in_serum, , drop = FALSE]
+  tif_and_serum <- tif_de[in_serum, , drop = FALSE]
+  if (nrow(tif_only) > 0) {
+    tif_only <- tif_only[order(tif_only$log2FC, decreasing = TRUE), ]
+    tif_only$rank <- seq_len(nrow(tif_only))
+    tif_only$in_Serum_T_vs_N <- FALSE
+    tif_only$TIF_direction <- ifelse(tif_only$log2FC >= 0, "TIF_T_gt_N", "TIF_T_lt_N")
+  }
+  if (nrow(tif_and_serum) > 0) {
+    tif_and_serum$in_Serum_T_vs_N <- TRUE
   }
 
-  utils::write.csv(tif_up, file.path(outdir, "00_TIF_T_vs_N_upregulated.csv"), row.names = FALSE)
-  utils::write.csv(serum_up, file.path(outdir, "00_Serum_T_vs_N_upregulated.csv"), row.names = FALSE)
-  utils::write.csv(tif_up_not_serum_up, file.path(outdir, "TIF_up_not_in_Serum_up.csv"), row.names = FALSE)
-  utils::write.csv(tif_and_serum_up, file.path(outdir, "TIF_up_AND_Serum_up_excluded.csv"), row.names = FALSE)
+  utils::write.csv(tif_de, file.path(outdir, "00_TIF_T_vs_N_DE.csv"), row.names = FALSE)
+  utils::write.csv(serum_de, file.path(outdir, "00_Serum_T_vs_N_DE.csv"), row.names = FALSE)
+  utils::write.csv(tif_only, file.path(outdir, "TIF_present_not_in_Serum_TN.csv"), row.names = FALSE)
+  utils::write.csv(tif_and_serum, file.path(outdir, "TIF_also_in_Serum_TN_excluded.csv"), row.names = FALSE)
   tryCatch(writexl::write_xlsx(
     list(
-      TIF_up = tif_up,
-      Serum_up = serum_up,
-      TIF_up_not_in_Serum_up = tif_up_not_serum_up,
-      both_up_excluded = tif_and_serum_up
+      TIF_T_vs_N_DE = tif_de,
+      Serum_T_vs_N_DE = serum_de,
+      TIF_present_not_in_Serum_TN = tif_only,
+      overlap_excluded = tif_and_serum
     ),
-    file.path(outdir, "TIF_up_not_in_Serum_up.xlsx")
+    file.path(outdir, "TIF_present_not_in_Serum_TN.xlsx")
   ), error = function(e) log_msg("TIF-specific xlsx failed: ", e$message))
 
   writeLines(
     c("Item 3 definition:",
-      "1. Take proteins upregulated in TIF T vs N.",
-      "2. Drop any protein that also appears in Serum T vs N upregulated (gene / UniProt / protein group).",
+      "1. Take proteins present in TIF T vs N (full DE table).",
+      "2. Drop any protein that also appears in Serum T vs N",
+      "   (full DE table: upregulated AND downregulated).",
       "3. Heatmap uses ONLY TIF T and N samples for the remaining proteins.",
       "   Do not plot these proteins on serum samples.",
-      paste("TIF upregulated:", nrow(tif_up)),
-      paste("Serum upregulated:", nrow(serum_up)),
-      paste("In both upregulated lists (excluded):", nrow(tif_and_serum_up)),
-      paste("TIF up, absent from Serum up (heatmap):", nrow(tif_up_not_serum_up))),
+      paste("TIF T vs N proteins:", nrow(tif_de)),
+      paste("Serum T vs N proteins (up+down):", nrow(serum_de)),
+      paste("Present in both (excluded):", nrow(tif_and_serum)),
+      paste("TIF present, absent from Serum T vs N:", nrow(tif_only))),
     file.path(outdir, "00_README.txt")
   )
 
   tryCatch(
-    plot_tif_up_not_serum_up_heatmap(
-      tif_res, tif_up_not_serum_up, outdir,
-      "TIF_up_absent_from_Serum_up",
-      "TIF T vs N upregulated proteins absent from Serum T vs N upregulated set"
+    plot_tif_specific_heatmap(
+      tif_res, tif_only, outdir,
+      "TIF_present_absent_from_Serum_TN",
+      "TIF T vs N present, absent from Serum T vs N (up or down)"
     ),
     error = function(e) {
       while (grDevices::dev.cur() > 1) grDevices::dev.off()
       log_msg("TIF-specific heatmap failed: ", e$message)
     }
   )
-  log_msg("Item 3: TIF up=", nrow(tif_up),
-          " Serum up=", nrow(serum_up),
-          " TIF up not in Serum up=", nrow(tif_up_not_serum_up))
+  tryCatch(
+    plot_rank(
+      tif_only,
+      "TIF T vs N present, absent from Serum T vs N (up or down)",
+      file.path(outdir, "rank_TIF_present_absent_from_Serum_TN")
+    ),
+    error = function(e) log_msg("TIF-specific ranking plot failed: ", e$message)
+  )
+  log_msg("Item 3: TIF T vs N n=", nrow(tif_de),
+          " Serum T vs N n=", nrow(serum_de),
+          " overlap excluded=", nrow(tif_and_serum),
+          " TIF present not in Serum T vs N=", nrow(tif_only))
 }
 
 # -----------------------------------------------------------------------------

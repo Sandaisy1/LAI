@@ -109,7 +109,7 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 1. TIF `T vs N`：差异蛋白、火山图、上调 GO、上调 KEGG
 2. 血清 `T vs N`：同上
-3. 先找 TIF T vs N **上调**蛋白，再去掉也在血清 T vs N **上调名单**里的蛋白
+3. 找 TIF T vs N **有**、血清 T vs N **全表都没有**的蛋白（血清侧无论上调还是下调，只要出现在血清 T vs N 里就排除）
 
 有两份**互不 source** 的脚本，拷到数据目录后在 R 控制台运行（不要输入 `Rscript`）：
 
@@ -152,9 +152,9 @@ results_protein_standalone/       # Protein_TIF_Serum_TVsN_standalone.R
   TIF_specific_vs_Serum/          # 排名图
 ```
 
-第 3 组：`TIF 上调名单 − 血清上调名单`。两边都上调的蛋白在 `TIF_up_AND_Serum_up_excluded.csv`。
+第 3 组：`TIF T vs N 全表 − 血清 T vs N 全表（上调+下调）`。两边都有的蛋白在 `TIF_also_in_Serum_TN_excluded.csv`。
 
-- 热图版：`TIF_specific_vs_Serum/heatmap_TIF_up_absent_from_Serum_up` 只用 TIF 的 T、N
-- 独立排名图版：`results_protein_standalone/TIF_specific_vs_Serum/rank_TIF_up_absent_from_Serum_up`（lollipop + rank vs log2FC）
+- 热图版：`TIF_specific_vs_Serum/heatmap_TIF_present_absent_from_Serum_TN` 只用 TIF 的 T、N；同目录也有排名图
+- 独立排名图版：`results_protein_standalone/TIF_specific_vs_Serum/rank_TIF_present_absent_from_Serum_TN`（lollipop + rank vs log2FC）
 
 列名识别失败时，可在数据目录放 `sample_map.csv`（列：`file,assay,group,replicate`），`file` 匹配原始列名即可。样本名会先匹配 `T6` 再匹配 `T`，避免把 `T6` 当成 `T`。
