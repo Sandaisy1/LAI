@@ -153,7 +153,10 @@ results/
 
 - `GO/`、`Pathway/`、`KEGG/`：ORA，文件名以 `ORA_` 开头
 - `GSEA/`：GSEA，文件名以 `GSEA_` 开头
-- `Focused_mitochondria/`：只检验 `mitochondria` 文本中的通路
+- `Focused_mitochondria/`：只检验 `mitochondria` 文本中的通路（图上写通路名称，不写 `GO:` 编号）
 - 全库表旁的 `*_FOCUS_mitochondria.csv` 保留原始 p 与 `genome_wide_rank`，不会改全库排名
+- `results/00_logs/mitochondria_term_mapping.csv`：文件里每条通路是否映射到基因（`mapped` / `unmapped_name` / `no_genes`）
+
+全库 GO 图只显示显著条目，所以你关注的很多通路不会出现在 `GO/` 里。请看 `Focused_mitochondria/` 和 `*_FOCUS_mitochondria.csv`。
 
 `00_GSEA_all_genes_NOT_FC_or_topN` 是全部蛋白的 GSEA，**不是** FC/topN 分层图。

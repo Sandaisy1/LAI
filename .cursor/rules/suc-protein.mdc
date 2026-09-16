@@ -50,9 +50,13 @@ alwaysApply: true
 - ORA 放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头（不要写进 GSEA/）
 - GSEA 放 `GSEA/`，文件名以 `GSEA_` 开头；全蛋白 GSEA 只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
 - mitochondria 假说放 `Focused_mitochondria/`；全库表另出 `*_FOCUS_mitochondria.csv`（保留原始 p 与 `genome_wide_rank`），不要为凸显假说去改全库 p 值
+- 图纵轴必须写**通路名称**，禁止只标 `GO:0005763` 这类编号
+- 全库 GO 只画显著条目，所以 mitochondria 文件里很多通路不会出现在全库 GO 图上；这些通路必须进 `Focused_mitochondria/`（能映射且有基因交集的都要画，不要因为全库不显著就丢掉）
 
 ```r
 # ❌ BAD: 把样品 1 与 2 当重复；跳过 FC>=1 或 top75；用原始强度算 FC
 # ❌ BAD: 只出 GSEA，或把 ORA 写进 GSEA/；把 mitochondria 条目的全库 p 改小
+# ❌ BAD: 关注通路图纵轴写 GO:数字；只画全库显著 GO，丢掉 mitochondria 文件里的通路
 # ✅ GOOD: 六类各自目录；每类 × (4 个 FC + 7 个 topN) 都出齐表和图
+# ✅ GOOD: Focused_mitochondria 用通路名；映射表见 00_logs/mitochondria_term_mapping.csv
 ```

@@ -13,7 +13,7 @@
 # 1-vs-1 无重复：不伪造 p 值。
 # 分层：FC >= 1 / 1.25 / 1.5 / 2（下调为倒数）以及 top 50–300。
 # 每个非空子集：差异表、火山图、热图、ORA GO / 通路 / KEGG、GSEA，
-# 以及 mitochondria 文本内通路的专项 GO / KEGG / 通路图。
+# 以及 mitochondria 文本内通路的专项 GO / KEGG / 通路图（图上写通路名称，不写 GO 编号）。
 # 「GWAS」按 GSEA（基因集富集）实现，不是 SNP 全基因组关联。
 # =============================================================================
 
@@ -31,10 +31,10 @@ cran_required <- c(
 )
 cran_optional <- c("ggvenn", "writexl")
 bioc_required <- c(
-  "limma", "clusterProfiler", "org.Hs.eg.db",
+  "limma", "clusterProfiler", "org.Hs.eg.db", "GO.db",
   "enrichplot", "DOSE", "AnnotationDbi", "fgsea", "msigdbr"
 )
-bioc_optional <- c("ReactomePA", "pathview", "GO.db")
+bioc_optional <- c("ReactomePA", "pathview")
 
 install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
   miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
@@ -295,19 +295,50 @@ parse_mitochondria_file <- function(project_dir) {
   path <- first_existing(project_dir, c("mitochondria", "mitochondria.txt", "mitochondria.tsv", "mitochondria.csv"))
   if (is.na(path)) {
     log_msg("WARNING: 未找到 mitochondria 文本，专项分析将用线粒体关键词回退")
-    return(list(path = NA_character_, go_ids = character(), names = character(), raw = character()))
+    return(list(
+      path = NA_character_, go_ids = character(), names = character(),
+      raw = character(), parsed = data.frame(
+        source = character(), go_id = character(), name_hint = character(),
+        stringsAsFactors = FALSE
+      )
+    ))
   }
   raw <- readLines(path, warn = FALSE, encoding = "UTF-8")
   raw <- trimws(raw)
   raw <- raw[nzchar(raw) & !startsWith(raw, "#")]
-  ids <- unique(unlist(regmatches(raw, gregexpr("GO:[0-9]{7}", raw, ignore.case = TRUE))))
-  ids <- toupper(ids)
-  names_only <- gsub("GO:[0-9]{7}", "", raw, ignore.case = TRUE)
-  names_only <- trimws(gsub("[,;|/]+$", "", names_only))
-  names_only <- names_only[nzchar(names_only)]
+  recs <- list()
+  for (line in raw) {
+    ids <- unique(toupper(unlist(regmatches(
+      line, gregexpr("GO:[0-9]{7}", line, ignore.case = TRUE)
+    ))))
+    rest <- gsub("GO:[0-9]{7}", " ", line, ignore.case = TRUE)
+    rest <- trimws(gsub("[,\t;|/]+", " ", rest))
+    rest <- trimws(gsub("\\s+", " ", rest))
+    if (length(ids) == 0) {
+      recs[[length(recs) + 1]] <- data.frame(
+        source = line, go_id = NA_character_, name_hint = rest,
+        stringsAsFactors = FALSE
+      )
+    } else {
+      for (id in ids) {
+        recs[[length(recs) + 1]] <- data.frame(
+          source = line, go_id = id, name_hint = rest,
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+  parsed <- if (length(recs) == 0) {
+    data.frame(source = character(), go_id = character(), name_hint = character(),
+               stringsAsFactors = FALSE)
+  } else {
+    do.call(rbind, recs)
+  }
+  ids <- unique(parsed$go_id[!is.na(parsed$go_id) & nzchar(parsed$go_id)])
+  names_only <- unique(parsed$name_hint[nzchar(parsed$name_hint)])
   log_msg("mitochondria file: ", basename(path), " | lines=", length(raw),
           " GO IDs=", length(ids), " names=", length(names_only))
-  list(path = path, go_ids = ids, names = unique(names_only), raw = raw)
+  list(path = path, go_ids = ids, names = names_only, raw = raw, parsed = parsed)
 }
 
 # -----------------------------------------------------------------------------
@@ -588,9 +619,127 @@ plot_de_bar <- function(sub, title, outfile) {
 }
 
 # -----------------------------------------------------------------------------
-# 7. mitochondria 专项匹配（不改全库 p 值）
+# 7. mitochondria 专项匹配（不改全库 p 值；图上只用通路名，不用 GO 编号）
 # -----------------------------------------------------------------------------
 .mito_env <- new.env(parent = emptyenv())
+
+get_go_annot <- function() {
+  if (!is.null(.mito_env$go_annot)) return(.mito_env$go_annot)
+  if (!has_pkg("GO.db")) {
+    .mito_env$go_annot <- data.frame(
+      go_id = character(), term = character(), ont = character(),
+      stringsAsFactors = FALSE
+    )
+    return(.mito_env$go_annot)
+  }
+  trm <- AnnotationDbi::Term(GO.db::GOTERM)
+  ont <- AnnotationDbi::Ontology(GO.db::GOTERM)
+  .mito_env$go_annot <- data.frame(
+    go_id = names(trm),
+    term = unname(as.character(trm)),
+    ont = unname(as.character(ont[names(trm)])),
+    stringsAsFactors = FALSE
+  )
+  .mito_env$go_annot
+}
+
+go_id_to_name <- function(id) {
+  id <- toupper(as.character(id)[1])
+  if (!nzchar(id) || is.na(id)) return(NA_character_)
+  a <- get_go_annot()
+  if (nrow(a) > 0) {
+    hit <- a$term[match(id, toupper(a$go_id))]
+    if (length(hit) == 1 && !is.na(hit) && nzchar(hit)) return(hit)
+  }
+  gt <- tryCatch(clusterProfiler::go2term(id), error = function(e) NULL)
+  if (!is.null(gt) && nrow(gt) > 0) {
+    col <- intersect(c("Term", "term", "DESCRIPTION", "Description"), names(gt))[1]
+    if (!is.na(col) && nzchar(col)) return(as.character(gt[[col]][1]))
+    if (ncol(gt) >= 2) return(as.character(gt[[2]][1]))
+  }
+  NA_character_
+}
+
+go_id_to_ont <- function(id) {
+  id <- toupper(as.character(id)[1])
+  a <- get_go_annot()
+  hit <- a$ont[match(id, toupper(a$go_id))]
+  if (length(hit) == 1 && !is.na(hit) && nzchar(hit)) return(hit)
+  NA_character_
+}
+
+name_to_go_ids <- function(name) {
+  a <- get_go_annot()
+  name <- trimws(as.character(name)[1])
+  if (!nzchar(name) || nrow(a) == 0) return(character())
+  n2 <- tolower(gsub("\\s+", " ", name))
+  exact <- a$go_id[tolower(gsub("\\s+", " ", a$term)) == n2]
+  if (length(exact) > 0) return(unique(exact))
+  if (nchar(n2) < 8) return(character())
+  fuzzy <- a$go_id[grepl(n2, tolower(a$term), fixed = TRUE)]
+  unique(utils::head(fuzzy, 5))
+}
+
+extract_go_id <- function(...) {
+  txt <- paste(..., collapse = " ")
+  m <- regmatches(txt, gregexpr("GO:[0-9]{7}", txt, ignore.case = TRUE))[[1]]
+  if (length(m) == 0) return(NA_character_)
+  toupper(m[[1]])
+}
+
+pretty_term_label <- function(desc, id = NA_character_) {
+  desc <- as.character(desc)[1]
+  id <- as.character(id)[1]
+  if (length(desc) == 0 || is.na(desc)) desc <- ""
+  if (length(id) == 0 || is.na(id)) id <- ""
+  gid <- extract_go_id(id, desc)
+  if (!is.na(gid)) {
+    nm <- go_id_to_name(gid)
+    if (!is.na(nm) && nzchar(nm)) return(nm)
+  }
+  cleaned <- trimws(gsub("GO:[0-9]{7}", "", desc, ignore.case = TRUE))
+  cleaned <- trimws(gsub("^hsa[0-9]+\\s*", "", cleaned, ignore.case = TRUE))
+  cleaned <- gsub("\\s+", " ", cleaned)
+  if (nzchar(cleaned) && !grepl("^(GO:[0-9]{7}|hsa[0-9]+|[0-9]+)$", cleaned, ignore.case = TRUE)) {
+    return(cleaned)
+  }
+  cleaned_id <- trimws(gsub("GO:[0-9]{7}", "", id, ignore.case = TRUE))
+  if (nzchar(cleaned_id) && !grepl("^(GO:[0-9]{7}|hsa[0-9]+|[0-9]+)$", cleaned_id, ignore.case = TRUE)) {
+    return(cleaned_id)
+  }
+  if (nzchar(desc)) desc else id
+}
+
+pretty_term_label_vec <- function(desc, id = NULL) {
+  desc <- as.character(desc)
+  if (is.null(id)) id <- rep(NA_character_, length(desc))
+  id <- as.character(id)
+  vapply(seq_along(desc), function(i) pretty_term_label(desc[i], id[i]), character(1))
+}
+
+wrap_term <- function(x, width = 42) {
+  vapply(as.character(x), function(z) {
+    if (is.na(z) || !nzchar(z)) return(z)
+    paste(strwrap(z, width = width), collapse = "\n")
+  }, character(1), USE.NAMES = FALSE)
+}
+
+label_enrich_object <- function(x) {
+  if (is.null(x) || !isS4(x) || !("result" %in% methods::slotNames(x))) return(x)
+  df <- x@result
+  if (nrow(df) == 0) return(x)
+  desc <- if ("Description" %in% names(df)) df$Description else df$ID
+  df$Description <- pretty_term_label_vec(desc, df$ID)
+  x@result <- df
+  x
+}
+
+label_enrich_for_plot <- function(x) {
+  x <- label_enrich_object(x)
+  if (is.null(x) || !isS4(x) || !("result" %in% methods::slotNames(x))) return(x)
+  x@result$Description <- wrap_term(x@result$Description, 42)
+  x
+}
 
 term_matches_mito <- function(id, desc, mito) {
   id <- as.character(id)[1]
@@ -598,13 +747,22 @@ term_matches_mito <- function(id, desc, mito) {
   if (is.na(id)) id <- ""
   if (is.na(desc)) desc <- ""
   id_u <- toupper(id)
-  txt <- tolower(paste(id, desc))
+  txt <- tolower(paste(id, desc, pretty_term_label(desc, id)))
   if (length(mito$go_ids) > 0 && id_u %in% toupper(mito$go_ids)) return(TRUE)
+  gid <- extract_go_id(id, desc)
+  if (!is.na(gid) && gid %in% toupper(mito$go_ids)) return(TRUE)
+  cov <- .mito_env$coverage
+  if (!is.null(cov) && nrow(cov) > 0) {
+    if (!is.na(gid) && gid %in% toupper(cov$go_id)) return(TRUE)
+    names_l <- tolower(cov$term_name[nzchar(cov$term_name)])
+    if (tolower(pretty_term_label(desc, id)) %in% names_l) return(TRUE)
+  }
   needles <- unique(c(mito$names, mito$raw))
   needles <- needles[nzchar(needles)]
   if (length(needles) > 0) {
     hit <- vapply(needles, function(x) {
       x <- tolower(x)
+      x <- trimws(gsub("GO:[0-9]{7}", "", x, ignore.case = TRUE))
       if (!nzchar(x) || nchar(x) < 4) return(FALSE)
       grepl(x, txt, fixed = TRUE) || grepl(txt, x, fixed = TRUE)
     }, logical(1))
@@ -635,42 +793,108 @@ entrez_for_go <- function(go_id) {
   unique(as.character(ids[!is.na(ids)]))
 }
 
-append_term2gene <- function(lst, name, entrez) {
+append_term2gene <- function(lst, name, entrez, go_id = NA_character_) {
   entrez <- unique(as.character(entrez))
   entrez <- entrez[nzchar(entrez) & !is.na(entrez)]
-  if (length(entrez) < 5) return(lst)
+  if (length(entrez) < 1) return(lst)
   lst[[length(lst) + 1]] <- data.frame(
-    gs_name = name, entrez = entrez, stringsAsFactors = FALSE
+    gs_name = name, entrez = entrez, go_id = go_id,
+    stringsAsFactors = FALSE
   )
   lst
 }
 
+unique_term_label <- function(name, go_id, used) {
+  name <- pretty_term_label(name, go_id)
+  if (!nzchar(name)) name <- "unnamed_pathway"
+  if (!(name %in% used)) return(name)
+  ont <- go_id_to_ont(go_id)
+  if (!is.na(ont) && nzchar(ont)) {
+    alt <- paste0(name, " [", ont, "]")
+    if (!(alt %in% used)) return(alt)
+  }
+  make.unique(c(used, name), sep = " ")[length(used) + 1]
+}
+
 get_mito_term2gene <- function(mito) {
   if (!is.null(.mito_env$term2gene)) return(.mito_env$term2gene)
-  rows <- list()
-  for (gid in unique(mito$go_ids)) {
-    rows <- append_term2gene(rows, gid, entrez_for_go(gid))
+  parsed <- mito$parsed
+  if (is.null(parsed) || nrow(parsed) == 0) {
+    parsed <- data.frame(
+      source = mito$raw, go_id = NA_character_, name_hint = mito$names,
+      stringsAsFactors = FALSE
+    )
+    if (length(mito$go_ids) > 0) {
+      parsed <- data.frame(
+        source = mito$go_ids, go_id = mito$go_ids, name_hint = "",
+        stringsAsFactors = FALSE
+      )
+    }
   }
-  if (length(rows) == 0 && has_pkg("GO.db") && length(mito$names) > 0) {
-    terms <- tryCatch(AnnotationDbi::Term(GO.db::GOTERM), error = function(e) NULL)
-    if (!is.null(terms)) {
-      for (nm in mito$names) {
-        hit <- names(terms)[tolower(terms) == tolower(nm)]
-        if (length(hit) == 0) hit <- names(terms)[grepl(tolower(nm), tolower(terms), fixed = TRUE)]
-        for (gid in utils::head(hit, 5)) {
-          rows <- append_term2gene(rows, paste(gid, terms[[gid]]), entrez_for_go(gid))
+  rows <- list()
+  coverage <- list()
+  used_labels <- character()
+  add_one <- function(source, gid, hint) {
+    gid <- if (is.na(gid) || !nzchar(gid)) NA_character_ else toupper(gid)
+    official <- if (!is.na(gid)) go_id_to_name(gid) else NA_character_
+    label_src <- if (!is.na(official) && nzchar(official)) official else hint
+    if (!nzchar(label_src) && !is.na(gid)) label_src <- gid
+    entrez <- if (!is.na(gid)) entrez_for_go(gid) else character()
+    status <- if (is.na(gid)) {
+      "unmapped_name"
+    } else if (length(entrez) == 0) {
+      "no_genes"
+    } else {
+      "mapped"
+    }
+    term_name <- pretty_term_label(label_src, gid)
+    if (status == "mapped") {
+      term_name <- unique_term_label(term_name, gid, used_labels)
+      used_labels <<- c(used_labels, term_name)
+      rows <<- append_term2gene(rows, term_name, entrez, gid)
+    }
+    coverage[[length(coverage) + 1]] <<- data.frame(
+      source = source, go_id = gid, term_name = term_name,
+      ontology = go_id_to_ont(gid), n_genes = length(entrez), status = status,
+      stringsAsFactors = FALSE
+    )
+  }
+  if (nrow(parsed) > 0) {
+    for (i in seq_len(nrow(parsed))) {
+      gid <- parsed$go_id[i]
+      hint <- parsed$name_hint[i]
+      source <- parsed$source[i]
+      if (is.na(gid) || !nzchar(gid)) {
+        gids <- name_to_go_ids(hint)
+        if (length(gids) == 0) {
+          add_one(source, NA_character_, hint)
+        } else {
+          for (g in gids) add_one(source, g, hint)
         }
+      } else {
+        add_one(source, gid, hint)
       }
     }
   }
+  cov <- if (length(coverage) == 0) {
+    data.frame(source = character(), go_id = character(), term_name = character(),
+               ontology = character(), n_genes = integer(), status = character())
+  } else {
+    do.call(rbind, coverage)
+  }
+  .mito_env$coverage <- cov
+  n_map <- sum(cov$status == "mapped")
+  log_msg("mitochondria mapping: ", n_map, " / ", nrow(cov), " terms mapped to genes; ",
+          sum(cov$status == "unmapped_name"), " unmapped, ",
+          sum(cov$status == "no_genes"), " GO IDs with 0 genes")
   if (length(rows) == 0) {
     log_msg("WARNING: mitochondria TERM2GENE empty; focused enricher will skip")
     .mito_env$term2gene <- data.frame(gs_name = character(), entrez = character())
     return(.mito_env$term2gene)
   }
-  t2g <- unique(do.call(rbind, rows))
+  t2g <- unique(do.call(rbind, rows)[, c("gs_name", "entrez")])
   log_msg("mitochondria gene sets: ", length(unique(t2g$gs_name)),
-          " terms, ", length(unique(t2g$entrez)), " Entrez genes")
+          " named terms, ", length(unique(t2g$entrez)), " Entrez genes")
   .mito_env$term2gene <- t2g
   t2g
 }
@@ -678,10 +902,12 @@ get_mito_term2gene <- function(mito) {
 plot_focus_term_bar <- function(df, stub, title) {
   if (nrow(df) == 0) return(invisible(NULL))
   lab <- if ("Description" %in% names(df)) as.character(df$Description) else as.character(df$ID)
-  df$lab <- lab
+  id <- if ("ID" %in% names(df)) df$ID else lab
+  df$lab <- wrap_term(pretty_term_label_vec(lab, id), 42)
+  nshow <- min(40, nrow(df))
   if ("NES" %in% names(df) && any(is.finite(df$NES))) {
     df <- df[order(abs(df$NES), decreasing = TRUE), , drop = FALSE]
-    df <- utils::head(df, 20)
+    df <- utils::head(df, nshow)
     df$lab <- factor(df$lab, levels = rev(unique(df$lab)))
     p <- ggplot2::ggplot(df, ggplot2::aes(x = NES, y = lab)) +
       ggplot2::geom_col(fill = "#2A9D8F") +
@@ -691,23 +917,50 @@ plot_focus_term_bar <- function(df, stub, title) {
     yv <- if ("p.adjust" %in% names(df)) df$p.adjust else df$pvalue
     df$neglog <- -log10(pmax(as.numeric(yv), 1e-300))
     df <- df[order(yv), , drop = FALSE]
-    df <- utils::head(df, 20)
+    df <- utils::head(df, nshow)
     df$lab <- factor(df$lab, levels = rev(unique(df$lab)))
     p <- ggplot2::ggplot(df, ggplot2::aes(x = neglog, y = lab)) +
       ggplot2::geom_col(fill = "#2A9D8F") +
       ggplot2::theme_bw(base_size = 11) +
       ggplot2::labs(title = title, x = "-log10(p.adjust)", y = NULL)
   }
-  save_gg(p, stub, width = 12, height = max(5, min(12, 0.38 * nrow(df) + 2)))
+  save_gg(p, stub, width = 12, height = max(5, min(16, 0.38 * nrow(df) + 2)))
+}
+
+gg_enrich_bar <- function(x, showCategory = 15, title = "") {
+  df <- as.data.frame(x)
+  if (nrow(df) == 0) return(NULL)
+  id <- if ("ID" %in% names(df)) df$ID else df$Description
+  df$lab <- wrap_term(pretty_term_label_vec(df$Description, id), 42)
+  nshow <- min(showCategory, nrow(df))
+  df <- df[seq_len(nshow), , drop = FALSE]
+  if ("NES" %in% names(df) && any(is.finite(df$NES))) {
+    df <- df[order(abs(df$NES), decreasing = TRUE), , drop = FALSE]
+    df$lab <- factor(df$lab, levels = rev(unique(df$lab)))
+    ggplot2::ggplot(df, ggplot2::aes(x = NES, y = lab)) +
+      ggplot2::geom_col(fill = "#2A9D8F") +
+      ggplot2::theme_bw(base_size = 11) +
+      ggplot2::labs(title = title, y = NULL)
+  } else {
+    yv <- if ("p.adjust" %in% names(df)) -log10(pmax(as.numeric(df$p.adjust), 1e-300)) else df$Count
+    df$neglog <- yv
+    df$lab <- factor(df$lab, levels = rev(unique(df$lab)))
+    ggplot2::ggplot(df, ggplot2::aes(x = neglog, y = lab)) +
+      ggplot2::geom_col(fill = "#2A9D8F") +
+      ggplot2::theme_bw(base_size = 11) +
+      ggplot2::labs(title = title, x = "-log10(p.adjust)", y = NULL)
+  }
 }
 
 export_mito_focus_terms <- function(x, stub, title, mito) {
   if (is.null(x) || nrow(as.data.frame(x)) == 0) return(invisible(NULL))
+  x <- label_enrich_object(x)
   df <- as.data.frame(x)
   desc <- if ("Description" %in% names(df)) df$Description else df$ID
+  df$Description <- pretty_term_label_vec(desc, df$ID)
   df$genome_wide_rank <- seq_len(nrow(df))
   keep <- vapply(seq_len(nrow(df)), function(i) {
-    term_matches_mito(df$ID[i], desc[i], mito)
+    term_matches_mito(df$ID[i], df$Description[i], mito)
   }, logical(1))
   hit <- df[keep, , drop = FALSE]
   if (nrow(hit) == 0) {
@@ -745,6 +998,21 @@ title_maybe_relaxed <- function(obj, base) {
   if (isTRUE(attr(obj, "relaxed"))) paste0(base, " (relaxed cutoff)") else base
 }
 
+filter_enrich_sig <- function(obj, p = 0.05) {
+  if (is.null(obj) || nrow(as.data.frame(obj)) == 0) return(obj)
+  df <- as.data.frame(obj)
+  if (!("p.adjust" %in% names(df))) return(obj)
+  keep <- !is.na(df$p.adjust) & df$p.adjust < p
+  if (!any(keep)) {
+    attr(obj, "relaxed") <- TRUE
+    return(obj)
+  }
+  obj_sig <- obj
+  obj_sig@result <- obj@result[keep, , drop = FALSE]
+  attr(obj_sig, "relaxed") <- FALSE
+  obj_sig
+}
+
 msig_hallmark_map <- function() {
   msig <- tryCatch(
     msigdbr::msigdbr(species = "Homo sapiens", collection = "H"),
@@ -754,63 +1022,72 @@ msig_hallmark_map <- function() {
   msig[, c("gs_name", gene_col)]
 }
 
-plot_ora_object <- function(x, stub, title, fold_change = NULL, mito = NULL) {
+plot_ora_object <- function(x, stub, title, fold_change = NULL, mito = NULL, show_n = 15) {
   if (is.null(x) || nrow(as.data.frame(x)) == 0) {
     note_empty(stub, "no enrichment terms")
     return(invisible(NULL))
   }
+  x <- label_enrich_object(x)
   df <- as.data.frame(x)
   utils::write.csv(df, paste0(stub, ".csv"), row.names = FALSE)
-  nshow <- min(15, nrow(df))
-  try_save_plot(function() enrichplot::dotplot(x, showCategory = nshow) + ggplot2::ggtitle(title),
-                paste0(stub, "_dotplot"), 9, 7)
-  try_save_plot(function() enrichplot::barplot(x, showCategory = nshow) + ggplot2::ggtitle(title),
-                paste0(stub, "_barplot"), 9, 7)
-  x2 <- tryCatch(enrichplot::pairwise_termsim(x), error = function(e) NULL)
-  if (!is.null(x2) && nrow(df) >= 2) {
+  nshow <- min(max(show_n, 1), nrow(df))
+  xp <- label_enrich_for_plot(x)
+  try_save_plot(function() enrichplot::dotplot(xp, showCategory = nshow) + ggplot2::ggtitle(title),
+                paste0(stub, "_dotplot"), 10, max(7, min(16, 0.28 * nshow + 4)))
+  try_save_plot(function() gg_enrich_bar(x, showCategory = nshow, title = title),
+                paste0(stub, "_barplot"), 10, max(7, min(16, 0.28 * nshow + 4)))
+  x2 <- tryCatch(enrichplot::pairwise_termsim(xp), error = function(e) NULL)
+  if (!is.null(x2) && nrow(df) >= 6) {
     try_save_plot(function() enrichplot::emapplot(x2, showCategory = min(20, nrow(df))) + ggplot2::ggtitle(title),
                   paste0(stub, "_emapplot"), 10, 8)
     try_save_plot(function() enrichplot::treeplot(x2, showCategory = min(20, nrow(df))) + ggplot2::ggtitle(title),
                   paste0(stub, "_treeplot"), 11, 8)
   }
-  try_save_plot(function() enrichplot::cnetplot(
-    x, showCategory = min(8, nshow), foldChange = fold_change, circular = FALSE
-  ) + ggplot2::ggtitle(title), paste0(stub, "_cnetplot"), 10, 8)
-  try_save_plot(function() enrichplot::heatplot(x, showCategory = nshow, foldChange = fold_change) +
+  try_save_plot(function() {
+    args <- list(x = xp, showCategory = min(8, nshow), foldChange = fold_change)
+    do.call(enrichplot::cnetplot, args) + ggplot2::ggtitle(title)
+  }, paste0(stub, "_cnetplot"), 10, 8)
+  try_save_plot(function() enrichplot::heatplot(xp, showCategory = nshow, foldChange = fold_change) +
                   ggplot2::ggtitle(title), paste0(stub, "_heatplot"), 11, 6)
   if (!is.null(mito)) export_mito_focus_terms(x, stub, title, mito)
 }
 
-plot_gsea_object <- function(x, stub, title, mito = NULL) {
+plot_gsea_object <- function(x, stub, title, mito = NULL, show_n = 15) {
   if (is.null(x) || nrow(as.data.frame(x)) == 0) {
     note_empty(stub, "no GSEA terms")
     return(invisible(NULL))
   }
+  x <- label_enrich_object(x)
   df <- as.data.frame(x)
   utils::write.csv(df, paste0(stub, ".csv"), row.names = FALSE)
-  nshow <- min(15, nrow(df))
+  nshow <- min(max(show_n, 1), nrow(df))
+  xp <- label_enrich_for_plot(x)
   try_save_plot(function() {
-    p <- enrichplot::dotplot(x, showCategory = nshow, split = ".sign")
+    p <- enrichplot::dotplot(xp, showCategory = nshow, split = ".sign")
     p <- tryCatch(p + ggplot2::facet_grid(. ~ .sign) + ggplot2::ggtitle(title),
                   error = function(e) p + ggplot2::ggtitle(title))
     p
-  }, paste0(stub, "_dotplot"), 10, 7)
-  try_save_plot(function() enrichplot::ridgeplot(x, showCategory = nshow) + ggplot2::ggtitle(title),
+  }, paste0(stub, "_dotplot"), 11, max(7, min(16, 0.28 * nshow + 4)))
+  try_save_plot(function() gg_enrich_bar(x, showCategory = nshow, title = title),
+                paste0(stub, "_barplot"), 11, max(7, min(16, 0.28 * nshow + 4)))
+  try_save_plot(function() enrichplot::ridgeplot(xp, showCategory = nshow) + ggplot2::ggtitle(title),
                 paste0(stub, "_ridgeplot"), 10, 8)
   ncurve <- min(5, nrow(df))
-  try_save_plot(function() enrichplot::gseaplot2(x, geneSetID = seq_len(ncurve), pvalue_table = TRUE, title = title),
+  try_save_plot(function() enrichplot::gseaplot2(xp, geneSetID = seq_len(ncurve), pvalue_table = TRUE, title = title),
                 paste0(stub, "_gseaplot"), 10, 8)
   for (i in seq_len(min(3, nrow(df)))) {
-    desc <- as.character(df$Description[i])
-    try_save_plot(function() enrichplot::gseaplot2(x, geneSetID = i, title = desc),
+    desc <- as.character(as.data.frame(xp)$Description[i])
+    try_save_plot(function() enrichplot::gseaplot2(xp, geneSetID = i, title = desc),
                   paste0(stub, "_gseaplot_top", i), 8, 6)
   }
-  x2 <- tryCatch(enrichplot::pairwise_termsim(x), error = function(e) NULL)
-  if (!is.null(x2) && nrow(df) >= 2) {
+  x2 <- tryCatch(enrichplot::pairwise_termsim(xp), error = function(e) NULL)
+  if (!is.null(x2) && nrow(df) >= 6) {
     try_save_plot(function() enrichplot::emapplot(x2, showCategory = min(20, nrow(df))) + ggplot2::ggtitle(title),
                   paste0(stub, "_emapplot"), 10, 8)
-    try_save_plot(function() enrichplot::cnetplot(x, showCategory = min(8, nshow)) + ggplot2::ggtitle(title),
-                  paste0(stub, "_cnetplot"), 10, 8)
+    try_save_plot(function() {
+      args <- list(x = xp, showCategory = min(8, nshow))
+      do.call(enrichplot::cnetplot, args) + ggplot2::ggtitle(title)
+    }, paste0(stub, "_cnetplot"), 10, 8)
   }
   if (!is.null(mito)) export_mito_focus_terms(x, stub, title, mito)
 }
@@ -842,21 +1119,28 @@ run_focused_mito_ora <- function(entrez, outdir, label, tag, fc_sym, mito) {
   pref <- paste0(tag, "_")
   writeLines(
     c("这不是改全库 GO/KEGG 的 p 值或排名。",
+      "全库 GO 只画显著条目，所以 mitochondria 文件里很多通路不会出现在全库 GO 图上。",
+      "本文件夹用 mitochondria 文本中的通路做专项 ORA，凡能映射且与本类蛋白有交集的通路都会出图。",
+      "图纵轴是通路名称，不是 GO:数字。",
       "全库结果旁边的 *_FOCUS_mitochondria.csv 保留原始 p 值和 genome_wide_rank。",
-      "本文件夹只检验 mitochondria 文本中的通路。"),
+      "映射情况见 results/00_logs/mitochondria_term_mapping.csv。"),
     file.path(fdir, "00_README.txt")
   )
-  if (is.null(t2g) || nrow(t2g) < 5) {
+  if (!is.null(.mito_env$coverage)) {
+    utils::write.csv(.mito_env$coverage, file.path(fdir, paste0(pref, "mitochondria_term_mapping.csv")),
+                     row.names = FALSE)
+  }
+  if (is.null(t2g) || nrow(t2g) < 1) {
     note_empty(file.path(fdir, paste0(pref, "ORA_focused_mitochondria")), "empty mitochondria gene sets")
     return(invisible(NULL))
   }
   obj <- enrich_or_relax(
     function() clusterProfiler::enricher(
-      entrez, TERM2GENE = t2g, minGSSize = 5, maxGSSize = 2500,
-      pvalueCutoff = 0.05, qvalueCutoff = 0.2
+      entrez, TERM2GENE = t2g, minGSSize = 1, maxGSSize = 5000,
+      pvalueCutoff = 1, qvalueCutoff = 1
     ),
     function() clusterProfiler::enricher(
-      entrez, TERM2GENE = t2g, minGSSize = 5, maxGSSize = 2500,
+      entrez, TERM2GENE = t2g, minGSSize = 1, maxGSSize = 5000,
       pvalueCutoff = 1, qvalueCutoff = 1
     ),
     "focused ORA mitochondria"
@@ -866,11 +1150,13 @@ run_focused_mito_ora <- function(entrez, outdir, label, tag, fc_sym, mito) {
       clusterProfiler::setReadable(obj, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"),
       error = function(e) obj
     )
+    obj <- label_enrich_object(obj)
   }
+  n_terms <- if (is.null(obj)) 0 else nrow(as.data.frame(obj))
   plot_ora_object(
     obj, file.path(fdir, paste0(pref, "ORA_focused_mitochondria")),
-    title_maybe_relaxed(obj, paste(label, "| ORA focused mitochondria file")),
-    fold_change = fc_sym, mito = NULL
+    title_maybe_relaxed(obj, paste(label, "| ORA focused mitochondria (pathway names)")),
+    fold_change = fc_sym, mito = NULL, show_n = max(n_terms, 15)
   )
 }
 
@@ -897,73 +1183,89 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag, mito) {
   }
 
   for (ont in c("BP", "MF", "CC")) {
-    ego <- enrich_or_relax(
-      function() clusterProfiler::enrichGO(
-        gene = entrez, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = ont,
-        pAdjustMethod = "BH", pvalueCutoff = 0.05, qvalueCutoff = 0.2, readable = TRUE
-      ),
-      function() clusterProfiler::enrichGO(
-        gene = entrez, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = ont,
-        pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
-      ),
-      paste("enrichGO", ont)
-    )
-    plot_ora_object(ego, file.path(go_dir, paste0(pref, "ORA_GO_", ont)),
-                    title_maybe_relaxed(ego, paste(label, "| ORA GO", ont, "(not GSEA)")),
-                    fold_change = fc_sym, mito = mito)
+    ego_all <- tryCatch(clusterProfiler::enrichGO(
+      gene = entrez, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = ont,
+      pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
+    ), error = function(e) {
+      log_msg("enrichGO ", ont, " failed: ", e$message)
+      NULL
+    })
+    if (!is.null(ego_all) && nrow(as.data.frame(ego_all)) > 0) {
+      ego_all <- label_enrich_object(ego_all)
+    }
+    ego_plot <- filter_enrich_sig(ego_all, 0.05)
+    plot_ora_object(ego_plot, file.path(go_dir, paste0(pref, "ORA_GO_", ont)),
+                    title_maybe_relaxed(ego_plot, paste(label, "| ORA GO", ont, "(not GSEA)")),
+                    fold_change = fc_sym, mito = NULL)
+    if (!is.null(mito)) {
+      export_mito_focus_terms(
+        ego_all, file.path(go_dir, paste0(pref, "ORA_GO_", ont)),
+        paste(label, "| ORA GO", ont), mito
+      )
+    }
   }
 
-  ek <- enrich_or_relax(
-    function() clusterProfiler::enrichKEGG(
-      gene = entrez, organism = "hsa", pvalueCutoff = 0.05, qvalueCutoff = 0.2
-    ),
-    function() clusterProfiler::enrichKEGG(
-      gene = entrez, organism = "hsa", pvalueCutoff = 1, qvalueCutoff = 1
-    ),
-    "enrichKEGG"
-  )
-  if (!is.null(ek) && nrow(as.data.frame(ek)) > 0) {
-    ek <- tryCatch(clusterProfiler::setReadable(ek, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) ek)
+  ek_all <- tryCatch(clusterProfiler::enrichKEGG(
+    gene = entrez, organism = "hsa", pvalueCutoff = 1, qvalueCutoff = 1
+  ), error = function(e) {
+    log_msg("enrichKEGG failed: ", e$message)
+    NULL
+  })
+  if (!is.null(ek_all) && nrow(as.data.frame(ek_all)) > 0) {
+    ek_all <- tryCatch(clusterProfiler::setReadable(ek_all, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) ek_all)
+    ek_all <- label_enrich_object(ek_all)
   }
-  plot_ora_object(ek, file.path(kg_dir, paste0(pref, "ORA_KEGG")),
-                  title_maybe_relaxed(ek, paste(label, "| ORA KEGG (not GSEA)")),
-                  fold_change = fc_sym, mito = mito)
-  plot_kegg_pathview(ek, fc_entrez, kg_dir)
+  ek_plot <- filter_enrich_sig(ek_all, 0.05)
+  plot_ora_object(ek_plot, file.path(kg_dir, paste0(pref, "ORA_KEGG")),
+                  title_maybe_relaxed(ek_plot, paste(label, "| ORA KEGG (not GSEA)")),
+                  fold_change = fc_sym, mito = NULL)
+  if (!is.null(mito)) {
+    export_mito_focus_terms(ek_all, file.path(kg_dir, paste0(pref, "ORA_KEGG")),
+                            paste(label, "| ORA KEGG"), mito)
+  }
+  plot_kegg_pathview(ek_plot, fc_entrez, kg_dir)
 
   if (has_pkg("ReactomePA")) {
-    er <- enrich_or_relax(
-      function() ReactomePA::enrichPathway(
-        gene = entrez, organism = "human", pvalueCutoff = 0.05, qvalueCutoff = 0.2, readable = TRUE
-      ),
-      function() ReactomePA::enrichPathway(
-        gene = entrez, organism = "human", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
-      ),
-      "enrichPathway"
-    )
-    plot_ora_object(er, file.path(pw_dir, paste0(pref, "ORA_Reactome_pathway")),
-                    title_maybe_relaxed(er, paste(label, "| ORA Reactome pathway (not GSEA)")),
-                    fold_change = fc_sym, mito = mito)
+    er_all <- tryCatch(ReactomePA::enrichPathway(
+      gene = entrez, organism = "human", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
+    ), error = function(e) {
+      log_msg("enrichPathway failed: ", e$message)
+      NULL
+    })
+    if (!is.null(er_all) && nrow(as.data.frame(er_all)) > 0) {
+      er_all <- label_enrich_object(er_all)
+    }
+    er_plot <- filter_enrich_sig(er_all, 0.05)
+    plot_ora_object(er_plot, file.path(pw_dir, paste0(pref, "ORA_Reactome_pathway")),
+                    title_maybe_relaxed(er_plot, paste(label, "| ORA Reactome pathway (not GSEA)")),
+                    fold_change = fc_sym, mito = NULL)
+    if (!is.null(mito)) {
+      export_mito_focus_terms(er_all, file.path(pw_dir, paste0(pref, "ORA_Reactome_pathway")),
+                              paste(label, "| ORA Reactome"), mito)
+    }
   } else {
     note_empty(file.path(pw_dir, paste0(pref, "ORA_Reactome_pathway")), "ReactomePA not installed")
   }
 
-  hm <- enrich_or_relax(
-    function() {
-      term2gene <- msig_hallmark_map()
-      clusterProfiler::enricher(entrez, TERM2GENE = term2gene, pvalueCutoff = 0.05, qvalueCutoff = 0.2)
-    },
-    function() {
-      term2gene <- msig_hallmark_map()
-      clusterProfiler::enricher(entrez, TERM2GENE = term2gene, pvalueCutoff = 1, qvalueCutoff = 1)
-    },
-    "Hallmark"
-  )
-  if (!is.null(hm) && nrow(as.data.frame(hm)) > 0) {
-    hm <- tryCatch(clusterProfiler::setReadable(hm, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) hm)
+  hm_all <- tryCatch({
+    term2gene <- msig_hallmark_map()
+    clusterProfiler::enricher(entrez, TERM2GENE = term2gene, pvalueCutoff = 1, qvalueCutoff = 1)
+  }, error = function(e) {
+    log_msg("Hallmark failed: ", e$message)
+    NULL
+  })
+  if (!is.null(hm_all) && nrow(as.data.frame(hm_all)) > 0) {
+    hm_all <- tryCatch(clusterProfiler::setReadable(hm_all, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) hm_all)
+    hm_all <- label_enrich_object(hm_all)
   }
-  plot_ora_object(hm, file.path(pw_dir, paste0(pref, "ORA_MSigDB_Hallmark_pathway")),
-                  title_maybe_relaxed(hm, paste(label, "| ORA Hallmark pathway (not GSEA)")),
-                  fold_change = fc_sym, mito = mito)
+  hm_plot <- filter_enrich_sig(hm_all, 0.05)
+  plot_ora_object(hm_plot, file.path(pw_dir, paste0(pref, "ORA_MSigDB_Hallmark_pathway")),
+                  title_maybe_relaxed(hm_plot, paste(label, "| ORA Hallmark pathway (not GSEA)")),
+                  fold_change = fc_sym, mito = NULL)
+  if (!is.null(mito)) {
+    export_mito_focus_terms(hm_all, file.path(pw_dir, paste0(pref, "ORA_MSigDB_Hallmark_pathway")),
+                            paste(label, "| ORA Hallmark"), mito)
+  }
   tryCatch(
     run_focused_mito_ora(entrez, outdir, label, tag, fc_sym, mito),
     error = function(e) log_msg("focused mito ORA failed: ", e$message)
@@ -1093,6 +1395,7 @@ build_gsea_cache <- function(de) {
         clusterProfiler::setReadable(out[[nm]], OrgDb = org.Hs.eg.db, keyType = "ENTREZID"),
         error = function(e) out[[nm]]
       )
+      out[[nm]] <- label_enrich_object(out[[nm]])
     }
   }
   out
@@ -1156,21 +1459,26 @@ run_focused_mito_gsea <- function(stats, outdir, label, mito) {
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   writeLines(
     c("这不是改全库 GO/KEGG 的 p 值或排名。",
-      "本文件夹只检验 mitochondria 文本中的通路。",
+      "本文件夹只检验 mitochondria 文本中的通路；凡能映射的通路都会参与 GSEA。",
+      "图纵轴是通路名称，不是 GO:数字。",
       "全库结果旁边的 *_FOCUS_mitochondria.csv 保留原始 p 值和 genome_wide_rank。"),
     file.path(outdir, "00_README.txt")
   )
-  if (is.null(t2g) || nrow(t2g) < 5 || length(stats) < 10) {
+  if (!is.null(.mito_env$coverage)) {
+    utils::write.csv(.mito_env$coverage, file.path(outdir, "mitochondria_term_mapping.csv"),
+                     row.names = FALSE)
+  }
+  if (is.null(t2g) || nrow(t2g) < 1 || length(stats) < 10) {
     note_empty(file.path(outdir, "GSEA_focused_mitochondria"), "too few genes or empty gene sets")
     return(invisible(NULL))
   }
   obj <- enrich_or_relax(
     function() clusterProfiler::GSEA(
-      geneList = stats, TERM2GENE = t2g, minGSSize = 5, maxGSSize = 2500,
-      pvalueCutoff = 0.05, eps = 0, verbose = FALSE
+      geneList = stats, TERM2GENE = t2g, minGSSize = 1, maxGSSize = 5000,
+      pvalueCutoff = 1, eps = 0, verbose = FALSE
     ),
     function() clusterProfiler::GSEA(
-      geneList = stats, TERM2GENE = t2g, minGSSize = 5, maxGSSize = 2500,
+      geneList = stats, TERM2GENE = t2g, minGSSize = 1, maxGSSize = 5000,
       pvalueCutoff = 1, eps = 0, verbose = FALSE
     ),
     "focused GSEA mitochondria"
@@ -1180,11 +1488,13 @@ run_focused_mito_gsea <- function(stats, outdir, label, mito) {
       clusterProfiler::setReadable(obj, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"),
       error = function(e) obj
     )
+    obj <- label_enrich_object(obj)
   }
+  n_terms <- if (is.null(obj)) 0 else nrow(as.data.frame(obj))
   plot_gsea_object(
     obj, file.path(outdir, "GSEA_focused_mitochondria"),
-    paste(label, "| GSEA focused mitochondria file"),
-    mito = NULL
+    paste(label, "| GSEA focused mitochondria (pathway names)"),
+    mito = NULL, show_n = max(n_terms, 15)
   )
 }
 
@@ -1413,6 +1723,15 @@ log_msg("No p-values will be fabricated for 1-vs-1 sample pairs.")
 
 obj <- load_protein_matrix(project_dir)
 mito <- parse_mitochondria_file(project_dir)
+invisible(get_mito_term2gene(mito))
+if (!is.null(.mito_env$coverage)) {
+  utils::write.csv(
+    .mito_env$coverage,
+    file.path(log_dir, "mitochondria_term_mapping.csv"),
+    row.names = FALSE
+  )
+  log_msg("Wrote mitochondria term mapping: ", file.path(log_dir, "mitochondria_term_mapping.csv"))
+}
 log_msg("Loaded from ", obj$source, " | proteins=", nrow(obj$mat), " samples=", ncol(obj$mat))
 utils::write.csv(obj$sample_info, file.path(log_dir, "sample_info.csv"), row.names = FALSE)
 
