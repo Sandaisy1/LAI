@@ -1,0 +1,13 @@
+file,assay,group,replicate
+TIF_N,TIF,N,N
+TIF_T,TIF,T,T
+TIF_T6,TIF,T6,T6
+N1,Serum,N,N1
+N3,Serum,N,N3
+N7,Serum,N,N7
+T1,Serum,T,T1
+T3,Serum,T,T3
+T5,Serum,T,T5
+T6-1,Serum,T6,T6-1
+T6-2,Serum,T6,T6-2
+T6-3,Serum,T6,T6-3

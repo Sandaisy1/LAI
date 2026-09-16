@@ -97,3 +97,64 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+# TIF / 血清蛋白质组（T vs N）
+
+数据在 `E:/R/Protein TIF serum`，输入是 DIA-NN 蛋白矩阵（不要用 `*.pr_matrix` 做蛋白水平差异）。Windows 资源管理器常把后缀藏起来，文件类型若是「TSV 文件」，实际名字是 `TIF_report.pg_matrix.tsv` / `Serum_report.pg_matrix.tsv`，脚本两种都认：
+
+- `TIF_report.pg_matrix`：组织间质液，组别 `N`、`T`、`T6`
+- `Serum_report.pg_matrix`：血清，`N`=`N1,N3,N7`，`T`=`T1,T3,T5`，`T6`=`T6-1,T6-2,T6-3`
+
+只做三件事，**T6 不进入 T vs N**，TIF 与血清分开标准化：
+
+1. TIF `T vs N`：差异蛋白、火山图、上调 GO、上调 KEGG
+2. 血清 `T vs N`：同上
+3. 找 TIF T vs N **上调**、且血清 **T 样品和 N 样品都未检出**的蛋白（不是看血清差异表上调/下调，而是看血清强度有没有）
+
+有两份**互不 source** 的脚本，拷到数据目录后在 R 控制台运行（不要输入 `Rscript`）：
+
+**热图版**（结果 `results_protein/`）：
+
+```r
+setwd("E:/R/Protein TIF serum")
+source("Protein_TIF_Serum_pipeline.R")
+```
+
+**独立排名图版**（结果 `results_protein_standalone/`，第 3 条画排名图）：
+
+```r
+setwd("E:/R/Protein TIF serum")
+source("Protein_TIF_Serum_TVsN_standalone.R")
+```
+
+独立脚本不读取、不修改 `Protein_TIF_Serum_pipeline.R`。
+
+若在 **Windows 命令提示符** 或 PowerShell 里运行，才用：
+
+```bat
+Rscript run_protein_tif_serum.R "E:/R/Protein TIF serum"
+Rscript Protein_TIF_Serum_TVsN_standalone.R
+```
+
+第二行请先 `cd /d "E:\R\Protein TIF serum"`，并把独立脚本拷到该目录。
+没有真实矩阵时，仓库里的 `demo_protein_tif_serum/` 可先跑通流程（演示数据，不是实验结果）。
+
+结果目录：
+
+```
+results_protein/                  # Protein_TIF_Serum_pipeline.R
+  TIF_T_vs_N/
+  Serum_T_vs_N/
+  TIF_specific_vs_Serum/          # 热图
+results_protein_standalone/       # Protein_TIF_Serum_TVsN_standalone.R
+  TIF_T_vs_N/
+  Serum_T_vs_N/
+  TIF_specific_vs_Serum/          # 排名图
+```
+
+第 3 组：TIF 上调蛋白中，血清 T 和 N 样品强度都缺失的蛋白。在血清 T 或 N 里检出过的写在 `TIF_up_detected_in_Serum_T_or_N_excluded.csv`。
+
+- 热图版：`TIF_specific_vs_Serum/heatmap_TIF_up_absent_from_Serum_T_and_N` 只用 TIF 的 T、N
+- 独立排名图版：`results_protein_standalone/TIF_specific_vs_Serum/rank_TIF_up_absent_from_Serum_T_and_N`
+
+列名识别失败时，可在数据目录放 `sample_map.csv`（列：`file,assay,group,replicate`），`file` 匹配原始列名即可。样本名会先匹配 `T6` 再匹配 `T`，避免把 `T6` 当成 `T`。

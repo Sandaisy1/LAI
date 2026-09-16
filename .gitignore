@@ -3,6 +3,8 @@
 .Rproj.user
 .Ruserdata
 results/
+results_protein/
+results_protein_standalone/
 figures/
 *.html
 *.pdf
