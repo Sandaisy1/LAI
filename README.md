@@ -133,8 +133,10 @@ source("Protein_TIF_Serum_TVsN_standalone.R")
 
 ```bat
 Rscript run_protein_tif_serum.R "E:/R/Protein TIF serum"
+Rscript Protein_TIF_Serum_TVsN_standalone.R
 ```
 
+第二行请先 `cd /d "E:\R\Protein TIF serum"`，并把独立脚本拷到该目录。
 没有真实矩阵时，仓库里的 `demo_protein_tif_serum/` 可先跑通流程（演示数据，不是实验结果）。
 
 结果目录：
