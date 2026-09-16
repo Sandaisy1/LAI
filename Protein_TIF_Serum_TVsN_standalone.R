@@ -162,7 +162,7 @@ dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
 
 log_file <- file.path(log_dir, paste0("standalone_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
 log_msg <- function(...) {
-  msg <- paste0(format(Sys.time(), "%H:%M:%S"), " | ", paste(..., collapse = ""))
+  msg <- paste0(format(Sys.time(), "%H:%M:%S"), " | ", paste0(...))
   cat(msg, "\n")
   cat(msg, "\n", file = log_file, append = TRUE)
 }
@@ -584,7 +584,7 @@ plot_rank <- function(df, title, outfile, n = rank_plot_n) {
     p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = log2FC, y = label, color = serum_status)) +
       ggplot2::geom_segment(
         ggplot2::aes(x = 0, xend = log2FC, y = label, yend = label),
-        size = 0.6
+        linewidth = 0.6
       ) +
       ggplot2::geom_point(size = 2.6) +
       ggplot2::scale_color_manual(values = col_vals) +
