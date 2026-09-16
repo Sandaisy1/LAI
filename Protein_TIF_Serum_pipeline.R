@@ -1137,8 +1137,8 @@ tif_specific_proteins <- function(tif_res, serum_obj) {
   tryCatch(writexl::write_xlsx(
     list(
       TIF_up = tif_up,
-      TIF_up_absent_from_Serum_T_and_N = tif_up_absent,
-      detected_in_Serum_T_or_N_excluded = tif_up_in_serum
+      absent_Serum_T_and_N = tif_up_absent,
+      in_Serum_T_or_N = tif_up_in_serum
     ),
     file.path(outdir, "TIF_up_absent_from_Serum_T_and_N.xlsx")
   ), error = function(e) log_msg("TIF-specific xlsx failed: ", e$message))
