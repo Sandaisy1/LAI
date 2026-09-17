@@ -275,14 +275,15 @@ parse_series_matrix_geo <- function(path) {
   n <- length(titles)
   char_mat <- lapply(char_mat, function(v) { length(v) <- n; v })
 
+  # 必须匹配行首特征名，避免 "met event" 误匹配 "binary 5y met event"
   get_char <- function(key_pat) {
     out <- rep(NA_character_, n)
+    anchor <- paste0("(?i)^\\s*", key_pat, "\\s*:")
     for (row in char_mat) {
-      hit <- grepl(key_pat, row, ignore.case = TRUE)
+      hit <- grepl(anchor, row, perl = TRUE)
       if (!any(hit, na.rm = TRUE)) next
-      # 该行是同一特征时整行都匹配；取整行
       if (mean(hit, na.rm = TRUE) > 0.3) {
-        out <- sub(paste0("(?i)^.*", key_pat, "\\s*:\\s*"), "", row, perl = TRUE)
+        out <- sub(paste0("(?i)^\\s*", key_pat, "\\s*:\\s*"), "", row, perl = TRUE)
         out <- trimws(out)
         out[out %in% c("", "--", "NA", "null")] <- NA_character_
         return(out)
@@ -388,7 +389,7 @@ if (length(datasets) == 0) {
 # 4. 问题1：lung_tropic vs other_met —— 低表达基因
 # -----------------------------------------------------------------------------
 emit_q1 <- function(tag, mat, si) {
-  keep <- si$tropism %in% c("lung_tropic", "other_met")
+  keep <- which(!is.na(si$tropism) & si$tropism %in% c("lung_tropic", "other_met"))
   if (sum(si$tropism == "lung_tropic", na.rm = TRUE) < 3 ||
       sum(si$tropism == "other_met", na.rm = TRUE) < 3) {
     log_msg("跳过问题1 ", tag, "：lung/other 样本不足")
@@ -574,13 +575,14 @@ cor_neg_with_nerve <- function(mat, score, label, is_protein = FALSE) {
 }
 
 emit_q2 <- function(tag, mat, si, is_protein = FALSE) {
-  lung <- si$tropism == "lung_tropic"
-  if (sum(lung, na.rm = TRUE) < 5) {
+  # 禁止用带 NA 的逻辑下标（会掺进 NA 行，虚增样本）
+  lung_idx <- which(!is.na(si$tropism) & si$tropism == "lung_tropic")
+  if (length(lung_idx) < 5) {
     log_msg("跳过问题2 ", tag, "：lung_tropic n < 5")
     return(NULL)
   }
-  mat_l <- mat[, lung, drop = FALSE]
-  si_l <- si[lung, , drop = FALSE]
+  mat_l <- mat[, lung_idx, drop = FALSE]
+  si_l <- si[lung_idx, , drop = FALSE]
   if (max(mat_l, na.rm = TRUE) > 100 && !is_protein) mat_l <- log2(pmax(mat_l, 1))
   mat_l <- quantile_norm(mat_l)
 
