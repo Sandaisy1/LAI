@@ -112,7 +112,7 @@ Sys.setenv(WANG_ST_DIR = "E:/R/Nerve")
 source("Wang_ST_nerve_infiltration.R")
 ```
 
-不需要 `TG_RNAseq_pipeline.R`。先 **p < 0.05**，再 **|FC| ≥ 1.25 和 1.5**（上调=问题2，下调=问题3）。原 Cuffdiff 六组比较不变。
+不需要 `TG_RNAseq_pipeline.R`。先 **p < 0.05**。问题2上调 **FC ≥ 1.25 和 1.5**；问题3下调 **FC < 1 即可**（1.25 / 1.5 只是更严的可选分层）。原 Cuffdiff 六组比较不变。
 
 真正必需的是 `Robjects/`（`counts` + `annotsBySpot`；先解压 `Robjects.tar`）。
 
@@ -127,9 +127,10 @@ E:/R/Nerve/results/
   01_Q1_literature_ligands.csv
   01_Q3_literature_repellents.csv
   02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv   # 问题2 高表达
-  03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv  # 问题3 低表达
+  03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv  # 问题3 低表达（p<0.05 且 FC<1）
+  03_Q3_down_p005_FC_lt_1.csv
+  03_Q3_down_p005_FC1.25.csv   # 可选更严
   02_Q2_up_p005_FC1.25.csv
-  03_Q3_down_p005_FC1.25.csv
   tumor_near_schwann_vs_far/     # 全队列 Schwann 邻域 DE
   TNBC50_tumor_near_nerve_vs_far/  # 病理神经，各病人单独
 ```

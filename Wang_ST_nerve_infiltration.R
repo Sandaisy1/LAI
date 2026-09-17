@@ -20,7 +20,9 @@
 #   1) 病理 Nerve 邻域：每个有神经 spot 的病人单独 1-vs-1
 #   2) 这些病人的共同上调 / 共同下调
 #   3) 全队列 Schwann 签名邻域：~ patient + group 的伪 bulk DESeq2
-# 显著性：先 p < 0.05，再按 |FC| >= 1.25 / 1.5 分上调（问题2）和下调（问题3）。
+# 显著性：先 p < 0.05。
+#   问题2 上调：FC >= 1.25 / 1.5
+#   问题3 下调：FC < 1 即可（近神经比远离低）；1.25 / 1.5 只是更严的可选分层。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -144,9 +146,10 @@ log_msg <- function(...) {
   cat(msg, "\n", file = log_file, append = TRUE)
 }
 
-# 先 p < 0.05，再 |FC| >= 1.25 / 1.5（上调=问题2，下调=问题3；不做 GO、不做 topN）
+# 先 p < 0.05。问题2：上调 FC>=1.25/1.5。问题3：下调 FC<1 即可（1.25/1.5 可选更严）。
 p_cutoff <- 0.05
-fc_cutoffs_local <- c("FC_1.25" = 1.25, "FC_1.5" = 1.5)
+fc_cutoffs_up <- c("FC_1.25" = 1.25, "FC_1.5" = 1.5)
+fc_cutoffs_down <- c("FC_lt_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5)
 
 log_msg("Wang ST nerve dir: ", nerve_dir)
 log_msg("Results: ", result_dir)
@@ -603,8 +606,9 @@ select_up <- function(de, fc = 1) {
 }
 
 select_down <- function(de, fc = 1) {
-  # 近/远 FC <= 1/fc，即下调倍数 >= fc（1.25 或 1.5）
-  keep <- !is.na(de$log2FC) & de$log2FC < 0 & (2^de$log2FC <= 1 / fc)
+  # fc=1：近/远 FC < 1（只要下调）。fc=1.25/1.5：下调倍数达到该档。
+  keep <- !is.na(de$log2FC) & de$log2FC < 0
+  if (fc > 1) keep <- keep & (2^de$log2FC <= 1 / fc)
   if (any(!is.na(de$pvalue))) {
     keep <- keep & !is.na(de$pvalue) & de$pvalue < p_cutoff
   }
@@ -673,23 +677,29 @@ emit_de_tables <- function(comp_name, de) {
   n_up <- sum((is.na(de$pvalue) | de$pvalue < p_cutoff) & de$log2FC > 0, na.rm = TRUE)
   n_dn <- sum((is.na(de$pvalue) | de$pvalue < p_cutoff) & de$log2FC < 0, na.rm = TRUE)
   log_msg(comp_name, " genes=", nrow(de), " have_p=", have_p,
-          " up p<", p_cutoff, " n=", n_up, " down n=", n_dn)
-  for (nm in names(fc_cutoffs_local)) {
-    fc <- unname(fc_cutoffs_local[[nm]])
+          " up p<", p_cutoff, " n=", n_up, " down FC<1 n=", n_dn)
+  for (nm in names(fc_cutoffs_up)) {
+    fc <- unname(fc_cutoffs_up[[nm]])
     up <- select_up(de, fc)
-    dn <- select_down(de, fc)
     od_up <- file.path(base, paste0("up_", nm))
-    od_dn <- file.path(base, paste0("down_", nm))
     dir.create(od_up, recursive = TRUE, showWarnings = FALSE)
-    dir.create(od_dn, recursive = TRUE, showWarnings = FALSE)
     utils::write.csv(up, file.path(od_up, paste0(nm, "_upregulated_tumor_genes.csv")),
                      row.names = FALSE)
+    basic_volcano(de, paste(comp_name, "| up FC >=", fc),
+                  file.path(base, paste0("volcano_up_", nm)), fc)
+    log_msg("  up ", nm, " n=", nrow(up))
+  }
+  for (nm in names(fc_cutoffs_down)) {
+    fc <- unname(fc_cutoffs_down[[nm]])
+    dn <- select_down(de, fc)
+    od_dn <- file.path(base, paste0("down_", nm))
+    dir.create(od_dn, recursive = TRUE, showWarnings = FALSE)
     utils::write.csv(dn, file.path(od_dn, paste0(nm, "_downregulated_tumor_genes.csv")),
                      row.names = FALSE)
-    basic_volcano(de, paste(comp_name, "| |FC| >=", fc),
-                  file.path(base, paste0("volcano_", nm)), fc)
-    log_msg("  ", nm, " up n=", nrow(up), " down n=", nrow(dn))
+    log_msg("  down ", nm, " n=", nrow(dn))
   }
+  basic_volcano(de, paste(comp_name, "| down FC < 1"),
+                file.path(base, "volcano_down_FC_lt_1"), fc_line = 1)
   invisible(de)
 }
 
@@ -815,14 +825,18 @@ if (length(nerve_de_list) >= 2) {
     de$gene[keep]
   }
   get_down <- function(de, fc) {
-    keep <- !is.na(de$log2FC) & de$log2FC < 0 & (2^de$log2FC <= 1 / fc)
+    keep <- !is.na(de$log2FC) & de$log2FC < 0
+    if (fc > 1) keep <- keep & (2^de$log2FC <= 1 / fc)
     if (have_p) keep <- keep & !is.na(de$pvalue) & de$pvalue < p_cutoff
     de$gene[keep]
   }
-  for (nm in names(fc_cutoffs_local)) {
-    fc <- unname(fc_cutoffs_local[[nm]])
+  for (nm in names(fc_cutoffs_up)) {
+    fc <- unname(fc_cutoffs_up[[nm]])
     log_msg("common up pathologist nerve ", nm, " n=",
             length(Reduce(intersect, lapply(nerve_de_list, get_up, fc = fc))))
+  }
+  for (nm in names(fc_cutoffs_down)) {
+    fc <- unname(fc_cutoffs_down[[nm]])
     log_msg("common down pathologist nerve ", nm, " n=",
             length(Reduce(intersect, lapply(nerve_de_list, get_down, fc = fc))))
   }
@@ -1028,23 +1042,26 @@ if (nrow(q2_src) > 0) {
   q3$repellent_partner <- tumor_repellents$receptor_or_partner[match(q3$gene, tumor_repellents$gene)]
   q3$repellent_rationale <- tumor_repellents$rationale[match(q3$gene, tumor_repellents$gene)]
   q3$n_pathologist_patients_also_down <- vapply(q3$gene, path_down_n, integer(1))
+  q3$pass_p005_down_FC_lt_1 <- q3$gene %in% select_down(q2_src, 1)$gene
   q3$pass_p005_down_FC_1.25 <- q3$gene %in% select_down(q2_src, 1.25)$gene
   q3$pass_p005_down_FC_1.5  <- q3$gene %in% select_down(q2_src, 1.5)$gene
   q3 <- q3[order(is.na(q3$pvalue), q3$pvalue, q3$log2FC), ]
   q3$genome_wide_rank <- seq_len(nrow(q3))
   utils::write.csv(q3, file.path(result_dir, "03_Q3_ALL_tumor_genes_near_nerve.csv"),
                    row.names = FALSE)
+  dn1   <- q3[q3$pass_p005_down_FC_lt_1, , drop = FALSE]
   dn125 <- q3[q3$pass_p005_down_FC_1.25, , drop = FALSE]
   dn15  <- q3[q3$pass_p005_down_FC_1.5, , drop = FALSE]
+  utils::write.csv(dn1,   file.path(result_dir, "03_Q3_down_p005_FC_lt_1.csv"), row.names = FALSE)
   utils::write.csv(dn125, file.path(result_dir, "03_Q3_down_p005_FC1.25.csv"), row.names = FALSE)
   utils::write.csv(dn15,  file.path(result_dir, "03_Q3_down_p005_FC1.5.csv"), row.names = FALSE)
-  short3 <- dn125
+  short3 <- dn1
   if (nrow(short3) > 0) {
     short3 <- short3[order(-short3$known_nerve_repellent_or_barrier, short3$pvalue, short3$log2FC), ]
   }
   utils::write.csv(short3, file.path(result_dir, "03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv"),
                    row.names = FALSE)
-  log_msg("问题3 下调 FC>=1.25 n=", nrow(dn125), " FC>=1.5 n=", nrow(dn15))
+  log_msg("问题3 下调 FC<1 n=", nrow(dn1), " 更严 FC>=1.25 n=", nrow(dn125), " FC>=1.5 n=", nrow(dn15))
 } else {
   log_msg("问题3：没有可用的差异表。")
 }
@@ -1070,8 +1087,9 @@ protocol <- c(
   "近 <=2 个 spot，远 >4；Schwann 高 = 切片内 z>1",
   "（SOX10 MPZ PMP22 S100B PLP1 NGFR NCAM1 MBP L1CAM）。",
   "",
-  "统计：先 p<0.05，再 |FC|>=1.25 和 1.5。",
-  "  问题2 = 近神经肿瘤上调；问题3 = 近神经肿瘤下调。",
+  "统计：先 p<0.05。",
+  "  问题2 上调：FC>=1.25 和 1.5。",
+  "  问题3 下调：FC<1 即可（近神经比远离低）。1.25 / 1.5 只是更严的可选分层。",
   "过滤低表达后再算 FC。",
   "",
   "文献配体（肿瘤高表达→神经，问题2）：NGF, BDNF, ARTN, GDNF, CXCL12, MDK, PTN, VEGFA。",
@@ -1088,9 +1106,10 @@ protocol <- c(
   "【问题 3】肿瘤细胞低表达、可能促使神经浸润的基因",
   "",
   "  03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv",
-  "    p<0.05 且下调倍数>=1.25（近/远 FC<=1/1.25）。",
+  "    p<0.05 且 FC<1（近/远倍数小于 1）。这是问题3主表。",
   "    已知轴突排斥 / 上皮屏障基因排在前面。",
-  "  03_Q3_down_p005_FC1.25.csv / 03_Q3_down_p005_FC1.5.csv",
+  "  03_Q3_down_p005_FC_lt_1.csv",
+  "  03_Q3_down_p005_FC1.25.csv / 03_Q3_down_p005_FC1.5.csv  （可选，更严）",
   "  03_Q3_ALL_tumor_genes_near_nerve.csv  全基因（未改 p 值）",
   "",
   "比较定义：靠近 Schwann/神经的肿瘤 spot vs 远离的肿瘤 spot。",
