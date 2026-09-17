@@ -1,0 +1,46 @@
+乳腺癌多器官转移：批量转录组 / 蛋白组从哪里下
+================================================
+用于两个问题：
+  1) 肿瘤高表达哪些基因可能促进神经浸润
+  2) 神经浸润更倾向哪个继发部位（肺 / 脑 / 骨 …）
+这是 bulk，不是单细胞、不是空间。
+公开完整的「多器官转移蛋白组」几乎没有；先用转录组。
+
+放到：E:/R/BRCA_met_bulk_nerve
+（BRCA_MET_BULK_DIR 可改路径）
+脚本在没有本地文件时会尝试用 GEOquery 下载下面两个 GSE。
+
+------------------------------------------------
+1) 主队列（必须优先）：GSE175692
+   184 例人乳腺癌转移灶，11 个器官（肝、肺、脑、骨等）
+   771 基因（NanoString 类面板，不是全转录组）
+   最适合比较继发部位
+   https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE175692
+   建议：把 Series Matrix 放到
+     E:/R/BRCA_met_bulk_nerve/GSE175692/
+
+------------------------------------------------
+2) 全转录组补充：GSE14020（含子系列 GSE14017、GSE14018）
+   约 58 例人转移灶 Affymetrix 芯片，含肺 / 脑 / 骨 / 肝
+   https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE14020
+   不要和 GSE175692 合并成一张表达矩阵（平台不同）
+
+------------------------------------------------
+3) 蛋白组
+   公开库几乎没有「多病人 × 肺脑骨转移灶」的完整蛋白组。
+   若你自己有 DIA-NN：
+     report.pg_matrix  +  一张带 sample、organ 列的元数据表
+   不要用 CPTAC 原发乳腺癌蛋白组冒充转移灶。
+
+------------------------------------------------
+4) 不要当病人多器官转移队列
+   GSE131007、GSE147942、GSE240212  小鼠 / PDX
+   TCGA-BRCA、CPTAC-BRCA            主要是原发灶
+
+运行：
+  setwd("E:/R/BRCA_met_bulk_nerve")
+  source("BRCA_met_bulk_nerve_infiltration.R")
+
+主结果：
+  results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv
+  results/02_SITE_RANK_neural_invasion.csv

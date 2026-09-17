@@ -119,3 +119,14 @@ source("BRCA_met_scRNA_nerve_infiltration.R")
 ```
 
 scRNA 只能支持「肿瘤配体高 + 神经细胞有受体 + 含神经样本里更高」，不能写成已经证明空间浸润。
+
+## 乳腺癌转移批量转录组 / 蛋白组（神经浸润 + 继发部位）
+
+公开可下载的多病人、肺/脑/骨转移灶以 **GSE175692**（184 例，11 器官）为主，芯片补充 GSE14020。蛋白组需自备。不要改 Cuffdiff 流程。
+
+```r
+setwd("E:/R/BRCA_met_bulk_nerve")
+source("BRCA_met_bulk_nerve_infiltration.R")
+```
+
+部位排名看 `results/02_SITE_RANK_neural_invasion.csv` 的 **配体残差**（不要把脑转移 GFAP 高写成更易神经浸润）。基因候选：`results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`。
