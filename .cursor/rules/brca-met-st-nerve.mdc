@@ -1,0 +1,59 @@
+---
+description: 乳腺癌多器官转移空间转录组：肿瘤高表达基因与神经浸润（Klughammer + HBCA + BCBM）
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# 乳腺癌转移 ST：肿瘤高表达基因 → 神经浸润
+
+仅当任务是**转移灶空间转录组 / 神经浸润**时按本规则。不要套用 NTC/TG_sh Cuffdiff 流程，不要改 `TG_RNAseq_*.R`。
+
+公开库里**没有**一份 ST 同时满足：多病人 + 健康人 + 肺/脑/骨转移 + 肿瘤细胞 + 免疫 + 神经。用下面三套拼齐，禁止把小鼠脑转移（如 GSE240212）当病人数据。
+
+## 数据（目录 `E:/R/BRCA_met_ST_nerve`；缺失则回退仓库根）
+
+1. **主队列（多病人、多器官、ST + 免疫/肿瘤细胞）**：Klughammer et al. *Nat Med* 2024，60 人 / 67 活检（肝、骨、腋窝、乳腺、胸壁、脑、肺、皮肤）；15 例有配对空间。处理后对象：Broad SCP2702、CELLxGENE `a96133de-e951-4e2d-ace6-59db8b3bfb1d`；原始 HTAN / dbGaP `phs002371`。骨转移 ST 可补 GSE298286。
+2. **神经细胞 / 神经浸润（主队列脑/肺各 n=1，不够）**：人 BCBM 空间 GSE325935（Visium+Xenium，含胶质/免疫/肿瘤细胞）；标记可参考 GSE186344。原发灶病理 **Nerve** 标注：Wang et al. *Nat Commun* 2024（Zenodo `10.5281/zenodo.13867935`，92 例 TNBC）。
+3. **正常人**：Kumar HBCA *Nature* 2023，GSE195665（Visium：GSE234814），126 名女性。癌旁 NAT **单独一组**，不要当健康对照。脑转移不要用正常乳腺当对照。
+
+物种：人 `org.Hs.eg.db`。病人、器官、切片 ID 必须保留；禁止把肺+脑+骨或病人偷偷合并后再做「转移 vs 正常」。
+
+## 细胞与「浸润」定义
+
+- **肿瘤类**：恶性上皮（EPCAM、KRT8/18/19 等）；Visium 用恶性反卷积高的 spot，不要把免疫/成纤维当肿瘤。
+- **神经**：外周 Nerve / Schwann（MPZ、PMP22、S100B、SOX10、PLP1）；中枢星形/少突（GFAP、AQP4、MBP、MOG）。神经元常极少，缺则记入日志，不伪造。
+- **神经浸润**：肿瘤–神经空间邻域（邻接 spot / 近神经 vs 远神经），不是 bulk 共表达。免疫只作共定位/协变量，不当「肿瘤高表达」的分子来源。
+
+## 比较（每组单独出表、单独作图）
+
+先按器官分层，再在病人内比较，最后做跨病人汇总（伪 bulk：`patient × 分区 × 器官`）。
+
+1. 近神经肿瘤 vs 远神经肿瘤（PNI；Wang 有 Nerve 标注时按病人 1-vs-1，再取共同上调）
+2. BCBM：瘤–胶质界面 vs 瘤核
+3. 肿瘤细胞 vs 器官匹配正常上皮（乳腺→HBCA luminal；脑→脑图谱，不用 HBCA）
+4. 肺 / 脑 / 骨 各自的肿瘤近神经上调，再取共同上调（不要先合并器官）
+
+## 显著性与分层（只分析上调）
+
+能估计 p 时（≥2 名病人或伪 bulk）先 **p < 0.01**，再分层；单切片 1-vs-1 不要伪造 p，按 FC 分层并写日志。关联 ≠ 因果：候选须同时满足肿瘤侧高表达 + 空间邻接 + 神经侧受体。
+
+1. FoldChange：上调 FC ≥ 1.25 / 1.5 / 2（不做 FC=1，也不做 top 50–300）
+2. 配体–受体：肿瘤配体 × 神经/胶质受体（轴突导向、神经营养、L1CAM/NCAM、CCL2 等）
+
+目录：`FoldChange/FC_1.5/`。文件名和图标题必须带档位、器官、分区。
+
+## 每个非空子集必须出的图
+
+差异基因表、火山图、热图、空间定位图、GO、通路、KEGG、GSEA、配体–受体。主表：`results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`。
+
+- ORA 放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头（不要写进 GSEA/）
+- GSEA 放 `GSEA/`，文件名以 `GSEA_` 开头；全基因 GSEA 只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
+- 神经浸润假说放 `Focused_nerve_invasion/`；全库表另出 `*_FOCUS_nerve_invasion.csv`（保留原始 p 与 `genome_wide_rank`），不要为凸显假说去改全库 p 值
+
+```r
+# ❌ BAD: 只用 Wang 原发 TNBC 冒充多器官转移；把 GSE240212 小鼠当病人
+# ❌ BAD: 肺+脑+骨、或病人、或 NAT+健康人合并后再做 DEG；把免疫高表达当成肿瘤基因
+# ❌ BAD: 无邻域证据就写「促进神经浸润」；改全库 p 让轴突导向排第一
+# ✅ GOOD: Klughammer 按器官保留；神经用 BCBM ST + Wang Nerve；正常人用 HBCA
+# ✅ GOOD: 近神经肿瘤 vs 远神经肿瘤，p<0.01 后 FC≥1.25/1.5/2；候选表含空间+LR
+```
