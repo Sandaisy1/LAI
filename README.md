@@ -100,11 +100,14 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 ## Wang 2024 空间转录组：神经浸润（新脚本，不改 1–4）
 
-数据在 `E:/R/Nerve`。脚本 `Wang_ST_nerve_infiltration.R` 回答三件事（**不做 GO/KEGG/GSEA**）：
+先 **导出能做近神经 vs 远神经的病人** 的近/远肿瘤 **基因表达**（RNA，不是蛋白）→ `results/00_expression_near_vs_far/`  
+再把这些病人合在一起，看近 vs 远的高表达基因 → `results/04_COMBINED_near_vs_far_high_genes.csv`
 
-1. 神经浸润相关分子和统计方案 → `results/00_Q1_PROTOCOL.txt`、`01_Q1_literature_ligands.csv`、`01_Q3_literature_repellents.csv`
+另外三件事（**不做 GO/KEGG/GSEA**）：
+
+1. 神经浸润相关分子和统计方案 → `results/00_Q1_PROTOCOL.txt`
 2. **肿瘤细胞高表达、可能促使神经浸润的基因** → `results/02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv`
-3. **肿瘤细胞低表达、可能促使神经浸润的基因**（丢失排斥/屏障）→ `results/03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv`
+3. **肿瘤细胞低表达、可能促使神经浸润的基因** → `results/03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv`
 
 ```r
 setwd("E:/R/Nerve")
@@ -126,7 +129,11 @@ E:/R/Nerve/results/
   00_Q1_PROTOCOL.txt
   01_Q1_literature_ligands.csv
   01_Q3_literature_repellents.csv
-  02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv   # 问题2 高表达
+  00_expression_near_vs_far/          # 每人近/远肿瘤 RNA 表达，先看这里
+    eligible_patients.csv
+    pathologist_nerve/TNBC*/near_and_far_tumor_RNA_expression.csv
+    schwann_neighborhood/COMBINED_mean_logCPM_near_and_far.csv
+  04_COMBINED_near_vs_far_high_genes.csv  # 这些病人合在一起后的高表达基因
   03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv  # 问题3 低表达（p<0.05 且 FC<1）
   03_Q3_down_p005_FC_lt_1.csv
   03_Q3_down_p005_FC1.25.csv   # 可选更严

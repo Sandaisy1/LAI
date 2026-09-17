@@ -16,13 +16,12 @@
 #   source("E:/R/TG_BRCA/TG/Wang_ST_nerve_infiltration.R")   # 或把本文件拷到 E:/R/Nerve
 #   # 也可：Sys.setenv(WANG_ST_DIR = "E:/R/Nerve")
 #
-# 比较（各自单独出表/出图；病人不偷偷合并）：
-#   1) 病理 Nerve 邻域：每个有神经 spot 的病人单独 1-vs-1
-#   2) 这些病人的共同上调 / 共同下调
-#   3) 全队列 Schwann 签名邻域：~ patient + group 的伪 bulk DESeq2
-# 显著性：先 p < 0.05。
-#   问题2 上调：FC >= 1.25 / 1.5
-#   问题3 下调：FC < 1 即可（近神经比远离低）；1.25 / 1.5 只是更严的可选分层。
+# 流程：
+#   0) 能做「近神经 vs 远神经」的病人：先导出近/远肿瘤的基因表达（RNA，不是蛋白）
+#   1) 病理 Nerve 邻域：这些病人各自 1-vs-1，不偷偷合并
+#   2) 把这些病人合在一起：近神经肿瘤 vs 远神经肿瘤，看高表达基因
+#   3) Schwann 邻域全队列（病理 Nerve 重叠太少时的主分析）
+# 问题2 上调：p<0.05 且 FC>=1.25/1.5；问题3 下调：p<0.05 且 FC<1。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -136,8 +135,10 @@ if (!exists("log_msg", mode = "function")) {
 
 result_dir <- file.path(nerve_dir, "results")
 log_dir <- file.path(result_dir, "00_logs")
+expr_dir <- file.path(result_dir, "00_expression_near_vs_far")
 dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(result_dir, "00_QC_maps"), recursive = TRUE, showWarnings = FALSE)
+dir.create(expr_dir, recursive = TRUE, showWarnings = FALSE)
 log_file <- file.path(log_dir, paste0("wang_st_nerve_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
 log_msg_file <- log_msg
 log_msg <- function(...) {
@@ -703,6 +704,75 @@ emit_de_tables <- function(comp_name, de) {
   invisible(de)
 }
 
+write_gene_mat <- function(mat, path) {
+  utils::write.csv(
+    data.frame(gene = rownames(mat), mat, check.names = FALSE, stringsAsFactors = FALSE),
+    path, row.names = FALSE
+  )
+}
+
+bind_gene_col <- function(mat, vec, colname) {
+  vec <- vec[is.finite(vec)]
+  if (length(vec) == 0) return(mat)
+  if (is.null(mat)) {
+    return(matrix(as.numeric(vec), ncol = 1,
+                  dimnames = list(names(vec), colname)))
+  }
+  gn <- intersect(rownames(mat), names(vec))
+  if (length(gn) == 0) return(mat)
+  out <- cbind(mat[gn, , drop = FALSE], as.numeric(vec[gn]))
+  colnames(out)[ncol(out)] <- colname
+  out
+}
+
+bind_pb <- function(acc, pb, si) {
+  if (is.null(acc$mat)) return(list(mat = pb, si = si))
+  gn <- intersect(rownames(acc$mat), rownames(pb))
+  list(
+    mat = cbind(acc$mat[gn, , drop = FALSE], pb[gn, , drop = FALSE]),
+    si = rbind(acc$si, si)
+  )
+}
+
+# 每个病人：近神经肿瘤 vs 远神经肿瘤的基因表达（RNA count / mean logCPM）
+export_patient_near_far <- function(pid, track, logm, cnts, near_i, far_i, eligible_de) {
+  if (length(near_i) < 1 || length(far_i) < 1) return(NULL)
+  od <- file.path(expr_dir, track, paste0("TNBC", pid))
+  dir.create(od, recursive = TRUE, showWarnings = FALSE)
+  near_mean <- colMeans(logm[near_i, , drop = FALSE])
+  far_mean  <- colMeans(logm[far_i, , drop = FALSE])
+  near_pb <- colSums(cnts[near_i, , drop = FALSE])
+  far_pb  <- colSums(cnts[far_i, , drop = FALSE])
+  tab <- data.frame(
+    gene = colnames(logm),
+    mean_logCPM_near_nerve_tumor = as.numeric(near_mean),
+    mean_logCPM_far_nerve_tumor = as.numeric(far_mean),
+    pseudobulk_count_near = as.numeric(near_pb),
+    pseudobulk_count_far = as.numeric(far_pb),
+    n_spots_near = length(near_i),
+    n_spots_far = length(far_i),
+    log2FC_near_minus_far = as.numeric(near_mean - far_mean),
+    eligible_for_combined_DE = eligible_de,
+    stringsAsFactors = FALSE
+  )
+  utils::write.csv(tab, file.path(od, "near_and_far_tumor_RNA_expression.csv"),
+                   row.names = FALSE)
+  meta <- data.frame(
+    patient = pid,
+    track = track,
+    n_spots_near = length(near_i),
+    n_spots_far = length(far_i),
+    eligible_for_combined_DE = eligible_de,
+    note = "Wang ST 是基因表达（RNA），不是蛋白质组",
+    stringsAsFactors = FALSE
+  )
+  utils::write.csv(meta, file.path(od, "sample_info.csv"), row.names = FALSE)
+  list(
+    mean_near = near_mean, mean_far = far_mean,
+    pb_near = near_pb, pb_far = far_pb
+  )
+}
+
 # -----------------------------------------------------------------------------
 # 7. 主分析
 # -----------------------------------------------------------------------------
@@ -721,6 +791,11 @@ qc_rows <- list()
 nerve_de_list <- list()
 pb_schwann <- NULL
 si_schwann <- NULL
+pb_nerve_acc <- list(mat = NULL, si = NULL)
+mean_nerve_wide <- NULL
+mean_schwann_wide <- NULL
+pb_nerve_wide <- NULL
+pb_schwann_wide <- NULL
 ligand_rows <- list()
 
 for (pid in pids) {
@@ -753,15 +828,40 @@ for (pid in pids) {
   gkeep <- filter_genes_mat(obj$cnts)
   logm <- obj$logmat[, gkeep, drop = FALSE]
   cnts <- obj$cnts[, gkeep, drop = FALSE]
+  tag <- paste0("TNBC", pid)
 
-  # 病理神经 1-vs-1（不合并病人）
-  if (sum(sp$near_nerve) >= 5 && sum(sp$far_nerve) >= 10) {
+  # 病理神经：先导出近/远肿瘤表达，再决定是否做差异
+  n_near_n <- which(sp$near_nerve)
+  n_far_n  <- which(sp$far_nerve)
+  elig_nerve <- length(n_near_n) >= 5 && length(n_far_n) >= 10
+  if (length(n_near_n) >= 1 && length(n_far_n) >= 1) {
+    ex <- export_patient_near_far(pid, "pathologist_nerve", logm, cnts,
+                                  n_near_n, n_far_n, elig_nerve)
+    if (!is.null(ex) && elig_nerve) {
+      mean_nerve_wide <- bind_gene_col(mean_nerve_wide, ex$mean_near, paste0(tag, "_near"))
+      mean_nerve_wide <- bind_gene_col(mean_nerve_wide, ex$mean_far,  paste0(tag, "_far"))
+      pb_n <- cbind(ex$pb_near, ex$pb_far)
+      rownames(pb_n) <- names(ex$pb_near)
+      colnames(pb_n) <- paste0(tag, c("_near", "_far"))
+      pb_nerve_wide <- if (is.null(pb_nerve_wide)) pb_n else {
+        gn <- intersect(rownames(pb_nerve_wide), rownames(pb_n))
+        cbind(pb_nerve_wide[gn, , drop = FALSE], pb_n[gn, , drop = FALSE])
+      }
+      si_n <- data.frame(
+        sample = colnames(pb_n), group = c("near", "far"),
+        patient = as.character(pid), stringsAsFactors = FALSE
+      )
+      pb_nerve_acc <- bind_pb(pb_nerve_acc, pb_n, si_n)
+    }
+  }
+
+  if (elig_nerve) {
     grp <- ifelse(sp$near_nerve, "near", ifelse(sp$far_nerve, "far", NA))
     keep <- !is.na(grp)
     de_i <- limma_two_group(logm[keep, , drop = FALSE], grp[keep],
                             label = paste0("TNBC", pid, "_nerve"))
     if (nrow(de_i) == 0) {
-      de_i <- mean_fc_two_group(logm, which(sp$near_nerve), which(sp$far_nerve))
+      de_i <- mean_fc_two_group(logm, n_near_n, n_far_n)
       log_msg("TNBC", pid, " nerve: limma empty, fallback mean FC (no p)")
     }
     nm <- paste0("TNBC", pid, "_tumor_near_nerve_vs_far")
@@ -769,12 +869,23 @@ for (pid in pids) {
     emit_de_tables(nm, de_i)
   }
 
-  # Schwann 邻域伪 bulk（全队列，病人作为协变量，不把对照混成一组去平均）
-  if (sum(sp$near_schwann) >= 5 && sum(sp$far_schwann) >= 10) {
-    near_sum <- colSums(cnts[sp$near_schwann, , drop = FALSE])
-    far_sum  <- colSums(cnts[sp$far_schwann, , drop = FALSE])
+  # Schwann 邻域：同样先导出表达，再进全队列伪 bulk
+  n_near_s <- which(sp$near_schwann)
+  n_far_s  <- which(sp$far_schwann)
+  elig_schw <- length(n_near_s) >= 5 && length(n_far_s) >= 10
+  if (length(n_near_s) >= 1 && length(n_far_s) >= 1) {
+    exs <- export_patient_near_far(pid, "schwann_neighborhood", logm, cnts,
+                                   n_near_s, n_far_s, elig_schw)
+    if (!is.null(exs) && elig_schw) {
+      mean_schwann_wide <- bind_gene_col(mean_schwann_wide, exs$mean_near, paste0(tag, "_near"))
+      mean_schwann_wide <- bind_gene_col(mean_schwann_wide, exs$mean_far,  paste0(tag, "_far"))
+    }
+  }
+  if (elig_schw) {
+    near_sum <- colSums(cnts[n_near_s, , drop = FALSE])
+    far_sum  <- colSums(cnts[n_far_s, , drop = FALSE])
     pb <- cbind(near_sum, far_sum)
-    colnames(pb) <- paste0("TNBC", pid, c("_near", "_far"))
+    colnames(pb) <- paste0(tag, c("_near", "_far"))
     si <- data.frame(
       sample = colnames(pb),
       group = c("near", "far"),
@@ -812,9 +923,58 @@ for (pid in pids) {
 }
 
 qc <- do.call(rbind, qc_rows)
+if (!is.null(qc) && nrow(qc) > 0) {
+  qc$eligible_pathologist_nerve_DE <- qc$n_tumor_near_nerve >= 5 & qc$n_tumor_far_nerve >= 10
+  qc$eligible_schwann_DE <- qc$n_tumor_near_schwann >= 5 & qc$n_tumor_far_schwann >= 10
+}
 utils::write.csv(qc, file.path(log_dir, "spot_class_counts.csv"), row.names = FALSE)
-log_msg("Patients with pathologist nerve spots: ",
-        paste(qc$patient[qc$n_nerve_path > 0], collapse = ", "))
+utils::write.csv(qc, file.path(expr_dir, "eligible_patients.csv"), row.names = FALSE)
+if (!is.null(qc) && nrow(qc) > 0) {
+  log_msg("Patients with pathologist nerve spots: ",
+          paste(qc$patient[qc$n_nerve_path > 0], collapse = ", "))
+  log_msg("能做病理近神经 vs 远神经 DE 的病人: ",
+          paste(qc$patient[qc$eligible_pathologist_nerve_DE], collapse = ", "))
+  log_msg("能做 Schwann 近 vs 远 DE 的病人: ",
+          paste(qc$patient[qc$eligible_schwann_DE], collapse = ", "))
+}
+
+write_combined_expression <- function(track, mean_wide, pb_mat, si) {
+  od <- file.path(expr_dir, track)
+  dir.create(od, recursive = TRUE, showWarnings = FALSE)
+  if (!is.null(mean_wide) && ncol(mean_wide) > 0) {
+    write_gene_mat(mean_wide, file.path(od, "COMBINED_mean_logCPM_near_and_far.csv"))
+    tryCatch(writexl::write_xlsx(
+      data.frame(gene = rownames(mean_wide), mean_wide, check.names = FALSE),
+      file.path(od, "COMBINED_mean_logCPM_near_and_far.xlsx")
+    ), error = function(e) NULL)
+  }
+  if (!is.null(pb_mat) && ncol(pb_mat) > 0) {
+    write_gene_mat(pb_mat, file.path(od, "COMBINED_pseudobulk_counts_near_and_far.csv"))
+    if (!is.null(si)) {
+      utils::write.csv(si, file.path(od, "COMBINED_sample_info.csv"), row.names = FALSE)
+    }
+  }
+}
+
+write_combined_expression("pathologist_nerve", mean_nerve_wide, pb_nerve_wide, pb_nerve_acc$si)
+si_sw_export <- si_schwann
+write_combined_expression("schwann_neighborhood", mean_schwann_wide, pb_schwann, si_sw_export)
+writeLines(c(
+  "这是空间转录组的基因表达（RNA count / logCPM），不是蛋白质组。",
+  "",
+  "每个能分出近/远肿瘤 spot 的病人有一张表：",
+  "  pathologist_nerve/TNBC*/near_and_far_tumor_RNA_expression.csv",
+  "  schwann_neighborhood/TNBC*/near_and_far_tumor_RNA_expression.csv",
+  "列：近神经肿瘤 mean logCPM、远神经肿瘤 mean logCPM、伪 bulk count。",
+  "",
+  "能做 DE 的病人（近>=5 且 远>=10）还会汇总：",
+  "  COMBINED_mean_logCPM_near_and_far.csv   基因 × 各病人_near/_far",
+  "  COMBINED_pseudobulk_counts_near_and_far.csv",
+  "  eligible_patients.csv",
+  "",
+  "病理 Nerve 与阵列重叠的病人很少；全队列近 vs 远请看 schwann_neighborhood。",
+  "综合高表达基因在 04_COMBINED_near_vs_far_high_genes.csv。"
+), file.path(expr_dir, "00_READ_ME.txt"))
 
 # 共同上调 / 共同下调：病理神经 1-vs-1 交集
 if (length(nerve_de_list) >= 2) {
@@ -877,7 +1037,7 @@ if (length(nerve_de_list) >= 2) {
   log_msg("病理 Nerve 重叠 spot 的病人不足 2 例，跳过共同上调/下调。请看全队列 Schwann 邻域。")
 }
 
-# 全队列 Schwann 邻域
+# 全队列 Schwann 邻域（能做近 vs 远的病人合在一起，~ patient + group）
 if (!is.null(pb_schwann) && length(unique(si_schwann$patient)) >= 2) {
   log_msg("Schwann-neighborhood pseudobulk patients: ",
           paste(unique(si_schwann$patient), collapse = ","))
@@ -892,6 +1052,36 @@ if (!is.null(pb_schwann) && length(unique(si_schwann$patient)) >= 2) {
 } else {
   log_msg("Schwann 邻域伪 bulk 病人不足，跳过 tumor_near_schwann_vs_far")
   de_sw <- empty_de()
+}
+
+# 病理近神经：把能做 1-vs-1 的病人合在一起再比一次（不把对照混成一组去平均）
+de_nerve_combined <- empty_de()
+if (!is.null(pb_nerve_acc$mat) && length(unique(pb_nerve_acc$si$patient)) >= 2) {
+  log_msg("Pathologist-nerve combined patients: ",
+          paste(unique(pb_nerve_acc$si$patient), collapse = ","))
+  si_n <- pb_nerve_acc$si
+  rownames(si_n) <- si_n$sample
+  de_nerve_combined <- deseq2_pseudobulk(round(pmax(pb_nerve_acc$mat, 0)), si_n,
+                                         "combined_pathologist_near_vs_far")
+  if (nrow(de_nerve_combined) == 0) {
+    logm <- log2(sweep(t(pb_nerve_acc$mat), 1, pmax(colSums(pb_nerve_acc$mat), 1), "/") * 1e6 + 1)
+    de_nerve_combined <- limma_two_group(logm, si_n$group, si_n$patient, "nerve_pb")
+  }
+  emit_de_tables("combined_pathologist_near_vs_far", de_nerve_combined)
+} else {
+  log_msg("病理近神经可合并病人不足 2 例，综合分析用 Schwann 邻域。")
+}
+
+# 综合高表达：近神经肿瘤 vs 远神经肿瘤（优先 Schwann 全队列，病理合并作对照）
+de_combined <- if (nrow(de_sw) > 0) de_sw else de_nerve_combined
+if (nrow(de_combined) > 0) {
+  hi <- select_up(de_combined, 1.25)
+  utils::write.csv(hi, file.path(result_dir, "04_COMBINED_near_vs_far_high_genes.csv"),
+                   row.names = FALSE)
+  utils::write.csv(select_up(de_combined, 1.5),
+                   file.path(result_dir, "04_COMBINED_near_vs_far_high_genes_FC1.5.csv"),
+                   row.names = FALSE)
+  log_msg("综合近 vs 远 高表达 FC>=1.25 n=", nrow(hi))
 }
 
 # -----------------------------------------------------------------------------
@@ -1076,7 +1266,13 @@ protocol <- c(
   "不做 GO / KEGG / GSEA。",
   "============================================================",
   "",
-  "【问题 1】神经浸润相关分子和方案",
+  "【先导出表达，再综合】",
+  "  这是 RNA 表达，不是蛋白。能分出近/远肿瘤的病人：",
+  "    results/00_expression_near_vs_far/",
+  "    每人一张 near_and_far_tumor_RNA_expression.csv",
+  "    能做 DE 的病人汇总 COMBINED_mean_logCPM_near_and_far.csv",
+  "  综合这些病人：近神经肿瘤 vs 远神经肿瘤的高表达基因",
+  "    04_COMBINED_near_vs_far_high_genes.csv（p<0.05 且 FC>=1.25）",
   "",
   "瘤内几乎没有神经元胞体，主要是纤维 + Schwann。病理 Nerve 与 ST spot",
   "重叠的病人极少（见 00_logs/spot_class_counts.csv），所以双轨：",
@@ -1122,15 +1318,19 @@ protocol <- c(
 writeLines(protocol, file.path(result_dir, "00_Q1_PROTOCOL.txt"))
 writeLines(c(
   "先看这些文件：",
+  "  0 表达量（RNA，不是蛋白）  00_expression_near_vs_far/",
+  "    eligible_patients.csv",
+  "    pathologist_nerve/ 与 schwann_neighborhood/ 下每人 near_and_far_tumor_RNA_expression.csv",
+  "    COMBINED_mean_logCPM_near_and_far.csv  能做近vs远的病人汇总",
+  "  综合高表达  04_COMBINED_near_vs_far_high_genes.csv",
   "  问题1  00_Q1_PROTOCOL.txt",
-  "         01_Q1_literature_ligands.csv（高表达促浸润配体）",
-  "         01_Q3_literature_repellents.csv（低表达放开浸润）",
   "  问题2  02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv",
   "  问题3  03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv",
   "没有 GO/GSEA。"
 ), file.path(result_dir, "00_READ_ME.txt"))
-log_msg("Wrote Q1 protocol and Q2/Q3 ranked tumor-gene tables")
-log_msg("问题1: ", file.path(result_dir, "00_Q1_PROTOCOL.txt"))
+log_msg("Wrote Q1 protocol, expression tables, and Q2/Q3 ranked genes")
+log_msg("表达量: ", file.path(expr_dir, "00_READ_ME.txt"))
+log_msg("综合高表达: ", file.path(result_dir, "04_COMBINED_near_vs_far_high_genes.csv"))
 log_msg("问题2: ", file.path(result_dir, "02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv"))
 log_msg("问题3: ", file.path(result_dir, "03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv"))
 
