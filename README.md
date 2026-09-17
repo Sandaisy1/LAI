@@ -112,7 +112,7 @@ Sys.setenv(WANG_ST_DIR = "E:/R/Nerve")
 source("Wang_ST_nerve_infiltration.R")
 ```
 
-同目录若有 `TG_RNAseq_pipeline.R`，会出 ORA/GSEA 图。本空间分析只做上调 **FC ≥ 1.25 和 1.5**（先 **p < 0.01**），不做 FC=1、FC=2，也不做 topN。原 Cuffdiff 六组比较的档位不变。
+同目录若有 `TG_RNAseq_pipeline.R`，会出 ORA/GSEA 图。本空间分析只做上调 **FC ≥ 1.25 和 1.5**（先 **p < 0.05**），不做 FC=1、FC=2，也不做 topN。原 Cuffdiff 六组比较的档位不变。
 
 主结果：
 

@@ -15,7 +15,7 @@
 #   1) 病理 Nerve 邻域：每个有神经 spot 的病人单独 1-vs-1
 #   2) 这些病人的共同上调
 #   3) 全队列 Schwann 签名邻域：~ patient + group 的伪 bulk DESeq2
-# 显著性：先 p < 0.01，再按上调 FC >= 1.25 / 1.5 分层（不做 FC=1、FC=2，也不做 topN）。
+# 显著性：先 p < 0.05，再按上调 FC >= 1.25 / 1.5 分层（不做 FC=1、FC=2，也不做 topN）。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -151,10 +151,10 @@ log_msg <- function(...) {
   cat(msg, "\n", file = log_file, append = TRUE)
 }
 
-# 本空间分析：先滤 p < 0.01，再只按上调 FC >= 1.25 / 1.5 分层
+# 本空间分析：先滤 p < 0.05，再只按上调 FC >= 1.25 / 1.5 分层
 # （不做 FC=1、FC=2，也不做 topN；不改原 Cuffdiff 脚本的档位）
-if (exists("padj_cutoff")) padj_cutoff <<- 0.01
-p_cutoff <- 0.01
+if (exists("padj_cutoff")) padj_cutoff <<- 0.05
+p_cutoff <- 0.05
 fc_cutoffs_local <- c("FC_1.25" = 1.25, "FC_1.5" = 1.5)
 
 log_msg("Wang ST nerve dir: ", nerve_dir)
@@ -565,7 +565,7 @@ emit_comparison <- function(comp_name, de, heat_mat, sample_info) {
           " up p<", p_cutoff, " n=", sum(!is.na(de$pvalue) & de$pvalue < p_cutoff & de$log2FC > 0))
 
   writeLines(
-    c("本比较只做上调 FC >= 1.25 和 FC >= 1.5（先 p < 0.01）。",
+    c("本比较只做上调 FC >= 1.25 和 FC >= 1.5（先 p < 0.05）。",
       "没有 FC=1、FC=2，也没有 TopRank。",
       "分层图在 FoldChange/FC_1.25 和 FoldChange/FC_1.5。",
       "全基因 GSEA 在 00_GSEA_all_genes_NOT_FC_or_topN（不是分层图）。",
@@ -927,7 +927,7 @@ protocol <- c(
   "  Schwann 高：切片内 z-score > 1；基因 SOX10 MPZ PMP22 S100B PLP1 NGFR NCAM1 MBP L1CAM",
   "",
   "C. 统计（本空间分析，不是 Cuffdiff 那六组）",
-  "  先 p < 0.01，再只看上调 FC >= 1.25 和 FC >= 1.5",
+  "  先 p < 0.05，再只看上调 FC >= 1.25 和 FC >= 1.5",
   "  不做 FC=1、FC=2，也不做 top 50–300",
   "  只看上调（近神经肿瘤 > 远神经肿瘤）",
   "  有病理神经的病人各自 1-vs-1；共同上调 = 这些 1-vs-1 的交集",
