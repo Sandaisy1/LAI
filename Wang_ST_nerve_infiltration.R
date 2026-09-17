@@ -15,7 +15,7 @@
 #   1) 病理 Nerve 邻域：每个有神经 spot 的病人单独 1-vs-1
 #   2) 这些病人的共同上调
 #   3) 全队列 Schwann 签名邻域：~ patient + group 的伪 bulk DESeq2
-# 显著性：先 p < 0.01，再按上调 FC >= 1 / 1.25 / 1.5 / 2 和 top 50–300 分层。
+# 显著性：先 p < 0.01，再按上调 FC >= 1.25 / 1.5 分层（不做 FC=1、FC=2，也不做 topN）。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -151,13 +151,11 @@ log_msg <- function(...) {
   cat(msg, "\n", file = log_file, append = TRUE)
 }
 
-# 本空间分析：先滤 p < 0.01，再分层（不改原 Cuffdiff 脚本的 0.05）
+# 本空间分析：先滤 p < 0.01，再只按上调 FC >= 1.25 / 1.5 分层
+# （不做 FC=1、FC=2，也不做 topN；不改原 Cuffdiff 脚本的档位）
 if (exists("padj_cutoff")) padj_cutoff <<- 0.01
 p_cutoff <- 0.01
-fc_cutoffs_local <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
-top_ns_local <- c(50, 75, 100, 150, 200, 250, 300)
-if (exists("fc_cutoffs")) fc_cutoffs <<- fc_cutoffs_local
-if (exists("top_ns")) top_ns <<- top_ns_local
+fc_cutoffs_local <- c("FC_1.25" = 1.25, "FC_1.5" = 1.5)
 
 log_msg("Wang ST nerve dir: ", nerve_dir)
 log_msg("Results: ", result_dir)
@@ -566,40 +564,66 @@ emit_comparison <- function(comp_name, de, heat_mat, sample_info) {
   log_msg(comp_name, " genes=", nrow(de), " have_p=", have_p,
           " up p<", p_cutoff, " n=", sum(!is.na(de$pvalue) & de$pvalue < p_cutoff & de$log2FC > 0))
 
-  if (have_pipeline && exists("analyze_one_comparison", mode = "function")) {
-    old_rd <- if (exists("result_dir", inherits = TRUE)) result_dir else NULL
-    assign("result_dir", result_dir, envir = .GlobalEnv)
-    assign("padj_cutoff", p_cutoff, envir = .GlobalEnv)
-    tryCatch(
-      analyze_one_comparison(comp_name, de, de, heat_mat, sample_info, have_p, de),
-      error = function(e) log_msg("analyze_one_comparison failed ", comp_name, ": ", e$message)
-    )
-  } else {
-    writeLines(
-      c("本比较未调用原流程富集函数。差异表在 DE_full.csv。",
-        "把 TG_RNAseq_pipeline.R 放在同一目录再跑，可出 ORA/GSEA 全套图。"),
-      file.path(base, "00_READ_ME_先看这里.txt")
-    )
-    for (nm in names(fc_cutoffs_local)) {
-      fc <- unname(fc_cutoffs_local[[nm]])
-      keep <- !is.na(de$log2FC) & (2^de$log2FC >= fc) & de$log2FC > 0
-      if (have_p) keep <- keep & !is.na(de$pvalue) & de$pvalue < p_cutoff
-      sub <- de[keep, , drop = FALSE]
-      od <- file.path(base, "FoldChange", nm)
-      dir.create(od, recursive = TRUE, showWarnings = FALSE)
+  writeLines(
+    c("本比较只做上调 FC >= 1.25 和 FC >= 1.5（先 p < 0.01）。",
+      "没有 FC=1、FC=2，也没有 TopRank。",
+      "分层图在 FoldChange/FC_1.25 和 FoldChange/FC_1.5。",
+      "全基因 GSEA 在 00_GSEA_all_genes_NOT_FC_or_topN（不是分层图）。",
+      "细胞骨架/线粒体专项在 Focused_cytoskeleton_mito/。"),
+    file.path(base, "00_READ_ME_先看这里.txt")
+  )
+  invisible(lapply(file.path(base, "FoldChange", names(fc_cutoffs_local)),
+                   dir.create, recursive = TRUE, showWarnings = FALSE))
+
+  gsea_cache <- list()
+  use_pipe_plots <- have_pipeline && exists("emit_subset_analysis", mode = "function")
+  assign("result_dir", result_dir, envir = .GlobalEnv)
+  assign("padj_cutoff", p_cutoff, envir = .GlobalEnv)
+
+  for (nm in names(fc_cutoffs_local)) {
+    fc <- unname(fc_cutoffs_local[[nm]])
+    keep <- !is.na(de$log2FC) & de$log2FC > 0 & (2^de$log2FC >= fc)
+    if (have_p) keep <- keep & !is.na(de$pvalue) & de$pvalue < p_cutoff
+    sub <- de[keep, , drop = FALSE]
+    if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
+    od <- file.path(base, "FoldChange", nm)
+    if (use_pipe_plots) {
+      tryCatch(
+        emit_subset_analysis(
+          comp_name, sub, nm, paste0(comp_name, " | up FC >= ", fc),
+          od, de, heat_mat, sample_info, gsea_cache, fc_line = fc
+        ),
+        error = function(e) log_msg("ERROR subset ", comp_name, " ", nm, ": ", e$message)
+      )
+    } else {
       utils::write.csv(sub, file.path(od, paste0(nm, "_DE_selected_genes.csv")), row.names = FALSE)
       basic_volcano(de, paste(comp_name, nm), file.path(od, paste0(nm, "_volcano")), fc)
     }
-    ord <- de[de$log2FC > 0, ]
-    if (have_p) ord <- ord[!is.na(ord$pvalue) & ord$pvalue < p_cutoff, , drop = FALSE]
-    ord <- ord[order(ord$log2FC, decreasing = TRUE), , drop = FALSE]
-    for (n in top_ns_local) {
-      tag <- paste0("top", n)
-      od <- file.path(base, "TopRank", tag)
-      dir.create(od, recursive = TRUE, showWarnings = FALSE)
-      utils::write.csv(utils::head(ord, n), file.path(od, paste0(tag, "_DE_selected_genes.csv")),
-                       row.names = FALSE)
-    }
+  }
+
+  if (use_pipe_plots && exists("build_gsea_cache", mode = "function")) {
+    tryCatch({
+      log_msg("Building full-list GSEA after subset plots: ", comp_name)
+      gsea_cache <- build_gsea_cache(de)
+      full_gsea_dir <- file.path(base, "00_GSEA_all_genes_NOT_FC_or_topN")
+      dir.create(full_gsea_dir, recursive = TRUE, showWarnings = FALSE)
+      writeLines("全基因 GSEA，不是 FC 分层结果。分层图在 FoldChange/FC_1.25 和 FC_1.5。",
+                 file.path(full_gsea_dir, "00_README.txt"))
+      for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
+        plot_gsea_object(gsea_cache[[nm]], file.path(full_gsea_dir, paste0("allGenes_GSEA_", nm)),
+                         paste("GSEA", nm, "|", comp_name, "| ALL genes, NOT FC subset"))
+      }
+      plot_fgsea_hallmark(gsea_cache$stats, full_gsea_dir,
+                          paste("GSEA Hallmark |", comp_name, "| ALL genes"), prefix = "allGenes_")
+    }, error = function(e) log_msg("full-list GSEA failed for ", comp_name, ": ", e$message))
+    tryCatch({
+      focus_stats <- if (!is.null(gsea_cache$stats)) gsea_cache$stats else ranked_entrez(de)
+      run_focused_gsea(
+        focus_stats, de, heat_mat, sample_info,
+        file.path(base, "Focused_cytoskeleton_mito"),
+        paste(comp_name, "| all genes")
+      )
+    }, error = function(e) log_msg("focused GSEA failed for ", comp_name, ": ", e$message))
   }
   invisible(TRUE)
 }
@@ -902,8 +926,9 @@ protocol <- c(
   "  远：距离 > 4（中间空一圈，避免模糊带）",
   "  Schwann 高：切片内 z-score > 1；基因 SOX10 MPZ PMP22 S100B PLP1 NGFR NCAM1 MBP L1CAM",
   "",
-  "C. 统计（与仓库规则一致）",
-  "  先 p < 0.01，再上调 FC >= 1 / 1.25 / 1.5 / 2，以及 top 50–300",
+  "C. 统计（本空间分析，不是 Cuffdiff 那六组）",
+  "  先 p < 0.01，再只看上调 FC >= 1.25 和 FC >= 1.5",
+  "  不做 FC=1、FC=2，也不做 top 50–300",
   "  只看上调（近神经肿瘤 > 远神经肿瘤）",
   "  有病理神经的病人各自 1-vs-1；共同上调 = 这些 1-vs-1 的交集",
   "  全队列 Schwann：伪 bulk ~ patient + group，不用把病人平均掉再比",
@@ -928,7 +953,8 @@ protocol <- c(
   "       priority 高 = 阵列检出 + 靠近 Schwann 的肿瘤里升高 + 与距离负相关",
   "    2. results/tumor_near_schwann_vs_far/",
   "       全队列：靠近 Schwann 的肿瘤 vs 远离 Schwann 的肿瘤",
-  "       FoldChange/ 和 TopRank/ 里才是分层图；GSEA 全基因在 00_GSEA_all_genes_NOT_FC_or_topN",
+  "       FoldChange/FC_1.25 和 FC_1.5 才是分层图；没有 TopRank",
+  "       全基因 GSEA 在 00_GSEA_all_genes_NOT_FC_or_topN",
   "    3. results/TNBC*_tumor_near_nerve_vs_far/",
   "       病理神经金标准，病人很少，只作验证，不要和 Schwann 结果混成一张表",
   "    4. results/common_up_pathologist_nerve/  上述金标准的共同上调",
