@@ -4,6 +4,8 @@
 #
 # 问题1：肿瘤活检里哪些高表达基因可能促进神经浸润
 # 问题2：神经浸润更倾向哪个继发部位（肺 / 脑 / 骨 …）
+# 问题3：肿瘤细胞低表达哪些基因可能促使神经浸润
+#         （屏障/黏附/抑癌/轴突排斥等丢失 → 更易向神经侵袭）
 #
 # 数据目录默认：E:/R/Nerve RNA
 # 需要放入（二选一或都放）：
@@ -116,10 +118,28 @@ ligand_priority <- c(
   "CCL2", "EFNA5", "ROBO4", "CDH2", "VIM", "SNAI1", "SNAI2", "TWIST1", "ZEB1", "ZEB2",
   "MMP9", "MMP14", "ITGB1", "ITGAV"
 )
+# 问题3：低表达/丢失可能解除屏障、促侵袭（含向神经）的候选
+# 黏附/紧密连接、抑癌、TIMP、轴突排斥/Wnt 拮抗、基底膜相关等
+barrier_priority <- c(
+  # 上皮黏附 / 紧密连接 / 桥粒
+  "CDH1", "CDH3", "CLDN1", "CLDN3", "CLDN4", "CLDN7", "OCLN", "DSC2", "CXADR",
+  # 抑癌 / 周期刹车
+  "PTEN", "TP53", "RB1", "CDKN1A", "CDKN1B", "CDKN2A", "CDKN2B", "SMAD4", "ATM",
+  "BRCA1", "BRCA2", "MLH1", "CHEK2",
+  # MMP 抑制 / 抗侵袭
+  "TIMP4", "SERPINB5", "THBS1", "THBS2",
+  # 基底膜 / 半桥粒相关（低表达削弱组织结构）
+  "LAMA3", "LAMB3", "LAMC2", "ITGA6", "KRT5", "KRT14",
+  # Wnt 拮抗 / 分化维持（丢失可促侵袭表型）
+  "SFRP1", "SFRP2", "DKK1", "DKK2", "WIF1", "AXIN1", "AXIN2", "BMP4", "TGFBR2",
+  # 管腔分化标志（低表达常伴侵袭性更高）
+  "ESR1", "PGR", "FOXA1", "GATA3", "MUC1"
+)
 stroma_genes <- c("SOX10", "S100A7", "S100A14")  # 面板几乎无 GFAP/MBP/MPZ
 nerve_term_pat <- paste(
   "axon", "neur", "nerve", "schwann", "synap", "neurotroph", "semaphorin",
-  "ephrin", "glia", "wnt", "emt", "invas", "migrat",
+  "ephrin", "glia", "wnt", "emt", "invas", "migrat", "adhes", "junction",
+  "cadherin", "claudin", "barrier",
   sep = "|"
 )
 
@@ -200,15 +220,20 @@ save_gg <- function(p, stub, w = 7, h = 5) {
   ggplot2::ggsave(paste0(stub, ".png"), p, width = w, height = h, dpi = 140)
 }
 
-basic_volcano <- function(de, title, stub, fc_line = 1.25) {
+basic_volcano <- function(de, title, stub, fc_line = 1.25, highlight = c("up", "down", "both")) {
   if (nrow(de) == 0) return(invisible(NULL))
+  highlight <- match.arg(highlight)
   df <- de
   df$y <- -log10(pmax(df$pvalue, 1e-300))
   df$col <- "ns"
-  df$col[!is.na(df$pvalue) & df$pvalue < p_cutoff & df$log2FC >= log2(fc_line)] <- "up"
+  up_ok <- !is.na(df$pvalue) & df$pvalue < p_cutoff & df$log2FC >= log2(fc_line)
+  dn_ok <- !is.na(df$pvalue) & df$pvalue < p_cutoff & df$log2FC <= -log2(fc_line)
+  if (highlight %in% c("up", "both")) df$col[up_ok] <- "up"
+  if (highlight %in% c("down", "both")) df$col[dn_ok] <- "down"
+  cols <- c(ns = "grey70", up = "#D62828", down = "#1D3557")
   p <- ggplot2::ggplot(df, ggplot2::aes(log2FC, y, color = col)) +
     ggplot2::geom_point(alpha = 0.5, size = 1) +
-    ggplot2::scale_color_manual(values = c(ns = "grey70", up = "#D62828")) +
+    ggplot2::scale_color_manual(values = cols[intersect(names(cols), unique(df$col))]) +
     ggplot2::theme_bw(base_size = 12) +
     ggplot2::labs(title = title, y = "-log10(p)", x = "log2FC")
   save_gg(p, stub, 7, 6)
@@ -407,11 +432,15 @@ log_msg("Organs: ", paste(sprintf("%s=%d", names(org_tab), as.integer(org_tab)),
 
 lig_in <- present(ligand_priority, rownames(mat_n))
 str_in <- present(stroma_genes, rownames(mat_n))
+bar_in <- present(barrier_priority, rownames(mat_n))
 log_msg("神经亲和候选基因（面板命中 ", length(lig_in), "/", length(ligand_priority), "）: ",
         paste(lig_in, collapse = ", "))
 log_msg("神经基质基因（面板命中 ", length(str_in), "/", length(stroma_genes), "）: ",
         paste(str_in, collapse = ", "))
+log_msg("屏障/抑癌低表达候选（面板命中 ", length(bar_in), "/", length(barrier_priority), "）: ",
+        paste(bar_in, collapse = ", "))
 if (length(lig_in) < 3) log_msg("WARNING: 面板神经亲和基因很少，问题1结果会偏窄")
+if (length(bar_in) < 5) log_msg("WARNING: 面板屏障/抑癌基因很少，问题3结果会偏窄")
 
 # -----------------------------------------------------------------------------
 # 3. 问题2：继发部位倾向（先算分数，后面写总表）
@@ -454,7 +483,8 @@ emit_one <- function(comp_name, de) {
     sub <- de[keep, , drop = FALSE]
     if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
     utils::write.csv(sub, file.path(od, paste0(nm, "_up_genes.csv")), row.names = FALSE)
-    basic_volcano(de, paste(comp_name, nm), file.path(od, paste0(nm, "_volcano")), fc)
+    basic_volcano(de, paste(comp_name, nm), file.path(od, paste0(nm, "_volcano")), fc,
+                  highlight = "up")
     # 神经相关基因子集
     focus <- sub[sub$gene %in% lig_in, , drop = FALSE]
     utils::write.csv(focus, file.path(od, paste0(nm, "_FOCUS_nerve_ligands.csv")), row.names = FALSE)
@@ -462,7 +492,38 @@ emit_one <- function(comp_name, de) {
   invisible(de)
 }
 
+# 问题3：同一套比较，只取下调（屏障丢失 / 低表达促侵袭）
+emit_down <- function(comp_name, de) {
+  base <- file.path(result_dir, "Q3_genes_low_expr_promote_nerve", comp_name)
+  dir.create(base, recursive = TRUE, showWarnings = FALSE)
+  de <- de[!is.na(de$log2FC), , drop = FALSE]
+  utils::write.csv(de, file.path(base, "DE_full.csv"), row.names = FALSE)
+  writeLines(
+    c("问题3：该比较中下调基因（先 p < 0.01，再下调倍数 FC >= 1.25 / 1.5 / 2）",
+      "即 2^(-log2FC) >= 阈值；只分析下调。",
+      "生物学解读：黏附/紧密连接/抑癌/TIMP/轴突排斥等低表达，可解除屏障、促使神经浸润。",
+      "关联 ≠ 已证明促进浸润；优先看 FOCUS 屏障基因与 03_CANDIDATE 总表。"),
+    file.path(base, "00_READ_ME.txt")
+  )
+  for (nm in names(fc_cutoffs)) {
+    fc <- unname(fc_cutoffs[[nm]])
+    od <- file.path(base, "FoldChange", nm)
+    dir.create(od, recursive = TRUE, showWarnings = FALSE)
+    keep <- !is.na(de$pvalue) & de$pvalue < p_cutoff & de$log2FC < 0 & (2^(-de$log2FC) >= fc)
+    sub <- de[keep, , drop = FALSE]
+    if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = FALSE), , drop = FALSE]
+    utils::write.csv(sub, file.path(od, paste0(nm, "_down_genes.csv")), row.names = FALSE)
+    basic_volcano(de, paste(comp_name, nm, "DOWN"), file.path(od, paste0(nm, "_volcano_down")),
+                  fc, highlight = "down")
+    focus <- sub[sub$gene %in% bar_in, , drop = FALSE]
+    utils::write.csv(focus, file.path(od, paste0(nm, "_FOCUS_barrier_suppressors.csv")),
+                     row.names = FALSE)
+  }
+  invisible(de)
+}
+
 de_store <- list()
+comp_folder <- list()  # de_store key -> 输出目录名
 focus_organs <- c("brain", "lung", "bone", "liver", "skin", "lymph_node", "breast", "pleura")
 for (org in intersect(focus_organs, unique(si_use$organ))) {
   n1 <- sum(si_use$organ == org)
@@ -473,7 +534,10 @@ for (org in intersect(focus_organs, unique(si_use$organ))) {
   }
   grp <- ifelse(si_use$organ == org, "near", "far")
   de <- limma_near_far(mat_n, grp, paste(org, "vs rest"))
-  de_store[[paste0(org, "_vs_other")]] <- emit_one(paste0(org, "_vs_other_mets"), de)
+  key <- paste0(org, "_vs_other")
+  folder <- paste0(org, "_vs_other_mets")
+  de_store[[key]] <- emit_one(folder, de)
+  comp_folder[[key]] <- folder
 }
 
 pairs <- list(c("brain", "lung"), c("brain", "bone"), c("lung", "bone"),
@@ -484,7 +548,15 @@ for (pr in pairs) {
   keep <- si_use$organ %in% c(a, b)
   grp <- ifelse(si_use$organ[keep] == a, "near", "far")
   de <- limma_near_far(mat_n[, keep, drop = FALSE], grp, paste(a, "vs", b))
-  de_store[[paste0(a, "_vs_", b)]] <- emit_one(paste0(a, "_vs_", b), de)
+  key <- paste0(a, "_vs_", b)
+  folder <- key
+  de_store[[key]] <- emit_one(folder, de)
+  comp_folder[[key]] <- folder
+}
+
+# 问题3：复用同一批 limma 结果，出下调表
+for (key in names(de_store)) {
+  emit_down(comp_folder[[key]], de_store[[key]])
 }
 
 # -----------------------------------------------------------------------------
@@ -538,13 +610,104 @@ missing_classic <- setdiff(
   c("NGF", "ARTN", "GDNF", "NTN1", "SLIT2", "SEMA3A", "SEMA3C", "L1CAM", "NTF3", "NRG1"),
   rownames(mat_n)
 )
+missing_barrier <- setdiff(
+  c("TIMP1", "TIMP2", "TIMP3", "RECK", "SEMA3A", "SEMA3F", "SLIT2", "NF2", "CADM1",
+    "EPCAM", "TJP1", "CTNNA1", "CTNNB1", "APC", "GSN", "CD82", "KISS1"),
+  rownames(mat_n)
+)
 writeLines(
   c("下列经典神经浸润配体不在 GSE175692 的 771 基因面板上，本分析无法评估：",
     paste(missing_classic, collapse = ", "),
     "",
-    "面板上可用于问题1的基因见 01_CANDIDATE_MOLECULES_tumor_to_nerve.csv"),
+    "下列经典屏障/抗侵袭基因不在面板上，问题3无法评估：",
+    paste(missing_barrier, collapse = ", "),
+    "",
+    "面板上可用于问题1的基因见 01_CANDIDATE_MOLECULES_tumor_to_nerve.csv",
+    "面板上可用于问题3的基因见 03_CANDIDATE_MOLECULES_low_expr_promote_nerve.csv"),
   file.path(result_dir, "01_NOTE_genes_not_on_NanoString_panel.txt")
 )
+
+# -----------------------------------------------------------------------------
+# 5b. 候选分子总表（问题3：低表达 / 下调促神经浸润）
+# -----------------------------------------------------------------------------
+cand_lo <- data.frame(
+  gene = bar_in,
+  on_panel = TRUE,
+  role = "barrier_adhesion_suppressor",
+  mean_expr = if (length(bar_in) > 0) rowMeans(mat_n[bar_in, , drop = FALSE]) else numeric(0),
+  stringsAsFactors = FALSE
+)
+if (nrow(cand_lo) > 0) {
+  for (org in c("brain", "lung", "bone")) {
+    key <- paste0(org, "_vs_other")
+    if (!key %in% names(de_store)) next
+    d <- de_store[[key]]
+    cand_lo[[paste0(org, "_vs_rest_log2FC")]] <- d$log2FC[match(cand_lo$gene, d$gene)]
+    cand_lo[[paste0(org, "_vs_rest_pvalue")]] <- d$pvalue[match(cand_lo$gene, d$gene)]
+  }
+  fc_cols_lo <- grep("_log2FC$", names(cand_lo), value = TRUE)
+  pv_cols_lo <- grep("_pvalue$", names(cand_lo), value = TRUE)
+  cand_lo$n_down_p01 <- 0L
+  if (length(fc_cols_lo) > 0) {
+    for (i in seq_along(fc_cols_lo)) {
+      fc <- cand_lo[[fc_cols_lo[i]]]
+      pv <- cand_lo[[pv_cols_lo[i]]]
+      cand_lo$n_down_p01 <- cand_lo$n_down_p01 +
+        as.integer(!is.na(fc) & fc < 0 & !is.na(pv) & pv < p_cutoff)
+    }
+  }
+  # 绝对低表达：全队列均值低于面板中位 → 更像「肿瘤侧本底低表达」
+  panel_med <- stats::median(rowMeans(mat_n), na.rm = TRUE)
+  cand_lo$low_abs_expr <- !is.na(cand_lo$mean_expr) & cand_lo$mean_expr < panel_med
+  cand_lo$expr_percentile <- NA_real_
+  if (nrow(mat_n) > 0) {
+    rm_all <- rowMeans(mat_n)
+    cand_lo$expr_percentile <- stats::ecdf(rm_all)(cand_lo$mean_expr)
+  }
+  for (org in c("brain", "lung", "bone")) {
+    if (sum(si_use$organ == org) < 3) next
+    y <- as.integer(si_use$organ == org)
+    cors <- apply(mat_n[cand_lo$gene, , drop = FALSE], 1, function(v) {
+      suppressWarnings(stats::cor(v, y, method = "spearman"))
+    })
+    # 负相关 = 该器官活检中更低表达
+    cand_lo[[paste0("spearman_vs_", org)]] <- as.numeric(cors)
+  }
+  # 优先级：多器官显著下调 + 绝对低表达 + 表达分位更低
+  cand_lo$priority <- cand_lo$n_down_p01 +
+    as.integer(cand_lo$low_abs_expr) +
+    as.integer(!is.na(cand_lo$expr_percentile) & cand_lo$expr_percentile <= 0.25)
+  cand_lo <- cand_lo[order(-cand_lo$priority, cand_lo$mean_expr, -cand_lo$n_down_p01), ]
+}
+utils::write.csv(cand_lo, file.path(result_dir, "03_CANDIDATE_MOLECULES_low_expr_promote_nerve.csv"),
+                 row.names = FALSE)
+if (has_pkg("writexl")) {
+  tryCatch(
+    writexl::write_xlsx(cand_lo, file.path(result_dir, "03_CANDIDATE_MOLECULES_low_expr_promote_nerve.xlsx")),
+    error = function(e) NULL
+  )
+}
+
+# 全基因组显著下调 ∩ 屏障基因以外的补充列表（脑/肺/骨 vs rest 任一）
+extra_down <- list()
+for (org in c("brain", "lung", "bone")) {
+  key <- paste0(org, "_vs_other")
+  if (!key %in% names(de_store)) next
+  d <- de_store[[key]]
+  keep <- !is.na(d$pvalue) & d$pvalue < p_cutoff & !is.na(d$log2FC) &
+    d$log2FC < 0 & (2^(-d$log2FC) >= 1.25)
+  if (!any(keep)) next
+  sub <- d[keep, , drop = FALSE]
+  sub$comparison <- key
+  extra_down[[key]] <- sub
+}
+if (length(extra_down) > 0) {
+  ed <- do.call(rbind, extra_down)
+  ed$is_barrier_priority <- ed$gene %in% bar_in
+  ed <- ed[order(ed$pvalue, ed$log2FC), ]
+  utils::write.csv(ed, file.path(result_dir, "03_ALL_down_genes_p01_FC1.25_by_site.csv"),
+                   row.names = FALSE)
+}
 
 # -----------------------------------------------------------------------------
 # 6. 部位排名总表（问题2）
@@ -618,36 +781,56 @@ top_msg <- paste0(
 log_msg(top_msg)
 
 # -----------------------------------------------------------------------------
-# 7. 可选 ORA（上调候选基因）
+# 7. 可选 ORA（问题1上调配体 + 问题3下调屏障）
 # -----------------------------------------------------------------------------
-if (has_pkg("clusterProfiler") && has_pkg("org.Hs.eg.db") && nrow(cand) >= 5) {
-  up_genes <- cand$gene[cand$n_up_p01 > 0]
-  if (length(up_genes) < 3) up_genes <- utils::head(cand$gene, 15)
+run_ora_symbols <- function(symbols, out_dir, tag) {
+  if (!has_pkg("clusterProfiler") || !has_pkg("org.Hs.eg.db") || length(symbols) < 3) {
+    return(invisible(NULL))
+  }
   eg <- tryCatch(
-    clusterProfiler::bitr(up_genes, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db),
+    clusterProfiler::bitr(unique(symbols), fromType = "SYMBOL", toType = "ENTREZID",
+                          OrgDb = org.Hs.eg.db),
     error = function(e) NULL
   )
-  if (!is.null(eg) && nrow(eg) >= 3) {
-    ora_dir <- file.path(result_dir, "Q1_genes_promote_nerve", "ORA_candidate_ligands")
-    dir.create(ora_dir, recursive = TRUE, showWarnings = FALSE)
-    ego <- tryCatch(
-      clusterProfiler::enrichGO(
-        eg$ENTREZID, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = "BP",
-        pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
-      ),
-      error = function(e) NULL
-    )
-    if (!is.null(ego) && nrow(as.data.frame(ego)) > 0) {
-      df <- as.data.frame(ego)
-      utils::write.csv(df, file.path(ora_dir, "ORA_GO_BP.csv"), row.names = FALSE)
-      hit <- grepl(nerve_term_pat, df$Description, ignore.case = TRUE)
-      if (any(hit)) {
-        foc <- df[hit, , drop = FALSE]
-        foc$genome_wide_rank <- match(which(hit), order(df$pvalue))
-        utils::write.csv(foc, file.path(ora_dir, "FOCUS_nerve_invasion.csv"), row.names = FALSE)
-      }
-    }
+  if (is.null(eg) || nrow(eg) < 3) return(invisible(NULL))
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  ego <- tryCatch(
+    clusterProfiler::enrichGO(
+      eg$ENTREZID, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = "BP",
+      pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE
+    ),
+    error = function(e) NULL
+  )
+  if (is.null(ego) || nrow(as.data.frame(ego)) == 0) return(invisible(NULL))
+  df <- as.data.frame(ego)
+  utils::write.csv(df, file.path(out_dir, paste0("ORA_GO_BP_", tag, ".csv")), row.names = FALSE)
+  hit <- grepl(nerve_term_pat, df$Description, ignore.case = TRUE)
+  if (any(hit)) {
+    foc <- df[hit, , drop = FALSE]
+    foc$genome_wide_rank <- match(which(hit), order(df$pvalue))
+    utils::write.csv(foc, file.path(out_dir, paste0("FOCUS_nerve_invasion_", tag, ".csv")),
+                     row.names = FALSE)
   }
+  invisible(df)
+}
+
+if (nrow(cand) >= 5) {
+  up_genes <- cand$gene[cand$n_up_p01 > 0]
+  if (length(up_genes) < 3) up_genes <- utils::head(cand$gene, 15)
+  run_ora_symbols(
+    up_genes,
+    file.path(result_dir, "Q1_genes_promote_nerve", "ORA_candidate_ligands"),
+    "up_ligands"
+  )
+}
+if (nrow(cand_lo) >= 5) {
+  dn_genes <- cand_lo$gene[cand_lo$n_down_p01 > 0 | cand_lo$low_abs_expr]
+  if (length(dn_genes) < 3) dn_genes <- utils::head(cand_lo$gene, 20)
+  run_ora_symbols(
+    dn_genes,
+    file.path(result_dir, "Q3_genes_low_expr_promote_nerve", "ORA_candidate_barriers"),
+    "down_barriers"
+  )
 }
 
 # -----------------------------------------------------------------------------
@@ -676,14 +859,28 @@ protocol <- c(
   "  重要: 脑实质转移 ≠ 外周神经浸润(PNI)。",
   "        本面板几乎没有 GFAP/MBP/MPZ，不要把脑组织信号当成 PNI。",
   "",
+  "【问题3】肿瘤细胞低表达哪些基因可能促使神经浸润？",
+  "  主表: results/03_CANDIDATE_MOLECULES_low_expr_promote_nerve.csv",
+  "  详细: results/Q3_genes_low_expr_promote_nerve/<比较>/FoldChange/",
+  "  规则: 先 p < 0.01，再下调倍数 FC >= 1.25 / 1.5 / 2（2^(-log2FC)）",
+  "  同时标注绝对低表达（mean_expr < 面板中位；expr_percentile <= 0.25 加权）",
+  "  解读: CDH1/CLDN*/PTEN/TIMP4/SERPINB5 等屏障或抑癌低表达 → 解除约束、利于侵袭含神经。",
+  "  面板命中的屏障候选: ", paste(bar_in, collapse = ", "),
+  "  不在面板、无法评估: ", paste(missing_barrier, collapse = ", "),
+  "  补充全表: 03_ALL_down_genes_p01_FC1.25_by_site.csv",
+  "  关联 ≠ 因果；丢失促浸润需功能实验验证。",
+  "",
   "器官样本数: ", paste(sprintf("%s=%d", names(org_tab), as.integer(org_tab)), collapse = ", "),
   "",
   "运行方式:",
   "  setwd(\"E:/R/Nerve RNA\")",
   "  source(\"Nerve_RNA_nerve_infiltration.R\")"
 )
+writeLines(protocol, file.path(result_dir, "00_PROTOCOL_三个问题怎么看.txt"))
+# 兼容旧文件名
 writeLines(protocol, file.path(result_dir, "00_PROTOCOL_两个问题怎么看.txt"))
 log_msg("Done.")
 log_msg("Q1 -> ", file.path(result_dir, "01_CANDIDATE_MOLECULES_tumor_to_nerve.csv"))
 log_msg("Q2 -> ", file.path(result_dir, "02_SITE_RANK_neural_invasion.csv"))
-log_msg("Read -> ", file.path(result_dir, "00_PROTOCOL_两个问题怎么看.txt"))
+log_msg("Q3 -> ", file.path(result_dir, "03_CANDIDATE_MOLECULES_low_expr_promote_nerve.csv"))
+log_msg("Read -> ", file.path(result_dir, "00_PROTOCOL_三个问题怎么看.txt"))
