@@ -4,6 +4,7 @@
 .Ruserdata
 results/
 figures/
+data/
 *.html
 *.pdf
 .DS_Store

@@ -97,3 +97,33 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## Wang 2024 空间转录组：神经浸润（新脚本，不改 1–4）
+
+数据在 `E:/R/Nerve`（Wang et al. *Nat Commun* 2024 Zenodo 解压目录）。脚本 `Wang_ST_nerve_infiltration.R` 回答两件事：
+
+1. 神经浸润相关分子和统计方案（写出 `results/00_PROTOCOL_神经浸润分析方案.txt`）
+2. 靠近神经 / Schwann 的肿瘤细胞高表达哪些基因（候选表 + 分层差异分析）
+
+```r
+# 把本仓库两个脚本拷到 E:/R/Nerve，或从仓库目录 source
+setwd("E:/R/Nerve")
+Sys.setenv(WANG_ST_DIR = "E:/R/Nerve")
+source("Wang_ST_nerve_infiltration.R")
+```
+
+同目录若有 `TG_RNAseq_pipeline.R`，会自动套用原来的 FC / topN、ORA、GSEA 出图（先 **p < 0.01**）。没有则只出差异表和基础火山图。
+
+主结果：
+
+```
+E:/R/Nerve/results/
+  00_PROTOCOL_神经浸润分析方案.txt
+  01_CANDIDATE_MOLECULES_tumor_to_nerve.csv
+  00_logs/spot_class_counts.csv
+  TNBC50_tumor_near_nerve_vs_far/     # 病理神经，各病人单独
+  common_up_pathologist_nerve/        # 上述共同上调
+  tumor_near_schwann_vs_far/          # 全队列 Schwann 邻域（主分析）
+```
+
+病理 Nerve 只和极少数 spot 重叠，全队列结论以 Schwann 邻域为准。不要把两个 NTC 或病人在空间分析里偷偷合并。
