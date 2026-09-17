@@ -120,17 +120,20 @@ source("BRCA_met_scRNA_nerve_infiltration.R")
 
 scRNA 只能支持「肿瘤配体高 + 神经细胞有受体 + 含神经样本里更高」，不能写成已经证明空间浸润。
 
-## 乳腺癌转移批量转录组 / 蛋白组（神经浸润 + 继发部位）
+## 原位乳腺癌：肺转移倾向 vs 其他器官 + 神经浸润负相关蛋白
 
-数据放在 **`E:/R/Nerve RNA`**（GSE175692）。独立脚本，不改 Cuffdiff。
+数据放在 **`E:/R/Nerve RNA`**。用原发灶队列（GSE2603 / GSE5327），**不是**转移灶 GSE175692。独立脚本，不改 Cuffdiff。
 
 ```r
 setwd("E:/R/Nerve RNA")
-source("Nerve_RNA_nerve_infiltration.R")
+source("Nerve_RNA_primary_lung_tropism.R")
 ```
 
-放入 `GSE175692_series_matrix.txt.gz`（必须）和可选 `GSE175692_raw_data.txt.gz`。
+放入：`GSE2603_series_matrix.txt.gz`、`GSE5327_series_matrix.txt.gz`、`GPL96.annot.gz`（见 `Nerve_RNA_DOWNLOAD.txt`）。
 
-- 问题1高表达：`results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`
-- 问题2部位：`results/02_SITE_RANK_neural_invasion.csv`（看配体残差排名）
-- 问题3低表达：`results/03_CANDIDATE_MOLECULES_low_expr_promote_nerve.csv`（屏障/抑癌下调）
+结果在 `results_primary_lung_tropism/`：
+
+1. **问题1** 肺倾向原位 vs 其他器官倾向原位的**低表达基因**：火山图 + Excel（`01_POOLED_lung_vs_other_DOWN.xlsx`）
+2. **问题2** 肺倾向原位组织中与神经浸润**负相关**的蛋白（无蛋白组时用 RNA 作代理；可自备 `proteomics_pg_matrix.csv`）
+
+旧的转移灶脚本仍可用：`Nerve_RNA_nerve_infiltration.R`（GSE175692）。

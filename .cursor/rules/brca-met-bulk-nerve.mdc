@@ -4,54 +4,48 @@ globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
 
-# 乳腺癌转移 bulk：神经浸润基因 + 更倾向哪个器官
+# 乳腺癌转移 bulk：原位肺倾向 + 神经浸润
 
-仅当任务是**转移灶批量转录组或蛋白组**时按本规则。单细胞 / 空间分别用 `brca-met-scrna-nerve.mdc`、`brca-met-st-nerve.mdc`。不要套用 NTC/TG_sh Cuffdiff，不要改 `TG_RNAseq_*.R`。
+仅当任务是**转移灶/原发灶批量转录组或蛋白组**时按本规则。单细胞 / 空间分别用 `brca-met-scrna-nerve.mdc`、`brca-met-st-nerve.mdc`。不要套用 NTC/TG_sh Cuffdiff，不要改 `TG_RNAseq_*.R`。
 
-公开、可下载、多病人、含肺/脑/骨转移灶的人源数据以转录组为主；多器官转移蛋白组几乎没有完整公开队列。禁止小鼠 PDX 当病人。
+公开、可下载、多病人、含肺/脑/骨信息的人源数据以转录组为主。禁止小鼠 PDX 当病人。
 
-脚本：`Nerve_RNA_nerve_infiltration.R`（数据目录 `E:/R/Nerve RNA`）。也可参考 `BRCA_met_bulk_nerve_infiltration.R`。
+## 当前主问题（原位灶肺倾向）——优先用此脚本
+
+脚本：`Nerve_RNA_primary_lung_tropism.R`（目录 `E:/R/Nerve RNA`）
 
 ```r
 setwd("E:/R/Nerve RNA")
-source("Nerve_RNA_nerve_infiltration.R")
+source("Nerve_RNA_primary_lung_tropism.R")
 ```
 
-## 数据（目录 `E:/R/Nerve RNA`）
+数据：
 
-1. **主队列（推荐）**：GSE175692，184 例人转移灶、11 个器官（含肝/肺/脑/骨），771 基因面板。放入 `GSE175692_series_matrix.txt.gz`（必须）与可选 `GSE175692_raw_data.txt.gz`。
-2. **全转录组补充**：GSE14020（GSE14017+GSE14018），约 58 例人转移灶芯片（肺/脑/骨/肝）。两个平台不要并成一张矩阵。
-3. **蛋白组**：若有 DIA-NN `report.pg_matrix` + 带器官列的表，按同样流程；不要拿 CPTAC 原发当转移灶。
+1. **GSE2603**（MSK 原发灶，GPL96）——主队列；`lm event` / `met event` / `bm event`
+2. **GSE5327**（Erasmus ER- 原发灶）——验证/合并；`lung met all` / `metastasis`
+3. **GPL96.annot.gz**——探针→基因
+4. 可选蛋白组：`proteomics_pg_matrix.csv` + `proteomics_sample_meta.csv`
 
-物种：人 `org.Hs.eg.db`。每个活检单独保留；禁止把肺+脑+骨合并后再做 DEG。
+### 两个问题必须按此定义
 
-## 三个问题必须分开回答
+1. **倾向肺转移的原位组织 vs 倾向其他器官转移的原位组织 → 低表达基因**
+   - `lung_tropic` = 原发且肺转移事件=1
+   - `other_met` = 原发且有转移但肺转移=0（多为骨等）
+   - 先 **p < 0.01**，再下调 FC ≥ 1.25 / 1.5 / 2
+   - 必须出火山图 + Excel（`01_*_lung_vs_other_DOWN.xlsx`）
+2. **在肺倾向原位组织内，与神经浸润负相关的蛋白**
+   - 先算神经浸润签名分数，再 Spearman；取 **rho < 0 且 p < 0.01**
+   - 无匹配公开蛋白组时用 RNA 丰度作蛋白代理，并在表中标注 `RNA_proxy_for_protein`
+   - 有用户蛋白矩阵时优先用蛋白
 
-1. **肿瘤高表达哪些基因可能促神经浸润**：只看神经亲和配体/轴突导向在**肿瘤活检**中的上调（NGF、BDNF、ARTN、SEMA、SLIT、L1CAM 等），先 **p < 0.01** 再 FC ≥ 1.25 / 1.5 / 2。只分析上调。主表：`01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`。
-2. **神经浸润更倾向哪个继发部位**：按器官比较签名分数，**两套分数都要出**，不要混：
-   - `score_neurotropic_ligand`：肿瘤侧神经亲和配体（真正要拿来排部位）
-   - `score_neural_stroma`：GFAP/MBP/MPZ 等神经组织/施万（脑转移会很高，多半是微环境，不是 PNI）
-   - 另出残差 `ligand | stroma`，减轻脑组织污染
-   脑实质转移 ≠ 外周神经浸润（PNI）。部位排名表：`results/02_SITE_RANK_neural_invasion.csv`。
-3. **肿瘤细胞低表达哪些基因可能促使神经浸润**：看屏障/黏附/抑癌/TIMP/轴突排斥等**下调或绝对低表达**（CDH1、CLDN*、PTEN、TIMP4、SERPINB5 等）。同一套器官比较，先 **p < 0.01** 再下调倍数 FC ≥ 1.25 / 1.5 / 2；并标注 `low_abs_expr` / `expr_percentile`。主表：`03_CANDIDATE_MOLECULES_low_expr_promote_nerve.csv`。关联 ≠ 因果。
-
-## 比较（每组单独出表、单独作图）
-
-每个数据集内部先过滤低表达、再标准化，然后：
-
-1. 脑 vs 其余转移灶；肺 vs 其余；骨 vs 其余（不要先合并三器官）
-2. 脑 vs 肺、脑 vs 骨、肺 vs 骨
-3. 器官签名分数：n、均值、相对其余的 Wilcoxon p
-
-- ORA 放 `GO/`、`Pathway/`、`KEGG/`，`ORA_` 开头
-- GSEA 放 `GSEA/`；全基因只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
-- 专项 `Focused_nerve_invasion/`，保留原始 p 与 `genome_wide_rank`
-- 问题1 上调 → `Q1_genes_promote_nerve/`；问题3 下调 → `Q3_genes_low_expr_promote_nerve/`
+结果目录：`results_primary_lung_tropism/`。
 
 ```r
-# ❌ BAD: 把脑转移 GFAP 高写成「脑更易神经浸润」；三器官合并再 DEG
-# ❌ BAD: CPTAC 原发或小鼠 PDX 当多器官转移；GSE175692 与芯片硬拼矩阵
-# ❌ BAD: 问题3只报上调，或跳过屏障/抑癌低表达候选表
-# ✅ GOOD: 配体分数排部位，基质分数单独报；脑/肺/骨各自 vs 其余
-# ✅ GOOD: Q1 上调 + Q3 下调（p<0.01 后 FC≥1.25/1.5/2）分开出表
+# ❌ BAD: 用转移灶 GSE175692 的 organ=Lung vs organ=Bone 冒充「原位肺倾向 vs 其他」
+# ❌ BAD: 问题1只出上调、不出火山图/Excel；问题2不做负相关
+# ✅ GOOD: 原发灶 lung_tropic vs other_met；下调+火山图+xlsx；肺倾向内 neg-cor 神经分数
 ```
+
+## 旧脚本（转移灶 GSE175692）仍保留
+
+`Nerve_RNA_nerve_infiltration.R`：转移灶活检上的配体高表达 / 部位排名 / 屏障低表达。与「原位肺倾向」问题不同，不要混用。
