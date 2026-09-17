@@ -4,6 +4,10 @@
 # 神经浸润：方案 + 肿瘤细胞高表达、可能促使神经浸润的基因
 #
 # 本脚本独立于 TG_RNAseq_pipeline.R 的 1–4 组比较，不修改原流程。
+# TG_RNAseq_pipeline.R 不是输入、也不是神经分析所必需：
+#   有它 → 复用火山图/热图/GO/KEGG/GSEA 作图函数
+#   没有 → 照样算差异基因，只出 CSV 和基础火山图
+# 真正需要的数据是 E:/R/Nerve 里解压后的 Clinical/ids.RDS 和 Robjects/
 # 数据默认：E:/R/Nerve（Wang Zenodo 解压目录）
 #
 # 用法（Windows R / RStudio）：
@@ -50,13 +54,26 @@ resolve_nerve_dir <- function() {
 
 nerve_dir <- resolve_nerve_dir()
 
+find_under <- function(root, filename) {
+  hits <- list.files(root, pattern = paste0("^", filename, "$"),
+                     recursive = TRUE, full.names = TRUE, ignore.case = TRUE)
+  hits <- hits[!grepl("[/\\\\]__MACOSX[/\\\\]", hits)]
+  if (length(hits) == 0) return(NA_character_)
+  hits[1]
+}
+
 ensure_tar_extracted <- function(root, dirname, tarname) {
   dest <- file.path(root, dirname)
   if (dir.exists(dest) && length(list.files(dest, recursive = TRUE)) > 0) return(invisible(dest))
-  tarf <- file.path(root, tarname)
-  if (!file.exists(tarf)) return(invisible(NULL))
-  message("解压 ", tarname, " -> ", root)
-  utils::untar(tarf, exdir = root)
+  tars <- c(
+    file.path(root, tarname),
+    list.files(root, pattern = paste0("^", tarname, "$"), recursive = TRUE, full.names = TRUE)
+  )
+  tars <- unique(tars[file.exists(tars)])
+  if (length(tars) == 0) return(invisible(NULL))
+  message("解压 ", basename(tars[1]), " -> ", root)
+  tryCatch(utils::untar(tars[1], exdir = root, tar = "internal"),
+           error = function(e) utils::untar(tars[1], exdir = root))
   dest
 }
 
@@ -66,10 +83,25 @@ ensure_tar_extracted(nerve_dir, "misc", "misc.tar")
 ensure_tar_extracted(nerve_dir, "patches", "patches.tar")
 ensure_tar_extracted(nerve_dir, "classification", "classification.tar")
 
+ids_path <- find_under(nerve_dir, "ids.RDS")
+if (!is.na(ids_path)) {
+  clinical_dir <- dirname(ids_path)
+  if (basename(clinical_dir) == "Clinical") {
+    nerve_dir <- dirname(clinical_dir)
+  }
+}
+
 robj_dir <- if (dir.exists(file.path(nerve_dir, "Robjects"))) {
   file.path(nerve_dir, "Robjects")
-} else {
+} else if (dir.exists(file.path(nerve_dir, "annotsBySpot"))) {
   nerve_dir
+} else {
+  hit <- find_under(nerve_dir, "TNBC50.RDS")
+  if (!is.na(hit) && basename(dirname(hit)) %in% c("counts", "countsNonCorrected", "annotsBySpot")) {
+    dirname(dirname(hit))
+  } else {
+    nerve_dir
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -99,7 +131,10 @@ load_pipeline_functions_only <- function() {
   )
   pipe <- cands[file.exists(cands)][1]
   if (is.na(pipe) || !nzchar(pipe) || !file.exists(pipe)) {
-    message("未找到 TG_RNAseq_pipeline.R，将只出差异表和基础图，不出 ORA/GSEA 全套。")
+    message("提示（不是报错）：没找到 TG_RNAseq_pipeline.R。")
+    message("  这个文件只用来复用 GO/KEGG/GSEA 作图，不是 Wang 空间数据。")
+    message("  神经浸润分析会继续，先出差异表和基础火山图。")
+    message("  若要全套富集图，把 TG_RNAseq_pipeline.R 拷到 E:/R/Nerve 再跑。")
     return(FALSE)
   }
   lines <- readLines(pipe, warn = FALSE)
@@ -227,9 +262,22 @@ safe_read_rds <- function(path) {
 
 load_ids <- function() {
   f <- file.path(nerve_dir, "Clinical", "ids.RDS")
+  if (!file.exists(f)) {
+    alt <- find_under(nerve_dir, "ids.RDS")
+    if (!is.na(alt)) f <- alt
+  }
   ids <- safe_read_rds(f)
-  if (is.null(ids)) stop("缺少 Clinical/ids.RDS")
-  ids
+  if (!is.null(ids)) return(ids)
+  shown <- paste(list.files(nerve_dir), collapse = ", ")
+  stop(
+    "缺少 Clinical/ids.RDS。\n",
+    "这才是必需数据，不是 TG_RNAseq_pipeline.R。\n",
+    "请把 Zenodo 的 Clinical.tar 放到 ", nerve_dir, " 后解压：\n",
+    "  https://zenodo.org/records/14204217\n",
+    "  wget/浏览器下载 Clinical.tar，然后在 R 里：\n",
+    "  untar('E:/R/Nerve/Clinical.tar', exdir = 'E:/R/Nerve')\n",
+    "当前目录文件: ", shown
+  )
 }
 
 load_counts <- function(pid) {
