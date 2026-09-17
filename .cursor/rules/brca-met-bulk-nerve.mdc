@@ -1,0 +1,53 @@
+---
+description: 乳腺癌多器官转移批量转录组/蛋白组：神经浸润基因与继发部位倾向
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# 乳腺癌转移 bulk：神经浸润基因 + 更倾向哪个器官
+
+仅当任务是**转移灶批量转录组或蛋白组**时按本规则。单细胞 / 空间分别用 `brca-met-scrna-nerve.mdc`、`brca-met-st-nerve.mdc`。不要套用 NTC/TG_sh Cuffdiff，不要改 `TG_RNAseq_*.R`。
+
+公开、可下载、多病人、含肺/脑/骨转移灶的人源数据以转录组为主；多器官转移蛋白组几乎没有完整公开队列。禁止小鼠 PDX 当病人。
+
+脚本：`Nerve_RNA_nerve_infiltration.R`（数据目录 `E:/R/Nerve RNA`）。也可参考 `BRCA_met_bulk_nerve_infiltration.R`。
+
+```r
+setwd("E:/R/Nerve RNA")
+source("Nerve_RNA_nerve_infiltration.R")
+```
+
+## 数据（目录 `E:/R/Nerve RNA`）
+
+1. **主队列（推荐）**：GSE175692，184 例人转移灶、11 个器官（含肝/肺/脑/骨），771 基因面板。放入 `GSE175692_series_matrix.txt.gz`（必须）与可选 `GSE175692_raw_data.txt.gz`。
+2. **全转录组补充**：GSE14020（GSE14017+GSE14018），约 58 例人转移灶芯片（肺/脑/骨/肝）。两个平台不要并成一张矩阵。
+3. **蛋白组**：若有 DIA-NN `report.pg_matrix` + 带器官列的表，按同样流程；不要拿 CPTAC 原发当转移灶。
+
+物种：人 `org.Hs.eg.db`。每个活检单独保留；禁止把肺+脑+骨合并后再做 DEG。
+
+## 两个问题必须分开回答
+
+1. **肿瘤高表达哪些基因可能促神经浸润**：只看神经亲和配体/轴突导向在**肿瘤活检**中的上调（NGF、BDNF、ARTN、SEMA、SLIT、L1CAM 等），先 **p < 0.01** 再 FC ≥ 1.25 / 1.5 / 2。只分析上调。
+2. **神经浸润更倾向哪个继发部位**：按器官比较签名分数，**两套分数都要出**，不要混：
+   - `score_neurotropic_ligand`：肿瘤侧神经亲和配体（真正要拿来排部位）
+   - `score_neural_stroma`：GFAP/MBP/MPZ 等神经组织/施万（脑转移会很高，多半是微环境，不是 PNI）
+   - 另出残差 `ligand | stroma`，减轻脑组织污染
+   脑实质转移 ≠ 外周神经浸润（PNI）。部位排名表：`results/02_SITE_RANK_neural_invasion.csv`。
+
+## 比较（每组单独出表、单独作图）
+
+每个数据集内部先过滤低表达、再标准化，然后：
+
+1. 脑 vs 其余转移灶；肺 vs 其余；骨 vs 其余（不要先合并三器官）
+2. 脑 vs 肺、脑 vs 骨、肺 vs 骨
+3. 器官签名分数：n、均值、相对其余的 Wilcoxon p
+
+- ORA 放 `GO/`、`Pathway/`、`KEGG/`，`ORA_` 开头
+- GSEA 放 `GSEA/`；全基因只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
+- 专项 `Focused_nerve_invasion/`，保留原始 p 与 `genome_wide_rank`
+
+```r
+# ❌ BAD: 把脑转移 GFAP 高写成「脑更易神经浸润」；三器官合并再 DEG
+# ❌ BAD: CPTAC 原发或小鼠 PDX 当多器官转移；GSE175692 与芯片硬拼矩阵
+# ✅ GOOD: 配体分数排部位，基质分数单独报；脑/肺/骨各自 vs 其余，p<0.01 后 FC≥1.25/1.5/2
+```

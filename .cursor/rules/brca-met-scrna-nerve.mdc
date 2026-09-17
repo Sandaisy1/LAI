@@ -1,0 +1,57 @@
+---
+description: 乳腺癌多器官转移单细胞：肿瘤高表达基因与神经浸润（Klughammer scRNA + BCBM）
+globs: "**/*.{R,r,Rmd}"
+alwaysApply: true
+---
+
+# 乳腺癌转移 scRNA：肿瘤高表达基因 → 神经浸润
+
+仅当任务是**转移灶单细胞测序 / 神经浸润**时按本规则。空间转录组改用 `brca-met-st-nerve.mdc`。批量转录组/蛋白组改用 `brca-met-bulk-nerve.mdc`。不要套用 NTC/TG_sh Cuffdiff，不要改 `TG_RNAseq_*.R`，不要把空间邻域（近/远 spot）套到 scRNA 上。
+
+公开库里**没有**一份人 scRNA 同时满足：多病人 + 肺/脑/骨 + 肿瘤细胞 + 免疫 + 神经。用下面两套拼齐。禁止小鼠 PDX / 脑转移（GSE131007、GSE147942、GSE240212）当病人数据。
+
+脚本：`BRCA_met_scRNA_nerve_infiltration.R`。下载：`BRCA_met_scRNA_nerve_DOWNLOAD.txt`。
+
+```r
+setwd("E:/R/BRCA_met_scRNA_nerve")
+source("BRCA_met_scRNA_nerve_infiltration.R")
+```
+
+## 数据（目录 `E:/R/BRCA_met_scRNA_nerve`）
+
+1. **主队列（多病人、多器官、肿瘤+免疫）**：Klughammer et al. *Nat Med* 2024，60 人 / 67 活检 sc/snRNA（肝、骨、腋窝、乳腺、胸壁、脑、肺、皮肤）。SCP2702 的 **`scRNAseq.h5ad`**（不要只下 `slide_seq.h5ad`）。CELLxGENE `a96133de-e951-4e2d-ace6-59db8b3bfb1d`。脑/肺各约 1 例，神经细胞不够。
+2. **神经细胞（必须补）**：Gonzalez et al. *Cell* 2022 人脑转移 scRNA **GSE186344**（含乳腺癌来源，恶性 + 基质/免疫；胶质常见，神经元少则写日志）。Zou et al. *Adv Sci* 2022（肝+脑，6 人，含神经元/星形/少突/小胶质）可作补充，但 GEO 常需向作者索取。
+
+物种：人 `org.Hs.eg.db`。病人、器官、细胞类型必须保留；禁止把肺+脑+骨或病人合并后再做 DEG。
+
+## 细胞与「浸润」在 scRNA 里怎么定义
+
+- **肿瘤类**：恶性上皮，不是免疫/成纤维/胶质。
+- **神经**：Schwann / 星形 / 少突 / 小胶质 / 神经元（标签或 MPZ、GFAP、MBP、SYT1 等）。
+- **不能**从 scRNA 直接证明空间神经浸润。允许的证据链：肿瘤侧配体高表达 + 同队列神经细胞有受体 +（若有）含神经细胞的样本里肿瘤配体更高。免疫只作协变量。
+
+## 比较（每组单独出表、单独作图）
+
+伪 bulk：`patient × 器官 × 细胞类`。先按器官分层。
+
+1. 含神经细胞的样本里的肿瘤细胞 vs 不含神经的样本里的肿瘤细胞（按器官）
+2. 脑转移：肿瘤细胞 vs 胶质/神经（只作对照，不是浸润本身）
+3. 肿瘤配体 × 神经受体（同一样本或同一器官）
+4. 肺 / 脑 / 骨 各自肿瘤上调的神经相关配体，再取共同上调（不要先合并器官）
+5. 器官间肿瘤差异标成 `organ_adaptation_NOT_infiltration`，不要写成 PNI
+
+## 显著性与分层（只分析上调）
+
+能估计 p 时（≥2 名病人）先 **p < 0.01**，再 FC ≥ 1.25 / 1.5 / 2（不做 FC=1，不做 topN）。单病人不伪造 p。关联 ≠ 因果。
+
+目录：`FoldChange/FC_1.5/`。主表：`results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`。
+
+- ORA 放 `GO/`、`Pathway/`、`KEGG/`，`ORA_` 开头
+- GSEA 放 `GSEA/`；全基因只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
+- 专项 `Focused_nerve_invasion/`；`*_FOCUS_nerve_invasion.csv` 保留原始 p 与 `genome_wide_rank`
+
+```r
+# ❌ BAD: 把 slide_seq 空间邻域流程套到 scRNA；小鼠 PDX 当病人
+# ❌ BAD: 肺+脑+骨合并；把免疫高表达当成肿瘤基因；器官适应性写成「促进神经浸润」
+# ✅ GOOD: Klughammer scRNAseq.h5ad 按器官；神经用 GSE186344；配体–受体 + 含神经样本的肿瘤上调
+```

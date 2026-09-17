@@ -97,3 +97,39 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## 乳腺癌转移空间转录组（神经浸润）
+
+公开库没有一份 ST 同时含多病人、肺/脑/骨转移、肿瘤细胞、免疫细胞和神经细胞。主队列用 Klughammer 2024（SCP2702），神经用 GSE325935 / Wang 2024 补。下载说明见 `BRCA_met_ST_nerve_DOWNLOAD.txt`。**不要改**上面的 Cuffdiff 流程。
+
+```r
+setwd("E:/R/BRCA_met_ST_nerve")
+source("BRCA_met_ST_nerve_infiltration.R")
+```
+
+把 `slide_seq.h5ad`（或 `counts.tsv`+`annot.tsv`）放到该目录。主结果：`results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`。
+
+## 乳腺癌转移单细胞（神经浸润）
+
+这是 **scRNA/snRNA**，不是空间邻域。主队列仍是 Klughammer 2024，但请下 **`scRNAseq.h5ad`**；神经细胞用 GSE186344。说明见 `BRCA_met_scRNA_nerve_DOWNLOAD.txt`。
+
+```r
+setwd("E:/R/BRCA_met_scRNA_nerve")
+source("BRCA_met_scRNA_nerve_infiltration.R")
+```
+
+scRNA 只能支持「肿瘤配体高 + 神经细胞有受体 + 含神经样本里更高」，不能写成已经证明空间浸润。
+
+## 乳腺癌转移批量转录组 / 蛋白组（神经浸润 + 继发部位）
+
+数据放在 **`E:/R/Nerve RNA`**（GSE175692）。独立脚本，不改 Cuffdiff。
+
+```r
+setwd("E:/R/Nerve RNA")
+source("Nerve_RNA_nerve_infiltration.R")
+```
+
+放入 `GSE175692_series_matrix.txt.gz`（必须）和可选 `GSE175692_raw_data.txt.gz`。
+
+- 问题1基因：`results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`
+- 问题2部位：`results/02_SITE_RANK_neural_invasion.csv`（看配体残差排名）

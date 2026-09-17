@@ -1,0 +1,48 @@
+乳腺癌多器官转移单细胞：数据从哪里下
+================================================
+这是 scRNA/snRNA，不是空间转录组。
+没有一份人单细胞同时含：多病人 + 肺/脑/骨转移 + 肿瘤细胞 + 免疫 + 神经。
+主队列用 Klughammer 2024 的 scRNAseq.h5ad；神经细胞用 GSE186344 人脑转移 scRNA。
+不要用小鼠 PDX GSE131007、GSE147942，也不要把 SCP2702 的 slide_seq.h5ad 当成本分析主文件。
+
+放到：E:/R/BRCA_met_scRNA_nerve
+（环境变量 BRCA_MET_SCRNA_DIR 可改路径）
+
+------------------------------------------------
+1) 主队列（必须）：Klughammer et al. Nat Med 2024
+   60 名病人，67 份转移灶活检，scRNA-seq 或 snRNA-seq
+   器官：肝 37、腋窝 9、乳腺 7、骨 5、胸壁 3、颈 3、脑 1、肺 1、皮肤 1
+   细胞：恶性上皮、T/NK、B/浆细胞、髓系、成纤维、内皮
+   神经细胞很少（脑只有 1 例）
+
+   https://singlecell.broadinstitute.org/single_cell/study/SCP2702/htapp-mbc
+   下载：scRNAseq.h5ad
+   或 unregistered_data_bundle 里每例的 10x counts.tsv + annot.tsv
+
+   浏览：https://cellxgene.cziscience.com/collections/a96133de-e951-4e2d-ace6-59db8b3bfb1d
+   原始：HTAN / dbGaP phs002371
+
+   建议路径：
+     E:/R/BRCA_met_scRNA_nerve/Klughammer_SCP2702/scRNAseq.h5ad
+
+------------------------------------------------
+2) 神经细胞（强烈建议）：Gonzalez et al. Cell 2022
+   15 例人脑实质转移 scRNA，含乳腺癌来源
+   恶性细胞 + 免疫 + 脑基质（巨噬/小胶质等；神经元可能很少）
+   GEO：GSE186344
+   解压到：
+     E:/R/BRCA_met_scRNA_nerve/GSE186344/
+
+   补充（肝+脑、含神经元/星形/少突，但 6 人且数据常需向作者索取）：
+   Zou et al. Adv Sci 2022 doi:10.1002/advs.202203699
+
+------------------------------------------------
+3) 不要下这些当病人队列
+   GSE131007  ER+ PDX 小鼠骨/脑/肝
+   GSE147942  MDA-MB-231 小鼠脑转移
+   GSE240212  小鼠脑转移 Visium
+   slide_seq.h5ad  那是空间，请用 BRCA_met_ST_nerve_infiltration.R
+
+运行：
+  setwd("E:/R/BRCA_met_scRNA_nerve")
+  source("BRCA_met_scRNA_nerve_infiltration.R")

@@ -1,0 +1,29 @@
+E:\R\Nerve RNA 放什么文件
+================================
+主队列 GSE175692（184 例转移灶，11 器官）
+
+必须：
+  GSE175692_series_matrix.txt.gz
+  https://ftp.ncbi.nlm.nih.gov/geo/series/GSE175nnn/GSE175692/matrix/GSE175692_series_matrix.txt.gz
+
+建议：
+  GSE175692_raw_data.txt.gz
+  https://ftp.ncbi.nlm.nih.gov/geo/series/GSE175nnn/GSE175692/suppl/GSE175692_raw_data.txt.gz
+
+把上面两个文件（不解压也可）放到：
+  E:\R\Nerve RNA\
+
+把本仓库的 Nerve_RNA_nerve_infiltration.R 拷到同一目录，然后在 RStudio：
+
+  setwd("E:/R/Nerve RNA")
+  source("Nerve_RNA_nerve_infiltration.R")
+
+结果在 E:\R\Nerve RNA\results\
+  00_PROTOCOL_两个问题怎么看.txt
+  01_CANDIDATE_MOLECULES_tumor_to_nerve.csv   ← 问题1
+  02_SITE_RANK_neural_invasion.csv            ← 问题2（看配体残差排名）
+
+说明：这是 NanoString 771 基因，不是全转录组。
+NGF/ARTN/SEMA3 等经典配体多数不在面板上，脚本会写入
+01_NOTE_genes_not_on_NanoString_panel.txt。
+脑实质转移 ≠ 外周神经浸润(PNI)。
