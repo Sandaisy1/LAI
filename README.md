@@ -114,7 +114,14 @@ source("Wang_ST_nerve_infiltration.R")
 
 同目录若有 `TG_RNAseq_pipeline.R`，会出 ORA/GSEA 图（**可选**，只复用作图函数，不是空间数据）。没有也能跑，只是没有全套富集图。本空间分析只做上调 **FC ≥ 1.25 和 1.5**（先 **p < 0.05**）。原 Cuffdiff 六组比较不变。
 
-必需数据是 `E:/R/Nerve/Clinical/ids.RDS` 和 `Robjects/`（先解压 Zenodo 的 `Clinical.tar`、`Robjects.tar`）。
+真正必需的是 `Robjects/`（`counts` + `annotsBySpot`；先解压 `Robjects.tar`）。
+
+`ids.RDS` 是片子↔病人对照，**可选**。Windows 解 `Clinical.tar` 时常丢掉 `Clinical/` 子目录，于是根目录会出现：
+
+- `Clinicalids.RDS` ← 就是原来的 `Clinical/ids.RDS`（脚本现在会认这个名字）
+- `Clinical.RDS` / `Clinical.xlsx` ← 临床表，不是片子对照
+
+没有 `ids.RDS` 也能跑：用 spot 坐标对齐病理标注。
 
 主结果：
 

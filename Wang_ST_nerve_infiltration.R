@@ -7,7 +7,9 @@
 # TG_RNAseq_pipeline.R 不是输入、也不是神经分析所必需：
 #   有它 → 复用火山图/热图/GO/KEGG/GSEA 作图函数
 #   没有 → 照样算差异基因，只出 CSV 和基础火山图
-# 真正需要的数据是 E:/R/Nerve 里解压后的 Clinical/ids.RDS 和 Robjects/
+# 真正需要的数据是 E:/R/Nerve 里的 Robjects/（counts + annotsBySpot）。
+# ids.RDS 可选：Windows 解压 Clinical.tar 时常把 Clinical/ids.RDS 展成根目录的
+# Clinicalids.RDS；没有片子对照也能用坐标对齐病理标注。
 # 数据默认：E:/R/Nerve（Wang Zenodo 解压目录）
 #
 # 用法（Windows R / RStudio）：
@@ -43,7 +45,11 @@ resolve_nerve_dir <- function() {
       dir.exists(file.path(d, "Robjects", "annotsBySpot")) ||
         dir.exists(file.path(d, "annotsBySpot")) ||
         file.exists(file.path(d, "Robjects.tar")) ||
-        file.exists(file.path(d, "Clinical", "ids.RDS"))
+        file.exists(file.path(d, "Clinical", "ids.RDS")) ||
+        file.exists(file.path(d, "ids.RDS")) ||
+        file.exists(file.path(d, "Clinicalids.RDS")) ||
+        file.exists(file.path(d, "Clinical.RDS")) ||
+        file.exists(file.path(d, "Clinical.xlsx"))
     )
   }
   for (d in candidates) {
@@ -84,7 +90,11 @@ ensure_tar_extracted(nerve_dir, "patches", "patches.tar")
 ensure_tar_extracted(nerve_dir, "classification", "classification.tar")
 
 ids_path <- find_under(nerve_dir, "ids.RDS")
-if (!is.na(ids_path)) {
+if (is.na(ids_path)) {
+  flat <- list.files(nerve_dir, pattern = "ids\\.RDS$", full.names = TRUE, ignore.case = TRUE)
+  if (length(flat) > 0) ids_path <- flat[1]
+}
+if (!is.na(ids_path) && nzchar(ids_path)) {
   clinical_dir <- dirname(ids_path)
   if (basename(clinical_dir) == "Clinical") {
     nerve_dir <- dirname(clinical_dir)
@@ -178,6 +188,7 @@ if (!exists("log_msg", mode = "function")) {
 result_dir <- file.path(nerve_dir, "results")
 log_dir <- file.path(result_dir, "00_logs")
 dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(result_dir, "00_QC_maps"), recursive = TRUE, showWarnings = FALSE)
 log_file <- file.path(log_dir, paste0("wang_st_nerve_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
 log_msg_file <- log_msg
 log_msg <- function(...) {
@@ -260,24 +271,57 @@ safe_read_rds <- function(path) {
   })
 }
 
-load_ids <- function() {
-  f <- file.path(nerve_dir, "Clinical", "ids.RDS")
-  if (!file.exists(f)) {
-    alt <- find_under(nerve_dir, "ids.RDS")
-    if (!is.na(alt)) f <- alt
+is_ids_map <- function(obj) {
+  if (is.null(obj)) return(FALSE)
+  if (is.matrix(obj)) obj <- as.data.frame(obj, stringsAsFactors = FALSE)
+  if (!is.data.frame(obj)) return(FALSE)
+  all(c("id", "hasAnnot") %in% names(obj))
+}
+
+coerce_ids_map <- function(obj) {
+  if (is.matrix(obj)) obj <- as.data.frame(obj, stringsAsFactors = FALSE)
+  if (is.data.frame(obj) && is_ids_map(obj)) return(obj)
+  if (is.list(obj) && !is.data.frame(obj)) {
+    for (el in obj) {
+      got <- coerce_ids_map(el)
+      if (!is.null(got)) return(got)
+    }
   }
-  ids <- safe_read_rds(f)
-  if (!is.null(ids)) return(ids)
+  NULL
+}
+
+list_rds_shallow <- function(d) {
+  if (!dir.exists(d)) return(character())
+  list.files(d, pattern = "\\.RDS$", full.names = TRUE, ignore.case = TRUE)
+}
+
+load_ids <- function() {
+  # Windows 解 Clinical.tar 时常丢掉子目录：Clinical/ids.RDS → Clinicalids.RDS
+  # Clinical.RDS 是 94×50 临床表，不是片子对照，不能当 ids 用。
+  cand <- unique(c(
+    file.path(nerve_dir, "Clinical", "ids.RDS"),
+    file.path(nerve_dir, "ids.RDS"),
+    file.path(nerve_dir, "Clinicalids.RDS"),
+    file.path(nerve_dir, "Clinical_ids.RDS"),
+    list.files(nerve_dir, pattern = "ids\\.RDS$", full.names = TRUE, ignore.case = TRUE),
+    list_rds_shallow(file.path(nerve_dir, "Clinical")),
+    list_rds_shallow(nerve_dir)
+  ))
+  cand <- cand[file.exists(cand)]
+  cand <- cand[!grepl("Robjects|counts|annotsBySpot|images|BatchCorrection|__MACOSX",
+                      cand, ignore.case = TRUE)]
+  for (f in cand) {
+    obj <- coerce_ids_map(safe_read_rds(f))
+    if (is.null(obj)) next
+    log_msg("片子↔病人对照: ", f,
+            if (grepl("Clinicalids\\.RDS$", basename(f), ignore.case = TRUE))
+              "（Windows 把 Clinical/ids.RDS 展成了这个文件名）" else "")
+    return(obj)
+  }
   shown <- paste(list.files(nerve_dir), collapse = ", ")
-  stop(
-    "缺少 Clinical/ids.RDS。\n",
-    "这才是必需数据，不是 TG_RNAseq_pipeline.R。\n",
-    "请把 Zenodo 的 Clinical.tar 放到 ", nerve_dir, " 后解压：\n",
-    "  https://zenodo.org/records/14204217\n",
-    "  wget/浏览器下载 Clinical.tar，然后在 R 里：\n",
-    "  untar('E:/R/Nerve/Clinical.tar', exdir = 'E:/R/Nerve')\n",
-    "当前目录文件: ", shown
-  )
+  log_msg("没有 ids.RDS（片子↔病人对照）。根目录若只有 Clinical.RDS / Clinical.xlsx，那是临床表，不是对照。")
+  log_msg("将用 counts 坐标去对病理标注，分析继续。当前文件: ", shown)
+  NULL
 }
 
 load_counts <- function(pid) {
@@ -395,13 +439,22 @@ classify_one_patient <- function(pid, ids, near_d = 2, far_d = 4,
   }
 
   if (!is.null(aa)) {
+    key_sp <- paste(spots$x, spots$y, sep = "x")
+    fr <- spot_ann_frac(aa$annots)
+    if (is.na(annot_slide) && "slide_id" %in% names(spots)) {
+      ov <- tapply(seq_len(nrow(spots)), spots$slide_id, function(ii) {
+        length(intersect(key_sp[ii], fr$key))
+      })
+      if (length(ov) > 0 && max(as.numeric(ov), na.rm = TRUE) > 0) {
+        annot_slide <- names(ov)[which.max(ov)]
+        log_msg("TNBC", pid, " 病理标注对齐片子: ", annot_slide)
+      }
+    }
     on_annot <- if (!is.na(annot_slide) && "slide_id" %in% names(spots)) {
       spots$slide_id == annot_slide
     } else {
-      rep(TRUE, nrow(spots))
+      key_sp %in% fr$key
     }
-    key_sp <- paste(spots$x, spots$y, sep = "x")
-    fr <- spot_ann_frac(aa$annots)
     m <- match(key_sp, fr$key)
     hit <- on_annot & !is.na(m)
     spots$frac_tumor[hit] <- fr$frac_tumor[m[hit]]
