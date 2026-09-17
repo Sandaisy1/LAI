@@ -122,11 +122,14 @@ scRNA 只能支持「肿瘤配体高 + 神经细胞有受体 + 含神经样本�
 
 ## 乳腺癌转移批量转录组 / 蛋白组（神经浸润 + 继发部位）
 
-公开可下载的多病人、肺/脑/骨转移灶以 **GSE175692**（184 例，11 器官）为主，芯片补充 GSE14020。蛋白组需自备。不要改 Cuffdiff 流程。
+数据放在 **`E:/R/Nerve RNA`**（GSE175692）。独立脚本，不改 Cuffdiff。
 
 ```r
-setwd("E:/R/BRCA_met_bulk_nerve")
-source("BRCA_met_bulk_nerve_infiltration.R")
+setwd("E:/R/Nerve RNA")
+source("Nerve_RNA_nerve_infiltration.R")
 ```
 
-部位排名看 `results/02_SITE_RANK_neural_invasion.csv` 的 **配体残差**（不要把脑转移 GFAP 高写成更易神经浸润）。基因候选：`results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`。
+放入 `GSE175692_series_matrix.txt.gz`（必须）和可选 `GSE175692_raw_data.txt.gz`。
+
+- 问题1基因：`results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`
+- 问题2部位：`results/02_SITE_RANK_neural_invasion.csv`（看配体残差排名）

@@ -10,16 +10,16 @@ alwaysApply: true
 
 公开、可下载、多病人、含肺/脑/骨转移灶的人源数据以转录组为主；多器官转移蛋白组几乎没有完整公开队列。禁止小鼠 PDX 当病人。
 
-脚本：`BRCA_met_bulk_nerve_infiltration.R`。下载：`BRCA_met_bulk_nerve_DOWNLOAD.txt`。
+脚本：`Nerve_RNA_nerve_infiltration.R`（数据目录 `E:/R/Nerve RNA`）。也可参考 `BRCA_met_bulk_nerve_infiltration.R`。
 
 ```r
-setwd("E:/R/BRCA_met_bulk_nerve")
-source("BRCA_met_bulk_nerve_infiltration.R")
+setwd("E:/R/Nerve RNA")
+source("Nerve_RNA_nerve_infiltration.R")
 ```
 
-## 数据（目录 `E:/R/BRCA_met_bulk_nerve`）
+## 数据（目录 `E:/R/Nerve RNA`）
 
-1. **主队列（推荐）**：GSE175692，184 例人转移灶、11 个器官（含肝/肺/脑/骨），771 基因面板。适合「哪个继发部位」比较。
+1. **主队列（推荐）**：GSE175692，184 例人转移灶、11 个器官（含肝/肺/脑/骨），771 基因面板。放入 `GSE175692_series_matrix.txt.gz`（必须）与可选 `GSE175692_raw_data.txt.gz`。
 2. **全转录组补充**：GSE14020（GSE14017+GSE14018），约 58 例人转移灶芯片（肺/脑/骨/肝）。两个平台不要并成一张矩阵。
 3. **蛋白组**：若有 DIA-NN `report.pg_matrix` + 带器官列的表，按同样流程；不要拿 CPTAC 原发当转移灶。
 
