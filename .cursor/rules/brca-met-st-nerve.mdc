@@ -6,7 +6,7 @@ alwaysApply: true
 
 # 乳腺癌转移 ST：肿瘤高表达基因 → 神经浸润
 
-仅当任务是**转移灶空间转录组 / 神经浸润**时按本规则。不要套用 NTC/TG_sh Cuffdiff 流程，不要改 `TG_RNAseq_*.R`。
+仅当任务是**转移灶空间转录组**时按本规则。若任务是**单细胞测序**（不是空间），改用 `brca-met-scrna-nerve.mdc` 与 `BRCA_met_scRNA_nerve_infiltration.R`，禁止把空间邻域套到 scRNA 上。不要套用 NTC/TG_sh Cuffdiff 流程，不要改 `TG_RNAseq_*.R`。
 
 公开库里**没有**一份 ST 同时满足：多病人 + 肺/脑/骨转移 + 肿瘤细胞 + 免疫 + 神经。用下面两套拼齐，禁止把小鼠脑转移（如 GSE240212）当病人数据。
 

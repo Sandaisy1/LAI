@@ -108,3 +108,14 @@ source("BRCA_met_ST_nerve_infiltration.R")
 ```
 
 把 `slide_seq.h5ad`（或 `counts.tsv`+`annot.tsv`）放到该目录。主结果：`results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`。
+
+## 乳腺癌转移单细胞（神经浸润）
+
+这是 **scRNA/snRNA**，不是空间邻域。主队列仍是 Klughammer 2024，但请下 **`scRNAseq.h5ad`**；神经细胞用 GSE186344。说明见 `BRCA_met_scRNA_nerve_DOWNLOAD.txt`。
+
+```r
+setwd("E:/R/BRCA_met_scRNA_nerve")
+source("BRCA_met_scRNA_nerve_infiltration.R")
+```
+
+scRNA 只能支持「肿瘤配体高 + 神经细胞有受体 + 含神经样本里更高」，不能写成已经证明空间浸润。
