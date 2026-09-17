@@ -25,14 +25,15 @@ source("Nerve_RNA_nerve_infiltration.R")
 
 物种：人 `org.Hs.eg.db`。每个活检单独保留；禁止把肺+脑+骨合并后再做 DEG。
 
-## 两个问题必须分开回答
+## 三个问题必须分开回答
 
-1. **肿瘤高表达哪些基因可能促神经浸润**：只看神经亲和配体/轴突导向在**肿瘤活检**中的上调（NGF、BDNF、ARTN、SEMA、SLIT、L1CAM 等），先 **p < 0.01** 再 FC ≥ 1.25 / 1.5 / 2。只分析上调。
+1. **肿瘤高表达哪些基因可能促神经浸润**：只看神经亲和配体/轴突导向在**肿瘤活检**中的上调（NGF、BDNF、ARTN、SEMA、SLIT、L1CAM 等），先 **p < 0.01** 再 FC ≥ 1.25 / 1.5 / 2。只分析上调。主表：`01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`。
 2. **神经浸润更倾向哪个继发部位**：按器官比较签名分数，**两套分数都要出**，不要混：
    - `score_neurotropic_ligand`：肿瘤侧神经亲和配体（真正要拿来排部位）
    - `score_neural_stroma`：GFAP/MBP/MPZ 等神经组织/施万（脑转移会很高，多半是微环境，不是 PNI）
    - 另出残差 `ligand | stroma`，减轻脑组织污染
    脑实质转移 ≠ 外周神经浸润（PNI）。部位排名表：`results/02_SITE_RANK_neural_invasion.csv`。
+3. **肿瘤细胞低表达哪些基因可能促使神经浸润**：看屏障/黏附/抑癌/TIMP/轴突排斥等**下调或绝对低表达**（CDH1、CLDN*、PTEN、TIMP4、SERPINB5 等）。同一套器官比较，先 **p < 0.01** 再下调倍数 FC ≥ 1.25 / 1.5 / 2；并标注 `low_abs_expr` / `expr_percentile`。主表：`03_CANDIDATE_MOLECULES_low_expr_promote_nerve.csv`。关联 ≠ 因果。
 
 ## 比较（每组单独出表、单独作图）
 
@@ -45,9 +46,12 @@ source("Nerve_RNA_nerve_infiltration.R")
 - ORA 放 `GO/`、`Pathway/`、`KEGG/`，`ORA_` 开头
 - GSEA 放 `GSEA/`；全基因只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
 - 专项 `Focused_nerve_invasion/`，保留原始 p 与 `genome_wide_rank`
+- 问题1 上调 → `Q1_genes_promote_nerve/`；问题3 下调 → `Q3_genes_low_expr_promote_nerve/`
 
 ```r
 # ❌ BAD: 把脑转移 GFAP 高写成「脑更易神经浸润」；三器官合并再 DEG
 # ❌ BAD: CPTAC 原发或小鼠 PDX 当多器官转移；GSE175692 与芯片硬拼矩阵
-# ✅ GOOD: 配体分数排部位，基质分数单独报；脑/肺/骨各自 vs 其余，p<0.01 后 FC≥1.25/1.5/2
+# ❌ BAD: 问题3只报上调，或跳过屏障/抑癌低表达候选表
+# ✅ GOOD: 配体分数排部位，基质分数单独报；脑/肺/骨各自 vs 其余
+# ✅ GOOD: Q1 上调 + Q3 下调（p<0.01 后 FC≥1.25/1.5/2）分开出表
 ```

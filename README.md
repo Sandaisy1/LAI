@@ -131,5 +131,6 @@ source("Nerve_RNA_nerve_infiltration.R")
 
 放入 `GSE175692_series_matrix.txt.gz`（必须）和可选 `GSE175692_raw_data.txt.gz`。
 
-- 问题1基因：`results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`
+- 问题1高表达：`results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`
 - 问题2部位：`results/02_SITE_RANK_neural_invasion.csv`（看配体残差排名）
+- 问题3低表达：`results/03_CANDIDATE_MOLECULES_low_expr_promote_nerve.csv`（屏障/抑癌下调）
