@@ -1,11 +1,12 @@
 #!/usr/bin/env Rscript
 # =============================================================================
 # Wang et al. Nature Communications 2024  TNBC 空间转录组
-# 神经浸润：方案 + 肿瘤细胞高表达、可能促使神经浸润的基因
+# 神经浸润：三个问题（不做 GO / KEGG / GSEA / ORA）
 #
-# 只回答两件事（不做 GO / KEGG / GSEA / ORA）：
+# 只回答三件事：
 #   问题1  神经浸润相关分子 + 统计方案
-#   问题2  肿瘤细胞高表达、可能促使神经浸润的基因（主结果）
+#   问题2  肿瘤细胞高表达、可能促使神经浸润的基因
+#   问题3  肿瘤细胞低表达、可能促使神经浸润的基因（丢失排斥/屏障）
 # 独立于 TG_RNAseq_pipeline.R，不改原 Cuffdiff 1–4。
 # 数据：E:/R/Nerve 的 Robjects/（counts + annotsBySpot）。
 # ids.RDS 可选（Windows 常把 Clinical/ids.RDS 展成 Clinicalids.RDS）。
@@ -17,9 +18,9 @@
 #
 # 比较（各自单独出表/出图；病人不偷偷合并）：
 #   1) 病理 Nerve 邻域：每个有神经 spot 的病人单独 1-vs-1
-#   2) 这些病人的共同上调
+#   2) 这些病人的共同上调 / 共同下调
 #   3) 全队列 Schwann 签名邻域：~ patient + group 的伪 bulk DESeq2
-# 显著性：先 p < 0.05，再按上调 FC >= 1.25 / 1.5 分层（不做 FC=1、FC=2，也不做 topN）。
+# 显著性：先 p < 0.05，再按 |FC| >= 1.25 / 1.5 分上调（问题2）和下调（问题3）。
 # =============================================================================
 
 options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
@@ -143,7 +144,7 @@ log_msg <- function(...) {
   cat(msg, "\n", file = log_file, append = TRUE)
 }
 
-# 先 p < 0.05，再只看上调 FC >= 1.25 / 1.5（不做 GO、不做 topN）
+# 先 p < 0.05，再 |FC| >= 1.25 / 1.5（上调=问题2，下调=问题3；不做 GO、不做 topN）
 p_cutoff <- 0.05
 fc_cutoffs_local <- c("FC_1.25" = 1.25, "FC_1.5" = 1.5)
 
@@ -200,6 +201,41 @@ tumor_ligands <- data.frame(
     "IL6 神经损伤炎症（本阵列常未检出）",
     "CGRP，感觉神经肽（本阵列常未检出）",
     "肾上腺髓质素，与 CGRP 受体共用 RAMP"
+  ),
+  stringsAsFactors = FALSE
+)
+
+# 肿瘤细胞低表达后可能放开神经浸润：轴突排斥、基底膜、上皮屏障
+tumor_repellents <- data.frame(
+  gene = c(
+    "SEMA3A", "SEMA3B", "SEMA3F", "SLIT2", "SLIT3",
+    "EFNA1", "EFNA5", "EPHA2", "DCC", "UNC5B", "PLXNA1",
+    "CDH1", "TJP1", "OCLN", "CLDN1", "COL4A1", "LAMA2", "LAMB1"
+  ),
+  receptor_or_partner = c(
+    "NRP1/PLXNA", "NRP", "NRP2", "ROBO1/2", "ROBO",
+    "EPHA", "EPHA", "EFNA", "NTN1", "NTN1", "SEMA3",
+    "CTNNB1", "TJP", "CLDN", "OCLN", "ITG", "ITG", "ITG"
+  ),
+  rationale = c(
+    "3 类 semaphorin，轴突排斥；肿瘤里丢失利于神经长入",
+    "SEMA3B 排斥 / 抑癌",
+    "SEMA3F–NRP2 排斥",
+    "SLIT2–ROBO 排斥；多种癌中丢失与 PNI 有关",
+    "SLIT3 排斥",
+    "ephrin-A 接触排斥（下调才算问题3）",
+    "ephrin-A5 排斥",
+    "EphA2 接触导向",
+    "DCC：netrin 依赖的排斥/吸引取决于受体组合",
+    "UNC5B：netrin 排斥受体",
+    "Plexin-A1，semaphorin 排斥",
+    "E-cadherin 上皮屏障；丢失 / EMT 利于沿神经侵袭",
+    "紧密连接",
+    "occludin 紧密连接",
+    "claudin-1 紧密连接",
+    "IV 型胶原，基底膜",
+    "laminin-α2，基底膜 / 神经周围基质",
+    "laminin-β1，基底膜"
   ),
   stringsAsFactors = FALSE
 )
@@ -566,6 +602,23 @@ select_up <- function(de, fc = 1) {
   }
 }
 
+select_down <- function(de, fc = 1) {
+  # 近/远 FC <= 1/fc，即下调倍数 >= fc（1.25 或 1.5）
+  keep <- !is.na(de$log2FC) & de$log2FC < 0 & (2^de$log2FC <= 1 / fc)
+  if (any(!is.na(de$pvalue))) {
+    keep <- keep & !is.na(de$pvalue) & de$pvalue < p_cutoff
+  }
+  sub <- de[keep, , drop = FALSE]
+  if (nrow(sub) == 0) return(sub)
+  sub$FC <- 2^sub$log2FC
+  sub$down_FC <- 1 / pmax(sub$FC, 1e-12)
+  if (any(!is.na(sub$pvalue))) {
+    sub[order(sub$pvalue, sub$log2FC), , drop = FALSE]
+  } else {
+    sub[order(sub$log2FC), , drop = FALSE]
+  }
+}
+
 # -----------------------------------------------------------------------------
 # 6. 差异表（只出 CSV + 火山图，不出 GO/GSEA）
 # -----------------------------------------------------------------------------
@@ -574,12 +627,14 @@ basic_volcano <- function(de, title, outfile, fc_line = 1) {
   df <- de
   df$y <- if (any(!is.na(df$pvalue))) -log10(pmax(df$pvalue, 1e-300)) else abs(df$log2FC)
   df$col <- "ns"
-  df$col[!is.na(df$pvalue) & df$pvalue < p_cutoff & df$log2FC >= log2(fc_line)] <- "up"
+  sig <- is.na(df$pvalue) | df$pvalue < p_cutoff
+  df$col[sig & !is.na(df$log2FC) & df$log2FC >= log2(fc_line)] <- "up"
+  df$col[sig & !is.na(df$log2FC) & df$log2FC <= -log2(fc_line)] <- "down"
   dir.create(dirname(outfile), recursive = TRUE, showWarnings = FALSE)
   if (requireNamespace("ggplot2", quietly = TRUE)) {
     p <- ggplot2::ggplot(df, ggplot2::aes(log2FC, y, color = col)) +
       ggplot2::geom_point(alpha = 0.5, size = 0.8) +
-      ggplot2::scale_color_manual(values = c(ns = "grey70", up = "#D62828")) +
+      ggplot2::scale_color_manual(values = c(ns = "grey70", up = "#D62828", down = "#1D4E89")) +
       ggplot2::theme_bw(base_size = 12) +
       ggplot2::labs(title = title, y = "-log10(p)", x = "log2FC near / far")
     ggplot2::ggsave(paste0(outfile, ".pdf"), p, width = 7, height = 6)
@@ -615,19 +670,25 @@ emit_de_tables <- function(comp_name, de) {
   dir.create(base, recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(de, file.path(base, "DE_full.csv"), row.names = FALSE)
   have_p <- any(!is.na(de$pvalue))
+  n_up <- sum((is.na(de$pvalue) | de$pvalue < p_cutoff) & de$log2FC > 0, na.rm = TRUE)
+  n_dn <- sum((is.na(de$pvalue) | de$pvalue < p_cutoff) & de$log2FC < 0, na.rm = TRUE)
   log_msg(comp_name, " genes=", nrow(de), " have_p=", have_p,
-          " up p<", p_cutoff, " n=",
-          sum((is.na(de$pvalue) | de$pvalue < p_cutoff) & de$log2FC > 0, na.rm = TRUE))
+          " up p<", p_cutoff, " n=", n_up, " down n=", n_dn)
   for (nm in names(fc_cutoffs_local)) {
     fc <- unname(fc_cutoffs_local[[nm]])
-    sub <- select_up(de, fc)
-    od <- file.path(base, paste0("up_", nm))
-    dir.create(od, recursive = TRUE, showWarnings = FALSE)
-    utils::write.csv(sub, file.path(od, paste0(nm, "_upregulated_tumor_genes.csv")),
+    up <- select_up(de, fc)
+    dn <- select_down(de, fc)
+    od_up <- file.path(base, paste0("up_", nm))
+    od_dn <- file.path(base, paste0("down_", nm))
+    dir.create(od_up, recursive = TRUE, showWarnings = FALSE)
+    dir.create(od_dn, recursive = TRUE, showWarnings = FALSE)
+    utils::write.csv(up, file.path(od_up, paste0(nm, "_upregulated_tumor_genes.csv")),
                      row.names = FALSE)
-    basic_volcano(de, paste(comp_name, "| up FC >=", fc),
-                  file.path(od, paste0(nm, "_volcano")), fc)
-    log_msg("  ", nm, " n=", nrow(sub))
+    utils::write.csv(dn, file.path(od_dn, paste0(nm, "_downregulated_tumor_genes.csv")),
+                     row.names = FALSE)
+    basic_volcano(de, paste(comp_name, "| |FC| >=", fc),
+                  file.path(base, paste0("volcano_", nm)), fc)
+    log_msg("  ", nm, " up n=", nrow(up), " down n=", nrow(dn))
   }
   invisible(de)
 }
@@ -745,7 +806,7 @@ utils::write.csv(qc, file.path(log_dir, "spot_class_counts.csv"), row.names = FA
 log_msg("Patients with pathologist nerve spots: ",
         paste(qc$patient[qc$n_nerve_path > 0], collapse = ", "))
 
-# 共同上调：病理神经 1-vs-1 交集
+# 共同上调 / 共同下调：病理神经 1-vs-1 交集
 if (length(nerve_de_list) >= 2) {
   have_p <- all(vapply(nerve_de_list, function(d) any(!is.na(d$pvalue)), logical(1)))
   get_up <- function(de, fc) {
@@ -753,17 +814,20 @@ if (length(nerve_de_list) >= 2) {
     if (have_p) keep <- keep & !is.na(de$pvalue) & de$pvalue < p_cutoff
     de$gene[keep]
   }
-  for (nm in names(fc_cutoffs_local)) {
-    sets <- lapply(nerve_de_list, get_up, fc = unname(fc_cutoffs_local[[nm]]))
-    inter <- Reduce(intersect, sets)
-    log_msg("common up pathologist nerve ", nm, " n=", length(inter))
+  get_down <- function(de, fc) {
+    keep <- !is.na(de$log2FC) & de$log2FC < 0 & (2^de$log2FC <= 1 / fc)
+    if (have_p) keep <- keep & !is.na(de$pvalue) & de$pvalue < p_cutoff
+    de$gene[keep]
   }
-  genes_all <- Reduce(intersect, lapply(nerve_de_list, function(d) {
-    keep <- d$log2FC > 0
-    if (have_p) keep <- keep & !is.na(d$pvalue) & d$pvalue < p_cutoff
-    d$gene[keep]
-  }))
-  if (length(genes_all) > 0) {
+  for (nm in names(fc_cutoffs_local)) {
+    fc <- unname(fc_cutoffs_local[[nm]])
+    log_msg("common up pathologist nerve ", nm, " n=",
+            length(Reduce(intersect, lapply(nerve_de_list, get_up, fc = fc))))
+    log_msg("common down pathologist nerve ", nm, " n=",
+            length(Reduce(intersect, lapply(nerve_de_list, get_down, fc = fc))))
+  }
+  collapse_inter <- function(genes_all) {
+    if (length(genes_all) == 0) return(NULL)
     tab <- data.frame(gene = genes_all, stringsAsFactors = FALSE)
     for (nm in names(nerve_de_list)) {
       d <- nerve_de_list[[nm]]
@@ -777,12 +841,26 @@ if (length(nerve_de_list) >= 2) {
     tab$AveExpr <- NA_real_
     tab$padj <- tab$pvalue
     tab$padj_BH <- NA_real_
-    emit_de_tables("common_up_pathologist_nerve", tab)
-  } else {
-    log_msg("common_up_pathologist_nerve: empty intersection")
+    tab
   }
+  genes_up <- Reduce(intersect, lapply(nerve_de_list, function(d) {
+    keep <- d$log2FC > 0
+    if (have_p) keep <- keep & !is.na(d$pvalue) & d$pvalue < p_cutoff
+    d$gene[keep]
+  }))
+  genes_dn <- Reduce(intersect, lapply(nerve_de_list, function(d) {
+    keep <- d$log2FC < 0
+    if (have_p) keep <- keep & !is.na(d$pvalue) & d$pvalue < p_cutoff
+    d$gene[keep]
+  }))
+  tab_up <- collapse_inter(genes_up)
+  tab_dn <- collapse_inter(genes_dn)
+  if (!is.null(tab_up)) emit_de_tables("common_up_pathologist_nerve", tab_up) else
+    log_msg("common_up_pathologist_nerve: empty intersection")
+  if (!is.null(tab_dn)) emit_de_tables("common_down_pathologist_nerve", tab_dn) else
+    log_msg("common_down_pathologist_nerve: empty intersection")
 } else {
-  log_msg("病理 Nerve 重叠 spot 的病人不足 2 例，跳过共同上调。请看全队列 Schwann 邻域。")
+  log_msg("病理 Nerve 重叠 spot 的病人不足 2 例，跳过共同上调/下调。请看全队列 Schwann 邻域。")
 }
 
 # 全队列 Schwann 邻域
@@ -853,6 +931,22 @@ cand$priority <- as.integer(cand$detected_on_array) +
 cand <- cand[order(-cand$priority, cand$schwann_near_pvalue, -cand$mean_spearman_near_schwann), ]
 utils::write.csv(cand, file.path(result_dir, "01_Q1_literature_ligands.csv"), row.names = FALSE)
 
+repel <- tumor_repellents
+repel$detected_on_array <- repel$gene %in% universe_example
+if (nrow(de_sw) > 0) {
+  repel$schwann_near_log2FC <- de_sw$log2FC[match(repel$gene, de_sw$gene)]
+  repel$schwann_near_pvalue <- de_sw$pvalue[match(repel$gene, de_sw$gene)]
+} else {
+  repel$schwann_near_log2FC <- NA_real_
+  repel$schwann_near_pvalue <- NA_real_
+}
+repel$down_in_schwann_near <- (!is.na(repel$schwann_near_log2FC) & repel$schwann_near_log2FC < 0) &
+  (is.na(repel$schwann_near_pvalue) | repel$schwann_near_pvalue < p_cutoff)
+repel$priority <- as.integer(repel$detected_on_array) +
+  3L * as.integer(repel$down_in_schwann_near)
+repel <- repel[order(-repel$priority, repel$schwann_near_pvalue, repel$schwann_near_log2FC), ]
+utils::write.csv(repel, file.path(result_dir, "01_Q3_literature_repellents.csv"), row.names = FALSE)
+
 # 问题 2 主表：靠近神经/Schwann 的肿瘤细胞里升高的基因，按 p 再按 FC 排
 q2_src <- if (nrow(de_sw) > 0) {
   de_sw
@@ -914,6 +1008,47 @@ if (nrow(q2_src) > 0) {
   log_msg("问题2：没有可用的差异表。请确认 Robjects/counts 已解压且病人数足够。")
 }
 
+# 问题 3：靠近神经的肿瘤细胞里降低的基因（丢失排斥/屏障，可能促使浸润）
+path_down_n <- function(g) {
+  if (length(nerve_de_list) == 0) return(0L)
+  as.integer(sum(vapply(nerve_de_list, function(d) {
+    i <- match(g, d$gene)
+    if (is.na(i)) return(FALSE)
+    ok <- !is.na(d$log2FC[i]) && d$log2FC[i] < 0
+    if (!is.na(d$pvalue[i])) ok <- ok && d$pvalue[i] < p_cutoff
+    ok
+  }, logical(1))))
+}
+
+if (nrow(q2_src) > 0) {
+  q3 <- q2_src
+  q3$FC <- 2^q3$log2FC
+  q3$down_FC <- 1 / pmax(q3$FC, 1e-12)
+  q3$known_nerve_repellent_or_barrier <- q3$gene %in% tumor_repellents$gene
+  q3$repellent_partner <- tumor_repellents$receptor_or_partner[match(q3$gene, tumor_repellents$gene)]
+  q3$repellent_rationale <- tumor_repellents$rationale[match(q3$gene, tumor_repellents$gene)]
+  q3$n_pathologist_patients_also_down <- vapply(q3$gene, path_down_n, integer(1))
+  q3$pass_p005_down_FC_1.25 <- q3$gene %in% select_down(q2_src, 1.25)$gene
+  q3$pass_p005_down_FC_1.5  <- q3$gene %in% select_down(q2_src, 1.5)$gene
+  q3 <- q3[order(is.na(q3$pvalue), q3$pvalue, q3$log2FC), ]
+  q3$genome_wide_rank <- seq_len(nrow(q3))
+  utils::write.csv(q3, file.path(result_dir, "03_Q3_ALL_tumor_genes_near_nerve.csv"),
+                   row.names = FALSE)
+  dn125 <- q3[q3$pass_p005_down_FC_1.25, , drop = FALSE]
+  dn15  <- q3[q3$pass_p005_down_FC_1.5, , drop = FALSE]
+  utils::write.csv(dn125, file.path(result_dir, "03_Q3_down_p005_FC1.25.csv"), row.names = FALSE)
+  utils::write.csv(dn15,  file.path(result_dir, "03_Q3_down_p005_FC1.5.csv"), row.names = FALSE)
+  short3 <- dn125
+  if (nrow(short3) > 0) {
+    short3 <- short3[order(-short3$known_nerve_repellent_or_barrier, short3$pvalue, short3$log2FC), ]
+  }
+  utils::write.csv(short3, file.path(result_dir, "03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv"),
+                   row.names = FALSE)
+  log_msg("问题3 下调 FC>=1.25 n=", nrow(dn125), " FC>=1.5 n=", nrow(dn15))
+} else {
+  log_msg("问题3：没有可用的差异表。")
+}
+
 # -----------------------------------------------------------------------------
 # 9. 方案说明（问题 1）
 # -----------------------------------------------------------------------------
@@ -935,36 +1070,48 @@ protocol <- c(
   "近 <=2 个 spot，远 >4；Schwann 高 = 切片内 z>1",
   "（SOX10 MPZ PMP22 S100B PLP1 NGFR NCAM1 MBP L1CAM）。",
   "",
-  "统计：先 p<0.05，再上调 FC>=1.25 和 1.5。只看上调。",
+  "统计：先 p<0.05，再 |FC|>=1.25 和 1.5。",
+  "  问题2 = 近神经肿瘤上调；问题3 = 近神经肿瘤下调。",
   "过滤低表达后再算 FC。",
   "",
-  "文献配体（肿瘤→神经）：NGF, BDNF, ARTN, GDNF, NTN1, SLIT2,",
-  "SEMA3C/F, NRG1, CXCL12, MDK, PTN, VEGFA。",
+  "文献配体（肿瘤高表达→神经，问题2）：NGF, BDNF, ARTN, GDNF, CXCL12, MDK, PTN, VEGFA。",
   "表：01_Q1_literature_ligands.csv",
+  "文献排斥/屏障（肿瘤低表达→放开浸润，问题3）：SEMA3A/F, SLIT2/3, CDH1, TJP1, COL4A1, LAMA2。",
+  "表：01_Q3_literature_repellents.csv",
   "",
-  "【问题 2】肿瘤细胞高表达、可能促使神经浸润的基因  ← 先看这个",
+  "【问题 2】肿瘤细胞高表达、可能促使神经浸润的基因",
   "",
   "  02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv",
-  "    p<0.05 且上调 FC>=1.25 的肿瘤基因。已知促神经配体排在前面。",
+  "    p<0.05 且上调 FC>=1.25。已知促神经配体排在前面。",
   "  02_Q2_up_p005_FC1.25.csv / 02_Q2_up_p005_FC1.5.csv",
-  "    两个倍数档位。",
-  "  02_Q2_ALL_tumor_genes_near_nerve.csv",
-  "    全基因，带 genome_wide_rank（未改 p 值）。",
+  "",
+  "【问题 3】肿瘤细胞低表达、可能促使神经浸润的基因",
+  "",
+  "  03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv",
+  "    p<0.05 且下调倍数>=1.25（近/远 FC<=1/1.25）。",
+  "    已知轴突排斥 / 上皮屏障基因排在前面。",
+  "  03_Q3_down_p005_FC1.25.csv / 03_Q3_down_p005_FC1.5.csv",
+  "  03_Q3_ALL_tumor_genes_near_nerve.csv  全基因（未改 p 值）",
   "",
   "比较定义：靠近 Schwann/神经的肿瘤 spot vs 远离的肿瘤 spot。",
-  "邻域升高 = 空间相邻，还不等于已经证明『引起』浸润；",
-  "功能验证：肿瘤细胞敲低/过表达后与 DRG 共培养看轴突。",
+  "邻域升高或降低 = 空间相邻，还不等于已经证明『引起』浸润。",
+  "问题2 功能验证：肿瘤细胞过表达后与 DRG 共培养看轴突是否更长。",
+  "问题3 功能验证：把该基因补回去（过表达）看轴突是否被挡住。",
   "",
   "病理神经各病人表在 TNBC*_tumor_near_nerve_vs_far/，只作验证。"
 )
 writeLines(protocol, file.path(result_dir, "00_Q1_PROTOCOL.txt"))
 writeLines(c(
-  "先看这两个文件：",
-  "  问题1  00_Q1_PROTOCOL.txt  和  01_Q1_literature_ligands.csv",
+  "先看这些文件：",
+  "  问题1  00_Q1_PROTOCOL.txt",
+  "         01_Q1_literature_ligands.csv（高表达促浸润配体）",
+  "         01_Q3_literature_repellents.csv（低表达放开浸润）",
   "  问题2  02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv",
+  "  问题3  03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv",
   "没有 GO/GSEA。"
 ), file.path(result_dir, "00_READ_ME.txt"))
-log_msg("Wrote Q1 protocol and Q2 ranked tumor-gene tables")
+log_msg("Wrote Q1 protocol and Q2/Q3 ranked tumor-gene tables")
 log_msg("问题1: ", file.path(result_dir, "00_Q1_PROTOCOL.txt"))
 log_msg("问题2: ", file.path(result_dir, "02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv"))
+log_msg("问题3: ", file.path(result_dir, "03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv"))
 

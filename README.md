@@ -100,10 +100,11 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 ## Wang 2024 空间转录组：神经浸润（新脚本，不改 1–4）
 
-数据在 `E:/R/Nerve`。脚本 `Wang_ST_nerve_infiltration.R` 只回答两件事（**不做 GO/KEGG/GSEA**）：
+数据在 `E:/R/Nerve`。脚本 `Wang_ST_nerve_infiltration.R` 回答三件事（**不做 GO/KEGG/GSEA**）：
 
-1. 神经浸润相关分子和统计方案 → `results/00_Q1_PROTOCOL.txt`、`01_Q1_literature_ligands.csv`
+1. 神经浸润相关分子和统计方案 → `results/00_Q1_PROTOCOL.txt`、`01_Q1_literature_ligands.csv`、`01_Q3_literature_repellents.csv`
 2. **肿瘤细胞高表达、可能促使神经浸润的基因** → `results/02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv`
+3. **肿瘤细胞低表达、可能促使神经浸润的基因**（丢失排斥/屏障）→ `results/03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv`
 
 ```r
 setwd("E:/R/Nerve")
@@ -111,23 +112,24 @@ Sys.setenv(WANG_ST_DIR = "E:/R/Nerve")
 source("Wang_ST_nerve_infiltration.R")
 ```
 
-不需要 `TG_RNAseq_pipeline.R`。先 **p < 0.05**，再上调 **FC ≥ 1.25 和 1.5**。原 Cuffdiff 六组比较不变。
+不需要 `TG_RNAseq_pipeline.R`。先 **p < 0.05**，再 **|FC| ≥ 1.25 和 1.5**（上调=问题2，下调=问题3）。原 Cuffdiff 六组比较不变。
 
 真正必需的是 `Robjects/`（`counts` + `annotsBySpot`；先解压 `Robjects.tar`）。
 
 `ids.RDS` 可选。Windows 解 `Clinical.tar` 时常把 `Clinical/ids.RDS` 展成根目录的 `Clinicalids.RDS`；`Clinical.RDS` / `Clinical.xlsx` 是临床表。没有 ids 也能跑。
 
-先看问题 2 这张表：
+主表：
 
 ```
 E:/R/Nerve/results/
   00_READ_ME.txt
   00_Q1_PROTOCOL.txt
   01_Q1_literature_ligands.csv
-  02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv   # 问题2主表
+  01_Q3_literature_repellents.csv
+  02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv   # 问题2 高表达
+  03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv  # 问题3 低表达
   02_Q2_up_p005_FC1.25.csv
-  02_Q2_up_p005_FC1.5.csv
-  02_Q2_ALL_tumor_genes_near_nerve.csv
+  03_Q3_down_p005_FC1.25.csv
   tumor_near_schwann_vs_far/     # 全队列 Schwann 邻域 DE
   TNBC50_tumor_near_nerve_vs_far/  # 病理神经，各病人单独
 ```
