@@ -3,14 +3,12 @@
 # Wang et al. Nature Communications 2024  TNBC 空间转录组
 # 神经浸润：方案 + 肿瘤细胞高表达、可能促使神经浸润的基因
 #
-# 本脚本独立于 TG_RNAseq_pipeline.R 的 1–4 组比较，不修改原流程。
-# TG_RNAseq_pipeline.R 不是输入、也不是神经分析所必需：
-#   有它 → 复用火山图/热图/GO/KEGG/GSEA 作图函数
-#   没有 → 照样算差异基因，只出 CSV 和基础火山图
-# 真正需要的数据是 E:/R/Nerve 里的 Robjects/（counts + annotsBySpot）。
-# ids.RDS 可选：Windows 解压 Clinical.tar 时常把 Clinical/ids.RDS 展成根目录的
-# Clinicalids.RDS；没有片子对照也能用坐标对齐病理标注。
-# 数据默认：E:/R/Nerve（Wang Zenodo 解压目录）
+# 只回答两件事（不做 GO / KEGG / GSEA / ORA）：
+#   问题1  神经浸润相关分子 + 统计方案
+#   问题2  肿瘤细胞高表达、可能促使神经浸润的基因（主结果）
+# 独立于 TG_RNAseq_pipeline.R，不改原 Cuffdiff 1–4。
+# 数据：E:/R/Nerve 的 Robjects/（counts + annotsBySpot）。
+# ids.RDS 可选（Windows 常把 Clinical/ids.RDS 展成 Clinicalids.RDS）。
 #
 # 用法（Windows R / RStudio）：
 #   setwd("E:/R/Nerve")
@@ -115,70 +113,18 @@ robj_dir <- if (dir.exists(file.path(nerve_dir, "Robjects"))) {
 }
 
 # -----------------------------------------------------------------------------
-# 1. 可选：载入原 RNA-seq 脚本的作图/富集函数（不跑主流程）
+# 1. 包（只要差异分析；不要 GO/GSEA）
 # -----------------------------------------------------------------------------
-this_script_dir <- function() {
-  ofile <- NULL
-  if (sys.nframe() > 0) {
-    for (i in sys.nframe():1) {
-      e <- tryCatch(sys.frame(i)$ofile, error = function(e) NULL)
-      if (!is.null(e)) {
-        ofile <- e
-        break
-      }
-    }
+if (!requireNamespace("limma", quietly = TRUE)) {
+  if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager", repos = "https://cloud.r-project.org")
   }
-  if (is.null(ofile)) getwd() else dirname(normalizePath(ofile, winslash = "/", mustWork = FALSE))
+  tryCatch(BiocManager::install("limma", update = FALSE, ask = FALSE),
+           error = function(e) message("limma install failed: ", e$message))
 }
-
-load_pipeline_functions_only <- function() {
-  cands <- c(
-    file.path(this_script_dir(), "TG_RNAseq_pipeline.R"),
-    "TG_RNAseq_pipeline.R",
-    file.path(getwd(), "TG_RNAseq_pipeline.R"),
-    "E:/R/TG_BRCA/TG/TG_RNAseq_pipeline.R",
-    "E:\\R\\TG_BRCA\\TG\\TG_RNAseq_pipeline.R"
-  )
-  pipe <- cands[file.exists(cands)][1]
-  if (is.na(pipe) || !nzchar(pipe) || !file.exists(pipe)) {
-    message("提示（不是报错）：没找到 TG_RNAseq_pipeline.R。")
-    message("  这个文件只用来复用 GO/KEGG/GSEA 作图，不是 Wang 空间数据。")
-    message("  神经浸润分析会继续，先出差异表和基础火山图。")
-    message("  若要全套富集图，把 TG_RNAseq_pipeline.R 拷到 E:/R/Nerve 再跑。")
-    return(FALSE)
-  }
-  lines <- readLines(pipe, warn = FALSE)
-  main_at <- grep("^# 10\\. 主流程", lines)[1]
-  if (is.na(main_at) || main_at < 2) stop("无法从 TG_RNAseq_pipeline.R 切出函数定义")
-  eval(parse(text = lines[seq_len(main_at - 1)]), envir = .GlobalEnv)
-  TRUE
-}
-
-have_pipeline <- FALSE
-skip_pipe <- identical(Sys.getenv("WANG_ST_SKIP_PIPELINE"), "1")
-if (skip_pipe) {
-  message("WANG_ST_SKIP_PIPELINE=1：跳过原流程富集函数")
-} else if (!exists("analyze_one_comparison", mode = "function")) {
-  have_pipeline <- tryCatch(load_pipeline_functions_only(), error = function(e) {
-    message("载入原流程函数失败: ", e$message)
-    FALSE
-  })
-} else {
-  have_pipeline <- TRUE
-}
-
-if (!have_pipeline) {
-  if (!requireNamespace("limma", quietly = TRUE)) {
-    if (!requireNamespace("BiocManager", quietly = TRUE)) {
-      install.packages("BiocManager", repos = "https://cloud.r-project.org")
-    }
-    tryCatch(BiocManager::install("limma", update = FALSE, ask = FALSE),
-             error = function(e) message("limma install failed: ", e$message))
-  }
-  if (!requireNamespace("ggplot2", quietly = TRUE)) {
-    tryCatch(install.packages("ggplot2", repos = "https://cloud.r-project.org"),
-             error = function(e) message("ggplot2 install failed: ", e$message))
-  }
+if (!requireNamespace("ggplot2", quietly = TRUE)) {
+  tryCatch(install.packages("ggplot2", repos = "https://cloud.r-project.org"),
+           error = function(e) message("ggplot2 install failed: ", e$message))
 }
 
 if (!exists("log_msg", mode = "function")) {
@@ -197,9 +143,7 @@ log_msg <- function(...) {
   cat(msg, "\n", file = log_file, append = TRUE)
 }
 
-# 本空间分析：先滤 p < 0.05，再只按上调 FC >= 1.25 / 1.5 分层
-# （不做 FC=1、FC=2，也不做 topN；不改原 Cuffdiff 脚本的档位）
-if (exists("padj_cutoff")) padj_cutoff <<- 0.05
+# 先 p < 0.05，再只看上调 FC >= 1.25 / 1.5（不做 GO、不做 topN）
 p_cutoff <- 0.05
 fc_cutoffs_local <- c("FC_1.25" = 1.25, "FC_1.5" = 1.5)
 
@@ -607,14 +551,23 @@ mean_fc_two_group <- function(logmat, near_id, far_id) {
   )
 }
 
-prepare_de_for_pipeline <- function(de) {
-  de <- de[!is.na(de$log2FC), , drop = FALSE]
-  de$padj <- de$pvalue
-  de
+select_up <- function(de, fc = 1) {
+  keep <- !is.na(de$log2FC) & de$log2FC > 0 & (2^de$log2FC >= fc)
+  if (any(!is.na(de$pvalue))) {
+    keep <- keep & !is.na(de$pvalue) & de$pvalue < p_cutoff
+  }
+  sub <- de[keep, , drop = FALSE]
+  if (nrow(sub) == 0) return(sub)
+  sub$FC <- 2^sub$log2FC
+  if (any(!is.na(sub$pvalue))) {
+    sub[order(sub$pvalue, -sub$log2FC), , drop = FALSE]
+  } else {
+    sub[order(-sub$log2FC), , drop = FALSE]
+  }
 }
 
 # -----------------------------------------------------------------------------
-# 6. 作图与分层输出
+# 6. 差异表（只出 CSV + 火山图，不出 GO/GSEA）
 # -----------------------------------------------------------------------------
 basic_volcano <- function(de, title, outfile, fc_line = 1) {
   if (nrow(de) == 0) return(invisible(NULL))
@@ -656,82 +609,27 @@ spot_map_plot <- function(spots, title, outfile) {
   ggplot2::ggsave(paste0(outfile, ".png"), p, width = 9, height = 6, dpi = 150)
 }
 
-emit_comparison <- function(comp_name, de, heat_mat, sample_info) {
-  de <- prepare_de_for_pipeline(de)
+emit_de_tables <- function(comp_name, de) {
+  de <- de[!is.na(de$log2FC), , drop = FALSE]
   base <- file.path(result_dir, comp_name)
   dir.create(base, recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(de, file.path(base, "DE_full.csv"), row.names = FALSE)
   have_p <- any(!is.na(de$pvalue))
   log_msg(comp_name, " genes=", nrow(de), " have_p=", have_p,
-          " up p<", p_cutoff, " n=", sum(!is.na(de$pvalue) & de$pvalue < p_cutoff & de$log2FC > 0))
-
-  writeLines(
-    c("本比较只做上调 FC >= 1.25 和 FC >= 1.5（先 p < 0.05）。",
-      "没有 FC=1、FC=2，也没有 TopRank。",
-      "分层图在 FoldChange/FC_1.25 和 FoldChange/FC_1.5。",
-      "全基因 GSEA 在 00_GSEA_all_genes_NOT_FC_or_topN（不是分层图）。",
-      "细胞骨架/线粒体专项在 Focused_cytoskeleton_mito/。"),
-    file.path(base, "00_READ_ME_先看这里.txt")
-  )
-  invisible(lapply(file.path(base, "FoldChange", names(fc_cutoffs_local)),
-                   dir.create, recursive = TRUE, showWarnings = FALSE))
-
-  gsea_cache <- list()
-  use_pipe_plots <- have_pipeline && exists("emit_subset_analysis", mode = "function")
-  assign("result_dir", result_dir, envir = .GlobalEnv)
-  assign("padj_cutoff", p_cutoff, envir = .GlobalEnv)
-
+          " up p<", p_cutoff, " n=",
+          sum((is.na(de$pvalue) | de$pvalue < p_cutoff) & de$log2FC > 0, na.rm = TRUE))
   for (nm in names(fc_cutoffs_local)) {
     fc <- unname(fc_cutoffs_local[[nm]])
-    keep <- !is.na(de$log2FC) & de$log2FC > 0 & (2^de$log2FC >= fc)
-    if (have_p) keep <- keep & !is.na(de$pvalue) & de$pvalue < p_cutoff
-    sub <- de[keep, , drop = FALSE]
-    if (nrow(sub) > 0) sub <- sub[order(sub$log2FC, decreasing = TRUE), , drop = FALSE]
-    od <- file.path(base, "FoldChange", nm)
-    if (use_pipe_plots) {
-      tryCatch(
-        emit_subset_analysis(
-          comp_name, sub, nm, paste0(comp_name, " | up FC >= ", fc),
-          od, de, heat_mat, sample_info, gsea_cache, fc_line = fc
-        ),
-        error = function(e) log_msg("ERROR subset ", comp_name, " ", nm, ": ", e$message)
-      )
-    } else {
-      utils::write.csv(sub, file.path(od, paste0(nm, "_DE_selected_genes.csv")), row.names = FALSE)
-      basic_volcano(de, paste(comp_name, nm), file.path(od, paste0(nm, "_volcano")), fc)
-    }
+    sub <- select_up(de, fc)
+    od <- file.path(base, paste0("up_", nm))
+    dir.create(od, recursive = TRUE, showWarnings = FALSE)
+    utils::write.csv(sub, file.path(od, paste0(nm, "_upregulated_tumor_genes.csv")),
+                     row.names = FALSE)
+    basic_volcano(de, paste(comp_name, "| up FC >=", fc),
+                  file.path(od, paste0(nm, "_volcano")), fc)
+    log_msg("  ", nm, " n=", nrow(sub))
   }
-
-  if (use_pipe_plots && exists("build_gsea_cache", mode = "function")) {
-    tryCatch({
-      log_msg("Building full-list GSEA after subset plots: ", comp_name)
-      gsea_cache <- build_gsea_cache(de)
-      full_gsea_dir <- file.path(base, "00_GSEA_all_genes_NOT_FC_or_topN")
-      dir.create(full_gsea_dir, recursive = TRUE, showWarnings = FALSE)
-      writeLines("全基因 GSEA，不是 FC 分层结果。分层图在 FoldChange/FC_1.25 和 FC_1.5。",
-                 file.path(full_gsea_dir, "00_README.txt"))
-      for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
-        plot_gsea_object(gsea_cache[[nm]], file.path(full_gsea_dir, paste0("allGenes_GSEA_", nm)),
-                         paste("GSEA", nm, "|", comp_name, "| ALL genes, NOT FC subset"))
-      }
-      plot_fgsea_hallmark(gsea_cache$stats, full_gsea_dir,
-                          paste("GSEA Hallmark |", comp_name, "| ALL genes"), prefix = "allGenes_")
-    }, error = function(e) log_msg("full-list GSEA failed for ", comp_name, ": ", e$message))
-    tryCatch({
-      focus_stats <- if (!is.null(gsea_cache$stats)) gsea_cache$stats else ranked_entrez(de)
-      run_focused_gsea(
-        focus_stats, de, heat_mat, sample_info,
-        file.path(base, "Focused_cytoskeleton_mito"),
-        paste(comp_name, "| all genes")
-      )
-    }, error = function(e) log_msg("focused GSEA failed for ", comp_name, ": ", e$message))
-  }
-  invisible(TRUE)
-}
-
-build_heat_from_pb <- function(pb, si) {
-  logm <- log2(sweep(pb, 2, pmax(colSums(pb), 1), "/") * 1e6 + 1)
-  list(mat = logm, sample_info = si)
+  invisible(de)
 }
 
 # -----------------------------------------------------------------------------
@@ -795,21 +693,9 @@ for (pid in pids) {
       de_i <- mean_fc_two_group(logm, which(sp$near_nerve), which(sp$far_nerve))
       log_msg("TNBC", pid, " nerve: limma empty, fallback mean FC (no p)")
     }
-    heat <- t(logm[keep, , drop = FALSE])
-    si <- data.frame(sample = rownames(logm)[keep], group = grp[keep],
-                     stringsAsFactors = FALSE)
-    # heatmap 列太多时改用伪 bulk
-    pb <- cbind(
-      near = colSums(cnts[sp$near_nerve, , drop = FALSE]),
-      far  = colSums(cnts[sp$far_nerve, , drop = FALSE])
-    )
-    colnames(pb) <- paste0("TNBC", pid, "_", c("near", "far"))
-    heat_pb <- log2(sweep(pb, 2, pmax(colSums(pb), 1), "/") * 1e6 + 1)
-    si_pb <- data.frame(sample = colnames(heat_pb),
-                        group = c("near", "far"), stringsAsFactors = FALSE)
     nm <- paste0("TNBC", pid, "_tumor_near_nerve_vs_far")
     nerve_de_list[[nm]] <- de_i
-    emit_comparison(nm, de_i, heat_pb, si_pb)
+    emit_de_tables(nm, de_i)
   }
 
   # Schwann 邻域伪 bulk（全队列，病人作为协变量，不把对照混成一组去平均）
@@ -891,9 +777,7 @@ if (length(nerve_de_list) >= 2) {
     tab$AveExpr <- NA_real_
     tab$padj <- tab$pvalue
     tab$padj_BH <- NA_real_
-    heat <- matrix(tab$log2FC, ncol = 1, dimnames = list(tab$gene, "mean_log2FC"))
-    si <- data.frame(sample = "mean_log2FC", group = "near", stringsAsFactors = FALSE)
-    emit_comparison("common_up_pathologist_nerve", tab, heat, si)
+    emit_de_tables("common_up_pathologist_nerve", tab)
   } else {
     log_msg("common_up_pathologist_nerve: empty intersection")
   }
@@ -912,15 +796,14 @@ if (!is.null(pb_schwann) && length(unique(si_schwann$patient)) >= 2) {
     logm <- log2(sweep(t(pb_schwann), 1, pmax(colSums(pb_schwann), 1), "/") * 1e6 + 1)
     de_sw <- limma_two_group(logm, si_schwann$group, si_schwann$patient, "schwann_pb")
   }
-  heat_obj <- build_heat_from_pb(pb_schwann, si_schwann)
-  emit_comparison("tumor_near_schwann_vs_far", de_sw, heat_obj$mat, heat_obj$sample_info)
+  emit_de_tables("tumor_near_schwann_vs_far", de_sw)
 } else {
   log_msg("Schwann 邻域伪 bulk 病人不足，跳过 tumor_near_schwann_vs_far")
   de_sw <- empty_de()
 }
 
 # -----------------------------------------------------------------------------
-# 8. 候选分子总表
+# 8. 问题 1：文献配体；问题 2：肿瘤细胞上调基因总表（主结果）
 # -----------------------------------------------------------------------------
 lig_all <- if (length(ligand_rows) > 0) do.call(rbind, ligand_rows) else NULL
 if (!is.null(lig_all)) {
@@ -962,44 +845,73 @@ if (length(nerve_de_list) > 0) {
       d$log2FC[match(cand$gene, d$gene)]
   }
 }
-cand$up_in_schwann_near <- !is.na(cand$schwann_near_pvalue) &
-  cand$schwann_near_pvalue < p_cutoff & cand$schwann_near_log2FC > 0
-cand$priority <- (cand$detected_on_array) +
-  2 * (!is.na(cand$mean_spearman_near_schwann) & cand$mean_spearman_near_schwann > 0.1) +
-  3 * cand$up_in_schwann_near
+cand$up_in_schwann_near <- (!is.na(cand$schwann_near_log2FC) & cand$schwann_near_log2FC > 0) &
+  (is.na(cand$schwann_near_pvalue) | cand$schwann_near_pvalue < p_cutoff)
+cand$priority <- as.integer(cand$detected_on_array) +
+  2L * as.integer(!is.na(cand$mean_spearman_near_schwann) & cand$mean_spearman_near_schwann > 0.1) +
+  3L * as.integer(cand$up_in_schwann_near)
 cand <- cand[order(-cand$priority, cand$schwann_near_pvalue, -cand$mean_spearman_near_schwann), ]
-utils::write.csv(cand, file.path(result_dir, "01_CANDIDATE_MOLECULES_tumor_to_nerve.csv"),
-                 row.names = FALSE)
-tryCatch(writexl::write_xlsx(cand, file.path(result_dir, "01_CANDIDATE_MOLECULES_tumor_to_nerve.xlsx")),
-         error = function(e) NULL)
+utils::write.csv(cand, file.path(result_dir, "01_Q1_literature_ligands.csv"), row.names = FALSE)
 
-# TG knockdown 上调基因重叠（若已跑过原流程）
-tg_hits <- c(
-  "E:/R/TG_BRCA/TG/results",
-  file.path(getwd(), "results")
-)
-tg_files <- unlist(lapply(tg_hits, function(d) {
-  list.files(d, pattern = "^DE_full.csv$", recursive = TRUE, full.names = TRUE)
-}))
-tg_files <- tg_files[!grepl("Wang|nerve|schwann|pathologist", tg_files, ignore.case = TRUE)]
-if (length(tg_files) > 0 && nrow(de_sw) > 0) {
-  log_msg("Overlap with TG DE tables: ", length(tg_files), " files")
-  ov_dir <- file.path(result_dir, "overlap_TG_knockdown")
-  dir.create(ov_dir, recursive = TRUE, showWarnings = FALSE)
-  sw_up <- de_sw$gene[!is.na(de_sw$pvalue) & de_sw$pvalue < p_cutoff & de_sw$log2FC > 0]
-  for (f in tg_files) {
-    tg <- tryCatch(utils::read.csv(f, stringsAsFactors = FALSE), error = function(e) NULL)
-    if (is.null(tg) || !"gene" %in% names(tg)) next
-    keep <- tg$log2FC > 0
-    if ("pvalue" %in% names(tg) && any(!is.na(tg$pvalue))) {
-      keep <- keep & !is.na(tg$pvalue) & tg$pvalue < p_cutoff
-    }
-    inter <- intersect(unique(tg$gene[keep]), sw_up)
-    nm <- basename(dirname(f))
-    utils::write.csv(data.frame(gene = inter),
-                     file.path(ov_dir, paste0("overlap_", nm, ".csv")), row.names = FALSE)
-    log_msg("overlap ", nm, " n=", length(inter))
+# 问题 2 主表：靠近神经/Schwann 的肿瘤细胞里升高的基因，按 p 再按 FC 排
+q2_src <- if (nrow(de_sw) > 0) {
+  de_sw
+} else if (length(nerve_de_list) > 0) {
+  log_msg("全队列 Schwann 表为空，问题2改用病理神经 1-vs-1 合并排名")
+  Reduce(function(a, b) {
+    g <- unique(c(a$gene, b$gene))
+    data.frame(
+      gene = g,
+      log2FC = rowMeans(cbind(a$log2FC[match(g, a$gene)], b$log2FC[match(g, b$gene)]), na.rm = TRUE),
+      AveExpr = NA_real_,
+      pvalue = suppressWarnings(pmax(a$pvalue[match(g, a$gene)], b$pvalue[match(g, b$gene)], na.rm = TRUE)),
+      padj = NA_real_,
+      padj_BH = NA_real_,
+      stringsAsFactors = FALSE
+    )
+  }, nerve_de_list)
+} else {
+  empty_de()
+}
+
+path_up_n <- function(g) {
+  if (length(nerve_de_list) == 0) return(0L)
+  as.integer(sum(vapply(nerve_de_list, function(d) {
+    i <- match(g, d$gene)
+    if (is.na(i)) return(FALSE)
+    ok <- !is.na(d$log2FC[i]) && d$log2FC[i] > 0
+    if (!is.na(d$pvalue[i])) ok <- ok && d$pvalue[i] < p_cutoff
+    ok
+  }, logical(1))))
+}
+
+if (nrow(q2_src) > 0) {
+  q2 <- q2_src
+  q2$FC <- 2^q2$log2FC
+  q2$known_tumor_to_nerve_ligand <- q2$gene %in% tumor_ligands$gene
+  q2$ligand_receptor <- tumor_ligands$receptor_on_nerve[match(q2$gene, tumor_ligands$gene)]
+  q2$ligand_rationale <- tumor_ligands$rationale[match(q2$gene, tumor_ligands$gene)]
+  q2$mean_spearman_near_schwann <- agg$mean_spearman_near_schwann[match(q2$gene, agg$gene)]
+  q2$n_pathologist_patients_also_up <- vapply(q2$gene, path_up_n, integer(1))
+  q2$pass_p005_FC_1.25 <- q2$gene %in% select_up(q2_src, 1.25)$gene
+  q2$pass_p005_FC_1.5  <- q2$gene %in% select_up(q2_src, 1.5)$gene
+  q2 <- q2[order(is.na(q2$pvalue), q2$pvalue, -q2$log2FC), ]
+  q2$genome_wide_rank <- seq_len(nrow(q2))
+  utils::write.csv(q2, file.path(result_dir, "02_Q2_ALL_tumor_genes_near_nerve.csv"),
+                   row.names = FALSE)
+  up125 <- q2[q2$pass_p005_FC_1.25, , drop = FALSE]
+  up15  <- q2[q2$pass_p005_FC_1.5, , drop = FALSE]
+  utils::write.csv(up125, file.path(result_dir, "02_Q2_up_p005_FC1.25.csv"), row.names = FALSE)
+  utils::write.csv(up15,  file.path(result_dir, "02_Q2_up_p005_FC1.5.csv"), row.names = FALSE)
+  short <- up125
+  if (nrow(short) > 0) {
+    short <- short[order(-short$known_tumor_to_nerve_ligand, short$pvalue, -short$log2FC), ]
   }
+  utils::write.csv(short, file.path(result_dir, "02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv"),
+                   row.names = FALSE)
+  log_msg("问题2 上调 FC>=1.25 n=", nrow(up125), " FC>=1.5 n=", nrow(up15))
+} else {
+  log_msg("问题2：没有可用的差异表。请确认 Robjects/counts 已解压且病人数足够。")
 }
 
 # -----------------------------------------------------------------------------
@@ -1007,67 +919,52 @@ if (length(tg_files) > 0 && nrow(de_sw) > 0) {
 # -----------------------------------------------------------------------------
 protocol <- c(
   "============================================================",
-  "乳腺癌空间转录组：神经浸润分析方案（Wang et al. Nat Commun 2024）",
+  "乳腺癌空间转录组：神经浸润（Wang et al. Nat Commun 2024）",
   "数据目录: ", nerve_dir,
+  "不做 GO / KEGG / GSEA。",
   "============================================================",
   "",
-  "【问题 1】明确神经浸润相关分子和方案",
+  "【问题 1】神经浸润相关分子和方案",
   "",
-  "A. 为什么不能指望『神经元 cluster』",
-  "  瘤内主要是神经纤维 + Schwann 细胞，神经元胞体在神经节。",
-  "  本队列 94 例里，病理 Nerve 与 ST spot 重叠的只有极少数（见 00_logs/spot_class_counts.csv）。",
-  "  因此方案是双轨：",
-  "    轨 1  病理 Nerve 邻域（金标准，病人少，单独 1-vs-1，不合并）",
-  "    轨 2  Schwann 签名邻域（全队列，病人作为协变量）",
+  "瘤内几乎没有神经元胞体，主要是纤维 + Schwann。病理 Nerve 与 ST spot",
+  "重叠的病人极少（见 00_logs/spot_class_counts.csv），所以双轨：",
+  "  轨1 病理 Nerve 邻域：有神经的病人各自 1-vs-1，不合并",
+  "  轨2 Schwann 签名邻域：全队列伪 bulk ~ patient + group（主分析）",
   "",
-  "B. Spot 定义（写进日志，不事后改阈值去凑显著）",
-  "  神经（病理）：Nerve 像素 >= 1",
-  "  肿瘤：Tumor+Tumor region 像素比例 >= 0.25；无标注则用 EPCAM/KRT 签名",
-  "  近：阵列坐标欧氏距离 <= 2（约两个 spot）",
-  "  远：距离 > 4（中间空一圈，避免模糊带）",
-  "  Schwann 高：切片内 z-score > 1；基因 SOX10 MPZ PMP22 S100B PLP1 NGFR NCAM1 MBP L1CAM",
+  "Spot：Nerve 像素>=1；肿瘤 = Tumor 比例>=0.25（否则 EPCAM/KRT）；",
+  "近 <=2 个 spot，远 >4；Schwann 高 = 切片内 z>1",
+  "（SOX10 MPZ PMP22 S100B PLP1 NGFR NCAM1 MBP L1CAM）。",
   "",
-  "C. 统计（本空间分析，不是 Cuffdiff 那六组）",
-  "  先 p < 0.05，再只看上调 FC >= 1.25 和 FC >= 1.5",
-  "  不做 FC=1、FC=2，也不做 top 50–300",
-  "  只看上调（近神经肿瘤 > 远神经肿瘤）",
-  "  有病理神经的病人各自 1-vs-1；共同上调 = 这些 1-vs-1 的交集",
-  "  全队列 Schwann：伪 bulk ~ patient + group，不用把病人平均掉再比",
-  "  低表达过滤后再算 FC；DESeq2 size factor / limma-voom，不用原始 count 直接除",
+  "统计：先 p<0.05，再上调 FC>=1.25 和 1.5。只看上调。",
+  "过滤低表达后再算 FC。",
   "",
-  "D. 文献里已经比较清楚的『肿瘤→神经』分子（本阵列未必都测到）",
-  "  NGF–NTRK1/NGFR，BDNF–NTRK2，ARTN–GFRA3/RET，GDNF 家族",
-  "  NTN1、SLIT2、SEMA3C/F、NRG1、CXCL12–CXCR4、MDK/PTN、VEGFA",
-  "  TNBC 感觉神经：NGF → CGRP(CALCA) → CAF RAMP1（Cell 2026）",
-  "  详细候选表: 01_CANDIDATE_MOLECULES_tumor_to_nerve.csv",
+  "文献配体（肿瘤→神经）：NGF, BDNF, ARTN, GDNF, NTN1, SLIT2,",
+  "SEMA3C/F, NRG1, CXCL12, MDK, PTN, VEGFA。",
+  "表：01_Q1_literature_ligands.csv",
   "",
-  "E. 实验上怎么验证（分析之后）",
-  "  1. 候选配体在肿瘤细胞里敲低/过表达，背根神经节共培养看轴突长度",
-  "  2. 阻断受体：NTRK 抑制剂、NGFR、GFRA3、CXCR4、RAMP1（rimegepant）",
-  "  3. 切片 IHC：候选配体 vs PGP9.5/S100/SOX10 空间相邻",
-  "  4. 不要把免疫细胞高表达基因当成肿瘤细胞促浸润分子",
+  "【问题 2】肿瘤细胞高表达、可能促使神经浸润的基因  ← 先看这个",
   "",
-  "【问题 2】肿瘤细胞高表达哪些基因可以促使神经浸润",
+  "  02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv",
+  "    p<0.05 且上调 FC>=1.25 的肿瘤基因。已知促神经配体排在前面。",
+  "  02_Q2_up_p005_FC1.25.csv / 02_Q2_up_p005_FC1.5.csv",
+  "    两个倍数档位。",
+  "  02_Q2_ALL_tumor_genes_near_nerve.csv",
+  "    全基因，带 genome_wide_rank（未改 p 值）。",
   "",
-  "  主结果文件夹（按这个顺序看）:",
-  "    1. 01_CANDIDATE_MOLECULES_tumor_to_nerve.csv",
-  "       priority 高 = 阵列检出 + 靠近 Schwann 的肿瘤里升高 + 与距离负相关",
-  "    2. results/tumor_near_schwann_vs_far/",
-  "       全队列：靠近 Schwann 的肿瘤 vs 远离 Schwann 的肿瘤",
-  "       FoldChange/FC_1.25 和 FC_1.5 才是分层图；没有 TopRank",
-  "       全基因 GSEA 在 00_GSEA_all_genes_NOT_FC_or_topN",
-  "    3. results/TNBC*_tumor_near_nerve_vs_far/",
-  "       病理神经金标准，病人很少，只作验证，不要和 Schwann 结果混成一张表",
-  "    4. results/common_up_pathologist_nerve/  上述金标准的共同上调",
+  "比较定义：靠近 Schwann/神经的肿瘤 spot vs 远离的肿瘤 spot。",
+  "邻域升高 = 空间相邻，还不等于已经证明『引起』浸润；",
+  "功能验证：肿瘤细胞敲低/过表达后与 DRG 共培养看轴突。",
   "",
-  "  解释时注意：邻域基因升高 = 与神经空间相邻，不等于已证明『引起』浸润。",
-  "  促浸润要用配体功能（轴突生长、Schwann 趋化）再验证。",
-  "",
-  "ORA 在 GO/ Pathway/ KEGG/，文件名 ORA_ 开头。",
-  "GSEA 在 GSEA/，文件名 GSEA_ 开头。",
-  "细胞骨架/线粒体专项在 Focused_cytoskeleton_mito/，不改全库 p 值。"
+  "病理神经各病人表在 TNBC*_tumor_near_nerve_vs_far/，只作验证。"
 )
-writeLines(protocol, file.path(result_dir, "00_PROTOCOL_神经浸润分析方案.txt"))
-log_msg("Wrote protocol and candidate molecule table")
-log_msg("Done. Open: ", file.path(result_dir, "00_PROTOCOL_神经浸润分析方案.txt"))
-log_msg("and: ", file.path(result_dir, "01_CANDIDATE_MOLECULES_tumor_to_nerve.csv"))
+writeLines(protocol, file.path(result_dir, "00_Q1_PROTOCOL.txt"))
+writeLines(c(
+  "先看这两个文件：",
+  "  问题1  00_Q1_PROTOCOL.txt  和  01_Q1_literature_ligands.csv",
+  "  问题2  02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv",
+  "没有 GO/GSEA。"
+), file.path(result_dir, "00_READ_ME.txt"))
+log_msg("Wrote Q1 protocol and Q2 ranked tumor-gene tables")
+log_msg("问题1: ", file.path(result_dir, "00_Q1_PROTOCOL.txt"))
+log_msg("问题2: ", file.path(result_dir, "02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv"))
+
