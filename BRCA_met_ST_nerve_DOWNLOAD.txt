@@ -1,0 +1,57 @@
+乳腺癌多器官转移空间转录组：数据从哪里下
+================================================
+没有一份公开 ST 同时含：多病人 + 肺/脑/骨转移 + 肿瘤细胞 + 免疫 + 神经。
+主队列用 Klughammer 2024；神经细胞用脑转移空间补；病理 Nerve 标注用 Wang 2024。
+不要把小鼠 MDA-MB-231 脑转移 GSE240212 当病人数据。
+
+放到：E:/R/BRCA_met_ST_nerve
+（可用环境变量 BRCA_MET_ST_DIR 改路径）
+
+------------------------------------------------
+1) 主队列（必须）：Klughammer et al. Nat Med 2024
+   60 名转移性乳腺癌病人，67 份活检
+   器官：肝、骨、腋窝、乳腺、胸壁、颈、脑、肺、皮肤
+   细胞：恶性上皮、T/NK、B/浆细胞、髓系、成纤维、内皮
+   空间：15 例配对 Slide-seq / MERFISH / ExSeq / CODEX（不是 Visium）
+
+   处理后对象（优先下这个，不必申请 dbGaP）：
+   https://singlecell.broadinstitute.org/single_cell/study/SCP2702/htapp-mbc
+   至少下载：
+     slide_seq.h5ad
+     merfish.h5ad          （有则更好）
+     scRNAseq.h5ad         （67 例单细胞，空间不够时作器官分层支持）
+   或整个 unregistered_data_bundle.tar.zip（每例 counts.tsv + annot.tsv）
+
+   浏览：https://cellxgene.cziscience.com/collections/a96133de-e951-4e2d-ace6-59db8b3bfb1d
+   原始：HTAN / dbGaP phs002371
+   骨转移 Visium 可另补：GSE298286
+
+   建议目录：
+     E:/R/BRCA_met_ST_nerve/Klughammer_SCP2702/slide_seq.h5ad
+     E:/R/BRCA_met_ST_nerve/Klughammer_SCP2702/scRNAseq.h5ad
+
+------------------------------------------------
+2) 神经细胞 / 脑实质（强烈建议）：人源脑转移空间
+   GSE325935  Visium + Xenium，含胶质、免疫、肿瘤细胞
+   细胞类型标记可参考 Gonzalez 等 GSE186344（scRNA，不是空间）
+
+   建议目录：
+     E:/R/BRCA_met_ST_nerve/GSE325935/
+
+------------------------------------------------
+3) 病理 Nerve 金标准（强烈建议）：Wang et al. Nat Commun 2024
+   92 例 TNBC 原发灶 ST，病理标注 Nerve / Tumor / Lymphocyte
+   Zenodo：https://doi.org/10.5281/zenodo.13867935
+   解压 Clinical.tar、Robjects.tar 到：
+     E:/R/BRCA_met_ST_nerve/Wang_TNBC/
+   或 E:/R/Nerve（脚本也会找这里）
+
+   这是原发灶 PNI，不是多器官转移。只作神经邻域金标准，不要冒充转移队列。
+
+------------------------------------------------
+4) 可选正常人（本分析不要求）
+   Kumar HBCA Nature 2023  GSE195665（Visium：GSE234814）
+
+运行（Windows R / RStudio）：
+  setwd("E:/R/BRCA_met_ST_nerve")
+  source("BRCA_met_ST_nerve_infiltration.R")

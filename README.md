@@ -97,3 +97,14 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## 乳腺癌转移空间转录组（神经浸润）
+
+公开库没有一份 ST 同时含多病人、肺/脑/骨转移、肿瘤细胞、免疫细胞和神经细胞。主队列用 Klughammer 2024（SCP2702），神经用 GSE325935 / Wang 2024 补。下载说明见 `BRCA_met_ST_nerve_DOWNLOAD.txt`。**不要改**上面的 Cuffdiff 流程。
+
+```r
+setwd("E:/R/BRCA_met_ST_nerve")
+source("BRCA_met_ST_nerve_infiltration.R")
+```
+
+把 `slide_seq.h5ad`（或 `counts.tsv`+`annot.tsv`）放到该目录。主结果：`results/01_CANDIDATE_MOLECULES_tumor_to_nerve.csv`。

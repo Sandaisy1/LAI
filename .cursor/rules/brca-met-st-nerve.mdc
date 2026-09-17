@@ -1,5 +1,5 @@
 ---
-description: 乳腺癌多器官转移空间转录组：肿瘤高表达基因与神经浸润（Klughammer + HBCA + BCBM）
+description: 乳腺癌多器官转移空间转录组：肿瘤高表达基因与神经浸润（Klughammer + BCBM）
 globs: "**/*.{R,r,Rmd}"
 alwaysApply: true
 ---
@@ -8,13 +8,20 @@ alwaysApply: true
 
 仅当任务是**转移灶空间转录组 / 神经浸润**时按本规则。不要套用 NTC/TG_sh Cuffdiff 流程，不要改 `TG_RNAseq_*.R`。
 
-公开库里**没有**一份 ST 同时满足：多病人 + 健康人 + 肺/脑/骨转移 + 肿瘤细胞 + 免疫 + 神经。用下面三套拼齐，禁止把小鼠脑转移（如 GSE240212）当病人数据。
+公开库里**没有**一份 ST 同时满足：多病人 + 肺/脑/骨转移 + 肿瘤细胞 + 免疫 + 神经。用下面两套拼齐，禁止把小鼠脑转移（如 GSE240212）当病人数据。
+
+脚本：`BRCA_met_ST_nerve_infiltration.R`。下载清单：`BRCA_met_ST_nerve_DOWNLOAD.txt`。不要改 `TG_RNAseq_*.R`。
+
+```r
+setwd("E:/R/BRCA_met_ST_nerve")
+source("BRCA_met_ST_nerve_infiltration.R")
+```
 
 ## 数据（目录 `E:/R/BRCA_met_ST_nerve`；缺失则回退仓库根）
 
-1. **主队列（多病人、多器官、ST + 免疫/肿瘤细胞）**：Klughammer et al. *Nat Med* 2024，60 人 / 67 活检（肝、骨、腋窝、乳腺、胸壁、脑、肺、皮肤）；15 例有配对空间。处理后对象：Broad SCP2702、CELLxGENE `a96133de-e951-4e2d-ace6-59db8b3bfb1d`；原始 HTAN / dbGaP `phs002371`。骨转移 ST 可补 GSE298286。
-2. **神经细胞 / 神经浸润（主队列脑/肺各 n=1，不够）**：人 BCBM 空间 GSE325935（Visium+Xenium，含胶质/免疫/肿瘤细胞）；标记可参考 GSE186344。原发灶病理 **Nerve** 标注：Wang et al. *Nat Commun* 2024（Zenodo `10.5281/zenodo.13867935`，92 例 TNBC）。
-3. **正常人**：Kumar HBCA *Nature* 2023，GSE195665（Visium：GSE234814），126 名女性。癌旁 NAT **单独一组**，不要当健康对照。脑转移不要用正常乳腺当对照。
+1. **主队列（多病人、多器官、ST + 免疫/肿瘤细胞）**：Klughammer et al. *Nat Med* 2024，60 人 / 67 活检（肝、骨、腋窝、乳腺、胸壁、脑、肺、皮肤）；15 例有配对空间（Slide-seq/MERFISH/ExSeq/CODEX）。处理后对象：Broad SCP2702（`slide_seq.h5ad`）、CELLxGENE `a96133de-e951-4e2d-ace6-59db8b3bfb1d`；原始 HTAN / dbGaP `phs002371`。骨转移 Visium 可补 GSE298286。
+2. **神经细胞 / 神经浸润（主队列脑/肺各 n=1，不够）**：人 BCBM 空间 GSE325935（Visium+Xenium，含胶质/免疫/肿瘤细胞）；标记可参考 GSE186344。原发灶病理 **Nerve** 标注：Wang et al. *Nat Commun* 2024（Zenodo `10.5281/zenodo.13867935`，92 例 TNBC）——只作 PNI 金标准，不要冒充转移队列。
+3. **可选正常人**（本分析不要求）：Kumar HBCA *Nature* 2023，GSE195665。癌旁 NAT 不要当健康对照。
 
 物种：人 `org.Hs.eg.db`。病人、器官、切片 ID 必须保留；禁止把肺+脑+骨或病人偷偷合并后再做「转移 vs 正常」。
 
@@ -28,10 +35,9 @@ alwaysApply: true
 
 先按器官分层，再在病人内比较，最后做跨病人汇总（伪 bulk：`patient × 分区 × 器官`）。
 
-1. 近神经肿瘤 vs 远神经肿瘤（PNI；Wang 有 Nerve 标注时按病人 1-vs-1，再取共同上调）
+1. 近神经肿瘤 vs 远神经肿瘤（按病人 1-vs-1，再取共同上调；Wang Nerve 标注只作 PNI 金标准）
 2. BCBM：瘤–胶质界面 vs 瘤核
-3. 肿瘤细胞 vs 器官匹配正常上皮（乳腺→HBCA luminal；脑→脑图谱，不用 HBCA）
-4. 肺 / 脑 / 骨 各自的肿瘤近神经上调，再取共同上调（不要先合并器官）
+3. 肺 / 脑 / 骨 各自的肿瘤近神经上调，再取共同上调（不要先合并器官）
 
 ## 显著性与分层（只分析上调）
 
@@ -54,6 +60,6 @@ alwaysApply: true
 # ❌ BAD: 只用 Wang 原发 TNBC 冒充多器官转移；把 GSE240212 小鼠当病人
 # ❌ BAD: 肺+脑+骨、或病人、或 NAT+健康人合并后再做 DEG；把免疫高表达当成肿瘤基因
 # ❌ BAD: 无邻域证据就写「促进神经浸润」；改全库 p 让轴突导向排第一
-# ✅ GOOD: Klughammer 按器官保留；神经用 BCBM ST + Wang Nerve；正常人用 HBCA
+# ✅ GOOD: Klughammer 按器官保留；神经用 BCBM ST + Wang Nerve
 # ✅ GOOD: 近神经肿瘤 vs 远神经肿瘤，p<0.01 后 FC≥1.25/1.5/2；候选表含空间+LR
 ```
