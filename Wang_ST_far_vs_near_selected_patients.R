@@ -76,6 +76,8 @@ expr_dir <- file.path(out_root, "eligible_single_patients")
 log_dir <- file.path(out_root, "00_logs")
 dir.create(expr_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
+flag_no_de <- file.path(out_root, "NO_COMBINED_DE.txt")
+if (file.exists(flag_no_de)) unlink(flag_no_de)
 
 log_file <- file.path(log_dir, paste0("selected32_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
 log_msg <- function(...) {
