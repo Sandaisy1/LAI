@@ -119,21 +119,23 @@ plot_high_low_vs_distance <- function(df, outfile, gene_lab, xlab) {
   if (!requireNamespace("ggplot2", quietly = TRUE)) return(invisible(NULL))
   pal <- c(high = "#E31A1C", low = "#377EB8")
   labs_grp <- c(
-    high = paste0(gene_lab, "+ spots (n=", n_hi, ")"),
-    low = paste0(gene_lab, "- spots (n=", n_lo, ")")
+    high = paste0(gene_lab, "+ cells"),
+    low = paste0(gene_lab, "- cells")
   )
   p <- ggplot2::ggplot(df, ggplot2::aes(x = dist_mm, colour = grp)) +
-    ggplot2::geom_density(linewidth = 1.15, adjust = 1.1) +
-    ggplot2::scale_colour_manual(values = pal, labels = labs_grp, name = "Spot type") +
-    ggplot2::coord_cartesian(xlim = c(0, xmax)) +
+    ggplot2::stat_density(geom = "line", position = "identity",
+                          linewidth = 1.2, adjust = 1.15, bounds = c(0, Inf)) +
+    ggplot2::scale_colour_manual(values = pal, labels = labs_grp, name = "Cell type") +
+    ggplot2::coord_cartesian(xlim = c(0, xmax), expand = FALSE) +
+    ggplot2::scale_y_continuous(expand = ggplot2::expansion(mult = c(0, 0.08))) +
     ggplot2::theme_classic(base_size = 13) +
     ggplot2::theme(
-      legend.position = c(0.70, 0.82),
+      legend.position = c(0.72, 0.84),
       legend.background = ggplot2::element_blank(),
-      legend.key = ggplot2::element_blank()
+      legend.key = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(8, 12, 8, 8)
     ) +
     ggplot2::labs(
-      title = paste0(gene_lab, "+ vs ", gene_lab, "-  |  distance to Schwann"),
       x = xlab,
       y = "Density"
     )
@@ -361,7 +363,7 @@ emit_highlow_plots <- function(up_fc1, up_fc125) {
     log_msg("Per-gene distance plots: ", paste(unique(hl$gene), collapse = ","))
   }
 
-  plot_signature <- function(up_genes, tag) {
+  plot_signature <- function(up_genes, tag, lab) {
     if (length(sig_cache) == 0 || length(up_genes) < 3) return(invisible(NULL))
     parts <- list()
     for (nm in names(sig_cache)) {
@@ -381,15 +383,15 @@ emit_highlow_plots <- function(up_fc1, up_fc125) {
     plot_high_low_vs_distance(
       d,
       file.path(dist_dir, paste0(tag, "_high_vs_low_vs_Schwann_distance")),
-      tag,
+      lab,
       "Distance to Schwann (mm)"
     )
     log_msg("Signature distance plot ", tag, " n_spots=", nrow(d),
             " n_genes=", length(intersect(up_genes, colnames(sig_cache[[1]]$logm))))
   }
 
-  if (length(up_fc1) >= 3) plot_signature(up_fc1, "up_FC_gt_1")
-  if (length(up_fc125) >= 3) plot_signature(up_fc125, "up_FC_1.25")
+  if (length(up_fc1) >= 3) plot_signature(up_fc1, "up_FC_gt_1", "Up FC>1")
+  if (length(up_fc125) >= 3) plot_signature(up_fc125, "up_FC_1.25", "Up FC>=1.25")
 }
 
 up_fc1 <- character()
