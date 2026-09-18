@@ -221,38 +221,105 @@ limma_two_group <- function(mat, group, near_level = "lung_tropic", far_level = 
 }
 
 # -----------------------------------------------------------------------------
-# 2. GPL96 注释
+# 2. GPL96 注释（本地 → NCBI FTP 自动下载 → GEOquery → Bioconductor）
 # -----------------------------------------------------------------------------
+read_gpl96_annot_file <- function(path) {
+  con <- if (grepl("\\.gz$", path, ignore.case = TRUE)) gzfile(path, open = "rt") else file(path, open = "rt")
+  on.exit(close(con), add = TRUE)
+  lines <- readLines(con, warn = FALSE)
+  hdr_i <- which(grepl("^ID\\t", lines))[1]
+  if (is.na(hdr_i)) return(NULL)
+  tab <- utils::read.delim(textConnection(lines[hdr_i:length(lines)]),
+                           check.names = FALSE, stringsAsFactors = FALSE, quote = "")
+  if (!("ID" %in% names(tab))) return(NULL)
+  sym_col <- grep("Gene [Ss]ymbol|gene_assignment|Gene symbol", names(tab), value = TRUE)[1]
+  if (is.na(sym_col)) return(NULL)
+  setNames(as.character(tab[[sym_col]]), as.character(tab[["ID"]]))
+}
+
+download_gpl96_annot <- function(dest) {
+  urls <- c(
+    "https://ftp.ncbi.nlm.nih.gov/geo/platforms/GPLnnn/GPL96/annot/GPL96.annot.gz",
+    "http://ftp.ncbi.nlm.nih.gov/geo/platforms/GPLnnn/GPL96/annot/GPL96.annot.gz"
+  )
+  dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
+  for (u in urls) {
+    log_msg("下载 GPL96.annot.gz: ", u)
+    ok <- tryCatch({
+      utils::download.file(u, destfile = dest, mode = "wb", quiet = TRUE)
+      file.exists(dest) && file.info(dest)$size > 1000
+    }, error = function(e) {
+      log_msg("下载失败: ", e$message)
+      FALSE
+    })
+    if (isTRUE(ok)) return(dest)
+  }
+  if (file.exists(dest) && isTRUE(file.info(dest)$size < 1000)) unlink(dest)
+  NULL
+}
+
 load_gpl96 <- function() {
   local <- find_file(c("GPL96\\.annot(\\.gz)?$", "GPL96\\.soft(\\.gz)?$"))
   map <- NULL
   if (length(local) > 0) {
-    path <- local[1]
-    log_msg("Reading GPL96 annotation: ", path)
-    con <- if (grepl("\\.gz$", path, ignore.case = TRUE)) gzfile(path, open = "rt") else file(path, open = "rt")
-    on.exit(close(con), add = TRUE)
-    lines <- readLines(con, warn = FALSE)
-    hdr_i <- which(grepl("^ID\\t", lines))[1]
-    if (!is.na(hdr_i)) {
-      tab <- utils::read.delim(textConnection(lines[hdr_i:length(lines)]),
-                               check.names = FALSE, stringsAsFactors = FALSE, quote = "")
-      sym_col <- grep("Gene [Ss]ymbol|gene_assignment|Gene symbol", names(tab), value = TRUE)[1]
-      if (!is.na(sym_col)) {
-        map <- setNames(as.character(tab[[sym_col]]), as.character(tab[["ID"]]))
+    log_msg("Reading GPL96 annotation: ", local[1])
+    map <- tryCatch(read_gpl96_annot_file(local[1]), error = function(e) {
+      log_msg("本地 GPL96 解析失败: ", e$message); NULL
+    })
+  }
+
+  # 自动从 NCBI FTP 拉取（不依赖 Rtools / GEOquery）
+  if (is.null(map)) {
+    dest <- file.path(data_dir, "GPL96.annot.gz")
+    got <- download_gpl96_annot(dest)
+    if (!is.null(got)) {
+      map <- tryCatch(read_gpl96_annot_file(got), error = function(e) {
+        log_msg("下载的 GPL96 解析失败: ", e$message); NULL
+      })
+    }
+  }
+
+  if (is.null(map) && has_pkg("GEOquery")) {
+    log_msg("尝试 GEOquery::getGEO(GPL96)")
+    geo_dir <- file.path(data_dir, "GEO")
+    dir.create(geo_dir, recursive = TRUE, showWarnings = FALSE)
+    gpl <- tryCatch(GEOquery::getGEO("GPL96", destdir = geo_dir),
+                    error = function(e) { log_msg(e$message); NULL })
+    if (!is.null(gpl)) {
+      td <- tryCatch(GEOquery::Table(gpl), error = function(e) NULL)
+      if (!is.null(td)) {
+        sym_col <- grep("Gene Symbol|gene_assignment", names(td), value = TRUE)[1]
+        id_col <- if ("ID" %in% names(td)) "ID" else names(td)[1]
+        if (!is.na(sym_col)) map <- setNames(as.character(td[[sym_col]]), as.character(td[[id_col]]))
       }
     }
   }
-  if (is.null(map) && has_pkg("GEOquery")) {
-    log_msg("本地无 GPL96.annot，尝试 GEOquery::getGEO(GPL96)")
-    gpl <- tryCatch(GEOquery::getGEO("GPL96", destdir = file.path(data_dir, "GEO")),
-                    error = function(e) { log_msg(e$message); NULL })
-    if (!is.null(gpl)) {
-      td <- GEOquery::Table(gpl)
-      sym_col <- grep("Gene Symbol|gene_assignment", names(td), value = TRUE)[1]
-      if (!is.na(sym_col)) map <- setNames(as.character(td[[sym_col]]), as.character(td[["ID"]]))
-    }
+
+  if (is.null(map) && requireNamespace("hgu133a.db", quietly = TRUE)) {
+    log_msg("使用 Bioconductor hgu133a.db 作探针注释")
+    map <- tryCatch({
+      suppressPackageStartupMessages(library(hgu133a.db))
+      prb <- AnnotationDbi::keys(hgu133a.db::hgu133a.db, keytype = "PROBEID")
+      ann <- AnnotationDbi::select(hgu133a.db::hgu133a.db, keys = prb,
+                                  columns = "SYMBOL", keytype = "PROBEID")
+      ann <- ann[!is.na(ann$SYMBOL) & nzchar(ann$SYMBOL), , drop = FALSE]
+      # 一探针多符号时取第一个
+      ann <- ann[!duplicated(ann$PROBEID), , drop = FALSE]
+      setNames(as.character(ann$SYMBOL), as.character(ann$PROBEID))
+    }, error = function(e) { log_msg(e$message); NULL })
   }
-  if (is.null(map)) stop("无法获得 GPL96 探针→基因注释。请放入 GPL96.annot.gz")
+
+  if (is.null(map) || length(map) < 100) {
+    stop(
+      "无法获得 GPL96 探针→基因注释。\n",
+      "请任选其一：\n",
+      "  1) 浏览器下载后放到 E:/R/Nerve RNA/GPL96.annot.gz\n",
+      "     https://ftp.ncbi.nlm.nih.gov/geo/platforms/GPLnnn/GPL96/annot/GPL96.annot.gz\n",
+      "  2) 确认本机可访问 ftp.ncbi.nlm.nih.gov 后重新 source 本脚本（会自动下载）\n",
+      "  3) install.packages 无法用时，也可 BiocManager::install('hgu133a.db')"
+    )
+  }
+  log_msg("GPL96 注释探针数: ", length(map))
   map
 }
 
