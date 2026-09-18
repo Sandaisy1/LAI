@@ -158,4 +158,6 @@ E:/R/Nerve/results/02_selected32_far_tumor_vs_near_tumor/
     FC_1.25_each_gene/GENE_high_vs_low_vs_Schwann_distance.pdf
 ```
 
-距离图是 **FC>1.25 的每个上调基因分别** 画：该基因高表达 vs 低表达，横轴是到施旺细胞（SOX10、MPZ、PMP22、S100B、PLP1、NGFR、NCAM1、MBP、L1CAM）的距离。红 = 高，蓝 = 低。这是空间转录组 RNA，不是蛋白质组。
+距离图只画 **`upregulated_far_tumor_vs_near_tumor_FC_1.25.csv` 里那几个上调基因**（你这份大约 10 个，例如 PCYOX1L、ABHD3、CEP152），每个基因一张高/低表达 vs 施旺距离图。
+
+不要看 `03_distance_to_Schwann/genes/`。那里的 ARTN、NGF、CXCL12 是上一版误画的文献配体，不是这批上调基因；更新脚本后重跑会删掉这个文件夹。

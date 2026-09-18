@@ -164,9 +164,11 @@ writeLines(c(
   "  upregulated_far_tumor_vs_near_tumor_FC_gt_1.csv",
   "  upregulated_far_tumor_vs_near_tumor_FC_1.25.csv",
   "",
-  "FC>1.25 每个上调基因单独画：高低表达 vs 到施旺细胞距离",
-  "  03_distance_to_Schwann/FC_1.25_each_gene/",
-  "  先打开 03_distance_to_Schwann/INDEX_FC_1.25_each_gene.csv",
+  "  03_distance_to_Schwann/",
+  "  不要打开旧的 genes/（ARTN/NGF 不是这批上调基因，重跑会删掉）",
+  "  本次要画的上调基因.txt",
+  "  INDEX_FC_1.25_each_gene.csv",
+  "  FC_1.25_each_gene/每个上调基因一张图",
   "  神经 marker：SOX10, MPZ, PMP22, S100B, PLP1, NGFR, NCAM1, MBP, L1CAM",
   "  这是空间转录组 RNA，不是蛋白质组。"
 ), file.path(out_root, "00_请先看这里.txt"))
@@ -318,16 +320,24 @@ if (!is.null(pb_schwann) && ncol(pb_schwann) > 0) {
 plot_each_fc125_gene <- function(up_tab) {
   gene_dir <- file.path(dist_dir, "FC_1.25_each_gene")
   if (dir.exists(gene_dir)) unlink(gene_dir, recursive = TRUE, force = TRUE)
-  stale <- list.files(dist_dir, full.names = TRUE)
-  stale <- stale[grepl("up_FC_|ligand_|NGF_not|genes$", basename(stale))]
+  # 旧版误画的配体图（ARTN/NGF/CXCL12）在 genes/，必须删掉，避免当成上调基因
+  old_ligand <- file.path(dist_dir, "genes")
+  if (dir.exists(old_ligand)) {
+    unlink(old_ligand, recursive = TRUE, force = TRUE)
+    log_msg("已删除旧文件夹 genes/（那是配体 NGF/ARTN，不是这批上调基因）")
+  }
+  stale <- list.files(dist_dir, full.names = TRUE, include.dirs = TRUE)
+  stale <- stale[grepl("^(up_FC_|ligand_|NGF_not|genes)$", basename(stale))]
   if (length(stale) > 0) unlink(stale, recursive = TRUE, force = TRUE)
   dir.create(gene_dir, recursive = TRUE, showWarnings = FALSE)
 
   writeLines(c(
-    "每个 FC>1.25 上调基因单独一张图：该基因高表达 vs 低表达，横轴是到施旺细胞的距离。",
+    "只画「远神经肿瘤 vs 近神经肿瘤、FC>1.25 上调」的那些基因，每个基因一张图。",
+    "不要看旧的 genes/ 文件夹（ARTN、NGF、CXCL12 是文献配体，不是这批上调基因）。",
+    "名单：INDEX_FC_1.25_each_gene.csv 和 本次要画的上调基因.txt",
     "施旺 marker：SOX10, MPZ, PMP22, S100B, PLP1, NGFR, NCAM1, MBP, L1CAM。",
     "红 = 该基因高表达，蓝 = 该基因低表达。1 spot = 0.1 mm。",
-    "这是空间转录组 RNA 表达，不是蛋白质组。先看 INDEX_FC_1.25_each_gene.csv。"
+    "这是空间转录组 RNA，不是蛋白质组。"
   ), file.path(dist_dir, "00_READ_ME.txt"))
 
   if (is.null(up_tab) || nrow(up_tab) == 0 || length(sig_cache) == 0) {
@@ -338,7 +348,13 @@ plot_each_fc125_gene <- function(up_tab) {
   xlab <- "Distance to Schwann (mm)"
   idx <- list()
   genes <- unique(as.character(up_tab$gene))
-  log_msg("逐基因距离图：FC>1.25 上调 n=", length(genes))
+  log_msg("FC>1.25 上调基因共 ", length(genes), " 个，只分析这些：")
+  log_msg(paste(genes, collapse = ", "))
+  writeLines(
+    c(paste0("共 ", length(genes), " 个 FC>1.25 上调基因，逐个画高低表达 vs 施旺距离："),
+      genes),
+    file.path(dist_dir, "本次要画的上调基因.txt")
+  )
   for (g in genes) {
     parts <- list()
     for (nm in names(sig_cache)) {
