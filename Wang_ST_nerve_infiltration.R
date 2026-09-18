@@ -627,7 +627,8 @@ basic_volcano <- function(de, title, outfile, fc_line = 1) {
       ggplot2::geom_point(alpha = 0.5, size = 0.8) +
       ggplot2::scale_color_manual(values = c(ns = "grey70", up = "#D62828")) +
       ggplot2::theme_bw(base_size = 12) +
-      ggplot2::labs(title = title, y = "-log10(p)", x = "log2FC 远神经肿瘤 / 近神经肿瘤")
+      ggplot2::labs(title = title, y = "-log10(p)",
+                    x = "log2FC (far-nerve tumor / near-nerve tumor)")
     ggplot2::ggsave(paste0(outfile, ".pdf"), p, width = 7, height = 6)
     ggplot2::ggsave(paste0(outfile, ".png"), p, width = 7, height = 6, dpi = 150)
   }
@@ -674,7 +675,7 @@ emit_de_tables <- function(comp_name, de, out_dir = NULL, also_top_level = FALSE
       utils::write.csv(up, file.path(base, fname), row.names = FALSE)
     }
     lab <- if (isTRUE(all.equal(fc, 1))) "FC>1" else paste0("FC>=", fc)
-    basic_volcano(de, paste(comp_name, "| 远神经肿瘤 vs 近神经肿瘤 上调", lab),
+    basic_volcano(de, paste(comp_name, "| far-nerve tumor vs near-nerve tumor upregulated", lab),
                   file.path(od, paste0(nm, "_volcano")), fc)
     log_msg("  上调 ", lab, " n=", nrow(up))
   }
