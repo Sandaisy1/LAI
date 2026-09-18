@@ -3,7 +3,7 @@
 # E:\R\Nerve RNA —— 原位（原发）乳腺癌：肺转移倾向 vs 其他器官转移倾向
 #
 # 问题1：倾向肺转移的原位乳腺癌组织 vs 倾向其他器官转移的原位乳腺癌组织
-#         → 低表达基因有哪些？火山图 + Excel
+#         → 下调基因（仅 FC < 1；不做 1.25/1.5/2 分层）+ 火山图 + Excel
 # 问题2：在「倾向肺转移」的原位乳腺癌组织中，与神经浸润负相关的蛋白有哪些？
 #         （公开队列几乎无匹配蛋白组；默认用转录本丰度作蛋白代理，并支持自备蛋白矩阵）
 #
@@ -94,7 +94,8 @@ log_msg <- function(...) {
 log_msg("Data directory: ", data_dir)
 
 p_cutoff <- 0.01
-fc_cutoffs <- c("FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
+# 问题1：只讨论下调 FC < 1（即 log2FC < 0）；不做 1.25/1.5/2 分层
+fc_down_max <- 1  # fold_change < 1
 
 # 神经浸润签名（用于问题2 分数；转录本 / 蛋白共用符号）
 nerve_ligand_genes <- c(
@@ -184,22 +185,26 @@ save_gg <- function(p, stub, w = 7, h = 5) {
   ggplot2::ggsave(paste0(stub, ".png"), p, width = w, height = h, dpi = 140)
 }
 
-volcano_down <- function(de, title, stub, fc_line = 1.25) {
+# 火山图：高亮 p < 0.01 且 FC < 1（下调）
+volcano_down <- function(de, title, stub) {
   if (nrow(de) == 0) return(invisible(NULL))
   df <- de
   df$y <- -log10(pmax(df$pvalue, 1e-300))
   df$col <- "ns"
-  df$col[!is.na(df$pvalue) & df$pvalue < p_cutoff & df$log2FC <= -log2(fc_line)] <- "down"
-  df$col[!is.na(df$pvalue) & df$pvalue < p_cutoff & df$log2FC >= log2(fc_line)] <- "up"
+  df$col[!is.na(df$pvalue) & df$pvalue < p_cutoff & df$fold_change < fc_down_max] <- "down"
+  df$col[!is.na(df$pvalue) & df$pvalue < p_cutoff & df$fold_change > 1] <- "up"
   p <- ggplot2::ggplot(df, ggplot2::aes(log2FC, y, color = col)) +
     ggplot2::geom_point(alpha = 0.55, size = 1.1) +
     ggplot2::scale_color_manual(values = c(ns = "grey70", down = "#1D3557", up = "#D62828")) +
-    ggplot2::geom_vline(xintercept = c(-log2(fc_line), log2(fc_line)), linetype = 2, color = "grey40") +
+    ggplot2::geom_vline(xintercept = 0, linetype = 2, color = "grey40") +
     ggplot2::geom_hline(yintercept = -log10(p_cutoff), linetype = 2, color = "grey40") +
     ggplot2::theme_bw(base_size = 12) +
-    ggplot2::labs(title = title, subtitle = paste0("Highlight DOWN: p<", p_cutoff,
-                                                   " & FC>=", fc_line, " (lung-tropic vs other-met)"),
-                  y = "-log10(p)", x = "log2FC (lung_tropic / other_organ_met)")
+    ggplot2::labs(
+      title = title,
+      subtitle = paste0("DOWN highlight: p < ", p_cutoff, " & FC < ", fc_down_max,
+                        " (lung-tropic vs other-met primary)"),
+      y = "-log10(p)", x = "log2FC (lung_tropic / other_organ_met)"
+    )
   save_gg(p, stub, 7.5, 6)
 }
 
@@ -509,7 +514,7 @@ if (length(datasets) == 0) {
 }
 
 # -----------------------------------------------------------------------------
-# 4. 问题1：lung_tropic vs other_met —— 低表达基因
+# 4. 问题1：lung_tropic vs other_met —— 下调基因（仅 FC < 1）
 # -----------------------------------------------------------------------------
 emit_q1 <- function(tag, mat, si) {
   keep <- which(!is.na(si$tropism) & si$tropism %in% c("lung_tropic", "other_met"))
@@ -520,11 +525,9 @@ emit_q1 <- function(tag, mat, si) {
   }
   mat2 <- mat[, keep, drop = FALSE]
   si2 <- si[keep, , drop = FALSE]
-  # 过滤 + 标准化
   keep_g <- rowSums(is.finite(mat2)) >= max(4, floor(0.7 * ncol(mat2)))
   mat2 <- mat2[keep_g, , drop = FALSE]
   mat2[!is.finite(mat2)] <- stats::median(mat2[is.finite(mat2)], na.rm = TRUE)
-  # Affy series matrix 多为已 log2；若值域大则 log2
   if (max(mat2, na.rm = TRUE) > 100) mat2 <- log2(pmax(mat2, 1))
   mat_n <- quantile_norm(mat2)
 
@@ -534,35 +537,32 @@ emit_q1 <- function(tag, mat, si) {
 
   de <- limma_two_group(mat_n, si2$tropism)
   de$fold_change <- 2^de$log2FC
-  de$down_FC <- 2^(-de$log2FC)  # 下调倍数（lung 相对 other）
   de <- de[order(de$pvalue, de$log2FC), ]
   utils::write.csv(de, file.path(base, "DE_full_lung_vs_other.csv"), row.names = FALSE)
 
-  sheets <- list(DE_full = de, sample_groups = si2)
-  for (nm in names(fc_cutoffs)) {
-    fc <- unname(fc_cutoffs[[nm]])
-    od <- file.path(base, "FoldChange", nm)
-    dir.create(od, recursive = TRUE, showWarnings = FALSE)
-    down <- de[!is.na(de$pvalue) & de$pvalue < p_cutoff &
-                 de$log2FC < 0 & de$down_FC >= fc, , drop = FALSE]
-    down <- down[order(down$log2FC, decreasing = FALSE), , drop = FALSE]
-    utils::write.csv(down, file.path(od, paste0(nm, "_DOWN_genes_lung_vs_other.csv")),
-                     row.names = FALSE)
-    volcano_down(de, paste0(tag, " | ", nm, " | lung-tropic vs other-met PRIMARY"),
-                 file.path(od, paste0(nm, "_volcano")), fc)
-    sheets[[paste0(nm, "_DOWN")]] <- down
-  }
-  xlsx_path <- file.path(base, paste0(tag, "_Q1_lung_vs_other_DOWN.xlsx"))
-  write_xlsx_safe(sheets, xlsx_path)
-  # 总表副本
-  utils::write.csv(sheets[["FC_1.25_DOWN"]],
-                   file.path(result_dir, paste0("01_", tag, "_DOWN_genes_p01_FC1.25.csv")),
+  # 仅：p < 0.01 且 FC < 1（下调）；不做其他 FC 分层
+  down <- de[!is.na(de$pvalue) & de$pvalue < p_cutoff &
+               !is.na(de$fold_change) & de$fold_change < fc_down_max, , drop = FALSE]
+  down <- down[order(down$fold_change, decreasing = FALSE), , drop = FALSE]
+  utils::write.csv(down, file.path(base, "DOWN_genes_p01_FC_lt1.csv"), row.names = FALSE)
+  volcano_down(de, paste0(tag, " | lung-tropic vs other-met | DOWN FC<1"),
+               file.path(base, "volcano_DOWN_FC_lt1"))
+
+  sheets <- list(
+    DOWN_FC_lt1 = down,
+    DE_full = de,
+    sample_groups = si2
+  )
+  write_xlsx_safe(sheets, file.path(base, paste0(tag, "_Q1_DOWN_FC_lt1.xlsx")))
+  utils::write.csv(down, file.path(result_dir, paste0("01_", tag, "_DOWN_genes_p01_FC_lt1.csv")),
                    row.names = FALSE)
+  write_xlsx_safe(list(DOWN_FC_lt1 = down, DE_full = de),
+                  file.path(result_dir, paste0("01_", tag, "_DOWN_FC_lt1.xlsx")))
 
   log_msg(tag, " Q1: lung_tropic n=", sum(si2$tropism == "lung_tropic"),
           " other_met n=", sum(si2$tropism == "other_met"),
-          " DOWN(p<0.01,FC>=1.25)=", nrow(sheets[["FC_1.25_DOWN"]]))
-  list(de = de, mat_n = mat_n, si = si2, sheets = sheets, base = base)
+          " DOWN(p<0.01, FC<1)=", nrow(down))
+  list(de = de, down = down, mat_n = mat_n, si = si2, base = base)
 }
 
 q1_res <- list()
@@ -573,12 +573,11 @@ for (nm in names(datasets)) {
 # 合并两队列（同平台），cohort 作协变量
 if (length(datasets) >= 2 &&
     !is.null(q1_res[["GSE2603"]]) && !is.null(q1_res[["GSE5327"]])) {
-  # 用原始 gene 矩阵，重新取 tropism 样本
   common <- Reduce(intersect, lapply(datasets, function(d) rownames(d$mat)))
   mats <- list(); sis <- list()
   for (nm in names(datasets)) {
     si <- datasets[[nm]]$si
-    keep <- si$tropism %in% c("lung_tropic", "other_met")
+    keep <- which(!is.na(si$tropism) & si$tropism %in% c("lung_tropic", "other_met"))
     m <- datasets[[nm]]$mat[common, keep, drop = FALSE]
     s <- si[keep, , drop = FALSE]
     if (max(m, na.rm = TRUE) > 100) m <- log2(pmax(m, 1))
@@ -589,7 +588,6 @@ if (length(datasets) >= 2 &&
   si_c <- do.call(rbind, sis)
   rownames(si_c) <- colnames(mat_c)
   mat_c <- quantile_norm(mat_c)
-  # limma ~ tropism + cohort
   trop <- factor(si_c$tropism, levels = c("other_met", "lung_tropic"))
   cohort <- factor(si_c$cohort)
   design <- stats::model.matrix(~ trop + cohort)
@@ -597,37 +595,29 @@ if (length(datasets) >= 2 &&
   tt <- limma::topTable(fit, coef = "troplung_tropic", number = Inf, sort.by = "none")
   de <- data.frame(gene = rownames(tt), log2FC = tt$logFC, AveExpr = tt$AveExpr,
                    pvalue = tt$P.Value, padj_BH = tt$adj.P.Val,
-                   fold_change = 2^tt$logFC, down_FC = 2^(-tt$logFC),
-                   stringsAsFactors = FALSE)
+                   fold_change = 2^tt$logFC, stringsAsFactors = FALSE)
   de <- de[order(de$pvalue, de$log2FC), ]
+  down <- de[!is.na(de$pvalue) & de$pvalue < p_cutoff &
+               !is.na(de$fold_change) & de$fold_change < fc_down_max, , drop = FALSE]
+  down <- down[order(down$fold_change), , drop = FALSE]
+
   base <- file.path(result_dir, "Q1_lung_tropic_vs_other_met", "GSE2603_plus_GSE5327")
-  dir.create(file.path(base, "FoldChange"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(base, recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(si_c, file.path(base, "sample_groups.csv"), row.names = FALSE)
   utils::write.csv(de, file.path(base, "DE_full_lung_vs_other.csv"), row.names = FALSE)
-  sheets <- list(DE_full = de, sample_groups = si_c)
-  for (nm in names(fc_cutoffs)) {
-    fc <- unname(fc_cutoffs[[nm]])
-    od <- file.path(base, "FoldChange", nm)
-    dir.create(od, recursive = TRUE, showWarnings = FALSE)
-    down <- de[!is.na(de$pvalue) & de$pvalue < p_cutoff &
-                 de$log2FC < 0 & de$down_FC >= fc, , drop = FALSE]
-    down <- down[order(down$log2FC), , drop = FALSE]
-    utils::write.csv(down, file.path(od, paste0(nm, "_DOWN_genes_lung_vs_other.csv")),
-                     row.names = FALSE)
-    volcano_down(de, paste0("Pooled | ", nm, " | lung-tropic vs other-met PRIMARY"),
-                 file.path(od, paste0(nm, "_volcano")), fc)
-    sheets[[paste0(nm, "_DOWN")]] <- down
-  }
-  write_xlsx_safe(sheets, file.path(base, "Pooled_Q1_lung_vs_other_DOWN.xlsx"))
-  utils::write.csv(sheets[["FC_1.25_DOWN"]],
-                   file.path(result_dir, "01_POOLED_DOWN_genes_p01_FC1.25.csv"),
+  utils::write.csv(down, file.path(base, "DOWN_genes_p01_FC_lt1.csv"), row.names = FALSE)
+  volcano_down(de, "Pooled | lung-tropic vs other-met | DOWN FC<1",
+               file.path(base, "volcano_DOWN_FC_lt1"))
+  write_xlsx_safe(list(DOWN_FC_lt1 = down, DE_full = de, sample_groups = si_c),
+                  file.path(base, "Pooled_Q1_DOWN_FC_lt1.xlsx"))
+  utils::write.csv(down, file.path(result_dir, "01_POOLED_DOWN_genes_p01_FC_lt1.csv"),
                    row.names = FALSE)
-  write_xlsx_safe(list(FC_1.25_DOWN = sheets[["FC_1.25_DOWN"]], DE_full = de),
-                  file.path(result_dir, "01_POOLED_lung_vs_other_DOWN.xlsx"))
-  q1_res[["POOLED"]] <- list(de = de, mat_n = mat_c, si = si_c, sheets = sheets, base = base)
+  write_xlsx_safe(list(DOWN_FC_lt1 = down, DE_full = de),
+                  file.path(result_dir, "01_POOLED_DOWN_FC_lt1.xlsx"))
+  q1_res[["POOLED"]] <- list(de = de, down = down, mat_n = mat_c, si = si_c, base = base)
   log_msg("POOLED Q1: lung=", sum(si_c$tropism == "lung_tropic"),
           " other=", sum(si_c$tropism == "other_met"),
-          " DOWN(FC1.25)=", nrow(sheets[["FC_1.25_DOWN"]]))
+          " DOWN(p<0.01, FC<1)=", nrow(down))
 }
 
 # -----------------------------------------------------------------------------
@@ -802,17 +792,17 @@ protocol <- c(
   "E:/R/Nerve RNA | 原位乳腺癌：肺转移倾向 vs 其他器官倾向",
   "============================================================",
   "",
-  "【问题1】倾向肺转移的原位组织 vs 倾向其他器官转移的原位组织 —— 低表达基因",
+  "【问题1】倾向肺转移的原位组织 vs 倾向其他器官转移的原位组织 —— 下调基因",
   "  定义:",
   "    lung_tropic = 原发灶且发生肺转移 (GSE2603: lm event=1; GSE5327: lung met all=1)",
   "    other_met   = 原发灶发生转移但未发生肺转移 (多为骨等其他部位)",
-  "  规则: 先 p < 0.01，再下调 FC >= 1.25 / 1.5 / 2（lung 相对 other）",
+  "  规则: 先 p < 0.01，再只取 FC < 1（下调）；不做 1.25/1.5/2 分层",
   "  输出:",
   "    results_primary_lung_tropism/Q1_lung_tropic_vs_other_met/<队列>/",
-  "      FoldChange/FC_*/FC_*_DOWN_genes_lung_vs_other.csv",
-  "      FoldChange/FC_*/FC_*_volcano.png",
-  "      <队列>_Q1_lung_vs_other_DOWN.xlsx",
-  "    总表: 01_POOLED_lung_vs_other_DOWN.xlsx / 01_*_DOWN_genes_p01_FC1.25.csv",
+  "      DOWN_genes_p01_FC_lt1.csv",
+  "      volcano_DOWN_FC_lt1.png / .pdf",
+  "      <队列>_Q1_DOWN_FC_lt1.xlsx",
+  "    总表: 01_POOLED_DOWN_FC_lt1.xlsx / 01_*_DOWN_genes_p01_FC_lt1.csv",
   "",
   "【问题2】在倾向肺转移的原位组织中，与神经浸润负相关的蛋白",
   "  神经浸润分数: 神经亲和配体/侵袭签名基因的 z-mean",

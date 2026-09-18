@@ -1,8 +1,8 @@
 E:\R\Nerve RNA 放什么文件（原位乳腺癌：肺倾向 vs 其他器官）
 ============================================================
 回答两个问题：
-  1) 倾向肺转移的原位乳腺癌 vs 倾向其他器官转移的原位乳腺癌 —— 低表达基因
-     （火山图 + Excel）
+  1) 倾向肺转移的原位乳腺癌 vs 倾向其他器官转移的原位乳腺癌 —— 下调基因
+     （仅 FC < 1；p < 0.01；火山图 + Excel；不做 1.25/1.5/2 分层）
   2) 在倾向肺转移的原位组织中，与神经浸润负相关的蛋白
 
 注意：这是【原发/原位灶】分析，不是转移灶活检。
@@ -40,11 +40,12 @@ GSE175692 是转移灶，不用于本组比较。
 
 结果在 E:\R\Nerve RNA\results_primary_lung_tropism\
   00_PROTOCOL_原位肺倾向两个问题.txt
-  01_POOLED_lung_vs_other_DOWN.xlsx          ← 问题1（低表达 + 多 sheet）
-  01_*_DOWN_genes_p01_FC1.25.csv
-  Q1_.../FoldChange/FC_*/FC_*_volcano.png    ← 火山图
+  01_POOLED_DOWN_FC_lt1.xlsx                 ← 问题1（p<0.01 且 FC<1 下调）
+  01_*_DOWN_genes_p01_FC_lt1.csv
+  Q1_.../volcano_DOWN_FC_lt1.png             ← 火山图
   02_*_NEG_cor_nerve.xlsx                    ← 问题2（负相关蛋白/RNA代理）
 
 分组定义：
   lung_tropic = 原发灶且发生肺转移
   other_met   = 原发灶发生转移但未肺转移（多为骨等）
+问题1只讨论 FC < 1 的下调基因，不做其他 FC 阈值分层。
