@@ -8,3 +8,7 @@ figures/
 *.pdf
 .DS_Store
 Thumbs.db
+# GEO downloads (keep out of git)
+GSE*_series_matrix.txt.gz
+GPL96.annot.gz
+results_primary_lung_tropism/
