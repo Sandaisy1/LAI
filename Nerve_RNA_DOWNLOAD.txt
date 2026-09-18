@@ -45,7 +45,8 @@ GSE175692 是转移灶，不用于本组比较。
   Q1_.../volcano_DOWN_FC_lt1.png             ← 火山图
   02_*_NEG_cor_nerve.xlsx                    ← 问题2（负相关蛋白/RNA代理）
 
-分组定义：
-  lung_tropic = 原发灶且发生肺转移
-  other_met   = 原发灶发生转移但未肺转移（多为骨等）
-问题1只讨论 FC < 1 的下调基因，不做其他 FC 阈值分层。
+分组定义（必须同一患者临床结局对应）：
+  lung_tropic = 该原位灶患者随访确实发生肺转移（不是 LMS 签名）
+  other_met   = 该原位灶患者发生转移但未肺转移
+  对应表: 00_SAMPLE_CORRESPONDENCE_primary_to_met_organ.csv
+问题1只讨论 FC < 1 的下调基因；问题2只用问题1同一批 lung_tropic 原位灶。

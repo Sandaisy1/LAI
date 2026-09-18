@@ -133,7 +133,7 @@ source("Nerve_RNA_primary_lung_tropism.R")
 
 结果在 `results_primary_lung_tropism/`：
 
-1. **问题1** 肺倾向原位 vs 其他器官倾向原位的**下调基因（仅 FC < 1）**：火山图 + Excel（`01_POOLED_DOWN_FC_lt1.xlsx`）
-2. **问题2** 肺倾向原位组织中与神经浸润**负相关**的蛋白（无蛋白组时用 RNA 作代理；可自备 `proteomics_pg_matrix.csv`）
+1. **问题1** 肺倾向原位 vs 其他器官倾向原位的**下调基因（仅 FC < 1）**：须同一患者临床结局对应；火山图 + Excel（`01_POOLED_DOWN_FC_lt1.xlsx`）；对应表 `00_SAMPLE_CORRESPONDENCE_primary_to_met_organ.csv`
+2. **问题2** 与问题1同一批肺转移对应原位灶中，与神经浸润**负相关**的蛋白（无蛋白组时用 RNA 作代理）
 
 旧的转移灶脚本仍可用：`Nerve_RNA_nerve_infiltration.R`（GSE175692）。

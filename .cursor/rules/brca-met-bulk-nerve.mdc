@@ -29,11 +29,13 @@ source("Nerve_RNA_primary_lung_tropism.R")
 ### 两个问题必须按此定义
 
 1. **倾向肺转移的原位组织 vs 倾向其他器官转移的原位组织 → 下调基因**
-   - `lung_tropic` = 原发且肺转移事件=1
-   - `other_met` = 原发且有转移但肺转移=0（多为骨等）
-   - 先 **p < 0.01**，再只取 **FC < 1**（下调）；**不要**做 1.25 / 1.5 / 2 分层
+   - **必须对应**：原位灶与转移器官结局为同一患者临床随访（`lm event` / `lung met all`），写出 `00_SAMPLE_CORRESPONDENCE_primary_to_met_organ.csv`
+   - `lung_tropic` = 该患者原发 + 确实发生肺转移；`other_met` = 该患者原发 + 转移但无肺转移
+   - **禁止**用 LMS 签名、无结局样本、细胞系、转移灶活检冒充原位
+   - 先 **p < 0.01**，再只取 **FC < 1**；**不要**做 1.25 / 1.5 / 2 分层
    - 必须出火山图 + Excel（`01_*_DOWN_FC_lt1.xlsx`）
 2. **在肺倾向原位组织内，与神经浸润负相关的蛋白**
+   - **必须用问题1同一批**有肺转移临床对应的 `lung_tropic` 原位灶
    - 先算神经浸润签名分数，再 Spearman；取 **rho < 0 且 p < 0.01**
    - 无匹配公开蛋白组时用 RNA 丰度作蛋白代理，并在表中标注 `RNA_proxy_for_protein`
    - 有用户蛋白矩阵时优先用蛋白
@@ -41,10 +43,9 @@ source("Nerve_RNA_primary_lung_tropism.R")
 结果目录：`results_primary_lung_tropism/`。
 
 ```r
-# ❌ BAD: 用转移灶 GSE175692 的 organ=Lung vs organ=Bone 冒充「原位肺倾向 vs 其他」
-# ❌ BAD: 问题1做 FC≥1.25/1.5/2 多层；或只出上调、不出火山图/Excel
-# ✅ GOOD: 原发灶 lung_tropic vs other_met；p<0.01 且 FC<1 下调 + 火山图 + xlsx
-# ✅ GOOD: 肺倾向内 neg-cor 神经分数
+# ❌ BAD: 用 LMS 签名或转移灶 GSE175692 冒充「肺转移对应的原位灶」
+# ❌ BAD: 问题1做 FC≥1.25/1.5/2 多层；Q2 用与 Q1 不同的样本
+# ✅ GOOD: 同一患者临床结局对应；p<0.01 且 FC<1；Q2 样本 ⊆ Q1 lung_tropic
 ```
 
 ## 旧脚本（转移灶 GSE175692）仍保留
