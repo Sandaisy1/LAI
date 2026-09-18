@@ -128,6 +128,13 @@ if (!exists("log_msg", mode = "function")) {
   log_msg <- function(...) cat(format(Sys.time(), "%H:%M:%S"), "|", ..., "\n")
 }
 
+# 远神经肿瘤 vs 近神经肿瘤：全队列脚本默认 FC>1、1.25、1.5
+p_cutoff <- 0.05
+fc_cutoffs_up <- c("FC_gt_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5)
+
+wang_st_skip_main <- isTRUE(getOption("wang.st.skip_main", FALSE))
+
+if (!wang_st_skip_main) {
 result_dir <- file.path(nerve_dir, "results")
 log_dir <- file.path(result_dir, "00_logs")
 expr_dir <- file.path(result_dir, "00_eligible_single_patients")
@@ -180,12 +187,9 @@ log_msg <- function(...) {
   cat(msg, "\n", file = log_file, append = TRUE)
 }
 
-# 远神经肿瘤 vs 近神经肿瘤：上调只做 FC>1、1.25、1.5
-p_cutoff <- 0.05
-fc_cutoffs_up <- c("FC_gt_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5)
-
 log_msg("Wang ST nerve dir: ", nerve_dir)
 log_msg("Results: ", result_dir)
+} # end if (!wang_st_skip_main) 路径/日志初始化
 
 # -----------------------------------------------------------------------------
 # 2. 分子名单（文献 / 轴突导向 / Schwann；平台上没有的基因会记成未检出）
@@ -752,8 +756,9 @@ export_patient_near_far <- function(pid, track, logm, cnts, near_i, far_i, eligi
 }
 
 # -----------------------------------------------------------------------------
-# 7. 主分析
+# 7. 主分析（单独子集脚本可设 options(wang.st.skip_main=TRUE) 后只加载函数）
 # -----------------------------------------------------------------------------
+if (!isTRUE(getOption("wang.st.skip_main", FALSE))) {
 ids <- load_ids()
 pids <- list_patient_ids()
 if (length(pids) == 0) stop("Robjects/counts 下没有 TNBC*.RDS。请先解压 Robjects.tar")
@@ -1077,4 +1082,5 @@ utils::write.csv(cand, file.path(result_dir, "02_optional_literature_ligands.csv
 log_msg("单个病人: ", expr_dir)
 log_msg("综合上调: ", combined_dir)
 log_msg("先打开: ", file.path(result_dir, "00_请先看这里_单个病人和上调基因.txt"))
+} # end if (!wang.st.skip_main) 全队列主分析
 

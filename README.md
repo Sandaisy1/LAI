@@ -136,3 +136,21 @@ source("Wang_ST_nerve_infiltration.R")
 `ids.RDS` 可选。Windows 解 `Clinical.tar` 时常把 `Clinical/ids.RDS` 展成根目录的 `Clinicalids.RDS`；`Clinical.RDS` / `Clinical.xlsx` 是临床表。没有 ids 也能跑。
 
 病理 Nerve 只和极少数 spot 重叠，全队列结论以 Schwann 邻域为准。
+
+### 指定 32 个病人的综合分析（单独脚本）
+
+全队列跑完后，另跑 `Wang_ST_far_vs_near_selected_patients.R`。只综合病人 2、3、4、6、11、13、14、15、20、22、27、28、30、31、37、39、51、52、53、56、61、62、67、69、74、79、81、85、86、90、93、94。比较仍是 **远神经肿瘤 vs 近神经肿瘤**，上调只做 **FC>1、1.25**（没有 1.5）。不覆盖上面的 `00_` / `01_` 结果。
+
+```r
+setwd("E:/R/Nerve")
+Sys.setenv(WANG_ST_DIR = "E:/R/Nerve")
+source("Wang_ST_far_vs_near_selected_patients.R")
+```
+
+```
+E:/R/Nerve/results/02_selected32_far_tumor_vs_near_tumor/
+  00_请先看这里.txt
+  INDEX_requested_vs_used.csv
+  upregulated_far_tumor_vs_near_tumor_FC_gt_1.csv
+  upregulated_far_tumor_vs_near_tumor_FC_1.25.csv
+```
