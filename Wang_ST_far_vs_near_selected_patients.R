@@ -67,17 +67,12 @@ main_r <- locate_wang_main()
 source(main_r, local = FALSE)
 options(wang.st.skip_main = old_opt)
 
-# 本脚本只要上调 FC>1、1.25
+# 本脚本只要上调 FC>1、1.25；距离图只对 FC>1.25 的每个上调基因单独画
 p_cutoff <- 0.05
 fc_cutoffs_up <- c("FC_gt_1" = 1, "FC_1.25" = 1.25)
 # Wang ST spot 中心距约 100 μm；距离用 spot 网格换算成 mm
 spot_pitch_mm <- 0.1
-# 高低表达要画距离图的基因（NGF 本阵列常没有，有则画）
-highlow_genes <- c(
-  "NGF", "BDNF", "NTF3", "NTF4", "GDNF", "ARTN", "NRTN",
-  "NRG1", "CXCL12", "VEGFA", "MDK", "PTN", "TGFB1", "WNT5A", "NGFR"
-)
-# 距离参照：施旺细胞签名（与全队列脚本同一套 marker）
+# 距离参照：施旺细胞签名
 schwann_distance_markers <- schwann_genes
 
 out_root <- file.path(nerve_dir, "results", "02_selected32_far_tumor_vs_near_tumor")
@@ -106,17 +101,22 @@ label_high_low <- function(x) {
   }
 }
 
-plot_high_low_vs_distance <- function(df, outfile, gene_lab, xlab) {
+plot_high_low_vs_distance <- function(df, outfile, gene_lab, xlab, write_spots = FALSE) {
   df <- df[is.finite(df$dist_mm) & df$grp %in% c("high", "low"), , drop = FALSE]
-  if (nrow(df) < 40) return(invisible(NULL))
   n_hi <- sum(df$grp == "high")
   n_lo <- sum(df$grp == "low")
-  if (n_hi < 15 || n_lo < 15) return(invisible(NULL))
+  if (nrow(df) < 40 || n_hi < 15 || n_lo < 15) {
+    return(list(plotted = FALSE, n_high = n_hi, n_low = n_lo, note = "high/low spot 太少"))
+  }
   xmax <- max(df$dist_mm, na.rm = TRUE)
-  if (!is.finite(xmax) || xmax <= 0) return(invisible(NULL))
+  if (!is.finite(xmax) || xmax <= 0) {
+    return(list(plotted = FALSE, n_high = n_hi, n_low = n_lo, note = "距离无效"))
+  }
   df$grp <- factor(df$grp, levels = c("high", "low"))
   dir.create(dirname(outfile), recursive = TRUE, showWarnings = FALSE)
-  if (!requireNamespace("ggplot2", quietly = TRUE)) return(invisible(NULL))
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    return(list(plotted = FALSE, n_high = n_hi, n_low = n_lo, note = "无 ggplot2"))
+  }
   pal <- c(high = "#E31A1C", low = "#377EB8")
   labs_grp <- c(
     high = paste0(gene_lab, "+ cells"),
@@ -141,16 +141,14 @@ plot_high_low_vs_distance <- function(df, outfile, gene_lab, xlab) {
     )
   ggplot2::ggsave(paste0(outfile, ".pdf"), p, width = 6.2, height = 5.0)
   ggplot2::ggsave(paste0(outfile, ".png"), p, width = 6.2, height = 5.0, dpi = 150)
-  utils::write.csv(df, paste0(outfile, "_spots.csv"), row.names = FALSE)
-  invisible(p)
+  if (isTRUE(write_spots)) {
+    utils::write.csv(df, paste0(outfile, "_spots.csv"), row.names = FALSE)
+  }
+  list(plotted = TRUE, n_high = n_hi, n_low = n_lo, note = "")
 }
 
-score_gene_set <- function(mat, genes) {
-  g <- intersect(unique(genes), colnames(mat))
-  if (length(g) < 3) return(rep(NA_real_, nrow(mat)))
-  z <- scale(mat[, g, drop = FALSE])
-  z[is.na(z)] <- 0
-  as.numeric(rowMeans(z))
+safe_gene_filename <- function(g) {
+  gsub("[^A-Za-z0-9._-]+", "_", g)
 }
 
 dist_dir <- file.path(out_root, "03_distance_to_Schwann")
@@ -166,10 +164,11 @@ writeLines(c(
   "  upregulated_far_tumor_vs_near_tumor_FC_gt_1.csv",
   "  upregulated_far_tumor_vs_near_tumor_FC_1.25.csv",
   "",
-  "高低表达 vs 施旺细胞距离（类似 NGF+ / NGF- 密度图）：",
-  "  03_distance_to_Schwann/",
+  "FC>1.25 每个上调基因单独画：高低表达 vs 到施旺细胞距离",
+  "  03_distance_to_Schwann/FC_1.25_each_gene/",
+  "  先打开 03_distance_to_Schwann/INDEX_FC_1.25_each_gene.csv",
   "  神经 marker：SOX10, MPZ, PMP22, S100B, PLP1, NGFR, NCAM1, MBP, L1CAM",
-  "  主图：up_FC_gt_1_high_vs_low_vs_Schwann_distance.pdf"
+  "  这是空间转录组 RNA，不是蛋白质组。"
 ), file.path(out_root, "00_请先看这里.txt"))
 
 log_msg("Wang ST dir: ", nerve_dir)
@@ -186,7 +185,6 @@ qc_rows <- list()
 pb_schwann <- NULL
 si_schwann <- NULL
 mean_schwann_wide <- NULL
-hl_gene_rows <- list()
 sig_cache <- list()
 
 for (pid in selected_patients) {
@@ -241,23 +239,9 @@ for (pid in selected_patients) {
   tum <- which(sp$is_tumor & !sp$is_schwann_high & is.finite(sp$dist_schwann))
   if (length(tum) >= 20) {
     dist_mm <- as.numeric(sp$dist_schwann[tum]) * spot_pitch_mm
-    dist_pni_mm <- as.numeric(sp$dist_nerve[tum]) * spot_pitch_mm
-    g_here <- intersect(highlow_genes, colnames(logm))
-    if (length(g_here) > 0) {
-      for (g in g_here) {
-        expr <- as.numeric(logm[tum, g])
-        hl_gene_rows[[paste(pid, g, sep = "_")]] <- data.frame(
-          patient = pid, gene = g, dist_mm = dist_mm,
-          dist_pni_mm = dist_pni_mm, expr = expr,
-          grp = label_high_low(expr),
-          stringsAsFactors = FALSE
-        )
-      }
-    }
     sig_cache[[as.character(pid)]] <- list(
       patient = pid,
       dist_mm = dist_mm,
-      dist_pni_mm = dist_pni_mm,
       logm = logm[tum, , drop = FALSE]
     )
   }
@@ -331,71 +315,81 @@ if (!is.null(pb_schwann) && ncol(pb_schwann) > 0) {
                    row.names = FALSE)
 }
 
-emit_highlow_plots <- function(up_fc1, up_fc125) {
+plot_each_fc125_gene <- function(up_tab) {
+  gene_dir <- file.path(dist_dir, "FC_1.25_each_gene")
+  if (dir.exists(gene_dir)) unlink(gene_dir, recursive = TRUE, force = TRUE)
+  stale <- list.files(dist_dir, full.names = TRUE)
+  stale <- stale[grepl("up_FC_|ligand_|NGF_not|genes$", basename(stale))]
+  if (length(stale) > 0) unlink(stale, recursive = TRUE, force = TRUE)
+  dir.create(gene_dir, recursive = TRUE, showWarnings = FALSE)
+
   writeLines(c(
-    "Tumor spots split into gene-high vs gene-low, then density vs distance to Schwann-high spots.",
-    "Schwann markers: SOX10, MPZ, PMP22, S100B, PLP1, NGFR, NCAM1, MBP, L1CAM.",
-    "1 spot = 0.1 mm. Red = high / positive, blue = low / negative.",
-    "NGF is often absent on this array; if missing it is listed below and NGFR / ligands are plotted instead."
+    "每个 FC>1.25 上调基因单独一张图：该基因高表达 vs 低表达，横轴是到施旺细胞的距离。",
+    "施旺 marker：SOX10, MPZ, PMP22, S100B, PLP1, NGFR, NCAM1, MBP, L1CAM。",
+    "红 = 该基因高表达，蓝 = 该基因低表达。1 spot = 0.1 mm。",
+    "这是空间转录组 RNA 表达，不是蛋白质组。先看 INDEX_FC_1.25_each_gene.csv。"
   ), file.path(dist_dir, "00_READ_ME.txt"))
 
-  missing_ngf <- !("NGF" %in% unique(if (length(hl_gene_rows) > 0) {
-    do.call(rbind, hl_gene_rows)$gene
-  } else character()))
-  if (isTRUE(missing_ngf)) {
-    writeLines("NGF was not detected on this array. Plotted detected ligands and the upregulated-gene signature instead.",
-               file.path(dist_dir, "NGF_not_on_array.txt"))
-    log_msg("NGF 本阵列未检出，改画可检出配体 + 上调基因签名 vs 施旺距离")
+  if (is.null(up_tab) || nrow(up_tab) == 0 || length(sig_cache) == 0) {
+    log_msg("没有 FC>1.25 上调基因，或没有肿瘤 spot，跳过逐基因距离图")
+    return(invisible(NULL))
   }
 
-  if (length(hl_gene_rows) > 0) {
-    hl <- do.call(rbind, hl_gene_rows)
-    hl <- hl[!is.na(hl$grp), , drop = FALSE]
-    utils::write.csv(hl, file.path(dist_dir, "ligand_spots_distance_to_Schwann.csv"),
-                     row.names = FALSE)
-    for (g in unique(hl$gene)) {
-      d <- hl[hl$gene == g, , drop = FALSE]
-      plot_high_low_vs_distance(
-        d, file.path(dist_dir, "genes", paste0(g, "_high_vs_low_vs_Schwann_distance")),
-        g, "Distance to Schwann (mm)"
-      )
-    }
-    log_msg("Per-gene distance plots: ", paste(unique(hl$gene), collapse = ","))
-  }
-
-  plot_signature <- function(up_genes, tag, lab) {
-    if (length(sig_cache) == 0 || length(up_genes) < 3) return(invisible(NULL))
+  xlab <- "Distance to Schwann (mm)"
+  idx <- list()
+  genes <- unique(as.character(up_tab$gene))
+  log_msg("逐基因距离图：FC>1.25 上调 n=", length(genes))
+  for (g in genes) {
     parts <- list()
     for (nm in names(sig_cache)) {
       ch <- sig_cache[[nm]]
-      sc <- score_gene_set(ch$logm, up_genes)
-      if (all(!is.finite(sc))) next
+      if (!g %in% colnames(ch$logm)) next
+      expr <- as.numeric(ch$logm[, g])
+      grp <- label_high_low(expr)
       parts[[nm]] <- data.frame(
         patient = ch$patient,
         dist_mm = ch$dist_mm,
-        expr = sc,
-        grp = label_high_low(sc),
+        expr = expr,
+        grp = grp,
         stringsAsFactors = FALSE
       )
     }
-    if (length(parts) == 0) return(invisible(NULL))
-    d <- do.call(rbind, parts)
-    plot_high_low_vs_distance(
-      d,
-      file.path(dist_dir, paste0(tag, "_high_vs_low_vs_Schwann_distance")),
-      lab,
-      "Distance to Schwann (mm)"
+    row0 <- up_tab[match(g, up_tab$gene), , drop = FALSE]
+    rec <- data.frame(
+      gene = g,
+      log2FC_far_vs_near = if ("log2FC" %in% names(row0)) row0$log2FC[1] else NA_real_,
+      FC = if ("FC" %in% names(row0)) row0$FC[1] else NA_real_,
+      pvalue = if ("pvalue" %in% names(row0)) row0$pvalue[1] else NA_real_,
+      n_high = 0L, n_low = 0L, plotted = FALSE, note = "",
+      pdf = "",
+      stringsAsFactors = FALSE
     )
-    log_msg("Signature distance plot ", tag, " n_spots=", nrow(d),
-            " n_genes=", length(intersect(up_genes, colnames(sig_cache[[1]]$logm))))
+    if (length(parts) == 0) {
+      rec$note <- "缓存里没有这个基因"
+      idx[[g]] <- rec
+      next
+    }
+    d <- do.call(rbind, parts)
+    d <- d[!is.na(d$grp), , drop = FALSE]
+    out_stub <- file.path(gene_dir, paste0(safe_gene_filename(g), "_high_vs_low_vs_Schwann_distance"))
+    res <- plot_high_low_vs_distance(d, out_stub, g, xlab, write_spots = FALSE)
+    rec$n_high <- as.integer(res$n_high)
+    rec$n_low <- as.integer(res$n_low)
+    rec$plotted <- isTRUE(res$plotted)
+    rec$note <- res$note
+    if (isTRUE(res$plotted)) rec$pdf <- paste0(out_stub, ".pdf")
+    idx[[g]] <- rec
   }
-
-  if (length(up_fc1) >= 3) plot_signature(up_fc1, "up_FC_gt_1", "Up FC>1")
-  if (length(up_fc125) >= 3) plot_signature(up_fc125, "up_FC_1.25", "Up FC>=1.25")
+  index <- do.call(rbind, idx)
+  if ("FC" %in% names(index)) {
+    index <- index[order(-index$FC, index$pvalue), , drop = FALSE]
+  }
+  utils::write.csv(index, file.path(dist_dir, "INDEX_FC_1.25_each_gene.csv"),
+                   row.names = FALSE)
+  log_msg("逐基因距离图完成：画出 ", sum(index$plotted), " / ", nrow(index))
 }
 
-up_fc1 <- character()
-up_fc125 <- character()
+up_fc125_tab <- NULL
 if (is.null(pb_schwann) || length(unique(si_schwann$patient)) < 2) {
   log_msg("能进入综合分析的病人不足 2 例。看 INDEX_requested_vs_used.csv")
   writeLines(
@@ -414,12 +408,11 @@ if (is.null(pb_schwann) || length(unique(si_schwann$patient)) < 2) {
   }
   emit_de_tables("selected32_far_tumor_vs_near_tumor", de_sw,
                  out_dir = out_root, also_top_level = TRUE)
-  up_fc1 <- select_up(de_sw, 1)$gene
-  up_fc125 <- select_up(de_sw, 1.25)$gene
+  up_fc125_tab <- select_up(de_sw, 1.25)
 }
 
-emit_highlow_plots(up_fc1, up_fc125)
+plot_each_fc125_gene(up_fc125_tab)
 
 log_msg("先打开: ", file.path(out_root, "00_请先看这里.txt"))
 log_msg("综合上调: ", out_root)
-log_msg("距离图: ", dist_dir)
+log_msg("FC>1.25 逐基因距离图: ", file.path(dist_dir, "FC_1.25_each_gene"))

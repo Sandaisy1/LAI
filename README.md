@@ -153,10 +153,9 @@ E:/R/Nerve/results/02_selected32_far_tumor_vs_near_tumor/
   INDEX_requested_vs_used.csv
   upregulated_far_tumor_vs_near_tumor_FC_gt_1.csv
   upregulated_far_tumor_vs_near_tumor_FC_1.25.csv
-  03_distance_to_Schwann/                     # 基因高/低 vs 到施旺细胞距离
-    up_FC_gt_1_high_vs_low_vs_Schwann_distance.pdf
-    up_FC_1.25_high_vs_low_vs_Schwann_distance.pdf
-    genes/ARTN_high_vs_low_vs_Schwann_distance.pdf
+  03_distance_to_Schwann/
+    INDEX_FC_1.25_each_gene.csv              # 每个 FC>1.25 上调基因一张图
+    FC_1.25_each_gene/GENE_high_vs_low_vs_Schwann_distance.pdf
 ```
 
-神经距离用施旺签名（SOX10、MPZ、PMP22、S100B、PLP1、NGFR、NCAM1、MBP、L1CAM）。图是肿瘤 spot 按基因高/低分成两条密度曲线（红 = 高，蓝 = 低），横轴是到最近施旺 spot 的距离。NGF 在这套阵列上经常没有，会改画可检出的配体和上调基因签名。
+距离图是 **FC>1.25 的每个上调基因分别** 画：该基因高表达 vs 低表达，横轴是到施旺细胞（SOX10、MPZ、PMP22、S100B、PLP1、NGFR、NCAM1、MBP、L1CAM）的距离。红 = 高，蓝 = 低。这是空间转录组 RNA，不是蛋白质组。
