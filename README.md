@@ -100,14 +100,23 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 ## Wang 2024 空间转录组：神经浸润（新脚本，不改 1–4）
 
-先 **导出能做近神经 vs 远神经的病人** 的近/远肿瘤 **基因表达**（RNA，不是蛋白）→ `results/00_expression_near_vs_far/`  
-再把这些病人合在一起，看近 vs 远的高表达基因 → `results/04_COMBINED_near_vs_far_high_genes.csv`
+数据在 `E:/R/Nerve`。比较是 **远神经肿瘤 vs 近神经肿瘤**（上调 = 远神经肿瘤更高）。FC 只做 **>1、1.25、1.5**。
 
-另外三件事（**不做 GO/KEGG/GSEA**）：
-
-1. 神经浸润相关分子和统计方案 → `results/00_Q1_PROTOCOL.txt`
-2. **肿瘤细胞高表达、可能促使神经浸润的基因** → `results/02_Q2_READ_THIS_tumor_genes_may_promote_nerve.csv`
-3. **肿瘤细胞低表达、可能促使神经浸润的基因** → `results/03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv`
+```
+E:/R/Nerve/results/
+  00_eligible_single_patients/          # 每个符合条件的病人
+    INDEX_eligible_patients.csv
+    00_READ_ME.txt
+    schwann_neighborhood/TNBC32/near_and_far_tumor_RNA_expression.csv
+    schwann_neighborhood/TNBC32/DE_far_tumor_vs_near_tumor/up_FC_gt_1/
+    schwann_neighborhood/TNBC32/DE_far_tumor_vs_near_tumor/up_FC_1.25/
+    schwann_neighborhood/TNBC32/DE_far_tumor_vs_near_tumor/up_FC_1.5/
+    pathologist_nerve/TNBC50/           # 病理神经，病人很少
+  01_combined_far_tumor_vs_near_tumor/  # 这些人合在一起
+    upregulated_FC_gt_1.csv
+    upregulated_FC_1.25.csv
+    upregulated_FC_1.5.csv
+```
 
 ```r
 setwd("E:/R/Nerve")
@@ -115,31 +124,12 @@ Sys.setenv(WANG_ST_DIR = "E:/R/Nerve")
 source("Wang_ST_nerve_infiltration.R")
 ```
 
-不需要 `TG_RNAseq_pipeline.R`。先 **p < 0.05**。问题2上调 **FC ≥ 1.25 和 1.5**；问题3下调 **FC < 1 即可**（1.25 / 1.5 只是更严的可选分层）。原 Cuffdiff 六组比较不变。
+不需要 `TG_RNAseq_pipeline.R`。先 **p < 0.05**，再上调 **FC > 1、1.25、1.5**（远神经肿瘤 vs 近神经肿瘤）。原 Cuffdiff 六组比较不变。
 
 真正必需的是 `Robjects/`（`counts` + `annotsBySpot`；先解压 `Robjects.tar`）。
 
 `ids.RDS` 可选。Windows 解 `Clinical.tar` 时常把 `Clinical/ids.RDS` 展成根目录的 `Clinicalids.RDS`；`Clinical.RDS` / `Clinical.xlsx` 是临床表。没有 ids 也能跑。
 
-主表：
-
-```
-E:/R/Nerve/results/
-  00_READ_ME.txt
-  00_Q1_PROTOCOL.txt
-  01_Q1_literature_ligands.csv
-  01_Q3_literature_repellents.csv
-  00_expression_near_vs_far/          # 每人近/远肿瘤 RNA 表达，先看这里
-    eligible_patients.csv
-    pathologist_nerve/TNBC*/near_and_far_tumor_RNA_expression.csv
-    schwann_neighborhood/COMBINED_mean_logCPM_near_and_far.csv
-  04_COMBINED_near_vs_far_high_genes.csv  # 这些病人合在一起后的高表达基因
-  03_Q3_READ_THIS_tumor_genes_low_may_promote_nerve.csv  # 问题3 低表达（p<0.05 且 FC<1）
-  03_Q3_down_p005_FC_lt_1.csv
-  03_Q3_down_p005_FC1.25.csv   # 可选更严
-  02_Q2_up_p005_FC1.25.csv
-  tumor_near_schwann_vs_far/     # 全队列 Schwann 邻域 DE
-  TNBC50_tumor_near_nerve_vs_far/  # 病理神经，各病人单独
-```
+主表见上面的 `00_eligible_single_patients/` 和 `01_combined_far_tumor_vs_near_tumor/`。
 
 病理 Nerve 只和极少数 spot 重叠，全队列结论以 Schwann 邻域为准。不要把两个 NTC 或病人在空间分析里偷偷合并。
