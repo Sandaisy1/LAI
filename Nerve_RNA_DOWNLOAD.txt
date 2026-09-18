@@ -8,7 +8,7 @@ E:\R\Nerve RNA 放什么文件（原位乳腺癌：肺倾向 vs 其他器官）
 注意：这是【原发/原位灶】分析，不是转移灶活检。
 GSE175692 是转移灶，不用于本组比较。
 
-必须（推荐都放）：
+必须（脚本也会自动从 NCBI FTP 下载；失败时请手动放入）：
   GSE2603_series_matrix.txt.gz
   https://ftp.ncbi.nlm.nih.gov/geo/series/GSE2nnn/GSE2603/matrix/GSE2603_series_matrix.txt.gz
 
@@ -19,8 +19,13 @@ GSE175692 是转移灶，不用于本组比较。
   https://ftp.ncbi.nlm.nih.gov/geo/platforms/GPLnnn/GPL96/annot/GPL96.annot.gz
 
 若自动下载失败（公司网/防火墙），请用浏览器打开上面链接，把文件保存到：
-  E:\R\Nerve RNA\GPL96.annot.gz
+  E:\R\Nerve RNA\
 然后重新 source。不需要安装 Rtools；preprocessCore 装不上可忽略（脚本有备用标准化）。
+
+注意文件名必须带 GSE2603_ / GSE5327_ 前缀，例如：
+  E:\R\Nerve RNA\GSE2603_series_matrix.txt.gz
+  E:\R\Nerve RNA\GSE5327_series_matrix.txt.gz
+不要只放在 GEO 子目录里却改名；若 GEOquery 下到了 GEO\ 下，脚本会自动再找并拷贝。
 
 可选蛋白组（问题2用真实蛋白，而不是 RNA 代理）：
   proteomics_pg_matrix.csv      （行=蛋白/基因符号，列=样本）

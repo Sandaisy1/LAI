@@ -418,38 +418,94 @@ assign_tropism_gse5327 <- function(ds) {
 
 probe2gene <- load_gpl96()
 
-gse2603_f <- find_file(c("GSE2603_series_matrix\\.txt(\\.gz)?$"))
-gse5327_f <- find_file(c("GSE5327_series_matrix\\.txt(\\.gz)?$"))
+download_series_matrix <- function(acc, dest_file) {
+  # GSE2603 -> GSE2nnn; GSE5327 -> GSE5nnn
+  num <- as.integer(sub("^GSE", "", acc))
+  bucket <- paste0("GSE", floor(num / 1000), "nnn")
+  urls <- c(
+    sprintf("https://ftp.ncbi.nlm.nih.gov/geo/series/%s/%s/matrix/%s_series_matrix.txt.gz",
+            bucket, acc, acc),
+    sprintf("http://ftp.ncbi.nlm.nih.gov/geo/series/%s/%s/matrix/%s_series_matrix.txt.gz",
+            bucket, acc, acc)
+  )
+  dir.create(dirname(dest_file), recursive = TRUE, showWarnings = FALSE)
+  for (u in urls) {
+    log_msg("下载 ", acc, " series matrix: ", u)
+    ok <- tryCatch({
+      utils::download.file(u, destfile = dest_file, mode = "wb", quiet = TRUE)
+      file.exists(dest_file) && file.info(dest_file)$size > 10000
+    }, error = function(e) {
+      log_msg("下载失败: ", e$message)
+      FALSE
+    })
+    if (isTRUE(ok)) return(dest_file)
+  }
+  if (file.exists(dest_file) && isTRUE(file.info(dest_file)$size < 10000)) unlink(dest_file)
+  NULL
+}
+
+ensure_series_matrix <- function(acc) {
+  pat <- paste0(acc, "_series_matrix\\.txt(\\.gz)?$")
+  hits <- find_file(pat)
+  if (length(hits) > 0) return(hits[1])
+  dest <- file.path(data_dir, paste0(acc, "_series_matrix.txt.gz"))
+  got <- download_series_matrix(acc, dest)
+  if (!is.null(got)) return(got)
+  # GEOquery 备用：下载后在 GEO/ 与 data_dir 再找一次
+  if (has_pkg("GEOquery")) {
+    geo_dir <- file.path(data_dir, "GEO")
+    dir.create(geo_dir, recursive = TRUE, showWarnings = FALSE)
+    log_msg("GEOquery download ", acc)
+    tryCatch(GEOquery::getGEO(acc, destdir = geo_dir, getGPL = FALSE),
+             error = function(e) { log_msg(e$message); NULL })
+    hits <- unique(c(
+      list.files(geo_dir, pattern = pat, full.names = TRUE, ignore.case = TRUE, recursive = TRUE),
+      find_file(pat)
+    ))
+    hits <- hits[file.exists(hits)]
+    if (length(hits) > 0) {
+      # 拷一份到数据根目录，方便下次直接找到
+      if (!file.exists(dest)) {
+        tryCatch(file.copy(hits[1], dest, overwrite = FALSE), error = function(e) NULL)
+      }
+      return(if (file.exists(dest)) dest else hits[1])
+    }
+  }
+  NULL
+}
+
+load_dataset <- function(acc) {
+  path <- ensure_series_matrix(acc)
+  if (is.null(path)) {
+    log_msg("未找到且无法下载 ", acc)
+    return(NULL)
+  }
+  raw <- tryCatch(parse_series_matrix_geo(path), error = function(e) {
+    log_msg(acc, " 解析失败: ", e$message); NULL
+  })
+  if (is.null(raw)) return(NULL)
+  si <- if (identical(acc, "GSE2603")) assign_tropism_gse2603(raw) else assign_tropism_gse5327(raw)
+  mat_g <- collapse_probes(raw$mat, probe2gene)
+  log_msg(acc, " 载入成功: genes=", nrow(mat_g), " samples=", ncol(mat_g),
+          " lung_tropic=", sum(si$tropism == "lung_tropic", na.rm = TRUE),
+          " other_met=", sum(si$tropism == "other_met", na.rm = TRUE))
+  list(mat = mat_g, si = si, source = raw$source)
+}
 
 datasets <- list()
-if (length(gse2603_f) > 0) {
-  raw <- parse_series_matrix_geo(gse2603_f[1])
-  si <- assign_tropism_gse2603(raw)
-  mat_g <- collapse_probes(raw$mat, probe2gene)
-  datasets[["GSE2603"]] <- list(mat = mat_g, si = si, source = raw$source)
-}
-if (length(gse5327_f) > 0) {
-  raw <- parse_series_matrix_geo(gse5327_f[1])
-  si <- assign_tropism_gse5327(raw)
-  mat_g <- collapse_probes(raw$mat, probe2gene)
-  datasets[["GSE5327"]] <- list(mat = mat_g, si = si, source = raw$source)
+for (acc in c("GSE2603", "GSE5327")) {
+  ds <- load_dataset(acc)
+  if (!is.null(ds)) datasets[[acc]] <- ds
 }
 
 if (length(datasets) == 0) {
-  # 尝试自动下载
-  if (!has_pkg("GEOquery")) {
-    stop("请放入 GSE2603_series_matrix.txt.gz 与/或 GSE5327_series_matrix.txt.gz")
-  }
-  for (acc in c("GSE2603", "GSE5327")) {
-    dest <- file.path(data_dir, "GEO")
-    dir.create(dest, recursive = TRUE, showWarnings = FALSE)
-    log_msg("GEOquery download ", acc)
-    g <- tryCatch(GEOquery::getGEO(acc, destdir = dest, getGPL = FALSE),
-                  error = function(e) { log_msg(e$message); NULL })
-    if (is.null(g)) next
-    # 回退：要求用户用 series matrix；此处简单跳过
-  }
-  stop("本地缺少 GSE2603/GSE5327 series matrix。见 Nerve_RNA_DOWNLOAD.txt")
+  stop(
+    "本地缺少 GSE2603/GSE5327 series matrix，且自动下载失败。\n",
+    "请用浏览器下载后放到 E:/R/Nerve RNA/ ：\n",
+    "  https://ftp.ncbi.nlm.nih.gov/geo/series/GSE2nnn/GSE2603/matrix/GSE2603_series_matrix.txt.gz\n",
+    "  https://ftp.ncbi.nlm.nih.gov/geo/series/GSE5nnn/GSE5327/matrix/GSE5327_series_matrix.txt.gz\n",
+    "详见 Nerve_RNA_DOWNLOAD.txt"
+  )
 }
 
 # -----------------------------------------------------------------------------
