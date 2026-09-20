@@ -97,3 +97,12 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## 小鼠转移组学对照文献
+
+本仓库样品是人 BRCA 细胞 TG 敲低 RNA-seq，不是小鼠组织。若要用「原位 vs 肺/骨/肝/脑」公开数据做签名 overlap，见：
+
+- `literature/mouse_breast_cancer_metastasis_datasets.md`（文献说明与选用建议）
+- `literature/mouse_breast_cancer_metastasis_datasets.csv`（登录号、器官、数据类型表）
+
+没有一份公开数据同时覆盖原位 + 四器官配对 bulk RNA-seq；多器官比较需组合 GSE165393、GSE146012、GSE37975、GSE238214、GSE54773，或用 E-MTAB-16621 的四器官 scRNA-seq（无原位瘤）。
