@@ -1,0 +1,48 @@
+---
+description: 人源乳腺癌转移临床组织 RNA/蛋白组：必须同时有原发和转移组织
+globs: "**/*.{R,r,Rmd,md,csv}"
+alwaysApply: false
+---
+
+# 人源乳腺癌转移临床组学文献与数据
+
+仅当任务是**寻找/使用人源乳腺癌转移的临床组织 RNA 或蛋白数据**时按本规则。不要套用 `NTC`/`TG_sh` Cuffdiff，不要改 `TG_RNAseq_*.R`。
+
+文献目录：`docs/human_brca_metastasis_clinical_omics.md` 与 `docs/human_brca_metastasis_clinical_omics.csv`。
+
+## 必须同时满足
+
+1. **临床样本**（手术/活检/尸检），不是细胞系、小鼠、PDX 冒充病人
+2. **人源原发（原位）组织** 和 **人源转移组织**；转移优先肺、骨、肝、脑（淋巴结单独标注，不要写成远处器官）
+3. 分子层为 **RNA 或蛋白**（芯片、NanoString、RNA-seq、scRNA、空间转录组、质谱蛋白组均可）
+
+「原发灶 + 日后肺/骨/脑转移随访结局」**不等于**有转移组织。
+
+```r
+# ❌ BAD: GSE2603 / GSE5327 原发芯片 + lm event 当成「肺转移组织」
+# ❌ BAD: GSE14020 / GSE175692 只有转移灶，却写成配对原发–转移
+# ❌ BAD: 小鼠或 MDA-MB-231 肺/骨/脑亚系当病人
+# ✅ GOOD: AURORA US GSE209998、RAP GSE110590、脑转移 GSE184869：人源原发 + 转移组织
+```
+
+## 优先数据集（原发 + 远处转移组织）
+
+| 用途 | 队列 | 入口 |
+| --- | --- | --- |
+| 多器官 bulk RNA，公开 | AURORA US；UNC RAP | GEO `GSE209998` / `GSE212375`；`GSE110590`；`GSE193103` |
+| 最大配对 RNA-seq | AURORA EU | 申请 `aurora-ctc.hubruxelles.be` |
+| 配对脑转移 RNA | Cosgrove / Varešlija | `GSE184869`；`GSE173661` |
+| 配对肺/胸膜 RNA | Sinn 2020 | `GSE145752`（NanoString，非全转录组） |
+| 配对多器官 NanoString | Cejalvo / ConvertHER | `GSE92977` |
+| 原发 vs 淋巴结蛋白 | Pozniak / Geiger | PRIDE `PXD000815` |
+| 临床 sc/空间 | Klughammer HTAN 2024 | HTAN / CELLxGENE |
+
+## 转移灶为主（分析时必须写「非配对原发」）
+
+- `GSE175692`：184 个转移灶、11 器官（肝/肺/脑/骨），几乎无配对原发
+- `GSE14020`：58 个转移灶芯片，无原发
+- MET500：泛癌转移灶 RNA，乳腺癌配对原发很少
+
+## 禁止当作转移组织
+
+`GSE2603`、`GSE5327`、`GSE12276`、TCGA-BRCA、CPTAC-BRCA、Cimas 2019（仅原发蛋白 + CNS 结局）。
