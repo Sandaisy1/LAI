@@ -43,8 +43,41 @@
 | 模型 | MMTV-PyMT，自发转移 |
 | 组织 | 乳腺脂肪垫原发瘤、肺、淋巴结、骨髓来源的肿瘤细胞系 |
 | 类型 | bulk RNA-seq（NextSeq 500）+ 部分样本 scRNA-seq（ddSeq） |
-| 样品规模 | GEO 记录 17 个 bulk 样本；另有单细胞矩阵 |
+| 样品规模 | 17 个 GSM：14 个 bulk + 3 个 scRNA-seq |
 | 用途 | 本仓库上调基因 vs PyMT 器官来源转录组；看器官嗜性和 CD44 高低亚群 |
+
+#### GSE165393 该下哪些
+
+GEO 只给了处理后的表，没有 count 矩阵。和本仓库 TG 上调基因做 overlap / 器官比较时：
+
+**先下这两个（一共不到 1 MB）：**
+
+1. `GSE165393_AllTissues_TPM.csv.gz` — bulk TPM 矩阵（必下）
+2. `GSE165393_series_matrix.txt.gz` — 样品注释（很小；表达表是空的，不要当表达矩阵用）
+
+```
+https://ftp.ncbi.nlm.nih.gov/geo/series/GSE165nnn/GSE165393/suppl/GSE165393_AllTissues_TPM.csv.gz
+https://ftp.ncbi.nlm.nih.gov/geo/series/GSE165nnn/GSE165393/matrix/GSE165393_series_matrix.txt.gz
+```
+
+TPM 表有 55450 个 `ENSMUSG` 基因 × **14 个 bulk 样品**（不要把 3 个 scRNA GSM 并进去）：
+
+| 组织 | 样品列 | 生物学含义 |
+| --- | --- | --- |
+| 原位（乳腺脂肪垫） | `MFP1.TPM`, `MFP2.TPM` | 原发瘤来源，n=2，不分 CD44 |
+| 肺转移 | `LUlow1/2`, `LUhigh1/2` | CD44low / CD44high 各 2 |
+| 淋巴结 | `LN1low/2low`, `LN1high/2high` | 同上 |
+| 骨髓 | `BM1low/2low`, `BM1high/2high` | 同上；不是皮质骨转移灶 |
+
+比较建议：先做「器官主效应」（MFP vs 肺 / LN / BM，CD44 高低先合并或作为协变量），再单独看 CD44high vs low。GEO **没有 raw count**，不要拿 TPM 去跑 DESeq2；用 `log2(TPM+1)` + limma。基因 ID 是小鼠 Ensembl，和人 TG 结果比较前要做同源转换。
+
+**默认不要下：**
+
+- 三个 scRNA 矩阵（`LungH_rep1` / `LungL_rep1` / `LymphNodeH`，各约 2800–3600 细胞、raw counts）— 只有肺和淋巴结、没有原位和骨髓，适合看亚群，不适合先做器官 FC
+- SRA FASTQ（SRP302977）— 只有需要自己重定量出 count 时才下
+- Series matrix 里的表达表 — `data_row_count = 0`，是空的
+
+注意：这些是器官取出后 FACS（CD44/EpCAM）再培养的**细胞系**，不是新鲜肿瘤块。没有肝、脑。
 
 ### 1.2 脑 + 肺 + 肝 + 骨同一实验（scRNA-seq，无原位瘤）
 
