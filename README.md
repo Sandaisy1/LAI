@@ -101,3 +101,26 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## GSE209998 人源原发 vs 配对肺/骨（`GSE209998_Human_breast.R`）
+
+把 `GSE209998_AUR_129_raw_counts.txt.gz` 和 `GSE209998_series_matrix.txt.gz` 放到 `E:/R/Human breast cancer/GSE209998`，然后：
+
+```r
+setwd("E:/R/Human breast cancer/GSE209998")
+source("GSE209998_Human_breast.R")
+```
+
+只做 p < 0.05 且 FC > 1 / 1.25，按患者一一对应（热图列顺序为 原发_i、转移_i）。不做 top50–300。结果在同目录 `results_GSE209998_Human_breast/`。
+
+## GSE145752 人源原发 vs 配对肺/胸膜（`GSE145752_Human_breast.R`）
+
+Sinn 2020 NanoString 269 基因面板。把 `GSE145752_series_matrix.txt.gz`（建议同时留 `GSE145752_RAW.tar`）放到 `E:/R/Human breast cancer/GSE145752`，把脚本也拷到该目录，然后：
+
+```r
+setwd("E:/R/Human breast cancer/GSE145752")
+source("GSE145752_Human_breast.R")
+```
+
+57 对一一对应：肺转移 8 对（patient 14, 20, 31, 38, 43, 44, 55, 88），胸膜 49 对，**无骨转移**（骨分析会写成 SKIPPED）。器官特异改为肺 vs 胸膜。只做 p < 0.05 且 FC > 1 / 1.25，不做 top50–300。结果在同目录 `results_GSE145752_Human_breast/`。
+
