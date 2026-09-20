@@ -4,6 +4,8 @@
 
 人源乳腺癌转移的**临床组织** RNA/蛋白文献（必须同时有原发组织和转移组织，优先肺/骨/肝/脑）见 `docs/human_brca_metastasis_clinical_omics.md`。
 
+AURORA US `GSE209998` 配对原发–肺/骨分析脚本：`GSE209998_Human_breast.R`（数据默认 `E:/R/Human breast cancer/GSE209998`）。
+
 ## 数据位置
 
 默认读取 `E:/R/TG_BRCA/TG`。输入为 Cuffdiff 文件（不再使用 Excel）：
