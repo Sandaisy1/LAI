@@ -124,7 +124,7 @@ setwd("E:/R/Mouse Breast/GSE273439")
 source("GSE273439_Mouse_breast.R")
 ```
 
-**一一对应：** Mouse627 原位只对 Mouse627 肺，Mouse628 只对 Mouse628 肺，两只鼠不混成一组。入选为 **p < 0.05**，下调倍数 **原位/肺 ≥ 1 和 ≥ 1.25**。
+**一一对应：** Mouse627 原位只对 Mouse627 肺，Mouse628 只对 Mouse628 肺，两只鼠不混成一组。入选为 **p < 0.05**，下调倍数 **原位/肺 ≥ 1 和 ≥ 1.25**。只做这两档 FC，**没有 Top50–300**。
 
 1. 配对肺下调 → `results_GSE273439/01_lung_down_Mouse627/`、`01_lung_down_Mouse628/`、`01_lung_down_both_mice/` 与 `08_summary/Q1_*`
 2. 肺转移灶特异下调（相对未受累肺实质）→ `02_lung_foci_specific_down/`。**本套数据没有骨**，`03_bone_not_in_GSE273439/00_NOTE.txt` 说明原因

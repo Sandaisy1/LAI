@@ -16,7 +16,7 @@
 #   4) 三种神经分数分别与配对肺转移的关系
 #
 # 入选：p < 0.05，下调倍数 down_FC = 原位/肺 >= 1 与 >= 1.25
-# （即肺相对原位的 FC < 1 与 < 1/1.25）
+# （即肺相对原位的 FC < 1 与 < 1/1.25）。不做 Top50–300 排名分层。
 #
 # 数据注意：
 #   - 两只 BALB/c，各一块 TM + 一块 LUNG，Visium FFPE，mm10
@@ -133,11 +133,12 @@ log_msg <- function(...) {
 }
 
 p_cutoff   <- 0.05
+# 只这两档；不要 Top50 / 75 / 100 / 150 / 200 / 250 / 300
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25)
 
 log_msg("Project dir: ", project_dir)
 log_msg("Results dir: ", result_dir)
-log_msg("Gate: p < ", p_cutoff, " ; down-FC (primary/lung) >= 1 and >= 1.25")
+log_msg("Gate: p < ", p_cutoff, " ; down-FC (primary/lung) >= 1 and >= 1.25 ; no Top50-300")
 log_msg("Paired only: Mouse627 TM vs Mouse627 LUNG; Mouse628 TM vs Mouse628 LUNG")
 
 # -----------------------------------------------------------------------------
@@ -946,10 +947,11 @@ analyze_down_list <- function(comp_name, de, heat_mat, sample_info, lfc_col, p_c
   dir.create(base, recursive = TRUE, showWarnings = FALSE)
   write_table(de, file.path(base, "DE_full"))
   writeLines(
-    c("先看本目录 DE_full，再看 FoldChange/。",
+    c("先看本目录 DE_full，再看 FoldChange/FC_1 与 FoldChange/FC_1.25。",
       "筛选：p < 0.05 且配对肺相对该鼠原位下调（down_FC = 原位/肺 >= 1 与 >= 1.25）。",
+      "不做 Top50–300 排名分层，没有 TopRank/ 目录。",
       "627 只和 627 比，628 只和 628 比，两鼠不混成一组。",
-      "GO/Pathway/KEGG 是 ORA；GSEA 在 00_GSEA_all_genes_NOT_FC_or_topN。"),
+      "GO/Pathway/KEGG 是 ORA；GSEA 在 00_GSEA_all_genes。"),
     file.path(base, "00_READ_ME.txt")
   )
   for (nm in names(fc_cutoffs)) {
@@ -964,7 +966,7 @@ analyze_down_list <- function(comp_name, de, heat_mat, sample_info, lfc_col, p_c
                 do_ora = identical(nm, "FC_1.25") && nrow(sub) <= 800)
   }
   if (isTRUE(do_gsea) && !isTRUE(skip_enrich)) {
-    tryCatch(run_gsea_full(de, file.path(base, "00_GSEA_all_genes_NOT_FC_or_topN"), comp_name, lfc_col),
+    tryCatch(run_gsea_full(de, file.path(base, "00_GSEA_all_genes"), comp_name, lfc_col),
              error = function(e) log_msg("GSEA failed: ", e$message))
   }
 }
@@ -1420,7 +1422,7 @@ for (nm in names(curated)) {
     tryCatch(
       run_gsea_full(
         transform(mouse_cor[[mice[1]]], log2FC = rho),
-        file.path(ax_dir, "00_GSEA_all_genes_NOT_FC_or_topN"),
+        file.path(ax_dir, "00_GSEA_all_genes"),
         paste(nm, "TM correlation"), stat_col = "rho"
       ),
       error = function(e) log_msg(nm, " GSEA failed: ", e$message)
@@ -1624,8 +1626,8 @@ write_table(assoc_all, file.path(sum_dir, "Q4_neural_scores_vs_matched_lung"))
 write_table(ov_tab, file.path(sum_dir, "Q4_neg_cor_overlap_with_lung_down"))
 
 for (nm in names(neg_both_by_sig)) {
-  write_table(utils::head(neg_both_by_sig[[nm]], 500),
-              file.path(sum_dir, paste0("Q3_", nm, "_BOTH_mice_neg_cor_p0.05_top500")))
+  write_table(neg_both_by_sig[[nm]],
+              file.path(sum_dir, paste0("Q3_", nm, "_BOTH_mice_neg_cor_p0.05")))
 }
 
 n_tab <- data.frame(
