@@ -114,7 +114,7 @@ TPM 表有 55450 个 `ENSMUSG` 基因 × **14 个 bulk 样品**（不要把 3 �
 | 数据 | 文章 | 模型 | 材料 | 类型 | 备注 |
 | --- | --- | --- | --- | --- | --- |
 | **GSE146012** | So et al. *Cancer Research* 2020. Induction of DNMT3B by PGE2 and IL6 at distant metastatic sites. | 4T1 / BALB/c | GFP 分选：原发瘤 vs 肺转移（含 MFP 与尾静脉两条路径） | bulk mRNA-seq，8 个样本 | 配套 **GSE146010** 为肺转移 DNMT3B ChIP-seq |
-| **GSE273439** | Extraction of a Stromal Metastatic Gene Signature in Breast Cancer via Spatial Profiling | 4T1 脂肪垫接种 28 天 | 原发乳腺瘤 + 肺，FFPE | Visium 空间转录组 | 原位与肺在同一实验 |
+| **GSE273439** | Bertolazzi et al. *J Exp Clin Cancer Res* 2025. Extraction of a stromal metastatic gene signature. DOI: 10.1186/s13046-025-03353-3. PMID: 40065328 | 4T1 脂肪垫接种 28 天 | 原发乳腺瘤 + 肺，FFPE | Visium 空间转录组 | 原位与肺在同一实验；**该下哪些见 §4.1** |
 | **GSE131508** | Ombrato et al. *Nature* 2019. Metastatic niche labelling reveals tissue parenchyma stem cell features. DOI: 10.1038/s41586-019-1487-6 | Labelling-4T1 | 肺转移龛（mCherry+）vs 远端肺（mCherry−） | bulk / 后续 scRNA | 经典 Cherry-niche；偏龛细胞不是肿瘤细胞 |
 | **GSE318532** | Targeting FASN/GPAM in AT2 cells decreases lung metastasis | 4T1 脂肪垫 | 转移肺 vs 对照肺 | Visium | 看肺泡 II 型细胞脂质支持，不是分选肿瘤细胞 |
 | PXD005860 | *J Cancer* 2017. Proteomic analysis of lung metastases… CTSB/CTSL | MMTV-PyMT 肺转移灶 | 肺转移组织 | LC-MS/MS | 蛋白组；比较转基因 vs WT，不是原位 vs 肺 |
@@ -185,6 +185,50 @@ PXD055261 的细胞系与 GSE238214（肝）、GSE54773（脑/肺）同属 4T1 �
 
 GSE300613 是人源细胞在小鼠体内，基因表达是人/鼠混合；用来验证人 BRCA 细胞签名比纯小鼠瘤更直接，但免疫微环境是 NSG/免疫缺陷背景。
 
+### 4.1 GSE273439 该下哪些
+
+这不是 bulk TPM，而是 **10x Visium FFPE**（Space Ranger → mm10）。两只 BALB/c（Mouse 627 / 628），各一块原发乳腺瘤（TM）和一块肺（LUNG），共 4 个 visium 切片。文章里的 **Nanostring DSP**（人原发瘤 + 肝转移 24 个 ROI、stromal Met 签名）**不在 GEO**，在期刊 Supplementary Table 1–7。
+
+**必下这一个包（约 295 MB），四个样品全在里面：**
+
+```
+https://ftp.ncbi.nlm.nih.gov/geo/series/GSE273nnn/GSE273439/suppl/GSE273439_RAW.tar
+```
+
+可选、很小：`GSE273439_series_matrix.txt.gz`（3 KB）只当样品注释用。`data_row_count = 0`，**不要当表达矩阵**。
+
+```
+https://ftp.ncbi.nlm.nih.gov/geo/series/GSE273nnn/GSE273439/matrix/GSE273439_series_matrix.txt.gz
+```
+
+解压后每个 GSM 有 9 个文件。Seurat `Load10X_Spatial()` / SpatialExperiment 真正要用的是 MTX + 坐标 + 缩放因子 + PNG；大 TIFF 可以后下。
+
+| GSM | 标题 | 组织 | 分析必用 | 可后下 |
+| --- | --- | --- | --- | --- |
+| GSM8428408 | Mouse_627_TM | 原发乳腺瘤 | `matrix.mtx.gz`（21 MB）、`features.tsv.gz`、`barcodes.tsv.gz`、`tissue_positions_list.csv.gz`、`scalefactors_json.json.gz`、`tissue_hires/lowres_image.png.gz` | `aligned_fiducials.jpg.gz`；`.tif.gz` 11 MB |
+| GSM8428409 | Mouse_627_LUNG | 肺 | 同上（mtx 18 MB） | `.tif.gz` 47 MB |
+| GSM8428410 | Mouse_628_TM | 原发乳腺瘤 | 同上（mtx 17 MB） | `.tif.gz` 61 MB |
+| GSM8428411 | Mouse_628_LUNG | 肺 | 同上（mtx 39 MB） | `.tif.gz` 72 MB |
+
+文件名带前缀，例如 `GSM8428408_09.9_627_TM_V11Y03-083_A_matrix.mtx.gz`。读进 Seurat 前按样品建目录并改成 10x 标准名：
+
+```
+Mouse_627_TM/
+  filtered_feature_bc_matrix/{matrix.mtx.gz,features.tsv.gz,barcodes.tsv.gz}
+  spatial/{tissue_positions_list.csv,scalefactors_json.json,tissue_hires_image.png,tissue_lowres_image.png}
+```
+
+`spatial/` 里的 png / json / csv 需要 **gunzip**（Seurat 不认 `.png.gz`）。GEO 说明里写了 `detected_tissue_image.jpg.gz`，实际 **没有这个文件**。
+
+**默认不要下：**
+
+- SRA FASTQ（PRJNA1141928 / SRX25515152–155，NextSeq 2000）— 只有要自己重跑 Space Ranger 时才下
+- 四张全分辨率 `.tif.gz`（合计约 190 MB）— 热图/聚类用 PNG 就够；重新配准或重跑 spaceranger 再下
+- Series matrix 里的表达表 — 空的
+- 期刊 DSP / stromal Met 基因表 — 去论文补充材料，不在 `RAW.tar`
+
+注意：只有原位和肺，没有骨、肝、脑。小鼠 Visium 是验证集；签名本身来自人 DSP。和 TG 上调基因做 overlap 时，先把小鼠基因转人同源，再和 Supplementary Table 2（129 up / 99 down）比，不要把 visium spot count 直接并进 Cuffdiff。
+
 ---
 
 ## 5. 和本仓库 BRCA 背景相关、但不是转移灶
@@ -209,6 +253,7 @@ GSE300613 是人源细胞在小鼠体内，基因表达是人/鼠混合；用来
 5. **GSE54773** Series Matrix（原发 / 肺 / 脑衍生系，芯片）
 6. **PXD055261** MaxQuant/蛋白表（四器官 EV 蛋白）
 7. 若要单细胞多器官：E-MTAB-16621 或 GSE252507 的 h5ad / 10x 矩阵
+8. 若要原位 vs 肺的空间转录组：**GSE273439** 只下 `GSE273439_RAW.tar`（Visium MTX + 坐标 + PNG；见 §4.1）
 
 芯片与 RNA-seq 不要直接合并 counts；只在基因符号层做签名 overlap。小鼠基因映射到人用 `org.Mm.eg.db` / `org.Hs.eg.db` 同源转换后再和本仓库结果比较。
 
