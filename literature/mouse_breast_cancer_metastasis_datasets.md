@@ -113,7 +113,7 @@ TPM 表有 55450 个 `ENSMUSG` 基因 × **14 个 bulk 样品**（不要把 3 �
 
 | 数据 | 文章 | 模型 | 材料 | 类型 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| **GSE146012** | So et al. *Cancer Research* 2020. Induction of DNMT3B by PGE2 and IL6 at distant metastatic sites. | 4T1 / BALB/c | GFP 分选：原发瘤 vs 肺转移（含 MFP 与尾静脉两条路径） | bulk mRNA-seq，8 个样本 | 配套 **GSE146010** 为肺转移 DNMT3B ChIP-seq |
+| **GSE146012** | So et al. *Cancer Research* 2020. Induction of DNMT3B by PGE2 and IL6 at distant metastatic sites. PMID: 32265226 | 4T1 / BALB/c | GFP 分选：原发瘤 vs 肺转移（含 MFP 与尾静脉两条路径） | bulk mRNA-seq，8 个样本 | 配套 **GSE146010** 为肺转移 DNMT3B ChIP-seq；**该下哪些见下文** |
 | **GSE273439** | Bertolazzi et al. *J Exp Clin Cancer Res* 2025. Extraction of a stromal metastatic gene signature. DOI: 10.1186/s13046-025-03353-3. PMID: 40065328 | 4T1 脂肪垫接种 28 天 | 原发乳腺瘤 + 肺，FFPE | Visium 空间转录组 | 原位与肺在同一实验；**该下哪些见 §4.1** |
 | **GSE131508** | Ombrato et al. *Nature* 2019. Metastatic niche labelling reveals tissue parenchyma stem cell features. DOI: 10.1038/s41586-019-1487-6 | Labelling-4T1 | 肺转移龛（mCherry+）vs 远端肺（mCherry−） | bulk / 后续 scRNA | 经典 Cherry-niche；偏龛细胞不是肿瘤细胞 |
 | **GSE318532** | Targeting FASN/GPAM in AT2 cells decreases lung metastasis | 4T1 脂肪垫 | 转移肺 vs 对照肺 | Visium | 看肺泡 II 型细胞脂质支持，不是分选肿瘤细胞 |
@@ -121,6 +121,47 @@ TPM 表有 55450 个 `ENSMUSG` 基因 × **14 个 bulk 样品**（不要把 3 �
 | — | *PLOS One* 2015. Differential proteome… TGF-β in 4T1. DOI: 10.1371/journal.pone.0126483 | 4T1 肺转移 | 肺转移组织 ± TGF-β 抑制剂 | Orbitrap 定量蛋白组 | 6694 蛋白；治疗对照，不是原位配对 |
 
 肺空间多组学补充：*Cell Death & Disease* 2024, Metabolic shifts in lipid utilization… DOI: 10.1038/s41419-024-07205-4（4T1 / PyMT 肺转移 Visium + 蛋白相关分析）。
+
+#### GSE146012 该下哪些
+
+这是 **GFP 分选的 4T1 肿瘤细胞 bulk RNA-seq**（HiSeq 2500，mm10，DESeq2 标准化后的 log 矩阵），不是 Visium，也不是 raw count。8 个 GSM：原发瘤 2 个，脂肪垫接种后肺转移 3 个，尾静脉接种后肺转移 3 个。没有骨、肝、脑。GEO 各 GSM 的 `supplementary_file = NONE`，表达都在 series 补充文件里。
+
+**必下这一个（约 1.1 MB）：**
+
+```
+https://ftp.ncbi.nlm.nih.gov/geo/series/GSE146nnn/GSE146012/suppl/GSE146012_RNA_seq_logtransformed_count.txt.gz
+```
+
+表头是 `EnsembleID`、`GeneSymbol` 加 8 列样品，约 21017 个基因。已经是 DESeq2 标准化后的 log 值，**不要再拿去跑 DESeq2**；用 limma。作者写的是 `logtransformed_count`，不是 TPM。
+
+| 列名 | GSM | 组织 | 接种路径 |
+| --- | --- | --- | --- |
+| `4T1-Tumor-1` / `4T1-Tumor-2` | GSM4351981 / 82 | 原发乳腺瘤（GFP+） | 脂肪垫 |
+| `4T1-MFP-Met-1/2/3` | GSM4351983–85 | 肺转移（GFP+） | 脂肪垫接种后自发到肺 |
+| `4T1-TVI-Met-1/2/3` | GSM4351986–88 | 肺转移（GFP+） | 尾静脉实验性肺定植 |
+
+比较时 **不要把 MFP-Met 和 TVI-Met 并成一组**：MFP 才接近「原位 → 肺」；TVI 跳过原发瘤。原发只有 n=2，也不是一对一配对。
+
+**建议同时下（都很小）：**
+
+1. `GSE146012_DEG_MFPmet_vs_Tumor.txt.gz`（1.2 MB）— 作者 DESeq2：脂肪垫肺转移 vs 原发
+2. `GSE146012_DEG_TVImet_vs_Tumor.txt.gz`（1.2 MB）— 作者 DESeq2：尾静脉肺转移 vs 原发
+3. `GSE146012_series_matrix.txt.gz`（1.5 KB）— 只当样品注释；`data_row_count = 0`，**不要当表达矩阵**
+
+```
+https://ftp.ncbi.nlm.nih.gov/geo/series/GSE146nnn/GSE146012/suppl/GSE146012_DEG_MFPmet_vs_Tumor.txt.gz
+https://ftp.ncbi.nlm.nih.gov/geo/series/GSE146nnn/GSE146012/suppl/GSE146012_DEG_TVImet_vs_Tumor.txt.gz
+https://ftp.ncbi.nlm.nih.gov/geo/series/GSE146nnn/GSE146012/matrix/GSE146012_series_matrix.txt.gz
+```
+
+作者 DEG 表是 `log2FoldChange`（转移相对原发；负值 = 转移下调）。自己重算 FC 时用 count 矩阵；这两张表适合核对。
+
+**默认不要下：**
+
+- SRA FASTQ（SRP250874 / PRJNA608973）— 只有要自己重定量 raw count 时才下
+- **GSE146010**（同一篇文章的肺转移 DNMT3B ChIP-seq，4 个 GSM）— 做 RNA 差异时不需要；峰表在 `GSE146010_DNMT3B_ChIP_lung4304peaks_MACS2p05.txt.gz`
+
+注意：测的是 FACS 分选后的 **GFP+ 肿瘤细胞**，不是全组织；没有骨。和人 TG 结果比较前用 `org.Mm.eg.db` 做同源转换。
 
 ### 2.2 骨
 
