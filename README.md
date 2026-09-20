@@ -115,6 +115,24 @@ source("GSE165393_Mouse_breast.R")
 
 先看 `results_GSE165393/07_summary/`。入选为 limma **p < 0.05**，下调 **FC < 1** 即可，并再出 **FC < 1/1.25**。BM 是骨髓来源细胞系，不是皮质骨灶。
 
+## GSE273439 小鼠原位 vs 配对肺（Visium）
+
+数据目录：`E:/R/Mouse Breast/GSE273439`，放入并解压 `GSE273439_RAW.tar`（四个样品的 MTX / 坐标 / PNG）。把 `GSE273439_Mouse_breast.R` 拷到该目录后：
+
+```r
+setwd("E:/R/Mouse Breast/GSE273439")
+source("GSE273439_Mouse_breast.R")
+```
+
+**一一对应：** Mouse627 原位只对 Mouse627 肺，Mouse628 只对 Mouse628 肺，两只鼠不混成一组。入选为 **p < 0.05**，下调倍数 **原位/肺 ≥ 1 和 ≥ 1.25**。
+
+1. 配对肺下调 → `results_GSE273439/01_lung_down_Mouse627/`、`01_lung_down_Mouse628/`、`01_lung_down_both_mice/` 与 `08_summary/Q1_*`
+2. 肺转移灶特异下调（相对未受累肺实质）→ `02_lung_foci_specific_down/`。**本套数据没有骨**，`03_bone_not_in_GSE273439/00_NOTE.txt` 说明原因
+3. 原位 TM 上三套神经分数（施旺 / 神经营养 / 轴突导向）及负相关基因 → `06_neural_invasion/`
+4. 三种神经分数分别 vs 配对肺 → `07_neural_vs_lung/` 与 `08_summary/Q4_*`
+
+先看 `results_GSE273439/08_summary/`。spot 不是独立生物学重复，主结论用「两鼠都过阈值」。跳过富集可设环境变量 `GSE273439_SKIP_ENRICHMENT=1`。
+
 ## 小鼠转移组学对照文献
 
 本仓库样品是人 BRCA 细胞 TG 敲低 RNA-seq，不是小鼠组织。若要用「原位 vs 肺/骨/肝/脑」公开数据做签名 overlap，见：

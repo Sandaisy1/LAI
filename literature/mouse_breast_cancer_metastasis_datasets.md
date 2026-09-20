@@ -189,6 +189,8 @@ GSE300613 是人源细胞在小鼠体内，基因表达是人/鼠混合；用来
 
 这不是 bulk TPM，而是 **10x Visium FFPE**（Space Ranger → mm10）。两只 BALB/c（Mouse 627 / 628），各一块原发乳腺瘤（TM）和一块肺（LUNG），共 4 个 visium 切片。文章里的 **Nanostring DSP**（人原发瘤 + 肝转移 24 个 ROI、stromal Met 签名）**不在 GEO**，在期刊 Supplementary Table 1–7。
 
+配对分析脚本：`GSE273439_Mouse_breast.R`（627 原位对 627 肺，628 对 628；本套没有骨）。
+
 **必下这一个包（约 295 MB），四个样品全在里面：**
 
 ```
