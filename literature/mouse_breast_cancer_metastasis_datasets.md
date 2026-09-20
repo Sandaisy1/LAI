@@ -186,10 +186,63 @@ https://ftp.ncbi.nlm.nih.gov/geo/series/GSE146nnn/GSE146012/matrix/GSE146012_ser
 
 | 数据 | 文章 | 模型 | 材料 | 类型 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| **GSE54773** | *Science Translational Medicine* 2020. Connexins orchestrate progression of breast cancer metastasis to the brain. DOI: 10.1126/scitranslmed.aax8933 | 4T1 原位筛选：4T1-T2（原发）、4T1-LM2（肺）、4T1-BM2（脑） | 各 3 只鼠来源细胞系，体外平行培养后抽 RNA | 芯片，9 个样本 | **同一亲本、三个解剖部位**；测的是细胞系不是新鲜脑组织 |
+| **GSE54773** | Lorusso et al. *Science Translational Medicine* 2022. Connexins orchestrate progression of breast cancer metastasis to the brain by promoting FAK activation. DOI: 10.1126/scitranslmed.aax8933. PMID: 36070364 | 4T1 原位筛选：4T1-T2（原发）、4T1-LM2（肺）、4T1-BM2（脑） | 各 3 只独立小鼠来源细胞系，体外平行培养后抽 RNA | Affymetrix 芯片，9 个样本 | **同一亲本、三个解剖部位**；测的是细胞系不是新鲜脑组织；**该下哪些见下文** |
 | E-MTAB-16621 | 见 1.2 | VO-PyMT 心内 | 脑转移灶 + 近/远端间质 | scRNA-seq | 新鲜组织单细胞，无配对原发瘤 |
 
 脑转移 TMT 蛋白组（机制文，未必有完整组织库）：IL6/CCL2 from M2-polarized microglia… *Front Pharmacol* 2025. DOI: 10.3389/fphar.2025.1547333。
+
+#### GSE54773 该下哪些
+
+这是 **Affymetrix Mouse Gene 1.0 ST** 芯片（平台 **GPL6246**，transcript/gene version），不是 RNA-seq，也不是 Visium。GEO 提交者 Lorusso / Rüegg（Fribourg）；对应 STM 2022 connexin/FAK 脑转移文。9 个 GSM：原发衍生系 4T1-T2 ×3、肺衍生系 4T1-LM2 ×3、脑衍生系 4T1-BM2 ×3。没有骨、肝。测的是体内筛选后再**体外平行培养**的细胞系，不是新鲜原发/转移组织。
+
+和 GSE146012 / GSE273439 不同：这里的 **series matrix 就是表达矩阵**（已做 RMA，约 35557 探针 × 9 样品，数值大约 2–12，相当于 log2），`data_row_count = 35557`，**可以直接拿来做 limma，不要再跑 DESeq2**。
+
+**必下这一个（约 1.2 MB）：**
+
+```
+https://ftp.ncbi.nlm.nih.gov/geo/series/GSE54nnn/GSE54773/matrix/GSE54773_series_matrix.txt.gz
+```
+
+表头是 `ID_REF`（数字探针 ID，如 `10338001`）加 9 列 GSM。矩阵里**没有基因符号**，分析前要映射到小鼠 symbol。
+
+| GSM | 标题 | 细胞系 | 来源 | CEL 文件 |
+| --- | --- | --- | --- | --- |
+| GSM1323771 | 4T1-T2 primary tumor from mouse 1 | 4T1-T2 | 原发瘤衍生系 | `GSM1323771_GL_T58.CEL.gz` |
+| GSM1323772 | 4T1-T2 primary from mouse 2 | 4T1-T2 | 原发瘤衍生系 | `GSM1323772_GL_T59.CEL.gz` |
+| GSM1323773 | 4T1-T2 primary from mouse 3 | 4T1-T2 | 原发瘤衍生系 | `GSM1323773_GL_T60.CEL.gz` |
+| GSM1323768 | 4T1-LM2 lung met from mouse 1 | 4T1-LM2 | 肺转移衍生系 | `GSM1323768_GL_L64.CEL.gz` |
+| GSM1323769 | 4T1-LM2 lung met from mouse 2 | 4T1-LM2 | 肺转移衍生系 | `GSM1323769_GL_L65.CEL.gz` |
+| GSM1323770 | 4T1-LM2 lung met from mouse 3 | 4T1-LM2 | 肺转移衍生系 | `GSM1323770_GL_L66.CEL.gz` |
+| GSM1323765 | 4T1-BM2 brain met from mouse 1 | 4T1-BM2 | 脑转移衍生系 | `GSM1323765_GL_B74.CEL.gz` |
+| GSM1323766 | 4T1-BM2 brain met from mouse 2 | 4T1-BM2 | 脑转移衍生系 | `GSM1323766_GL_B77.CEL.gz` |
+| GSM1323767 | 4T1-BM2 brain met from mouse 3 | 4T1-BM2 | 脑转移衍生系 | `GSM1323767_GL_B96.CEL.gz` |
+
+GEO overall design 写明是 **9 只独立小鼠、每种细胞系 3 只**，解冻后平行培养。标题里的 mouse 1/2/3 是**该细胞系的生物学重复编号**，不是同一只鼠的原发对转移。不要把 T2-mouse1 和 LM2-mouse1 当成一对一配对；比较用 3 vs 3 组间 limma（T2 vs LM2、T2 vs BM2），再取肺特异 / 脑特异。
+
+**建议同时下探针注释（约 7.0 MB），否则只有探针号：**
+
+```
+https://ftp.ncbi.nlm.nih.gov/geo/platforms/GPL6nnn/GPL6246/annot/GPL6246.annot.gz
+```
+
+列里有 `Gene symbol` / `Gene ID`（Entrez）。也可以不下载这个文件，分析时用 Bioconductor `mogene10sttranscriptcluster.db`。
+
+**只有要自己重做 RMA 时才下 RAW（约 36 MB，9 个 CEL.gz 全在里面）：**
+
+```
+https://ftp.ncbi.nlm.nih.gov/geo/series/GSE54nnn/GSE54773/suppl/GSE54773_RAW.tar
+```
+
+series matrix 已经是 RMA，一般不必重算。
+
+**默认不要下：**
+
+- `GSE54773_family.soft.gz` / `GSE54773_family.xml.tgz`（各约 13 MB）— 和 series matrix 重复
+- `GPL6246_family.soft.gz` — 整个平台家族，**约 7 GB**，不要下
+- 单个 GSM 的 CEL — 已经打进 `GSE54773_RAW.tar`
+- SRA FASTQ — 这是芯片，没有测序 reads
+
+放到 `E:/R/Mouse Breast/GSE54773`。没有骨；脑转移是这套相对 GSE146012 / GSE273439 多出来的器官。
 
 ### 2.5 淋巴结
 
@@ -293,7 +346,7 @@ Mouse_627_TM/
 2. **GSE146012** 补充文件 `GSE146012_RNA_seq_logtransformed_count.txt.gz`（4T1 原位 vs 肺；配对脚本 `GSE146012_Mouse_breast.R`）
 3. **GSE37975** Series Matrix（4T1.2 原位 vs 骨，芯片）
 4. **GSE238214** Series Matrix（原位 vs 肝，芯片）
-5. **GSE54773** Series Matrix（原发 / 肺 / 脑衍生系，芯片）
+5. **GSE54773** 只下 `GSE54773_series_matrix.txt.gz`（RMA 芯片矩阵，原发/肺/脑衍生系；探针注释用 `GPL6246.annot.gz` 或 Bioconductor；见 §2.4）
 6. **PXD055261** MaxQuant/蛋白表（四器官 EV 蛋白）
 7. 若要单细胞多器官：E-MTAB-16621 或 GSE252507 的 h5ad / 10x 矩阵
 8. 若要原位 vs 肺的空间转录组：**GSE273439** 只下 `GSE273439_RAW.tar`（Visium MTX + 坐标 + PNG；见 §4.1）
