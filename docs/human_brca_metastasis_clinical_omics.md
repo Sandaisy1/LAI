@@ -13,10 +13,11 @@
 | 脑转移配对 RNA | Cosgrove / Varešlija（GSE184869 / GSE173661） |
 | 肺 / 胸膜配对 RNA | Sinn 等（GSE145752，NanoString 269 基因） |
 | 多器官转移灶部位比较（转移灶活检为主） | Brasó-Maristany（GSE175692）；Zhang（GSE14020） |
-| 原发 vs 淋巴结蛋白组 | Pozniak / Geiger（PXD000815） |
+| 原发 vs 淋巴结蛋白组 | Pozniak / Geiger（PXD000815）；复旦余科达/邵志敏 65 对（Protein & Cell 2026） |
 | 单细胞 / 空间、临床活检 | Klughammer HTAN（Nat Med 2024） |
+| 复旦邵志敏 / 江一舟组 | 见下方 **F 节**：原发多组学很大；远处转移公开数据几乎全是 DNA panel / IHC，不是配对 RNA/蛋白 |
 
-**不要**把下列数据当成「人源转移组织」：`GSE2603`、`GSE5327`（原发灶 + 肺转移**临床结局**，没有转移灶活检）、TCGA-BRCA / CPTAC-BRCA（几乎全是原发）、MDA-MB-231 衍生肺/骨/脑亚系。
+**不要**把下列数据当成「人源转移组织」：`GSE2603`、`GSE5327`（原发灶 + 肺转移**临床结局**，没有转移灶活检）、TCGA-BRCA / CPTAC-BRCA / **CBCGA 与 FUSCC 原发 TNBC**（几乎全是原发）、MDA-MB-231 衍生肺/骨/脑亚系。
 
 ---
 
@@ -118,7 +119,8 @@
   - 数据走 HTAN / CELLxGENE，不在本仓库 Cuffdiff 流程里分析。
 - **Labrie et al.**, SMMART / HTAN, *Cell Reports Medicine* (2022). DOI: [10.1016/j.xcrm.2022.100525](https://doi.org/10.1016/j.xcrm.2022.100525)
   - **1 例患者** 3.5 年：原发、多次肝活检、骨活检；DNA / RNA / 蛋白 / 多重空间成像。适合个案，不适合队列统计。
-- **GSE225600**：4 例患者原发 + 配对转移淋巴结的 scRNA + Visium。淋巴结，不是肺/骨/肝/脑。
+- **Liu, Yu, Shao et al.**, *Advanced Science* (2023)；GEO [GSE225600](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE225600)
+  - 复旦肿瘤 **4 对**原发 + 腋窝转移淋巴结，scRNA + Visium。通讯余科达，邵志敏为共同作者。淋巴结，不是肺/骨/肝/脑。
 - **GSE190772**：2 例骨转移 scRNA（转移灶为主）。
 
 ---
@@ -138,9 +140,58 @@ GSE2603 / GSE5327 只适用于「原发灶预测哪一类转移结局」，不�
 
 ---
 
+## F. 复旦大学附属肿瘤医院：邵志敏 / 江一舟课题组
+
+按原筛选标准核对：**临床组织 + 人源原发 + 人源转移（优先肺/骨/肝/脑）+ RNA 或蛋白**。
+
+**结论：该组目前没有公开的「配对原发 vs 肺/骨/肝/脑转移组织」全转录组或质谱蛋白组。** 组学主力是原发灶；转移相关公开队列主要是 484 基因 DNA panel 和 IHC。淋巴结层的 RNA/蛋白在同科室余科达组（邵志敏参与，江一舟不是通讯）。脑转移 RNA+蛋白在同医院内科胡夕春/张剑组，不是邵/江组。
+
+### F1. 最接近标准：原发 + 转移组织，但是淋巴结，且通讯多为余科达
+
+| 文章 | 组织 | 数据 | 作者关系 | 入口 |
+| --- | --- | --- | --- | --- |
+| **Zhai, Yu, Shao et al.**, *Protein & Cell* (2026). DOI: [10.1093/procel/pwag002](https://doi.org/10.1093/procel/pwag002) | 65 对治疗naive：**原发 + 腋窝转移淋巴结 + 癌旁**（195 份） | WES；RNA-seq（约 55 原发 / 58 淋巴结 / 51 癌旁）；TMT 蛋白组 65+65；磷酸化组 65 原发 / 55 淋巴结（8,588 蛋白，24,178 磷酸化位点） | 邵志敏作者；通讯余科达、谭敏佳、金怡婷。**江一舟不在作者中** | 原文补充表；ProteomeXchange 号需跟全文 Data availability |
+| **Liu, Yu, Shao et al.**, *Adv Sci* (2023) | 4 对原发 + 腋窝转移淋巴结 | scRNA + Visium | 通讯余科达；邵志敏共同作者 | GEO `GSE225600` |
+
+淋巴结是区域转移，不要写成肺/骨/肝/脑。该文结论是：淋巴结转移差异主要在**蛋白/磷酸化**，基因组和转录组差别较小（ANGPTL4、HMGB1、MARCKSL1-S104、FKBP15-S320、PRKCB）。
+
+### F2. 邵志敏 + 江一舟：有转移组织，但是 DNA / IHC，不是 RNA 或蛋白组
+
+这些文章**有**人源转移活检（含肝、肺、淋巴结、胸壁；临床事件含骨），也常有配对原发，但分子层是靶向测序或免疫组化。
+
+- **Zhu, Jiang, Shao, Wang et al.**, *JCI* (2025/2026). DOI: [10.1172/JCI188989](https://www.jci.org/articles/view/188989)
+  - 296 例转移性 TNBC 的**转移灶** 484 基因 panel；临床转移事件：淋巴结 213、肺 142、骨 129、肝 99、胸壁 93。活检部位以淋巴结、肝、肺、胸壁为主。另 105 对原发–转移验证 `PKD1`。
+  - RNA-seq 出现在机制实验（细胞系/小鼠），不是病人转移灶转录组。
+  - 数据：NODE `OEZ00021764`、`OEZ00021765`。
+- **Jiang, Shao et al.**, FUTURE 试验, *Cell Research* (2021). DOI: [10.1038/s41422-020-0375-9](https://www.nature.com/articles/s41422-020-0375-9)
+  - 难治转移性 TNBC：对可及转移灶再活检，做 IHC 亚型（AR / CD8 / FOXC1）+ 484 基因 panel。部位含淋巴结、肺、肝、骨、胸壁、乳腺。**没有**转移灶 RNA-seq/蛋白组。
+- **Zhu, Jiang, Shao et al.**, *Cancer Biology & Medicine* (2024). DOI: [10.20892/j.issn.2095-3941.2024.0009](https://doi.org/10.20892/j.issn.2095-3941.2024.0009)
+  - 880 例（465 早期 + 415 转移）；40 对原发–转移。亚型用 IHC，不是转录组。MES 亚型容易转换并偏脑转移。
+
+### F3. 邵 / 江组大规模组学：几乎全是原发灶（有转移随访，没有转移组织组学）
+
+| 队列 | 文章 | 样本 | 数据 | 注意 |
+| --- | --- | --- | --- | --- |
+| FUSCC TNBC | Jiang, Shao et al., *Cancer Cell* (2019). DOI: [10.1016/j.ccell.2019.02.001](https://doi.org/10.1016/j.ccell.2019.02.001) | 465 例**原发** TNBC；随访中 65 例复发/转移 | WES 279、CNA 401、RNA-seq 360 | 原发 + 结局，不是转移组织 |
+| CBCGA | Jiang, Shao et al., *Nature Cancer* (2024). DOI: [10.1038/s43018-024-00725-0](https://www.nature.com/articles/s43018-024-00725-0) | 773 例中国乳腺癌**原发** | 基因组、转录组 752、蛋白组 278、代谢组等 | 亚洲最大原发多组学，不是转移图谱 |
+| FUSCC-BRCA | Ma, Jiang, Shao et al., *Cancer Cell* (2024). DOI: [10.1016/j.ccell.2024.03.006](https://doi.org/10.1016/j.ccell.2024.03.006) | 873 例亚洲乳腺癌**原发** | WES+CNA 873、RNA-seq 842、TMT 蛋白 261、代谢 509 | 同上 |
+| TNBC 蛋白组 | Gong, Jiang, Shao et al., *Cell Reports* (2022). DOI: [10.1016/j.celrep.2022.110460](https://doi.org/10.1016/j.celrep.2022.110460) | 90 例 TNBC **原发** | 蛋白组 / 磷酸化 / 转录因子占用 | 原发 |
+| HER2-low 蛋白 | Dai, Jiang, Shao et al., *Nat Commun* (2023) | 中国乳腺癌原发 | TMT 蛋白组 | iProX `PXD042886` |
+
+这些可以做「原发灶预测转移风险」，**不能**做「转移灶相对原发灶的 RNA/蛋白差异」。
+
+### F4. 同医院、但不是邵志敏 / 江一舟组（避免混进）
+
+- **Lin, Zhang Jian, Hu Xichun et al.**, *Nature Communications* (2026). DOI: [10.1038/s41467-026-72927-2](https://www.nature.com/articles/s41467-026-72927-2)
+  - 复旦肿瘤内科：TNBC **原发 vs 脑转移** 的 RNA-seq + 蛋白组 + 代谢组；另有配对脑脊液/血浆。NDUFB9。
+  - 数据：NGDC [PRJCA032856](https://ngdc.cncb.ac.cn/bioproject/browse/PRJCA032856)、OMIX 代谢组。这是 FUSCC 里最接近「原发 + 脑转移 RNA/蛋白」的公开队列，课题组是张剑/胡夕春，不是邵/江。
+
+---
+
 ## 数据类型小结
 
-1. **同时有人源原发和远处转移、且 RNA 可下载或可申请**：AURORA US、RAP、AURORA EU、Cosgrove/Varešlija 脑转移、Cejalvo/ConvertHER、Sinn 肺/胸膜。
-2. **肺、骨、肝、脑在同一研究里都出现**：AURORA US、RAP、Cejalvo（骨/肝/肺明确，脑很少）、Brasó-Maristany（转移灶）、Zhang GSE14020（仅转移灶）、Klughammer（肝多、骨/肺/脑少）。
-3. **蛋白组**：淋巴结层最完整（Pozniak PXD000815）。远处器官几乎只有配对脑转移的小队列（JCO 2025 摘要、PXD073600）。公开的临床「原发 vs 肺/骨/肝」深度蛋白组仍然很少。
-4. **单细胞/空间**：HTAN Klughammer 是目前最大的临床转移活检图谱，但原发配对有限，肝活检占多数。
+1. **同时有人源原发和远处转移、且 RNA 可下载或可申请**：AURORA US、RAP、AURORA EU、Cosgrove/Varešlija 脑转移、Cejalvo/ConvertHER、Sinn 肺/胸膜。复旦邵/江组目前没有对等的公开队列。
+2. **肺、骨、肝、脑在同一研究里都出现**：AURORA US、RAP、Cejalvo（骨/肝/肺明确，脑很少）、Brasó-Maristany（转移灶）、Zhang GSE14020（仅转移灶）、Klughammer（肝多、骨/肺/脑少）。邵/江组 JCI 296 例转移性 TNBC 覆盖这些器官，但是 **DNA panel**。
+3. **蛋白组**：淋巴结层最完整（Pozniak PXD000815；复旦余科达/邵志敏 65 对 TMT+磷酸化）。远处器官几乎只有配对脑转移的小队列（JCO 2025 摘要、PXD073600、FUSCC 张剑/胡夕春 NDUFB9）。公开的临床「原发 vs 肺/骨/肝」深度蛋白组仍然很少。
+4. **单细胞/空间**：HTAN Klughammer 是目前最大的临床转移活检图谱，但原发配对有限，肝活检占多数。复旦 `GSE225600` 是原发+淋巴结。
+5. **复旦邵/江组怎么用**：要 RNA/蛋白请用他们的**原发**队列（CBCGA / FUSCC TNBC）或余科达组淋巴结多组学；要肺/肝/骨转移组织目前只能用他们的 **DNA/IHC** 转移队列，或回到 AURORA/RAP。
