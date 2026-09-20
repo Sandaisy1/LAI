@@ -19,6 +19,7 @@
 #
 # 数据注意：
 #   - 已是 DESeq2 log 矩阵，不要再跑 DESeq2
+#   - 表达矩阵文件名可以是 .txt.gz / .txt；找不到会列出目录并尝试从 NCBI 下载
 #   - 原发只有 Tumor-1/2；MFP-Met-3、TVI-Met-3 没有对应原发 3 号
 #   - 1-vs-1 无法估计 p，不伪造；p 值来自两对配对 limma
 #   - MFP-Met 与 TVI-Met 不合并
@@ -107,8 +108,11 @@ resolve_project_dir <- function() {
   candidates <- unique(candidates[nzchar(candidates)])
   looks_like <- function(d) {
     if (!dir.exists(d)) return(FALSE)
-    hits <- list.files(d, pattern = "GSE146012.*RNA_seq_logtransformed_count",
-                       recursive = TRUE, ignore.case = TRUE)
+    hits <- list.files(
+      d,
+      pattern = "GSE146012.*(logtransformed|log.?transformed|RNA.?seq|count_tracking|EnsembleID)",
+      recursive = TRUE, ignore.case = TRUE
+    )
     length(hits) > 0
   }
   for (d in candidates) {
@@ -117,16 +121,90 @@ resolve_project_dir <- function() {
   normalizePath(getwd(), winslash = "/", mustWork = FALSE)
 }
 
-find_count_file <- function(root) {
-  hits <- list.files(
-    root, pattern = "GSE146012.*RNA_seq_logtransformed_count.*\\.(txt|csv)(\\.gz)?$",
-    recursive = TRUE, full.names = TRUE, ignore.case = TRUE
-  )
-  hits <- hits[!grepl("results_GSE146012", hits)]
-  if (length(hits) == 0) {
-    stop("未找到 GSE146012_RNA_seq_logtransformed_count.txt.gz。请放到: ", root)
+data_files <- function(root) {
+  hits <- list.files(root, recursive = TRUE, full.names = TRUE, include.dirs = FALSE)
+  hits[!grepl("results_GSE146012|[\\\\/]\\.", hits)]
+}
+
+is_gzip_file <- function(path) {
+  con <- file(path, "rb")
+  on.exit(close(con), add = TRUE)
+  b <- readBin(con, "raw", n = 2)
+  length(b) >= 2 && b[1] == as.raw(0x1f) && b[2] == as.raw(0x8b)
+}
+
+open_text_file <- function(path) {
+  if (grepl("\\.gz$", path, ignore.case = TRUE) || isTRUE(is_gzip_file(path))) {
+    gzfile(path, "rt")
+  } else {
+    file(path, "rt")
   }
-  hits[[1]]
+}
+
+peek_header <- function(path, n = 1) {
+  con <- tryCatch(open_text_file(path), error = function(e) NULL)
+  if (is.null(con)) return("")
+  on.exit(close(con), add = TRUE)
+  paste(readLines(con, n = n, warn = FALSE), collapse = " ")
+}
+
+is_count_matrix_file <- function(path) {
+  bn <- basename(path)
+  if (grepl("results_GSE146012|DEG_|series_matrix|family\\.soft|ChIP|\\.(tar|pdf|png|jpg|zip|r|rdata|rds)$",
+            bn, ignore.case = TRUE)) {
+    return(FALSE)
+  }
+  if (grepl("logtransformed|log.?transformed_count|RNA[_.-]?seq.*count", bn, ignore.case = TRUE)) {
+    return(TRUE)
+  }
+  if (!grepl("\\.(txt|csv|tsv|gz)$", bn, ignore.case = TRUE) && grepl("\\.", bn)) {
+    return(FALSE)
+  }
+  hdr <- tryCatch(peek_header(path, 2), error = function(e) "")
+  grepl("EnsembleID|EnsemblID|GeneSymbol", hdr, ignore.case = TRUE) &&
+    grepl("Tumor|4T1|MFP", hdr, ignore.case = TRUE)
+}
+
+download_count_matrix <- function(dest_dir) {
+  dest <- file.path(dest_dir, "GSE146012_RNA_seq_logtransformed_count.txt.gz")
+  urls <- c(
+    "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE146nnn/GSE146012/suppl/GSE146012_RNA_seq_logtransformed_count.txt.gz",
+    "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE146012&format=file&file=GSE146012_RNA_seq_logtransformed_count.txt.gz"
+  )
+  for (u in urls) {
+    message("未在本地找到表达矩阵，正在下载: ", u)
+    ok <- tryCatch({
+      utils::download.file(u, destfile = dest, mode = "wb", quiet = FALSE)
+      file.exists(dest) && file.info(dest)$size > 10000
+    }, error = function(e) {
+      message("下载失败: ", e$message)
+      FALSE
+    })
+    if (isTRUE(ok)) return(normalizePath(dest, winslash = "/", mustWork = FALSE))
+  }
+  NA_character_
+}
+
+find_count_file <- function(root) {
+  files <- data_files(root)
+  ranked <- files[order(
+    !grepl("logtransformed|log.?transformed", basename(files), ignore.case = TRUE),
+    !grepl("GSE146012", basename(files), ignore.case = TRUE)
+  )]
+  hits <- ranked[vapply(ranked, is_count_matrix_file, logical(1))]
+  if (length(hits) > 0) return(hits[[1]])
+  dl <- download_count_matrix(root)
+  if (!is.na(dl)) return(dl)
+  listing <- if (length(files) == 0) "(目录是空的)" else paste("  -", basename(files), collapse = "\n")
+  stop(
+    "未找到表达矩阵 GSE146012_RNA_seq_logtransformed_count.txt.gz。\n",
+    "当前目录: ", root, "\n",
+    "现有文件:\n", listing, "\n",
+    "请把 GEO 补充文件放到该目录（浏览器可能已自动解压成 .txt，也可以）。\n",
+    "下载地址:\n",
+    "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE146nnn/GSE146012/suppl/GSE146012_RNA_seq_logtransformed_count.txt.gz\n",
+    "不要用 series_matrix（是空的）或 DEG_ 表当表达矩阵。"
+  )
 }
 
 project_dir <- resolve_project_dir()
@@ -154,7 +232,12 @@ log_msg("Paired by replicate number: Tumor-1 vs Met-1, Tumor-2 vs Met-2")
 # -----------------------------------------------------------------------------
 count_file <- find_count_file(project_dir)
 log_msg("Count file: ", count_file)
-raw <- utils::read.delim(count_file, check.names = FALSE, stringsAsFactors = FALSE)
+read_delim_auto <- function(path) {
+  con <- open_text_file(path)
+  on.exit(close(con), add = TRUE)
+  utils::read.delim(con, check.names = FALSE, stringsAsFactors = FALSE)
+}
+raw <- read_delim_auto(count_file)
 names(raw) <- gsub('^\\"|\\"$', "", names(raw))
 ens_col <- intersect(c("EnsembleID", "EnsemblID", "ensembl", "gene_id"), names(raw))
 sym_col <- intersect(c("GeneSymbol", "gene", "symbol", "Gene"), names(raw))

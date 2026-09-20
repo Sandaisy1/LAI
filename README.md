@@ -135,7 +135,7 @@ source("GSE273439_Mouse_breast.R")
 
 ## GSE146012 小鼠原位 vs 配对肺（4T1 GFP+ bulk）
 
-数据目录：`E:/R/Mouse Breast/GSE146012`，放入 `GSE146012_RNA_seq_logtransformed_count.txt.gz`。把 `GSE146012_Mouse_breast.R` 拷到该目录后：
+数据目录：`E:/R/Mouse Breast/GSE146012`，放入 `GSE146012_RNA_seq_logtransformed_count.txt.gz`（浏览器解压成 `.txt` 也可以）。把 `GSE146012_Mouse_breast.R` 拷到该目录后：
 
 ```r
 setwd("E:/R/Mouse Breast/GSE146012")
