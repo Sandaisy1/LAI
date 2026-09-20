@@ -133,6 +133,24 @@ source("GSE273439_Mouse_breast.R")
 
 先看 `results_GSE273439/08_summary/`。spot 不是独立生物学重复，主结论用「两鼠都过阈值」。跳过富集可设环境变量 `GSE273439_SKIP_ENRICHMENT=1`。
 
+## GSE146012 小鼠原位 vs 配对肺（4T1 GFP+ bulk）
+
+数据目录：`E:/R/Mouse Breast/GSE146012`，放入 `GSE146012_RNA_seq_logtransformed_count.txt.gz`。把 `GSE146012_Mouse_breast.R` 拷到该目录后：
+
+```r
+setwd("E:/R/Mouse Breast/GSE146012")
+source("GSE146012_Mouse_breast.R")
+```
+
+矩阵已经是 DESeq2 log，**不要再跑 DESeq2**。**一一对应：** Tumor-1 只对 MFP-Met-1（及 TVI-Met-1），Tumor-2 只对 Met-2；不要把两只原发和三只肺混成一组，也不要把 MFP 与 TVI 合并。Met-3 没有 Tumor-3，只相对原发均值作补充、不算真配对。入选为 **p < 0.05**（两对配对 limma；1-vs-1 无法估计 p 则只按 FC），下调倍数 **原位/肺 ≥ 1 和 ≥ 1.25**。只做这两档 FC，**没有 Top50–300**。
+
+1. 配对肺下调 → `results_GSE146012/01_lung_down_pair1_Tumor1_vs_MFPMet1/`、`01_lung_down_pair2_Tumor2_vs_MFPMet2/`、`01_lung_down_both_pairs_MFP/`。TVI 路径单独在 `01b_*`。**本套数据没有骨**，`03_bone_not_in_GSE146012/00_NOTE.txt` 说明原因
+2. 路径特异（MFP 下调而 TVI 未同时下调；不能做骨器官特异）→ `02_MFP_lung_specific_vs_TVI/`
+3. 原位 Tumor 上三套神经分数（施旺 / 神经营养 / 轴突导向）及负相关基因 → `06_neural_invasion/`
+4. 三种神经分数分别 vs 配对 MFP 肺 → `07_neural_vs_lung/` 与 `08_summary/Q4_*`
+
+先看 `results_GSE146012/08_summary/`。跳过富集可设 `GSE146012_SKIP_ENRICHMENT=1`。
+
 ## 小鼠转移组学对照文献
 
 本仓库样品是人 BRCA 细胞 TG 敲低 RNA-seq，不是小鼠组织。若要用「原位 vs 肺/骨/肝/脑」公开数据做签名 overlap，见：

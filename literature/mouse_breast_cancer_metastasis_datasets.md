@@ -140,7 +140,7 @@ https://ftp.ncbi.nlm.nih.gov/geo/series/GSE146nnn/GSE146012/suppl/GSE146012_RNA_
 | `4T1-MFP-Met-1/2/3` | GSM4351983–85 | 肺转移（GFP+） | 脂肪垫接种后自发到肺 |
 | `4T1-TVI-Met-1/2/3` | GSM4351986–88 | 肺转移（GFP+） | 尾静脉实验性肺定植 |
 
-比较时 **不要把 MFP-Met 和 TVI-Met 并成一组**：MFP 才接近「原位 → 肺」；TVI 跳过原发瘤。原发只有 n=2，也不是一对一配对。
+配对分析脚本：`GSE146012_Mouse_breast.R`（Tumor-1 对 MFP-Met-1 / TVI-Met-1，Tumor-2 对 Met-2；本套没有骨）。比较时 **不要把 MFP-Met 和 TVI-Met 并成一组**：MFP 才接近「原位 → 肺」；TVI 跳过原发瘤。原发只有 n=2；Met-3 没有对应 Tumor-3，脚本按编号做 1 对 1，不要把两只原发和三只肺混成一组。
 
 **建议同时下（都很小）：**
 
@@ -290,7 +290,7 @@ Mouse_627_TM/
 若下一步要和 TG 上调基因做 overlap，建议按这个顺序取矩阵（不必一次下完原始 FASTQ）：
 
 1. **GSE165393** 处理后的 counts / RSEM（原位 + 肺 + LN + 骨髓）
-2. **GSE146012** 补充文件 `GSE146012_RNA_seq_logtransformed_count.txt.gz`（4T1 原位 vs 肺）
+2. **GSE146012** 补充文件 `GSE146012_RNA_seq_logtransformed_count.txt.gz`（4T1 原位 vs 肺；配对脚本 `GSE146012_Mouse_breast.R`）
 3. **GSE37975** Series Matrix（4T1.2 原位 vs 骨，芯片）
 4. **GSE238214** Series Matrix（原位 vs 肝，芯片）
 5. **GSE54773** Series Matrix（原发 / 肺 / 脑衍生系，芯片）
