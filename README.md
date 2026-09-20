@@ -2,6 +2,8 @@
 
 针对 `NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5` 四个样品的 RNA-seq 分析。两个 NTC **不在 1-vs-1 比较里合并**。
 
+人源乳腺癌转移的**临床组织** RNA/蛋白文献（必须同时有原发组织和转移组织，优先肺/骨/肝/脑）见 `docs/human_brca_metastasis_clinical_omics.md`。
+
 ## 数据位置
 
 默认读取 `E:/R/TG_BRCA/TG`。输入为 Cuffdiff 文件（不再使用 Excel）：

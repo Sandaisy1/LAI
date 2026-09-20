@@ -1,0 +1,72 @@
+---
+description: 人源乳腺癌转移临床组织 RNA/蛋白组：必须同时有原发和转移组织
+globs: "**/*.{R,r,Rmd,md,csv}"
+alwaysApply: false
+---
+
+# 人源乳腺癌转移临床组学文献与数据
+
+仅当任务是**寻找/使用人源乳腺癌转移的临床组织 RNA 或蛋白数据**时按本规则。不要套用 `NTC`/`TG_sh` Cuffdiff，不要改 `TG_RNAseq_*.R`。
+
+文献目录：`docs/human_brca_metastasis_clinical_omics.md` 与 `docs/human_brca_metastasis_clinical_omics.csv`。
+
+## 必须同时满足
+
+1. **临床样本**（手术/活检/尸检），不是细胞系、小鼠、PDX 冒充病人
+2. **人源原发（原位）组织** 和 **人源转移组织**；转移优先肺、骨、肝、脑（淋巴结单独标注，不要写成远处器官）
+3. 分子层为 **RNA 或蛋白**（芯片、NanoString、RNA-seq、scRNA、空间转录组、质谱蛋白组均可）
+
+「原发灶 + 日后肺/骨/脑转移随访结局」**不等于**有转移组织。
+
+```r
+# ❌ BAD: GSE2603 / GSE5327 原发芯片 + lm event 当成「肺转移组织」
+# ❌ BAD: GSE14020 / GSE175692 只有转移灶，却写成配对原发–转移
+# ❌ BAD: 小鼠或 MDA-MB-231 肺/骨/脑亚系当病人
+# ✅ GOOD: AURORA US GSE209998、RAP GSE110590、脑转移 GSE184869：人源原发 + 转移组织
+```
+
+## 优先数据集（原发 + 远处转移组织）
+
+| 用途 | 队列 | 入口 |
+| --- | --- | --- |
+| 多器官 bulk RNA，公开 | AURORA US；UNC RAP | GEO `GSE209998` / `GSE212375`；`GSE110590`；`GSE193103` |
+| 最大配对 RNA-seq | AURORA EU | 申请 `aurora-ctc.hubruxelles.be` |
+| 配对脑转移 RNA | Cosgrove / Varešlija | `GSE184869`；`GSE173661` |
+| 配对肺/胸膜 RNA | Sinn 2020 | `GSE145752`（NanoString，非全转录组） |
+| 配对多器官 NanoString | Cejalvo / ConvertHER | `GSE92977` |
+| 原发 vs 淋巴结蛋白 | Pozniak / Geiger；复旦余科达/邵 65 对 | PRIDE `PXD000815`；*Protein & Cell* 2026 |
+| 临床 sc/空间 | Klughammer HTAN 2024 | HTAN / CELLxGENE |
+
+## 转移灶为主（分析时必须写「非配对原发」）
+
+- `GSE175692`：184 个转移灶、11 器官（肝/肺/脑/骨），几乎无配对原发
+- `GSE14020`：58 个转移灶芯片，无原发
+- MET500：泛癌转移灶 RNA，乳腺癌配对原发很少
+
+## 复旦邵志敏 / 江一舟组（单独核对）
+
+该组**没有**公开的配对原发 vs 肺/骨/肝/脑转移组织 RNA-seq 或质谱蛋白组。
+
+- 原发多组学（RNA/蛋白很大，不是转移组织）：CBCGA、FUSCC TNBC 465、FUSCC-BRCA、`PXD042886`
+- 转移组织但是 DNA/IHC：JCI `PKD1` 296 例转移灶 484-gene panel（NODE `OEZ00021764`）；FUTURE 试验；*Cancer Biol Med* 2024 IHC 亚型
+- 原发 + 淋巴结 RNA/蛋白：余科达组（邵参与）*Protein & Cell* 2026；`GSE225600`。江一舟不是这些文的通讯
+- 同医院脑转移 RNA+蛋白：张剑/胡夕春 `PRJCA032856`（NDUFB9），不是邵/江组
+
+## 中山大学宋尔卫组（单独核对）
+
+该组**没有**公开的配对原发 vs 肺/骨/肝/脑转移组织 RNA-seq 或组织质谱蛋白组。临床转移组织主要是 IHC/IF。
+
+- 人源原发 + 肝转移灶 IF：Yang/Su/Song *Nature* 2020（CCDC25 / NET）；2026 *Nat Commun* 肝转移 IF + **小鼠** 4T1 scRNA
+- 原发 IHC + 血清：Su/Song *Cancer Cell* 2014（GM-CSF–CCL18）；`GSE51938` 是细胞系细胞因子芯片
+- 晚期 TNBC 血浆 Olink：Liu Jieqiong/Song *Nat Commun* 2022（NCT04303741），不是组织蛋白组
+- 同校不同医院：中肿唐海林 *Adv Sci* 2023 肝/脑转移 scRNA，**不是**宋组；`GSE180286` 是南京管晓翔，也不是宋组
+
+```r
+# ❌ BAD: 把 Nature 2020 肝转移 IF 写成 RNA-seq 队列
+# ❌ BAD: 把唐海林中肿肝/脑 scRNA 或 GSE180286 算进宋尔卫组
+# ✅ GOOD: 宋组用于 NET/CCDC25 机制和肝转移组织验证；配对 RNA 仍用 AURORA/RAP
+```
+
+## 禁止当作转移组织
+
+`GSE2603`、`GSE5327`、`GSE12276`、TCGA-BRCA、CPTAC-BRCA、CBCGA、FUSCC 原发 TNBC、Cimas 2019（仅原发蛋白 + CNS 结局）。
