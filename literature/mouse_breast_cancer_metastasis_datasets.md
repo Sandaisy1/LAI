@@ -217,7 +217,7 @@ https://ftp.ncbi.nlm.nih.gov/geo/series/GSE54nnn/GSE54773/matrix/GSE54773_series
 | GSM1323766 | 4T1-BM2 brain met from mouse 2 | 4T1-BM2 | 脑转移衍生系 | `GSM1323766_GL_B77.CEL.gz` |
 | GSM1323767 | 4T1-BM2 brain met from mouse 3 | 4T1-BM2 | 脑转移衍生系 | `GSM1323767_GL_B96.CEL.gz` |
 
-GEO overall design 写明是 **9 只独立小鼠、每种细胞系 3 只**，解冻后平行培养。标题里的 mouse 1/2/3 是**该细胞系的生物学重复编号**，不是同一只鼠的原发对转移。不要把 T2-mouse1 和 LM2-mouse1 当成一对一配对；比较用 3 vs 3 组间 limma（T2 vs LM2、T2 vs BM2），再取肺特异 / 脑特异。
+配对分析脚本：`GSE54773_Mouse_breast.R`（T2-1 对 LM2-1 / BM2-1，2 对 2，3 对 3；本套没有骨）。GEO overall design 写明是 **9 只独立小鼠、每种细胞系 3 只**，解冻后平行培养。标题里的 mouse 1/2/3 是该细胞系的重复编号，不是同一只鼠的原发对转移；脚本仍按编号做 1 对 1，不要把 3 只原发和 3 只肺混成一组。器官特异用肺 vs 脑（没有骨）。
 
 **建议同时下探针注释（约 7.0 MB），否则只有探针号：**
 
@@ -346,7 +346,7 @@ Mouse_627_TM/
 2. **GSE146012** 补充文件 `GSE146012_RNA_seq_logtransformed_count.txt.gz`（4T1 原位 vs 肺；配对脚本 `GSE146012_Mouse_breast.R`）
 3. **GSE37975** Series Matrix（4T1.2 原位 vs 骨，芯片）
 4. **GSE238214** Series Matrix（原位 vs 肝，芯片）
-5. **GSE54773** 只下 `GSE54773_series_matrix.txt.gz`（RMA 芯片矩阵，原发/肺/脑衍生系；探针注释用 `GPL6246.annot.gz` 或 Bioconductor；见 §2.4）
+5. **GSE54773** 只下 `GSE54773_series_matrix.txt.gz`（RMA 芯片矩阵；配对脚本 `GSE54773_Mouse_breast.R`；探针注释 `GPL6246.annot.gz`；见 §2.4）
 6. **PXD055261** MaxQuant/蛋白表（四器官 EV 蛋白）
 7. 若要单细胞多器官：E-MTAB-16621 或 GSE252507 的 h5ad / 10x 矩阵
 8. 若要原位 vs 肺的空间转录组：**GSE273439** 只下 `GSE273439_RAW.tar`（Visium MTX + 坐标 + PNG；见 §4.1）

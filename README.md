@@ -151,6 +151,24 @@ source("GSE146012_Mouse_breast.R")
 
 先看 `results_GSE146012/08_summary/`。跳过富集可设 `GSE146012_SKIP_ENRICHMENT=1`。
 
+## GSE54773 小鼠原位衍生系 vs 配对肺/脑（芯片）
+
+数据目录：`E:/R/Mouse Breast/GSE54773`，放入 `GSE54773_series_matrix.txt.gz`（建议同时放 `GPL6246.annot.gz`）。把 `GSE54773_Mouse_breast.R` 拷到该目录后：
+
+```r
+setwd("E:/R/Mouse Breast/GSE54773")
+source("GSE54773_Mouse_breast.R")
+```
+
+矩阵已经是 RMA log2，**不要再跑 DESeq2**。**一一对应：** T2-1 只对 LM2-1 / BM2-1，T2-2 对 2 号，T2-3 对 3 号。GEO 写明 9 只独立小鼠，脚本仍按编号配对。入选为 **p < 0.05**（三对配对 limma；1-vs-1 无法估计 p 则只按 FC），下调倍数 **原位/转移 ≥ 1 和 ≥ 1.25**。只做这两档 FC，**没有 Top50–300**。
+
+1. 配对肺下调 → `results_GSE54773/01_lung_down_pair1_T2_1_vs_Lung_1/` … `01_lung_down_all_pairs/`。脑转移在 `01b_brain_down_*`。**本套数据没有骨**，`03_bone_not_in_GSE54773/00_NOTE.txt` 说明原因
+2. 器官特异（肺下调而脑未同时下调，或反过来）→ `02_lung_specific_vs_brain/`、`02b_brain_specific_vs_lung/`
+3. 原位 T2 上三套神经分数（施旺 / 神经营养 / 轴突导向）及负相关基因 → `06_neural_invasion/`
+4. 三种神经分数分别 vs 配对肺 → `07_neural_vs_lung/` 与 `08_summary/Q4_*`
+
+先看 `results_GSE54773/08_summary/`。跳过富集可设 `GSE54773_SKIP_ENRICHMENT=1`。
+
 ## 小鼠转移组学对照文献
 
 本仓库样品是人 BRCA 细胞 TG 敲低 RNA-seq，不是小鼠组织。若要用「原位 vs 肺/骨/肝/脑」公开数据做签名 overlap，见：
