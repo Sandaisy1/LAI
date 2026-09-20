@@ -1188,7 +1188,11 @@ if (!is.null(de_mfp_p2)) {
   write_table(de_mfp_p2[is_down_fc(de_mfp_p2$log2FC, 1.25), ],
               file.path(sum_dir, "Q1_pair2_Tumor2_vs_MFPMet2_FC1.25"))
 }
-q2s <- merged[mark_spec, ]
+q2s <- merged[mark_spec, , drop = FALSE]
+if ("pvalue" %in% names(merged) && any(!is.na(merged$pvalue))) {
+  q2s <- q2s[!is.na(q2s$pvalue) & q2s$pvalue < p_cutoff, , drop = FALSE]
+}
+q2s <- q2s[order(q2s$mean_pair_log2FC), , drop = FALSE]
 write_table(q2s, file.path(sum_dir, "Q2_MFP_lung_specific_vs_TVI"))
 writeLines("GSE146012 has no bone. Q2 bone-specific list does not exist.",
            file.path(sum_dir, "Q2_bone_specific_NOT_AVAILABLE.txt"))
@@ -1207,7 +1211,7 @@ n_tab <- data.frame(
   ),
   n_genes = c(
     vapply(q1_list, nrow, integer(1)),
-    sum(mark_spec, na.rm = TRUE),
+    nrow(q2s),
     0,
     vapply(neg_both, nrow, integer(1))
   ),
