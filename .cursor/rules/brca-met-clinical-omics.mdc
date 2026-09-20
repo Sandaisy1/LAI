@@ -52,10 +52,19 @@ alwaysApply: false
 - 原发 + 淋巴结 RNA/蛋白：余科达组（邵参与）*Protein & Cell* 2026；`GSE225600`。江一舟不是这些文的通讯
 - 同医院脑转移 RNA+蛋白：张剑/胡夕春 `PRJCA032856`（NDUFB9），不是邵/江组
 
+## 中山大学宋尔卫组（单独核对）
+
+该组**没有**公开的配对原发 vs 肺/骨/肝/脑转移组织 RNA-seq 或组织质谱蛋白组。临床转移组织主要是 IHC/IF。
+
+- 人源原发 + 肝转移灶 IF：Yang/Su/Song *Nature* 2020（CCDC25 / NET）；2026 *Nat Commun* 肝转移 IF + **小鼠** 4T1 scRNA
+- 原发 IHC + 血清：Su/Song *Cancer Cell* 2014（GM-CSF–CCL18）；`GSE51938` 是细胞系细胞因子芯片
+- 晚期 TNBC 血浆 Olink：Liu Jieqiong/Song *Nat Commun* 2022（NCT04303741），不是组织蛋白组
+- 同校不同医院：中肿唐海林 *Adv Sci* 2023 肝/脑转移 scRNA，**不是**宋组；`GSE180286` 是南京管晓翔，也不是宋组
+
 ```r
-# ❌ BAD: 把 CBCGA / FUSCC 原发 TNBC RNA 写成「复旦转移图谱」
-# ❌ BAD: 把 JCI 296 例 484-gene DNA 写成 RNA/蛋白组
-# ✅ GOOD: 淋巴结 RNA/蛋白用余科达/邵 65 对；远处器官 RNA 仍用 AURORA/RAP
+# ❌ BAD: 把 Nature 2020 肝转移 IF 写成 RNA-seq 队列
+# ❌ BAD: 把唐海林中肿肝/脑 scRNA 或 GSE180286 算进宋尔卫组
+# ✅ GOOD: 宋组用于 NET/CCDC25 机制和肝转移组织验证；配对 RNA 仍用 AURORA/RAP
 ```
 
 ## 禁止当作转移组织

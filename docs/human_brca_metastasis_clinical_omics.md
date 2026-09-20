@@ -15,7 +15,8 @@
 | 多器官转移灶部位比较（转移灶活检为主） | Brasó-Maristany（GSE175692）；Zhang（GSE14020） |
 | 原发 vs 淋巴结蛋白组 | Pozniak / Geiger（PXD000815）；复旦余科达/邵志敏 65 对（Protein & Cell 2026） |
 | 单细胞 / 空间、临床活检 | Klughammer HTAN（Nat Med 2024） |
-| 复旦邵志敏 / 江一舟组 | 见下方 **F 节**：原发多组学很大；远处转移公开数据几乎全是 DNA panel / IHC，不是配对 RNA/蛋白 |
+| 复旦邵志敏 / 江一舟组 | 见 **F 节**：原发多组学很大；远处转移公开数据几乎全是 DNA panel / IHC |
+| 中山大学宋尔卫组 | 见 **G 节**：机制强；临床组织主要是 IHC/IF（含肝转移），没有公开配对 RNA/蛋白组 |
 
 **不要**把下列数据当成「人源转移组织」：`GSE2603`、`GSE5327`（原发灶 + 肺转移**临床结局**，没有转移灶活检）、TCGA-BRCA / CPTAC-BRCA / **CBCGA 与 FUSCC 原发 TNBC**（几乎全是原发）、MDA-MB-231 衍生肺/骨/脑亚系。
 
@@ -188,10 +189,47 @@ GSE2603 / GSE5327 只适用于「原发灶预测哪一类转移结局」，不�
 
 ---
 
+## G. 中山大学孙逸仙纪念医院：宋尔卫课题组
+
+按同一标准核对。宋组以**转移机制**见长（GM-CSF–CCL18、NET–CCDC25、外泌体 HISLA），临床组织主要用于 IHC / IF / 血清，而不是 bulk RNA-seq 或组织质谱。
+
+**结论：没有公开的「配对原发 vs 肺/骨/肝/脑」全转录组或组织蛋白组。** 最接近的是人源原发 + 肝转移灶的免疫荧光（有组织，不是 RNA/蛋白矩阵）。
+
+### G1. 有人源原发和肝转移组织，但是 IHC / IF，不是 RNA 或质谱
+
+- **Yang, Su, Song et al.**, *Nature* (2020). DOI: [10.1038/s41586-020-2394-6](https://doi.org/10.1038/s41586-020-2394-6)
+  - 对人源**原发灶和转移灶**做 MPO / H3Cit 免疫荧光；**肝转移** NET 浸润最多。早期乳腺癌血清 MPO–DNA 可预测日后肝转移。原发灶 CCDC25 IHC 与预后相关。
+  - 机制：NET-DNA 经癌细胞受体 CCDC25 → ILK–β-parvin。小鼠肝/肺模型。
+  - **没有**病人转移灶 RNA-seq / 蛋白组矩阵。
+- **Zhang, Song, Yang et al.**, *Nature Communications* (2026). DOI: [10.1038/s41467-026-76459-7](https://www.nature.com/articles/s41467-026-76459-7)
+  - 临床肝转移标本验证 NET 与 NK 功能障碍；纵向 scRNA-seq 来自 **4T1 小鼠**肝转移，不是病人组织转录组。
+- **Su, Liu, Song et al.**, *Cancer Cell* (2014). DOI: [10.1016/j.ccr.2014.03.021](https://doi.org/10.1016/j.ccr.2014.03.021)
+  - 约 1015 例**原发** IHC（GM-CSF / CCL18 / EMT）+ 151 例血清。GEO `GSE51938` 是细胞系条件培养基细胞因子芯片，不是转移组织。
+- **Chen, Song et al.**, *Cancer Cell* (2011)：CCL18–PITPNM3，同样是原发组织 IHC 为主。
+- **Chen, Su, Song et al.**, *Nature Cell Biology* (2019)：TAM 外泌体 HISLA，原发切片 IHC。
+
+### G2. 转移性乳腺癌临床队列，但是血浆蛋白 / 原发或可及病灶 IHC
+
+- **Liu Jieqiong, Song et al.**, *Nature Communications* (2022). DOI: [10.1038/s41467-022-30569-0](https://www.nature.com/articles/s41467-022-30569-0)
+  - NCT04303741：46 例晚期 TNBC（局部晚期或转移）。Olink 做的是**血浆**免疫肿瘤 panel；组织侧是 IHC / 多重荧光（TLS、PML、PLOD3），不是配对原发–转移转录组或组织质谱。
+
+### G3. 不要和同校其他医院、或其他单位的单细胞队列搞混
+
+| 容易混进来的 | 实际是谁 | 数据 | 为什么不是宋组 |
+| --- | --- | --- | --- |
+| Zou, Tang Hailin et al., *Advanced Science* (2023). DOI: [10.1002/advs.202203699](https://doi.org/10.1002/advs.202203699) | **中山大学肿瘤防治中心**唐海林，不是孙逸仙纪念医院 | 6 例乳腺癌**肝或脑转移** scRNA，44,473 细胞 | 同大学不同医院、不同课题组 |
+| Xu et al., *Oncogenesis* (2021)；GEO `GSE180286` | 南京医大一附院管晓翔等 | 5 例原发 + 10 个配对淋巴结 scRNA | 不是中大宋组 |
+| Liu, Yu, Shao；`GSE225600` | 复旦余科达 | 4 对原发 + 腋窝淋巴结 scRNA+Visium | 复旦，不是宋组 |
+
+宋组若要做「原发 vs 肝转移 RNA/蛋白」，公开数据不够，需要向组内要原始组织组学，或用 AURORA/RAP / 唐海林肝脑 scRNA 作为外源队列，并写明来源。
+
+---
+
 ## 数据类型小结
 
-1. **同时有人源原发和远处转移、且 RNA 可下载或可申请**：AURORA US、RAP、AURORA EU、Cosgrove/Varešlija 脑转移、Cejalvo/ConvertHER、Sinn 肺/胸膜。复旦邵/江组目前没有对等的公开队列。
+1. **同时有人源原发和远处转移、且 RNA 可下载或可申请**：AURORA US、RAP、AURORA EU、Cosgrove/Varešlija 脑转移、Cejalvo/ConvertHER、Sinn 肺/胸膜。复旦邵/江组、中大宋尔卫组目前都没有对等的公开队列。
 2. **肺、骨、肝、脑在同一研究里都出现**：AURORA US、RAP、Cejalvo（骨/肝/肺明确，脑很少）、Brasó-Maristany（转移灶）、Zhang GSE14020（仅转移灶）、Klughammer（肝多、骨/肺/脑少）。邵/江组 JCI 296 例转移性 TNBC 覆盖这些器官，但是 **DNA panel**。
 3. **蛋白组**：淋巴结层最完整（Pozniak PXD000815；复旦余科达/邵志敏 65 对 TMT+磷酸化）。远处器官几乎只有配对脑转移的小队列（JCO 2025 摘要、PXD073600、FUSCC 张剑/胡夕春 NDUFB9）。公开的临床「原发 vs 肺/骨/肝」深度蛋白组仍然很少。
 4. **单细胞/空间**：HTAN Klughammer 是目前最大的临床转移活检图谱，但原发配对有限，肝活检占多数。复旦 `GSE225600` 是原发+淋巴结。
 5. **复旦邵/江组怎么用**：要 RNA/蛋白请用他们的**原发**队列（CBCGA / FUSCC TNBC）或余科达组淋巴结多组学；要肺/肝/骨转移组织目前只能用他们的 **DNA/IHC** 转移队列，或回到 AURORA/RAP。
+6. **宋尔卫组怎么用**：机制和肝转移 **IHC/IF**（CCDC25 / NET）可用；不要把该组写成有公开配对 RNA/蛋白图谱。同校肝/脑转移 scRNA 属于中肿唐海林，不是宋组。
