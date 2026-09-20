@@ -72,6 +72,29 @@ GSE209998 **只含 RNA-seq 处理后矩阵**，没有 FASTQ/BAM。GEO 补充文�
 - **下载**：GEO [GSE110590](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE110590)（RSEM 上分位数标准化）；后续 RAP 扩展与正常组织：[GSE193103](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE193103)；原始 FASTQ dbGaP [phs000676](https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=phs000676.v2.p1)。
 - **要点**：表达更像「同一患者」而不是「同一器官」；转移灶相对原发上调迁移/代谢，下调核酸加工。
 
+#### GSE110590 / RAP 该下哪些文件（Siegel *JCI* 2018）
+
+GEO **没有公开 FASTQ**。公开的是 83 个样本的 RSEM 上分位数标准化 log2 矩阵（约 16 原发 + 67 转移）。FASTQ 与 WES 在 dbGaP，需申请。
+
+**必下（表达分析）**
+
+| 文件 | 链接 | 用途 |
+| --- | --- | --- |
+| `GSE110590_RAP_A16_log2.sne.tsv.gz`（5.5 MB） | [FTP](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE110nnn/GSE110590/suppl/GSE110590_RAP_A16_log2.sne.tsv.gz) | 83 列 RSEM UQN log2；列名如 `A11-PT-FFPE-RNA`、`A11-LUNG-MET-RNA`。 |
+| series matrix（GPL11154 + GPL16791） | [GPL11154](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE110nnn/GSE110590/matrix/GSE110590-GPL11154_series_matrix.txt.gz)、[GPL16791](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE110nnn/GSE110590/matrix/GSE110590-GPL16791_series_matrix.txt.gz) | 表型：`patient id`、`tumor location`（PRIMARY / LUNG / LIVER / BRAIN 等）。 |
+| 论文 | [10.1172/JCI96153](https://doi.org/10.1172/JCI96153) | 临床与克隆进化注释。 |
+
+**真正的原始测序（需 dbGaP 批准）**
+
+- RNA-seq FASTQ + DNA-seq：dbGaP [phs000676.v2.p1](https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=phs000676.v2.p1)。GEO 上的 [SRP038753](https://www.ncbi.nlm.nih.gov/sra?term=SRP038753) 只是受控入口，不能直接 `fastq-dump`。
+
+**不要和下成本文搞混**
+
+- [GSE193103](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE193103) 是后来为 AURORA 文 **rRNA depletion 重测** 的 RAP101 + 24 正常组织 Salmon 矩阵，不是 2018 原文的 RSEM 矩阵。要复现 AURORA 合并分析再下：
+  - [salmon counts](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE193nnn/GSE193103/suppl/GSE193103_salmon_gene.matrix_RAP101_plus_Normals24.txt.gz)
+  - [normalized](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE193nnn/GSE193103/suppl/GSE193103_salmon_gene_normalized.matrix_RAP101_plus_Normals24.txt.gz)
+  - FASTQ：dbGaP [phs002429](https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=phs002429.v1.p1)
+
 ### A3. AURORA EU / BIG（最大配对 RNA-seq，需申请）
 
 - **Aftimos et al.**, *Cancer Discovery* (2021). DOI: [10.1158/2159-8290.CD-20-1647](https://doi.org/10.1158/2159-8290.cd-20-1647)
@@ -96,6 +119,20 @@ GSE209998 **只含 RNA-seq 处理后矩阵**，没有 FASTQ/BAM。GEO 补充文�
 - **下载**：GEO [GSE145752](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE145752)
 - **要点**：Luminal A 最容易亚型转换（常转为 Luminal B）。
 
+#### GSE145752 该下哪些文件
+
+这是 NanoString nCounter（自定义 269 基因 + 11 管家基因），**不是**全转录组，没有 FASTQ。原始文件是每样本一份 RCC。
+
+**必下**
+
+| 文件 | 链接 | 用途 |
+| --- | --- | --- |
+| `GSE145752_RAW.tar`（520 KB，114 个 `.RCC.gz`） | [FTP](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE145nnn/GSE145752/suppl/GSE145752_RAW.tar) | nCounter 原始计数。文件名 `Txx` 原发、`Mxx` 转移。 |
+| `GSE145752_series_matrix.txt.gz`（159 KB） | [FTP](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE145nnn/GSE145752/matrix/GSE145752_series_matrix.txt.gz) | nSolver 标准化后的表达 + 表型：57 原发乳腺、49 胸膜转移、8 肺转移。 |
+| 论文 Data Supplement | [10.1200/PO.19.00337](https://doi.org/10.1200/PO.19.00337)（[ASCO 补充材料](https://ascopubs.org/doi/suppl/10.1200/PO.19.00337)） | 基因列表、签名、配对临床。 |
+
+GEO 页面：[GSE145752](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE145752)。分析肿瘤配对时按 patient 把 `T`/`M` 对齐即可。
+
 ### A6. 配对原发–转移 NanoString（多器官，含肝/骨/肺）
 
 - **Cejalvo et al.**, *Cancer Research* (2017). DOI: [10.1158/0008-5472.CAN-16-2479](https://aacrjournals.org/cancerres/article/77/9/2213/625048)
@@ -103,6 +140,20 @@ GSE209998 **只含 RNA-seq 处理后矩阵**，没有 FASTQ/BAM。GEO 补充文�
 - **数据**：NanoString PAM50 / 乳腺癌基因，不是全转录组。AURORA US 后来对其中一部分做了 RNA-seq 并入合并队列。
 - **下载**：GEO [GSE92977](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE92977)
 - **要点**：肝转移亚型转换率最高，肺最低。
+
+#### GSE92977 该下哪些文件
+
+同样是 NanoString（105 个乳腺癌基因 + 5 管家基因），**不是** RNA-seq。GEO **没有** RCC 文件，原始计数已经打成一张表。
+
+**必下**
+
+| 文件 | 链接 | 用途 |
+| --- | --- | --- |
+| `GSE92977_raw_data.txt.gz`（50 KB） | [FTP](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92977/suppl/GSE92977_raw_data.txt.gz) | nCounter 原始 barcode 计数。列 `1P`/`1M` … `123P`/`123M`（P 原发、M 转移）；约 110 行探针。 |
+| `GSE92977_series_matrix.txt.gz`（149 KB） | [FTP](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92977/matrix/GSE92977_series_matrix.txt.gz) | 管家基因标准化后的表达 + 表型：转移部位皮肤 35、淋巴结 24、肝 20、骨 16、肺 7、胸膜 6、卵巢 6、脑 2 等；含 PAM50。 |
+| 论文 | [10.1158/0008-5472.CAN-16-2479](https://doi.org/10.1158/0008-5472.CAN-16-2479) | 123 对临床与亚型转换。 |
+
+GEO 页面：[GSE92977](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE92977)。不要去 SuperSeries / SRA 找 FASTQ，这个平台没有。
 
 ### A7. 配对原发 vs 脑转移蛋白组（队列小于 RNA）
 
@@ -207,11 +258,51 @@ GSE2603 / GSE5327 只适用于「原发灶预测哪一类转移结局」，不�
 | --- | --- | --- | --- | --- |
 | FUSCC TNBC | Jiang, Shao et al., *Cancer Cell* (2019). DOI: [10.1016/j.ccell.2019.02.001](https://doi.org/10.1016/j.ccell.2019.02.001) | 465 例**原发** TNBC；随访中 65 例复发/转移 | WES 279、CNA 401、RNA-seq 360 | 原发 + 结局，不是转移组织 |
 | CBCGA | Jiang, Shao et al., *Nature Cancer* (2024). DOI: [10.1038/s43018-024-00725-0](https://www.nature.com/articles/s43018-024-00725-0) | 773 例中国乳腺癌**原发** | 基因组、转录组 752、蛋白组 278、代谢组等 | 亚洲最大原发多组学，不是转移图谱 |
-| FUSCC-BRCA | Ma, Jiang, Shao et al., *Cancer Cell* (2024). DOI: [10.1016/j.ccell.2024.03.006](https://doi.org/10.1016/j.ccell.2024.03.006) | 873 例亚洲乳腺癌**原发** | WES+CNA 873、RNA-seq 842、TMT 蛋白 261、代谢 509 | 同上 |
+| FUSCC-BRCA | Ma, Jiang, Shao et al., *Cancer Cell* (2024). DOI: [10.1016/j.ccell.2024.03.006](https://doi.org/10.1016/j.ccell.2024.03.006) | 873 例亚洲乳腺癌**原发** | WES+CNA 873、RNA-seq 842、TMT 蛋白 261、代谢 509 | 同上；下载见下 |
 | TNBC 蛋白组 | Gong, Jiang, Shao et al., *Cell Reports* (2022). DOI: [10.1016/j.celrep.2022.110460](https://doi.org/10.1016/j.celrep.2022.110460) | 90 例 TNBC **原发** | 蛋白组 / 磷酸化 / 转录因子占用 | 原发 |
 | HER2-low 蛋白 | Dai, Jiang, Shao et al., *Nat Commun* (2023) | 中国乳腺癌原发 | TMT 蛋白组 | iProX `PXD042886` |
 
 这些可以做「原发灶预测转移风险」，**不能**做「转移灶相对原发灶的 RNA/蛋白差异」。
+
+#### FUSCC-BRCA（*Cancer Cell* 2024）该下哪些文件
+
+**全是原发灶**，没有肺/骨/肝/脑转移组织组学。GEO 上几乎没有这个 873 例队列的 RNA-seq；原始测序在国内 NODE，需注册/申请。论文：[10.1016/j.ccell.2024.03.006](https://doi.org/10.1016/j.ccell.2024.03.006)。
+
+**处理后多组学（NODE，论文列出的登录号）**
+
+在 [NODE](http://www.biosino.org/node) 搜索，或直接打开（论文原文部分 URL 写成了 `detai`，正确是 `detail`）：
+
+- [OEP003358](http://www.biosino.org/node/project/detail/OEP003358)
+- [OEP003049](http://www.biosino.org/node/project/detail/OEP003049)
+- [OEP000155](http://www.biosino.org/node/project/detail/OEP000155)（较早的 FUSCC TNBC 465 例子集）
+- [OEP001027](http://www.biosino.org/node/project/detail/OEP001027)
+- [OEP003469](http://www.biosino.org/node/project/detail/OEP003469)
+- [OEP004654](http://www.biosino.org/node/project/detail/OEP004654)
+
+原始 WES / RNA-seq FASTQ：同一 NODE 库，论文写 “Raw sequencing data for all datatypes have been deposited in NODE”。NGDC BioProject 镜像：[PRJCA017539](https://ngdc.cncb.ac.cn/bioproject/browse/PRJCA017539)。
+
+**蛋白组原始质谱**
+
+- ProteomeXchange [PXD042886](https://proteomecentral.proteomexchange.org/cgi/GetDataset?ID=PXD042886)
+- iProX [IPX0006535000](http://www.iprox.org/page/project.html?id=IPX0006535000)
+- 已定量 ratio 矩阵：[ratio_matrix_original.csv](http://download.iprox.org/IPX0006535000/IPX0006535002/ratio_matrix_original.csv)（不必先下全部 mzML）
+
+该 PXD 首次随 HER2-low *Nat Commun* 2023 公布，是邵组中国乳腺癌 TMT 原发队列；*Cancer Cell* 2024 的 261 例蛋白组用的是同一套资源。
+
+**代谢组原始（受控）**
+
+- OMIX [OMIX004302](https://ngdc.cncb.ac.cn/omix/release/OMIX004302)（记录写明来自 NODE `OEP000155` / `OEP003049` / `OEP003358`）
+
+**靶向 panel / 临床门户（不是 bulk RNA）**
+
+- [Fudan Data Portal `FUSCC_BRCA_panel_4000`](https://data.3steps.cn/cdataportal/study/clinicalData?id=FUSCC_BRCA_panel_4000)
+
+**TNBC 子集另有 NCBI 备份（Cancer Cell 2019 / Scientific Data，不是 873 例全文）**
+
+- OncoScan GEO [GSE118527](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE118527)
+- WES + RNA-seq SRA [SRP157974](https://www.ncbi.nlm.nih.gov/sra/?term=SRP157974)
+- 处理后矩阵 Figshare [10.6084/m9.figshare.19783498](https://doi.org/10.6084/m9.figshare.19783498.v5)
+- 门户 [FUSCC_BRCA_2022](http://fudan-pgx.3steps.cn/cdataportal/study/summary?id=FUSCC_BRCA_2022)
 
 ### F4. 同医院、但不是邵志敏 / 江一舟组（避免混进）
 
