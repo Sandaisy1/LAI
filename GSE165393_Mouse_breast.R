@@ -10,7 +10,8 @@
 # 三个问题（「低表达促进转移」= 转移抑制候选：转移灶相对原位下调）：
 #   1) 原位内低表达、同时与肺转移和骨（骨髓）转移相关的共享下调基因
 #   2) 只与肺、或只与骨相关的器官特异下调基因
-#   3) 给原位瘤打神经浸润（PNI）分数，找低表达与高 PNI 相关的基因
+#   3) 按施旺细胞、神经营养因子、轴突导向分别打分，找负相关基因，
+#      并分别检验这三种分数与肺转移、骨转移的关系
 #
 # 数据注意：
 #   - 14 个 bulk 是 FACS 后培养的细胞系，不是新鲜肿瘤块
@@ -138,14 +139,14 @@ log_msg <- function(...) {
   cat(msg, "\n", file = log_file, append = TRUE)
 }
 
-p_cutoff   <- 0.01
-fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
+p_cutoff   <- 0.05
+fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25)
 top_ns     <- c(50, 75, 100, 150, 200, 250, 300)
 skip_enrich <- nzchar(Sys.getenv("GSE165393_SKIP_ENRICHMENT"))
 
 log_msg("Project dir: ", project_dir)
 log_msg("Results dir: ", result_dir)
-log_msg("Significance gate: p < ", p_cutoff, " (raw p from limma), then down-FC strata")
+log_msg("Significance gate: p < ", p_cutoff, " ; down-FC strata: met/MFP FC < 1 and < 1/1.25")
 
 # -----------------------------------------------------------------------------
 # 2. 读入 TPM 与样品表
@@ -684,7 +685,7 @@ analyze_down_list <- function(comp_name, de, heat_mat, sample_info, lfc_col, p_c
   write_table(de, file.path(base, "DE_full"))
   writeLines(
     c("先看本目录 DE_full，再看 FoldChange/ 与 TopRank/。",
-      "筛选：p < 0.01 且相对原位（MFP）下调，再按 FC 和 topN 分层。",
+      "筛选：p < 0.05 且相对原位（MFP）下调（FC < 1 即入选；再加 FC < 1/1.25）。",
       "GO/Pathway/KEGG 是 ORA；GSEA 在 00_GSEA_all_genes_NOT_FC_or_topN。"),
     file.path(base, "00_READ_ME.txt")
   )
@@ -697,7 +698,7 @@ analyze_down_list <- function(comp_name, de, heat_mat, sample_info, lfc_col, p_c
     emit_subset(comp_name, sub, nm, paste0(comp_name, " | down FC >= ", fc),
                 file.path(base, "FoldChange", nm), de, heat_mat, sample_info,
                 lfc_col, p_col, fc_line = fc, extra_ann = extra_ann,
-                do_ora = identical(nm, "FC_1.5") && nrow(sub) <= 800)
+                do_ora = identical(nm, "FC_1.25") && nrow(sub) <= 800)
   }
   for (n in top_ns) {
     tag <- paste0("top", n)
@@ -828,7 +829,7 @@ for (nm in names(fc_cutoffs)) {
     transform(merged, log2FC = mean_met_log2FC, pvalue = pmax(pvalue_LU, pvalue_BM)),
     heat_mat[, si3$sample, drop = FALSE], si3,
     lfc_col = "mean_met_log2FC", p_col = "pvalue", fc_line = fc,
-    do_ora = identical(nm, "FC_1.5") && nrow(sub) <= 800
+    do_ora = identical(nm, "FC_1.25") && nrow(sub) <= 800
   )
 }
 
@@ -879,7 +880,7 @@ for (nm in names(fc_cutoffs)) {
     file.path(base_lu, "FoldChange", paste0(nm, "_lung_only")),
     transform(merged, log2FC = log2FC_LU, pvalue = pvalue_LU),
     heat_mat[, si3$sample, drop = FALSE], si3,
-    "log2FC_LU", "pvalue_LU", fc, do_ora = identical(nm, "FC_1.5") && nrow(lu) <= 800
+    "log2FC_LU", "pvalue_LU", fc, do_ora = identical(nm, "FC_1.25") && nrow(lu) <= 800
   )
   bm <- merged[is_down(merged$log2FC_BM, merged$pvalue_BM, fc) &
                  !is_down(merged$log2FC_LU, merged$pvalue_LU, fc) &
@@ -893,7 +894,7 @@ for (nm in names(fc_cutoffs)) {
     file.path(base_bm, "FoldChange", paste0(nm, "_bone_only")),
     transform(merged, log2FC = log2FC_BM, pvalue = pvalue_BM),
     heat_mat[, si3$sample, drop = FALSE], si3,
-    "log2FC_BM", "pvalue_BM", fc, do_ora = identical(nm, "FC_1.5") && nrow(bm) <= 800
+    "log2FC_BM", "pvalue_BM", fc, do_ora = identical(nm, "FC_1.25") && nrow(bm) <= 800
   )
 }
 
@@ -903,7 +904,7 @@ if (has_pkg("ggvenn")) {
     Bone_down = merged$gene[is_down(merged$log2FC_BM, merged$pvalue_BM, 1)]
   )
   p <- ggvenn::ggvenn(vdf, fill_color = c("#F58518", "#54A24B")) +
-    ggplot2::labs(title = "p<0.01 downregulated vs MFP")
+    ggplot2::labs(title = "p<0.05 downregulated vs MFP")
   save_gg(p, file.path(result_dir, "00_QC", "venn_lung_vs_bone_down"))
 }
 
@@ -913,171 +914,262 @@ analyze_down_list("04_lung_vs_MFP_all_down", de_lu, heat_mat[, si3$sample, drop 
 analyze_down_list("05_bone_vs_MFP_all_down", de_bm, heat_mat[, si3$sample, drop = FALSE], si3,
                   "log2FC", "pvalue", do_gsea = FALSE)
 
+
 # -----------------------------------------------------------------------------
-# 9. 问题 3：原位神经浸润标记 + 低表达促进 PNI
+# 9. 问题 3：施旺细胞 / 神经营养因子 / 轴突导向 分别打分
 # -----------------------------------------------------------------------------
-log_msg("Q3: neural invasion score on primary tumors")
+log_msg("Q3: three neural signatures (Schwann, neurotrophin, axon guidance)")
 pni_dir <- file.path(result_dir, "06_neural_invasion")
 dir.create(pni_dir, recursive = TRUE, showWarnings = FALSE)
 writeLines(
-  c("GSE165393 没有病理神经浸润标签。",
-    "这里用文献/GO 神经亲和、轴突导向、施万细胞、神经营养因子基因集给每个样品打 PNI 分数。",
-    "原位（MFP1/MFP2）的分数写在 MFP_neural_invasion_marker.csv。",
-    "随后找：表达与 PNI 分数负相关（基因越低，PNI 分数越高）的基因。"),
+  c("没有病理神经浸润标签。三套 marker 分开打分：",
+    "  1) 施旺细胞 Schwann",
+    "  2) 神经营养因子 Neurotrophin",
+    "  3) 轴突导向 Axon_guidance",
+    "每套：样品分数、原位 MFP 标记、与分数负相关的基因（p<0.05, rho<0）。",
+    "另外比较三套分数在原位 vs 肺、原位 vs 骨之间的差异，并与肺/骨下调基因取交集。"),
   file.path(pni_dir, "00_READ_ME.txt")
 )
 
-curated_pni <- c(
-  "Ngf", "Bdnf", "Ntf3", "Ntf5", "Ntrk1", "Ntrk2", "Ntrk3", "Ngfr",
-  "Artn", "Gdnf", "Nrtn", "Pspn", "Gfra1", "Gfra2", "Gfra3", "Ret",
-  "Sema3a", "Sema3d", "Sema3e", "Sema3f", "Sema4d", "Nrp1", "Nrp2",
-  "Plxna1", "Plxna3", "Plxnb1", "Robo1", "Robo2", "Slit2", "Slit3",
-  "L1cam", "Ncam1", "Nrcam", "Chl1", "Cntn1", "Cntn2",
-  "Mag", "Mpz", "Mbp", "Pmp22", "Plp1", "Sox10", "S100b", "Gfap",
-  "Gal", "Tac1", "Calca", "Ephb2", "Efnb1", "Cxcr4", "Cxcl12",
-  "Mmp2", "Mmp9", "Adam10", "Cadm1", "Nrxn1", "Nrxn3"
-)
-
-msig_neural <- tryCatch({
-  msig <- tryCatch(
+msig_bp <- tryCatch({
+  tryCatch(
     msigdbr::msigdbr(species = "Mus musculus", collection = "C5", subcollection = "GO:BP"),
     error = function(e) msigdbr::msigdbr(species = "Mus musculus", category = "C5", subcategory = "BP")
   )
-  keep <- grepl(
-    "AXON|NEURON_PROJECTION|PERIPHERAL_NERVOUS|SCHWANN|MYELIN|NERVE_GROWTH|NEUROTROPHIN|SYNAPSE_ASSEMBLY",
-    msig$gs_name
-  )
-  unique(msig$gene_symbol[keep])
 }, error = function(e) {
-  log_msg("msigdbr neural GO failed: ", e$message)
-  character()
+  log_msg("msigdbr GO:BP failed: ", e$message)
+  NULL
 })
 
-pni_genes <- unique(c(curated_pni, msig_neural))
-pni_genes <- intersect(pni_genes, rownames(heat_mat))
-log_msg("PNI/neural genes in matrix: ", length(pni_genes))
-utils::write.csv(data.frame(gene = pni_genes), file.path(pni_dir, "PNI_signature_genes_used.csv"), row.names = FALSE)
+msig_symbols <- function(pattern) {
+  if (is.null(msig_bp) || nrow(msig_bp) == 0) return(character())
+  unique(msig_bp$gene_symbol[grepl(pattern, msig_bp$gs_name)])
+}
 
-z_sig <- t(scale(t(heat_mat[pni_genes, , drop = FALSE])))
-pni_score <- colMeans(z_sig, na.rm = TRUE)
-if (has_pkg("GSVA") && length(pni_genes) >= 8) {
-  gs <- list(PNI_neural = pni_genes)
-  gsva_mat <- tryCatch({
-    if (utils::packageVersion("GSVA") >= "1.50.0") {
-      sp <- GSVA::ssgseaParam(as.matrix(heat_mat), gs)
-      GSVA::gsva(sp, verbose = FALSE)
-    } else {
-      GSVA::gsva(as.matrix(heat_mat), gs, method = "ssgsea", verbose = FALSE)
+curated <- list(
+  Schwann = c(
+    "Sox10", "S100b", "Mag", "Mpz", "Mbp", "Pmp22", "Plp1", "Gfap", "Egr2",
+    "Pou3f1", "Pou3f2", "Ngfr", "Ncam1", "L1cam", "Cdh19", "Dhh", "Mpzl1",
+    "Prx", "Gjb1", "Mal", "Cnp", "Erbb3", "Erbb2", "Nrg1", "Mpz", "Oct6"
+  ),
+  Neurotrophin = c(
+    "Ngf", "Bdnf", "Ntf3", "Ntf5", "Ntrk1", "Ntrk2", "Ntrk3", "Ngfr",
+    "Artn", "Gdnf", "Nrtn", "Pspn", "Gfra1", "Gfra2", "Gfra3", "Ret",
+    "Gal", "Tac1", "Calca", "Vgf", "Cntf", "Lif", "Igf1"
+  ),
+  Axon_guidance = c(
+    "Sema3a", "Sema3d", "Sema3e", "Sema3f", "Sema4d", "Sema5a", "Sema6a",
+    "Nrp1", "Nrp2", "Plxna1", "Plxna3", "Plxnb1", "Robo1", "Robo2",
+    "Slit1", "Slit2", "Slit3", "Ephb2", "Efnb1", "Epha4", "Efna1",
+    "Unc5b", "Unc5c", "Dcc", "Ntn1", "L1cam", "Ncam1", "Efnb2", "Ephb1"
+  )
+)
+go_pat <- list(
+  Schwann = "SCHWANN|MYELIN|PERIPHERAL_NERVOUS",
+  Neurotrophin = "NEUROTROPHIN|NERVE_GROWTH_FACTOR|GDNF|NEUROTROPHIC",
+  Axon_guidance = "AXON_GUIDANCE|NEURON_PROJECTION_GUIDANCE|SEMASPHORIN|NETRIN|SLIT_ROBO"
+)
+
+sig_genes <- lapply(names(curated), function(nm) {
+  g <- unique(c(curated[[nm]], msig_symbols(go_pat[[nm]])))
+  intersect(g, rownames(heat_mat))
+})
+names(sig_genes) <- names(curated)
+for (nm in names(sig_genes)) {
+  log_msg("Signature ", nm, ": ", length(sig_genes[[nm]]), " genes in matrix")
+  utils::write.csv(
+    data.frame(gene = sig_genes[[nm]]),
+    file.path(pni_dir, paste0("signature_genes_", nm, ".csv")),
+    row.names = FALSE
+  )
+}
+
+mean_z_score <- function(genes) {
+  genes <- intersect(genes, rownames(heat_mat))
+  if (length(genes) < 2) return(setNames(rep(NA_real_, ncol(heat_mat)), colnames(heat_mat)))
+  z <- t(scale(t(heat_mat[genes, , drop = FALSE])))
+  colMeans(z, na.rm = TRUE)
+}
+
+score_mat <- sapply(sig_genes, mean_z_score)
+if (has_pkg("GSVA")) {
+  gs_ok <- sig_genes[vapply(sig_genes, length, integer(1)) >= 8]
+  if (length(gs_ok) > 0) {
+    gsva_mat <- tryCatch({
+      if (utils::packageVersion("GSVA") >= "1.50.0") {
+        GSVA::gsva(GSVA::ssgseaParam(as.matrix(heat_mat), gs_ok), verbose = FALSE)
+      } else {
+        GSVA::gsva(as.matrix(heat_mat), gs_ok, method = "ssgsea", verbose = FALSE)
+      }
+    }, error = function(e) {
+      log_msg("GSVA failed, keep mean z-score: ", e$message)
+      NULL
+    })
+    if (!is.null(gsva_mat)) {
+      for (nm in rownames(gsva_mat)) {
+        score_mat[, nm] <- as.numeric(gsva_mat[nm, colnames(heat_mat)])
+      }
     }
-  }, error = function(e) {
-    log_msg("GSVA ssgsea failed, use mean z-score: ", e$message)
-    NULL
-  })
-  if (!is.null(gsva_mat)) pni_score <- as.numeric(gsva_mat[1, colnames(heat_mat)])
-  names(pni_score) <- colnames(heat_mat)
+  }
 }
-
-pni_tab <- sample_info
-pni_tab$PNI_score <- pni_score[pni_tab$sample]
-pni_tab$PNI_class <- ifelse(pni_tab$PNI_score >= stats::median(pni_tab$PNI_score, na.rm = TRUE),
-                            "PNI_high", "PNI_low")
-write_table(pni_tab, file.path(pni_dir, "sample_PNI_scores"))
-mfp_mark <- pni_tab[pni_tab$tissue == "MFP", ]
+score_mat <- as.data.frame(score_mat)
+score_mat$sample <- colnames(heat_mat)
+score_tab <- merge(sample_info, score_mat, by = "sample", all.x = TRUE)
+write_table(score_tab, file.path(pni_dir, "sample_three_neural_scores"))
+mfp_mark <- score_tab[score_tab$tissue == "MFP", ]
 write_table(mfp_mark, file.path(pni_dir, "MFP_neural_invasion_marker"))
-log_msg("MFP PNI scores: ", paste(sprintf("%s=%.3f(%s)", mfp_mark$sample, mfp_mark$PNI_score, mfp_mark$PNI_class), collapse = "; "))
 
-p_score <- ggplot2::ggplot(pni_tab, ggplot2::aes(x = sample, y = PNI_score, fill = tissue)) +
+score_long <- tidyr::pivot_longer(
+  score_tab, cols = dplyr::all_of(names(curated)),
+  names_to = "signature", values_to = "score"
+)
+p_bar <- ggplot2::ggplot(score_long, ggplot2::aes(x = sample, y = score, fill = tissue)) +
   ggplot2::geom_col() +
-  ggplot2::geom_hline(yintercept = stats::median(pni_tab$PNI_score), linetype = 2) +
-  ggplot2::theme_bw(base_size = 12) +
+  ggplot2::facet_wrap(~ signature, ncol = 1, scales = "free_y") +
+  ggplot2::theme_bw(base_size = 11) +
   ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
-  ggplot2::labs(title = "Neural / PNI signature score", y = "PNI score", x = NULL)
-save_gg(p_score, file.path(pni_dir, "PNI_score_by_sample"), 9, 5)
+  ggplot2::labs(title = "Three neural invasion signature scores", x = NULL, y = "score")
+save_gg(p_bar, file.path(pni_dir, "three_scores_by_sample"), 9, 10)
 
-ann_pni <- data.frame(PNI_class = pni_tab$PNI_class, row.names = pni_tab$sample)
-plot_heatmap(
-  heat_mat, sample_info, pni_genes,
-  "PNI / neural signature genes",
-  file.path(pni_dir, "heatmap_PNI_signature_genes"),
-  extra_ann = ann_pni
-)
+p_box <- ggplot2::ggplot(score_long, ggplot2::aes(x = tissue, y = score, fill = tissue)) +
+  ggplot2::geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  ggplot2::geom_jitter(width = 0.15, size = 2) +
+  ggplot2::facet_wrap(~ signature, scales = "free_y") +
+  ggplot2::theme_bw(base_size = 12) +
+  ggplot2::labs(title = "Neural scores by tissue (MFP / LU / BM / LN)", x = NULL, y = "score")
+save_gg(p_box, file.path(pni_dir, "three_scores_by_tissue"), 9, 5)
 
-# 表达与 PNI 分数负相关：基因越低，PNI 越高
-cor_df <- do.call(rbind, lapply(rownames(heat_mat), function(g) {
-  ct <- suppressWarnings(stats::cor.test(as.numeric(heat_mat[g, ]), pni_score[colnames(heat_mat)],
-                                         method = "spearman", exact = FALSE))
-  data.frame(gene = g, rho = unname(ct$estimate), pvalue = ct$p.value, stringsAsFactors = FALSE)
-}))
-cor_df$padj <- stats::p.adjust(cor_df$pvalue, method = "BH")
-cor_df$ensembl <- id_map$ensembl[match(cor_df$gene, id_map$gene)]
-cor_df$MFP_mean_tpm <- mfp_mean_tpm[cor_df$gene]
-cor_df$MFP_expr_percentile <- mfp_pct[cor_df$gene]
-cor_df$MFP_low_quartile <- !is.na(cor_df$MFP_expr_percentile) & cor_df$MFP_expr_percentile <= 25
-cor_df <- cor_df[order(cor_df$rho), ]
-write_table(cor_df, file.path(pni_dir, "gene_vs_PNI_score_spearman"))
+annotate_cor <- function(df) {
+  df$padj <- stats::p.adjust(df$pvalue, method = "BH")
+  df$ensembl <- id_map$ensembl[match(df$gene, id_map$gene)]
+  df$MFP_mean_tpm <- mfp_mean_tpm[df$gene]
+  df$MFP_expr_percentile <- mfp_pct[df$gene]
+  df$log2FC_LU <- merged$log2FC_LU[match(df$gene, merged$gene)]
+  df$pvalue_LU <- merged$pvalue_LU[match(df$gene, merged$gene)]
+  df$log2FC_BM <- merged$log2FC_BM[match(df$gene, merged$gene)]
+  df$pvalue_BM <- merged$pvalue_BM[match(df$gene, merged$gene)]
+  df$down_in_lung <- is_down(df$log2FC_LU, df$pvalue_LU, 1)
+  df$down_in_bone <- is_down(df$log2FC_BM, df$pvalue_BM, 1)
+  df[order(df$rho), ]
+}
 
-# 低表达促进 PNI：rho < 0 且 p < 0.01（相关不是倍数，不做 FC 分层）
-pni_low <- cor_df[cor_df$rho < 0 & cor_df$pvalue < p_cutoff, ]
-pni_low$log2FC <- pni_low$rho
-pni_low_dir <- file.path(pni_dir, "low_expr_associated_with_high_PNI")
-write_table(pni_low, file.path(pni_low_dir, "selected_genes"))
-emit_subset(
-  "06_neural_invasion", pni_low, "PNI_neg_cor_p0.01",
-  "Q3 | gene expression negatively correlated with PNI score (p<0.01)",
-  file.path(pni_low_dir, "p0.01"),
-  transform(cor_df, log2FC = rho), heat_mat, sample_info,
-  lfc_col = "rho", p_col = "pvalue", extra_ann = ann_pni, do_ora = nrow(pni_low) <= 800
-)
-for (n in top_ns) {
+spearman_vs_score <- function(score_vec) {
+  do.call(rbind, lapply(rownames(heat_mat), function(g) {
+    ct <- suppressWarnings(stats::cor.test(
+      as.numeric(heat_mat[g, ]), score_vec[colnames(heat_mat)],
+      method = "spearman", exact = FALSE
+    ))
+    data.frame(gene = g, rho = unname(ct$estimate), pvalue = ct$p.value, stringsAsFactors = FALSE)
+  }))
+}
+
+tissue_ttest <- function(score_vec, grp_a, grp_b) {
+  a <- score_vec[sample_info$sample[sample_info$tissue == grp_a]]
+  b <- score_vec[sample_info$sample[sample_info$tissue == grp_b]]
+  a <- a[is.finite(a)]
+  b <- b[is.finite(b)]
+  if (length(a) < 2 || length(b) < 2) {
+    return(data.frame(group_a = grp_a, group_b = grp_b, n_a = length(a), n_b = length(b),
+                      mean_a = mean(a), mean_b = mean(b), delta = mean(b) - mean(a),
+                      pvalue = NA_real_))
+  }
+  tt <- stats::t.test(b, a)
+  data.frame(
+    group_a = grp_a, group_b = grp_b, n_a = length(a), n_b = length(b),
+    mean_a = mean(a), mean_b = mean(b), delta = unname(diff(tt$estimate)),
+    pvalue = tt$p.value
+  )
+}
+
+neg_lists <- list()
+assoc_rows <- list()
+lung_down_genes <- merged$gene[is_down(merged$log2FC_LU, merged$pvalue_LU, 1)]
+bone_down_genes <- merged$gene[is_down(merged$log2FC_BM, merged$pvalue_BM, 1)]
+
+for (nm in names(curated)) {
+  log_msg("Neural axis: ", nm)
+  ax_dir <- file.path(pni_dir, nm)
+  dir.create(ax_dir, recursive = TRUE, showWarnings = FALSE)
+  sc <- setNames(score_tab[[nm]], score_tab$sample)
+  plot_heatmap(
+    heat_mat, sample_info, sig_genes[[nm]],
+    paste(nm, "signature genes"),
+    file.path(ax_dir, paste0("heatmap_", nm, "_signature")),
+    extra_ann = data.frame(score = sc[sample_info$sample], row.names = sample_info$sample)
+  )
+
+  cor_df <- annotate_cor(spearman_vs_score(sc))
+  write_table(cor_df, file.path(ax_dir, paste0(nm, "_gene_vs_score_spearman")))
+  neg <- cor_df[cor_df$rho < 0 & cor_df$pvalue < p_cutoff, ]
+  neg$log2FC <- neg$rho
+  neg_lists[[nm]] <- neg
+  write_table(neg, file.path(ax_dir, paste0(nm, "_neg_cor_p0.05")))
   emit_subset(
-    "06_neural_invasion", utils::head(pni_low, n), paste0("top", n),
-    paste0("Q3 | strongest negative PNI correlation top ", n),
-    file.path(pni_low_dir, "TopRank", paste0("top", n)),
+    paste0("06_neural_invasion/", nm), neg, paste0(nm, "_neg_cor_p0.05"),
+    paste0(nm, " | negative correlation with score (p<0.05)"),
+    file.path(ax_dir, "neg_cor_p0.05"),
     transform(cor_df, log2FC = rho), heat_mat, sample_info,
-    lfc_col = "rho", p_col = "pvalue", extra_ann = ann_pni, do_ora = n == 100
+    lfc_col = "rho", p_col = "pvalue", do_ora = nrow(neg) <= 800
   )
-}
-if (!isTRUE(skip_enrich)) {
-  tryCatch(
-    run_gsea_full(transform(cor_df, log2FC = rho), file.path(pni_low_dir, "00_GSEA_all_genes_NOT_FC_or_topN"),
-                  "Q3 PNI negative correlation", stat_col = "rho"),
-    error = function(e) log_msg("PNI GSEA failed: ", e$message)
-  )
-}
-
-# 原位内部：MFP 低表达且与高 PNI 相关
-mfp_pni_low <- pni_low[!is.na(pni_low$MFP_expr_percentile) & pni_low$MFP_expr_percentile <= 40, ]
-write_table(mfp_pni_low, file.path(pni_dir, "MFP_low_expression_and_high_PNI"))
-if (nrow(mfp_pni_low) >= 2) {
   emit_subset(
-    "06_neural_invasion", mfp_pni_low, "MFP_low_and_high_PNI",
-    "Q3 | low in primary and negatively correlated with PNI score",
-    file.path(pni_dir, "MFP_low_and_high_PNI"),
+    paste0("06_neural_invasion/", nm), utils::head(neg, 100), paste0(nm, "_top100"),
+    paste0(nm, " | top100 negative correlation"),
+    file.path(ax_dir, "TopRank", "top100"),
     transform(cor_df, log2FC = rho), heat_mat, sample_info,
-    lfc_col = "rho", p_col = "pvalue", extra_ann = ann_pni, do_ora = TRUE
+    lfc_col = "rho", p_col = "pvalue", do_ora = TRUE
   )
+  if (!isTRUE(skip_enrich)) {
+    tryCatch(
+      run_gsea_full(transform(cor_df, log2FC = rho), file.path(ax_dir, "00_GSEA_all_genes_NOT_FC_or_topN"),
+                    paste(nm, "negative correlation"), stat_col = "rho"),
+      error = function(e) log_msg(nm, " GSEA failed: ", e$message)
+    )
+  }
+
+  lu_ov <- neg[neg$gene %in% lung_down_genes, ]
+  bm_ov <- neg[neg$gene %in% bone_down_genes, ]
+  both_ov <- neg[neg$gene %in% intersect(lung_down_genes, bone_down_genes), ]
+  write_table(lu_ov, file.path(ax_dir, paste0(nm, "_neg_cor_AND_lung_down")))
+  write_table(bm_ov, file.path(ax_dir, paste0(nm, "_neg_cor_AND_bone_down")))
+  write_table(both_ov, file.path(ax_dir, paste0(nm, "_neg_cor_AND_shared_lung_bone_down")))
+
+  tt_lu <- tissue_ttest(sc, "MFP", "LU")
+  tt_bm <- tissue_ttest(sc, "MFP", "BM")
+  tt_lu_bm <- tissue_ttest(sc, "LU", "BM")
+  assoc <- rbind(
+    data.frame(signature = nm, contrast = "LU_vs_MFP", tt_lu, stringsAsFactors = FALSE),
+    data.frame(signature = nm, contrast = "BM_vs_MFP", tt_bm, stringsAsFactors = FALSE),
+    data.frame(signature = nm, contrast = "BM_vs_LU", tt_lu_bm, stringsAsFactors = FALSE)
+  )
+  write_table(assoc, file.path(ax_dir, paste0(nm, "_score_vs_lung_bone_ttest")))
+  assoc_rows[[nm]] <- assoc
+
+  # 签名基因本身在肺/骨 vs 原位的 limma
+  sg <- intersect(sig_genes[[nm]], merged$gene)
+  sig_de <- merged[merged$gene %in% sg, ]
+  write_table(sig_de, file.path(ax_dir, paste0(nm, "_signature_genes_limma_vs_MFP")))
 }
 
-# PNI_high vs PNI_low 的 limma（辅助）
-pni_tab$PNI_class <- factor(pni_tab$PNI_class, levels = c("PNI_low", "PNI_high"))
-if (all(c("PNI_low", "PNI_high") %in% pni_tab$PNI_class)) {
-  des_p <- stats::model.matrix(~ PNI_class, data = pni_tab)
-  fit_p <- limma::eBayes(limma::lmFit(heat_mat[, pni_tab$sample, drop = FALSE], des_p))
-  tt_p <- limma::topTable(fit_p, coef = "PNI_classPNI_high", number = Inf, sort.by = "none")
-  de_pni <- data.frame(
-    gene = rownames(tt_p),
-    log2FC = tt_p$logFC,
-    AveExpr = tt_p$AveExpr,
-    pvalue = tt_p$P.Value,
-    padj = tt_p$adj.P.Val,
-    stringsAsFactors = FALSE
+assoc_all <- do.call(rbind, assoc_rows)
+write_table(assoc_all, file.path(pni_dir, "three_signatures_score_vs_lung_bone"))
+
+p_assoc <- ggplot2::ggplot(assoc_all[assoc_all$contrast %in% c("LU_vs_MFP", "BM_vs_MFP"), ],
+                           ggplot2::aes(x = signature, y = delta, fill = contrast)) +
+  ggplot2::geom_col(position = ggplot2::position_dodge(width = 0.7), width = 0.65) +
+  ggplot2::geom_hline(yintercept = 0, linetype = 2) +
+  ggplot2::theme_bw(base_size = 12) +
+  ggplot2::labs(
+    title = "Neural score change vs primary (positive = higher in metastasis)",
+    y = "mean(met) - mean(MFP)", x = NULL
   )
-  de_pni <- anno_primary(de_pni)
-  analyze_down_list(
-    "06_neural_invasion/PNI_high_vs_low_down",
-    de_pni, heat_mat, sample_info,
-    lfc_col = "log2FC", p_col = "pvalue", extra_ann = ann_pni, do_gsea = FALSE
-  )
+save_gg(p_assoc, file.path(pni_dir, "three_signatures_delta_lung_bone"), 8, 5)
+
+if (has_pkg("ggvenn")) {
+  v3 <- lapply(neg_lists, function(x) x$gene)
+  names(v3) <- names(neg_lists)
+  p <- ggvenn::ggvenn(v3, fill_color = c("#4C78A8", "#F58518", "#54A24B")) +
+    ggplot2::labs(title = "Negatively correlated genes (p<0.05) across three neural scores")
+  save_gg(p, file.path(pni_dir, "venn_three_neg_cor"), 8, 6)
 }
 
 # -----------------------------------------------------------------------------
@@ -1086,38 +1178,50 @@ if (all(c("PNI_low", "PNI_high") %in% pni_tab$PNI_class)) {
 sum_dir <- file.path(result_dir, "07_summary")
 dir.create(sum_dir, recursive = TRUE, showWarnings = FALSE)
 
-q1 <- merged[is_down(merged$log2FC_LU, merged$pvalue_LU, 1.5) &
-               is_down(merged$log2FC_BM, merged$pvalue_BM, 1.5), ]
+q1_fc1 <- merged[is_down(merged$log2FC_LU, merged$pvalue_LU, 1) &
+                   is_down(merged$log2FC_BM, merged$pvalue_BM, 1), ]
+q1_fc1 <- q1_fc1[order(q1_fc1$mean_met_log2FC), ]
+q1 <- merged[is_down(merged$log2FC_LU, merged$pvalue_LU, 1.25) &
+               is_down(merged$log2FC_BM, merged$pvalue_BM, 1.25), ]
 q1 <- q1[order(q1$mean_met_log2FC), ]
-q2l <- merged[is_down(merged$log2FC_LU, merged$pvalue_LU, 1.5) &
-                !is_down(merged$log2FC_BM, merged$pvalue_BM, 1.5) &
+q2l <- merged[is_down(merged$log2FC_LU, merged$pvalue_LU, 1.25) &
+                !is_down(merged$log2FC_BM, merged$pvalue_BM, 1.25) &
                 merged$log2FC_LU < merged$log2FC_BM, ]
 q2l <- q2l[order(q2l$log2FC_LU), ]
-q2b <- merged[is_down(merged$log2FC_BM, merged$pvalue_BM, 1.5) &
-                !is_down(merged$log2FC_LU, merged$pvalue_LU, 1.5) &
+q2b <- merged[is_down(merged$log2FC_BM, merged$pvalue_BM, 1.25) &
+                !is_down(merged$log2FC_LU, merged$pvalue_LU, 1.25) &
                 merged$log2FC_BM < merged$log2FC_LU, ]
 q2b <- q2b[order(q2b$log2FC_BM), ]
-q3 <- pni_low[order(pni_low$rho), ]
 
-write_table(q1, file.path(sum_dir, "Q1_shared_lung_and_bone_down_p0.01_FC1.5"))
-write_table(q2l, file.path(sum_dir, "Q2_lung_specific_down_p0.01_FC1.5"))
-write_table(q2b, file.path(sum_dir, "Q2_bone_specific_down_p0.01_FC1.5"))
-write_table(utils::head(q3, 500), file.path(sum_dir, "Q3_low_expr_high_PNI_top500"))
-write_table(mfp_mark, file.path(sum_dir, "Q3_MFP_PNI_marker"))
+write_table(q1_fc1, file.path(sum_dir, "Q1_shared_lung_and_bone_down_p0.05_FC1"))
+write_table(q1, file.path(sum_dir, "Q1_shared_lung_and_bone_down_p0.05_FC1.25"))
+write_table(q2l, file.path(sum_dir, "Q2_lung_specific_down_p0.05_FC1.25"))
+write_table(q2b, file.path(sum_dir, "Q2_bone_specific_down_p0.05_FC1.25"))
+write_table(mfp_mark, file.path(sum_dir, "Q3_MFP_three_neural_scores"))
+write_table(assoc_all, file.path(sum_dir, "Q3_neural_scores_vs_lung_bone"))
+
+q3_counts <- data.frame(
+  signature = names(neg_lists),
+  n_neg_cor_p0.05 = vapply(neg_lists, nrow, integer(1)),
+  n_neg_and_lung_down = vapply(neg_lists, function(x) sum(x$gene %in% lung_down_genes), integer(1)),
+  n_neg_and_bone_down = vapply(neg_lists, function(x) sum(x$gene %in% bone_down_genes), integer(1)),
+  stringsAsFactors = FALSE
+)
+write_table(q3_counts, file.path(sum_dir, "Q3_neg_cor_overlap_with_lung_bone"))
+for (nm in names(neg_lists)) {
+  write_table(utils::head(neg_lists[[nm]], 500),
+              file.path(sum_dir, paste0("Q3_", nm, "_neg_cor_p0.05_top500")))
+}
 
 n_tab <- data.frame(
   question = c(
-    "Q1 shared down p<0.01 FC>=1",
-    "Q1 shared down p<0.01 FC>=1.5",
-    "Q2 lung-specific p<0.01 FC>=1.5",
-    "Q2 bone-specific p<0.01 FC>=1.5",
-    "Q3 rho<0 p<0.01 vs PNI score",
-    "Q3 MFP-low and high-PNI"
+    "Q1 shared down p<0.05 FC<1",
+    "Q1 shared down p<0.05 FC<1/1.25",
+    "Q2 lung-specific p<0.05 FC<1/1.25",
+    "Q2 bone-specific p<0.05 FC<1/1.25",
+    paste0("Q3 ", q3_counts$signature, " neg-cor p<0.05")
   ),
-  n_genes = c(
-    sum(is_down(merged$log2FC_LU, merged$pvalue_LU, 1) & is_down(merged$log2FC_BM, merged$pvalue_BM, 1)),
-    nrow(q1), nrow(q2l), nrow(q2b), nrow(q3), nrow(mfp_pni_low)
-  )
+  n_genes = c(nrow(q1_fc1), nrow(q1), nrow(q2l), nrow(q2b), q3_counts$n_neg_cor_p0.05)
 )
 write_table(n_tab, file.path(sum_dir, "gene_counts"))
 log_msg("Done. Summary counts:")

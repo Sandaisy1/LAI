@@ -107,13 +107,13 @@ setwd("E:/R/Mouse Breast")
 source("GSE165393_Mouse_breast.R")
 ```
 
-脚本回答三问（低表达促进转移 = 转移灶相对原位 MFP 下调的抑制候选）：
+脚本回答三问（低表达促进转移 = 转移灶相对原位 MFP 下调）：
 
 1. 肺和骨髓都下调的共享基因 → `results_GSE165393/01_shared_lung_and_bone_down/` 与 `07_summary/Q1_*`
 2. 只肺或只骨下调 → `02_lung_specific_down/`、`03_bone_specific_down/` 与 `07_summary/Q2_*`
-3. 原位神经浸润打分（无病理 PNI 标签，用神经/PNI 基因集）→ `06_neural_invasion/MFP_neural_invasion_marker` 与 `07_summary/Q3_*`
+3. 神经浸润拆成三套 marker（施旺细胞、神经营养因子、轴突导向）分别打分、找负相关基因，并比较三套分数与肺/骨转移的关系 → `06_neural_invasion/` 与 `07_summary/Q3_*`
 
-先看 `results_GSE165393/07_summary/`。显著性为 limma **p < 0.01**，再按下调 FC ≥ 1 / 1.25 / 1.5 / 2 和 top 50–300 出表和图。BM 是骨髓来源细胞系，不是皮质骨灶。
+先看 `results_GSE165393/07_summary/`。入选为 limma **p < 0.05**，下调 **FC < 1** 即可，并再出 **FC < 1/1.25**。BM 是骨髓来源细胞系，不是皮质骨灶。
 
 ## 小鼠转移组学对照文献
 
