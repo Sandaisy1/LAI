@@ -3,6 +3,7 @@
 .Rproj.user
 .Ruserdata
 results/
+results_GSE165393/
 figures/
 *.html
 *.pdf

@@ -98,6 +98,23 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
 
+## GSE165393 小鼠原位 vs 肺/骨转移
+
+数据目录：`E:/R/Mouse Breast`，放入 GEO 补充文件 `GSE165393_AllTissues_TPM.csv.gz`。把 `GSE165393_Mouse_breast.R` 拷到该目录后：
+
+```r
+setwd("E:/R/Mouse Breast")
+source("GSE165393_Mouse_breast.R")
+```
+
+脚本回答三问（低表达促进转移 = 转移灶相对原位 MFP 下调的抑制候选）：
+
+1. 肺和骨髓都下调的共享基因 → `results_GSE165393/01_shared_lung_and_bone_down/` 与 `07_summary/Q1_*`
+2. 只肺或只骨下调 → `02_lung_specific_down/`、`03_bone_specific_down/` 与 `07_summary/Q2_*`
+3. 原位神经浸润打分（无病理 PNI 标签，用神经/PNI 基因集）→ `06_neural_invasion/MFP_neural_invasion_marker` 与 `07_summary/Q3_*`
+
+先看 `results_GSE165393/07_summary/`。显著性为 limma **p < 0.01**，再按下调 FC ≥ 1 / 1.25 / 1.5 / 2 和 top 50–300 出表和图。BM 是骨髓来源细胞系，不是皮质骨灶。
+
 ## 小鼠转移组学对照文献
 
 本仓库样品是人 BRCA 细胞 TG 敲低 RNA-seq，不是小鼠组织。若要用「原位 vs 肺/骨/肝/脑」公开数据做签名 overlap，见：
