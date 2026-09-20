@@ -97,3 +97,83 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## GSE165393 小鼠原位 vs 肺/骨转移
+
+数据目录：`E:/R/Mouse Breast`，放入 GEO 补充文件 `GSE165393_AllTissues_TPM.csv.gz`。把 `GSE165393_Mouse_breast.R` 拷到该目录后：
+
+```r
+setwd("E:/R/Mouse Breast")
+source("GSE165393_Mouse_breast.R")
+```
+
+脚本回答三问（低表达促进转移 = 转移灶相对原位 MFP 下调）：
+
+1. 肺和骨髓都下调的共享基因 → `results_GSE165393/01_shared_lung_and_bone_down/` 与 `07_summary/Q1_*`
+2. 只肺或只骨下调 → `02_lung_specific_down/`、`03_bone_specific_down/` 与 `07_summary/Q2_*`
+3. 神经浸润拆成三套 marker（施旺细胞、神经营养因子、轴突导向）分别打分、找负相关基因，并比较三套分数与肺/骨转移的关系 → `06_neural_invasion/` 与 `07_summary/Q3_*`
+
+先看 `results_GSE165393/07_summary/`。入选为 limma **p < 0.05**，下调 **FC < 1** 即可，并再出 **FC < 1/1.25**。BM 是骨髓来源细胞系，不是皮质骨灶。
+
+## GSE273439 小鼠原位 vs 配对肺（Visium）
+
+数据目录：`E:/R/Mouse Breast/GSE273439`，放入并解压 `GSE273439_RAW.tar`（四个样品的 MTX / 坐标 / PNG）。把 `GSE273439_Mouse_breast.R` 拷到该目录后：
+
+```r
+setwd("E:/R/Mouse Breast/GSE273439")
+source("GSE273439_Mouse_breast.R")
+```
+
+**一一对应：** Mouse627 原位只对 Mouse627 肺，Mouse628 只对 Mouse628 肺，两只鼠不混成一组。入选为 **p < 0.05**，下调倍数 **原位/肺 ≥ 1 和 ≥ 1.25**。只做这两档 FC，**没有 Top50–300**。
+
+1. 配对肺下调 → `results_GSE273439/01_lung_down_Mouse627/`、`01_lung_down_Mouse628/`、`01_lung_down_both_mice/` 与 `08_summary/Q1_*`
+2. 肺转移灶特异下调（相对未受累肺实质）→ `02_lung_foci_specific_down/`。**本套数据没有骨**，`03_bone_not_in_GSE273439/00_NOTE.txt` 说明原因
+3. 原位 TM 上三套神经分数（施旺 / 神经营养 / 轴突导向）及负相关基因 → `06_neural_invasion/`
+4. 三种神经分数分别 vs 配对肺 → `07_neural_vs_lung/` 与 `08_summary/Q4_*`
+
+先看 `results_GSE273439/08_summary/`。spot 不是独立生物学重复，主结论用「两鼠都过阈值」。跳过富集可设环境变量 `GSE273439_SKIP_ENRICHMENT=1`。
+
+## GSE146012 小鼠原位 vs 配对肺（4T1 GFP+ bulk）
+
+数据目录：`E:/R/Mouse Breast/GSE146012`，放入 `GSE146012_RNA_seq_logtransformed_count.txt.gz`（浏览器解压成 `.txt` 也可以）。把 `GSE146012_Mouse_breast.R` 拷到该目录后：
+
+```r
+setwd("E:/R/Mouse Breast/GSE146012")
+source("GSE146012_Mouse_breast.R")
+```
+
+矩阵已经是 DESeq2 log，**不要再跑 DESeq2**。**一一对应：** Tumor-1 只对 MFP-Met-1（及 TVI-Met-1），Tumor-2 只对 Met-2；不要把两只原发和三只肺混成一组，也不要把 MFP 与 TVI 合并。Met-3 没有 Tumor-3，只相对原发均值作补充、不算真配对。入选为 **p < 0.05**（两对配对 limma；1-vs-1 无法估计 p 则只按 FC），下调倍数 **原位/肺 ≥ 1 和 ≥ 1.25**。只做这两档 FC，**没有 Top50–300**。
+
+1. 配对肺下调 → `results_GSE146012/01_lung_down_pair1_Tumor1_vs_MFPMet1/`、`01_lung_down_pair2_Tumor2_vs_MFPMet2/`、`01_lung_down_both_pairs_MFP/`。TVI 路径单独在 `01b_*`。**本套数据没有骨**，`03_bone_not_in_GSE146012/00_NOTE.txt` 说明原因
+2. 路径特异（MFP 下调而 TVI 未同时下调；不能做骨器官特异）→ `02_MFP_lung_specific_vs_TVI/`
+3. 原位 Tumor 上三套神经分数（施旺 / 神经营养 / 轴突导向）及负相关基因 → `06_neural_invasion/`
+4. 三种神经分数分别 vs 配对 MFP 肺 → `07_neural_vs_lung/` 与 `08_summary/Q4_*`
+
+先看 `results_GSE146012/08_summary/`。跳过富集可设 `GSE146012_SKIP_ENRICHMENT=1`。
+
+## GSE54773 小鼠原位衍生系 vs 配对肺/脑（芯片）
+
+数据目录：`E:/R/Mouse Breast/GSE54773`，放入 `GSE54773_series_matrix.txt.gz`（建议同时放 `GPL6246.annot.gz`）。把 `GSE54773_Mouse_breast.R` 拷到该目录后：
+
+```r
+setwd("E:/R/Mouse Breast/GSE54773")
+source("GSE54773_Mouse_breast.R")
+```
+
+矩阵已经是 RMA log2，**不要再跑 DESeq2**。**一一对应：** T2-1 只对 LM2-1 / BM2-1，T2-2 对 2 号，T2-3 对 3 号。GEO 写明 9 只独立小鼠，脚本仍按编号配对。入选为 **p < 0.05**（三对配对 limma；1-vs-1 无法估计 p 则只按 FC），下调倍数 **原位/转移 ≥ 1 和 ≥ 1.25**。只做这两档 FC，**没有 Top50–300**。
+
+1. 配对肺下调 → `results_GSE54773/01_lung_down_pair1_T2_1_vs_Lung_1/` … `01_lung_down_all_pairs/`。脑转移在 `01b_brain_down_*`。**本套数据没有骨**，`03_bone_not_in_GSE54773/00_NOTE.txt` 说明原因
+2. 器官特异（肺下调而脑未同时下调，或反过来）→ `02_lung_specific_vs_brain/`、`02b_brain_specific_vs_lung/`
+3. 原位 T2 上三套神经分数（施旺 / 神经营养 / 轴突导向）及负相关基因 → `06_neural_invasion/`
+4. 三种神经分数分别 vs 配对肺 → `07_neural_vs_lung/` 与 `08_summary/Q4_*`
+
+先看 `results_GSE54773/08_summary/`。跳过富集可设 `GSE54773_SKIP_ENRICHMENT=1`。
+
+## 小鼠转移组学对照文献
+
+本仓库样品是人 BRCA 细胞 TG 敲低 RNA-seq，不是小鼠组织。若要用「原位 vs 肺/骨/肝/脑」公开数据做签名 overlap，见：
+
+- `literature/mouse_breast_cancer_metastasis_datasets.md`（文献说明与选用建议）
+- `literature/mouse_breast_cancer_metastasis_datasets.csv`（登录号、器官、数据类型表）
+
+没有一份公开数据同时覆盖原位 + 四器官配对 bulk RNA-seq；多器官比较需组合 GSE165393、GSE146012、GSE37975、GSE238214、GSE54773，或用 E-MTAB-16621 的四器官 scRNA-seq（无原位瘤）。
