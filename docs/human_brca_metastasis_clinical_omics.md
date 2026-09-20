@@ -32,6 +32,38 @@
 - **下载**：RNA-seq GEO [GSE209998](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE209998)（SuperSeries [GSE212375](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE212375)）；原始数据 dbGaP [phs002622](https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=phs002622.v1.p1)；切片 TCIA `AURORA-Metastatic-Breast-Multiomics`。
 - **器官比较**：该文把 AURORA 与 RAP、GEICAM RNA-seq 合并后比较肝 / 肺 / 脑 vs 原发；肝转移免疫签名偏低，脑转移免疫/基质偏低，肺 vs 原发差异最小。
 
+#### GSE209998 该下哪些文件
+
+GSE209998 **只含 RNA-seq 处理后矩阵**，没有 FASTQ/BAM。GEO 补充文件一共两个；再加表型和论文附表即可做差异表达。矩阵 129 列 = 论文 QC 后的 123 个肿瘤（35 FFPE + 88 FF）+ 6 个正常组织。论文全文多组学队列是 55 例、51 原发 + 102 转移（153 个肿瘤），比 RNA 矩阵大，不要用 153 当 RNA 样本量。
+
+**必下（表达分析）**
+
+| 文件 | 大约大小 | 用途 |
+| --- | --- | --- |
+| [`GSE209998_AUR_129_raw_counts.txt.gz`](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE209nnn/GSE209998/suppl/GSE209998_AUR_129_raw_counts.txt.gz) | 14 MB | Salmon / UCSC hg38 基因计数。要自己做 DESeq2 / 批次校正时用这个，不要只用 UQN。值为小数（不是整数 read count），按论文方法可先 `DESeq2::estimateSizeFactors`。 |
+| [`GSE209998_series_matrix.txt.gz`](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE209nnn/GSE209998/matrix/GSE209998_series_matrix.txt.gz) | 9 KB | 表型：`disease`（Primary / Metastatic / Normal）、`tissue`（Breast / Liver / Lung / Brain / Bone 等）、`treatment`、`time`（Autopsy / Non-Autopsy）。也可下 SOFT。 |
+| 论文 Supplementary Table 1–2（Nature Cancer / PMC [9886551](https://pmc.ncbi.nlm.nih.gov/articles/PMC9886551/)） | — | **GEO 没有** PAM50、纯度、FF vs FFPE、配对关系。Table 1 临床；Table 2 样本级分子注释（与 barcode 对齐）。 |
+
+**可选**
+
+| 文件 | 何时需要 |
+| --- | --- |
+| [`GSE209998_AUR_129_UQN.txt.gz`](https://ftp.ncbi.nlm.nih.gov/geo/series/GSE209nnn/GSE209998/suppl/GSE209998_AUR_129_UQN.txt.gz)（25 MB） | 只想复现论文的 upper-quartile 标准化矩阵、不做自己的 size factor。 |
+| UNC RAP [`GSE110590`](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE110590) / [`GSE193103`](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE193103) | 复现文中肝 / 肺 / 脑 vs 原发的合并分析（AURORA + RAP ± GEICAM）。RAP 重测序 FASTQ 在 dbGaP [phs002429](https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=phs002429.v1.p1)。 |
+| ConvertHER / GEICAM [`GSE92977`](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE92977) | 只在复现文中三联队列时需要；那是 NanoString，不是 RNA-seq。 |
+
+**不要下（除非题目明确要）**
+
+- SuperSeries [`GSE212375`](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE212375) 的 `RAW.tar`、甲基化亚系列 [`GSE212370`](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE212370)（825 MB 矩阵 + 2.1 GB IDAT）：这是 EPIC 甲基化，不是 RNA。
+- dbGaP [phs002622](https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=phs002622.v1.p1) BAM/FASTQ：GEO 写明 raw 交 dbGaP；只有重新比对或要 WES/WGS 时才申请。
+- TCIA `AURORA-Metastatic-Breast-Multiomics`：H&E 切片，不是表达矩阵。
+
+**样本 barcode（与矩阵列名一致）**
+
+- `TTP`：原发；`TTM`：转移；`NT`：正常组织（矩阵最后 6 列：2 脑、1 肺、1 肝、2 乳腺）。
+- GEO RNA 矩阵部位计数（仅本 series，不是全文 153 肿瘤）：原发乳腺 44；转移肝 18、淋巴结 11、脑 9、肺 8、骨 2，另有胸壁/软组织等；正常 6。分析肿瘤时去掉 `disease: Normal tissue`。
+- 列名示例：`AUR-AFEA-TTP1-...` vs `AUR-AFEA-TTM1-...`。患者 ID 是 `AUR-xxxx`。
+
 ### A2. UNC Rapid Autopsy（同一患者多个转移器官）
 
 - **Siegel et al.**, *J Clin Invest* (2018). DOI: [10.1172/JCI96153](https://doi.org/10.1172/jci96153)
