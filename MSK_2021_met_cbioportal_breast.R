@@ -1,0 +1,1368 @@
+#!/usr/bin/env Rscript
+# =============================================================================
+# MSK 2021 MetTropism cBioPortal 乳腺癌：原发灶低剂量 vs 该患者肺/骨转移，以及神经浸润
+# 文件名：MSK_2021_met_cbioportal_breast.R
+# （即“MSK_2021 met_cbioportal breast”）
+#
+# 数据目录（脚本会自动寻找）：
+#   E:/R/cBioportal breast cancer/MSK_2021 met
+#   或其下的 msk_met_2021/ 解压子目录
+#
+# 运行：
+#   setwd("E:/R/cBioportal breast cancer/MSK_2021 met")
+#   source("MSK_2021_met_cbioportal_breast.R")
+# 也可设置环境变量 MSK2021_DIR 指向解压后的 msk_met_2021 目录。
+#
+# 四个问题：
+#   1) 同一患者原发灶 vs 该患者肺转移 / 骨转移：原发灶里更低的基因
+#      （1 号原发只配 1 号患者自己的肺/骨结局，绝不把不同患者混成一对）
+#   2) 在 1) 基础上取器官特异：只肺、不骨；或只骨、不肺
+#   3) 用轴突导向 / 施旺细胞 / 神经营养 三套基因集给原发灶打神经浸润分，
+#      再找原发灶里低剂量、与高神经浸润表型相关的基因（三套分开）
+#   4) 三种神经浸润评分分别与是否发生肺转移的关系
+#
+# 阈值：p < 0.05，且 FC >= 1 与 FC >= 1.25 两档。不做 top50–300。
+#
+# 重要：MSK-MET（Nguyen et al. Cell 2022, msk_met_2021）是泛癌 IMPACT 队列，
+# 公开包通常每人只测 1 个样本（原发或转移），没有“同一人原发 RNA/CNA + 同人肺转移 RNA/CNA”。
+# 本脚本：
+#   - 先筛乳腺癌，再尝试样本级 1 原发 : 1 该器官测序转移；n < 3 不伪造 p
+#   - 样本级配对为 0 时，改用该患者自己的 Distant Mets 表型（DMETS_DX_LUNG / BONE）
+#     做原发灶内比较：有该器官转移 vs 无。1 个原发只对应该患者自己的 Yes/No
+#   - 无 RNA 则用离散 GISTIC 拷贝数当剂量；FC = 2^(mean_无转移 - mean_有转移)
+#     正 FC = 有转移的原发灶更低。这不是转录组倍数。
+# =============================================================================
+
+options(stringsAsFactors = FALSE, warn = 1, timeout = 600)
+Sys.setenv(LANGUAGE = "en")
+options(clusterProfiler.download.method = "auto")
+
+# -----------------------------------------------------------------------------
+# 0. 依赖
+# -----------------------------------------------------------------------------
+cran_required <- c(
+  "dplyr", "tidyr", "tibble", "stringr", "ggplot2", "ggrepel",
+  "pheatmap", "RColorBrewer", "matrixStats"
+)
+cran_optional <- c("writexl")
+bioc_required <- character(0)
+bioc_optional <- c("clusterProfiler", "org.Hs.eg.db", "enrichplot", "AnnotationDbi", "msigdbr")
+
+install_if_missing <- function(pkgs, bioc = FALSE, required = TRUE) {
+  miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(miss) == 0) return(invisible(TRUE))
+  if (bioc) {
+    if (!requireNamespace("BiocManager", quietly = TRUE)) {
+      install.packages("BiocManager", repos = "https://cloud.r-project.org")
+    }
+    tryCatch(
+      BiocManager::install(miss, update = FALSE, ask = FALSE),
+      error = function(e) message("Bioconductor install failed: ", e$message)
+    )
+  } else {
+    tryCatch(
+      install.packages(miss, repos = "https://cloud.r-project.org"),
+      error = function(e) message("CRAN install failed: ", e$message)
+    )
+  }
+  still <- miss[!vapply(miss, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(still) > 0 && required) {
+    stop("缺少必需 R 包: ", paste(still, collapse = ", "))
+  }
+  if (length(still) > 0) message("可选包未安装，相关步骤将跳过: ", paste(still, collapse = ", "))
+  invisible(TRUE)
+}
+
+install_if_missing(cran_required, bioc = FALSE, required = TRUE)
+install_if_missing(cran_optional, bioc = FALSE, required = FALSE)
+still_bioc <- bioc_optional[!vapply(bioc_optional, requireNamespace, logical(1), quietly = TRUE)]
+if (length(still_bioc) > 0) {
+  message("可选 Bioconductor 包未安装，相关步骤将跳过: ", paste(still_bioc, collapse = ", "))
+}
+
+safe_library <- function(pkgs) {
+  for (p in pkgs) {
+    if (requireNamespace(p, quietly = TRUE)) {
+      suppressPackageStartupMessages(library(p, character.only = TRUE))
+    }
+  }
+}
+safe_library(c(cran_required, cran_optional, bioc_required, bioc_optional))
+has_pkg <- function(p) requireNamespace(p, quietly = TRUE)
+
+# -----------------------------------------------------------------------------
+# 1. 路径
+# -----------------------------------------------------------------------------
+script_dir <- tryCatch({
+  ofile <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+  if (length(ofile) == 1) {
+    dirname(normalizePath(sub("^--file=", "", ofile), winslash = "/", mustWork = FALSE))
+  } else if (!is.null(sys.frames()[[1]]$ofile)) {
+    dirname(normalizePath(sys.frames()[[1]]$ofile, winslash = "/", mustWork = FALSE))
+  } else {
+    NA_character_
+  }
+}, error = function(e) NA_character_)
+
+dir_has_msk2021 <- function(d) {
+  if (!nzchar(d) || !dir.exists(d)) return(FALSE)
+  hits <- list.files(d, pattern = "data_clinical_sample\\.txt$", recursive = TRUE, full.names = TRUE)
+  if (length(hits) == 0) return(FALSE)
+  meta <- list.files(d, pattern = "meta_study\\.txt$", recursive = TRUE, full.names = TRUE)
+  if (length(meta) > 0) {
+    txt <- paste(readLines(meta[1], warn = FALSE), collapse = "\n")
+    if (grepl("msk_met_2021|MetTropism|MSK-MET", txt, ignore.case = TRUE)) return(TRUE)
+  }
+  TRUE
+}
+
+resolve_msk2021_dir <- function() {
+  env_dir <- Sys.getenv("MSK2021_DIR", unset = Sys.getenv("MSKMET_DIR", unset = ""))
+  candidates <- c(
+    env_dir,
+    "E:/R/cBioportal breast cancer/MSK_2021 met",
+    "E:\\R\\cBioportal breast cancer\\MSK_2021 met",
+    file.path("E:/R/cBioportal breast cancer/MSK_2021 met", "msk_met_2021"),
+    getwd(),
+    file.path(getwd(), "msk_met_2021"),
+    file.path(getwd(), "MSK_2021 met"),
+    script_dir,
+    file.path(script_dir, "MSK_2021 met"),
+    file.path(script_dir, "msk_met_2021")
+  )
+  candidates <- unique(candidates[!is.na(candidates) & nzchar(candidates)])
+  for (d in candidates) {
+    if (dir_has_msk2021(d)) {
+      clin <- list.files(d, pattern = "data_clinical_sample\\.txt$", recursive = TRUE, full.names = TRUE)
+      return(normalizePath(dirname(clin[1]), winslash = "/", mustWork = FALSE))
+    }
+  }
+  stop(
+    "未找到 MSK 2021 MetTropism 临床表 data_clinical_sample.txt。请把解压后的文件放在：",
+    "E:/R/cBioportal breast cancer/MSK_2021 met （或设置环境变量 MSK2021_DIR）"
+  )
+}
+
+project_dir <- resolve_msk2021_dir()
+result_dir  <- file.path(project_dir, "results_MSK_2021_met_cbioportal_breast")
+log_dir     <- file.path(result_dir, "00_logs")
+dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
+log_file <- file.path(log_dir, paste0("MSK2021_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
+log_msg <- function(...) {
+  msg <- paste0(format(Sys.time(), "%H:%M:%S"), " | ", paste(..., collapse = ""))
+  cat(msg, "\n")
+  cat(msg, "\n", file = log_file, append = TRUE)
+}
+log_msg("MSK 2021 MetTropism data directory: ", project_dir)
+log_msg("Results: ", result_dir)
+
+p_cutoff   <- 0.05
+fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25)
+
+save_tbl <- function(df, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  utils::write.csv(df, path, row.names = FALSE, na = "")
+  if (has_pkg("writexl") && grepl("\\.csv$", path)) {
+    tryCatch(
+      writexl::write_xlsx(df, sub("\\.csv$", ".xlsx", path)),
+      error = function(e) NULL
+    )
+  }
+}
+
+save_gg <- function(plot, path_stub, width = 8, height = 6) {
+  dir.create(dirname(path_stub), recursive = TRUE, showWarnings = FALSE)
+  tryCatch(ggplot2::ggsave(paste0(path_stub, ".pdf"), plot, width = width, height = height),
+           error = function(e) log_msg("pdf ggsave failed: ", e$message))
+  tryCatch(ggplot2::ggsave(paste0(path_stub, ".png"), plot, width = width, height = height, dpi = 300),
+           error = function(e) log_msg("png ggsave failed: ", e$message))
+}
+
+# -----------------------------------------------------------------------------
+# 2. 读临床表 + 表达/拷贝数矩阵
+# -----------------------------------------------------------------------------
+read_cbioportal_clinical <- function(path) {
+  raw <- readLines(path, warn = FALSE, encoding = "UTF-8")
+  hit <- which(grepl("^(PATIENT_ID|SAMPLE_ID)\\t", raw))
+  if (length(hit) == 0) stop("临床表没有 PATIENT_ID / SAMPLE_ID 表头: ", path)
+  utils::read.delim(path, skip = hit[1] - 1, check.names = FALSE, stringsAsFactors = FALSE)
+}
+
+find_one <- function(patterns) {
+  allf <- list.files(project_dir, recursive = TRUE, full.names = TRUE)
+  base <- basename(allf)
+  for (p in patterns) {
+    hit <- allf[grepl(p, base, ignore.case = TRUE)]
+    if (length(hit) > 0) return(hit[1])
+  }
+  NULL
+}
+
+matrix_from_portal <- function(path) {
+  raw <- utils::read.delim(path, check.names = FALSE, stringsAsFactors = FALSE)
+  gene_col <- if ("Hugo_Symbol" %in% names(raw)) "Hugo_Symbol" else names(raw)[1]
+  entrez_col <- if ("Entrez_Gene_Id" %in% names(raw)) "Entrez_Gene_Id" else NULL
+  sample_cols <- setdiff(names(raw), c(gene_col, entrez_col))
+  mat <- as.matrix(raw[, sample_cols, drop = FALSE])
+  storage.mode(mat) <- "double"
+  genes <- trimws(as.character(raw[[gene_col]]))
+  keep <- !is.na(genes) & nzchar(genes) & genes != "NA"
+  mat <- mat[keep, , drop = FALSE]
+  genes <- genes[keep]
+  if (any(duplicated(genes))) {
+    means <- matrixStats::rowMeans2(mat, na.rm = TRUE)
+    ord <- order(means, decreasing = TRUE, na.last = TRUE)
+    mat <- mat[ord, , drop = FALSE]
+    genes <- genes[ord]
+    uniq <- !duplicated(genes)
+    mat <- mat[uniq, , drop = FALSE]
+    genes <- genes[uniq]
+  }
+  rownames(mat) <- genes
+  mat
+}
+
+clin_sample_file <- find_one("^data_clinical_sample\\.txt$")
+clin_patient_file <- find_one("^data_clinical_patient\\.txt$")
+if (is.null(clin_sample_file)) stop("缺少 data_clinical_sample.txt")
+clin_all <- read_cbioportal_clinical(clin_sample_file)
+patient <- if (!is.null(clin_patient_file)) read_cbioportal_clinical(clin_patient_file) else NULL
+log_msg("Clinical samples (pan-cancer): ", nrow(clin_all), " from ", basename(clin_sample_file))
+is_breast <- FALSE
+if ("CANCER_TYPE" %in% names(clin_all)) {
+  is_breast <- is_breast | grepl("breast", clin_all$CANCER_TYPE, ignore.case = TRUE)
+}
+if ("ORGAN_SYSTEM" %in% names(clin_all)) {
+  is_breast <- is_breast | grepl("^breast$", clin_all$ORGAN_SYSTEM, ignore.case = TRUE)
+}
+if ("ONCOTREE_CODE" %in% names(clin_all)) {
+  is_breast <- is_breast | clin_all$ONCOTREE_CODE %in% c(
+    "BRCA", "IDC", "ILC", "IMMC", "MDLC", "BRCNOS", "PD", "IBC", "MBC"
+  )
+}
+if (!any(is_breast)) stop("临床表里没有乳腺癌样本，请确认这是 msk_met_2021。")
+clin <- clin_all[which(is_breast), , drop = FALSE]
+log_msg("Breast subset: ", nrow(clin), " samples / ",
+        length(unique(clin$PATIENT_ID)), " patients")
+
+# 优先 RNA；MSK-MET 公开包没有 RNA，回退到离散 CNA
+expr_file <- find_one(c(
+  "^data_mrna_seq_v2_rsem\\.txt$",
+  "^data_mrna_seq_rsem\\.txt$",
+  "^data_mrna.*rsem\\.txt$",
+  "^data_mrna.*counts\\.txt$",
+  "^data_mrna.*fpkm\\.txt$"
+))
+expr_is_zscore <- FALSE
+assay_mode <- "RNA"
+if (is.null(expr_file)) {
+  zf <- find_one(c(
+    "^data_mrna_seq_v2_rsem_zscores.*\\.txt$",
+    "^data_mrna.*zscores.*\\.txt$"
+  ))
+  if (!is.null(zf)) {
+    expr_file <- zf
+    expr_is_zscore <- TRUE
+    assay_mode <- "RNA_zscore"
+  }
+}
+if (is.null(expr_file)) {
+  expr_file <- find_one(c("^data_cna\\.txt$", "^data_linear_cna\\.txt$"))
+  assay_mode <- if (!is.null(expr_file) && grepl("linear", basename(expr_file), ignore.case = TRUE)) {
+    "CNA_linear"
+  } else {
+    "CNA_discrete"
+  }
+}
+if (is.null(expr_file)) stop("未找到 mRNA 或拷贝数矩阵（data_cna.txt）")
+log_msg("Assay file: ", basename(expr_file), " | mode=", assay_mode, " | z-score=", expr_is_zscore)
+if (grepl("^CNA", assay_mode)) {
+  log_msg("NOTE: MSK-MET 公开包无 RNA。用 IMPACT 离散拷贝数当剂量代理。",
+          "有该器官转移的原发灶更低：FC = 2^(mean_无转移 - mean_有转移)。",
+          "这不是转录组倍数，解读时必须写明。")
+}
+
+mat <- matrix_from_portal(expr_file)
+keep_cols <- intersect(colnames(mat), as.character(clin$SAMPLE_ID))
+if (length(keep_cols) == 0) stop("乳腺癌 SAMPLE_ID 与表达/CNA 矩阵列名对不上")
+mat <- mat[, keep_cols, drop = FALSE]
+log_msg("Matrix: ", nrow(mat), " genes x ", ncol(mat), " breast samples")
+
+# -----------------------------------------------------------------------------
+# 3. 器官归并 + 同一患者 1 对 1 配对
+# -----------------------------------------------------------------------------
+# MSK-MET 用 METASTATIC_SITE；部分包也可能有 SAMPLE_SITE
+site_col <- if ("METASTATIC_SITE" %in% names(clin)) {
+  "METASTATIC_SITE"
+} else if ("SAMPLE_SITE" %in% names(clin)) {
+  "SAMPLE_SITE"
+} else {
+  stop("临床表没有 METASTATIC_SITE / SAMPLE_SITE")
+}
+
+classify_organ <- function(site, sample_type) {
+  s <- tolower(trimws(as.character(site)))
+  s[is.na(s)] <- ""
+  st <- tolower(trimws(as.character(sample_type)))
+  out <- rep(NA_character_, length(s))
+  # 原发灶部位不是转移器官
+  is_met <- grepl("metasta", st)
+  lung <- is_met & grepl("lung|lobe", s) & !grepl("liver", s)
+  bone <- is_met & grepl("bone|vertebra|rib|iliac|spine|femur|sternum|calvarium|perioste", s)
+  # 不要用孤立的 "dura"：epidural 会误匹配成脑
+  brain <- is_met & grepl("brain|cerebr|cerebel|occipital|\\bdura\\b|meninge", s) &
+    !grepl("epidural", s)
+  liver <- is_met & grepl("liver", s)
+  out[liver] <- "Liver"
+  out[brain] <- "Brain"
+  out[bone] <- "Bone"
+  out[lung] <- "Lung"
+  out[is_met & s != "" & is.na(out)] <- "Other"
+  out
+}
+
+clin$SAMPLE_ID <- as.character(clin$SAMPLE_ID)
+clin$PATIENT_ID <- as.character(clin$PATIENT_ID)
+clin$SAMPLE_TYPE <- as.character(clin$SAMPLE_TYPE)
+clin$SAMPLE_TYPE[clin$SAMPLE_TYPE %in% c("Metastasis", "metastasis")] <- "Metastatic"
+clin$SITE_RAW <- as.character(clin[[site_col]])
+clin$organ <- classify_organ(clin$SITE_RAW, clin$SAMPLE_TYPE)
+clin$has_assay <- clin$SAMPLE_ID %in% colnames(mat)
+
+flag_yes <- function(x) {
+  s <- tolower(trimws(as.character(x)))
+  s[is.na(x)] <- ""
+  ifelse(s %in% c("yes", "true", "1", "y"), TRUE,
+         ifelse(s %in% c("no", "false", "0", "n", ""), FALSE, NA))
+}
+find_flag_col <- function(keys) {
+  nms <- names(clin)
+  hit <- nms[grepl(keys, nms, ignore.case = TRUE)]
+  if (length(hit) == 0) return(NA_character_)
+  hit[1]
+}
+col_lung_flag <- find_flag_col("DMETS_DX_LUNG|DISTANT_METS.*LUNG|MET_SITE_LUNG")
+col_bone_flag <- find_flag_col("DMETS_DX_BONE|DISTANT_METS.*BONE|MET_SITE_BONE")
+col_pns_flag  <- find_flag_col("DMETS_DX_PNS|DISTANT_METS.*PNS")
+if (is.na(col_lung_flag) || is.na(col_bone_flag)) {
+  log_msg("WARNING: 未找到 DMETS_DX_LUNG / BONE 列。现有列: ",
+          paste(names(clin), collapse = ", "))
+}
+clin$ever_lung <- if (!is.na(col_lung_flag)) flag_yes(clin[[col_lung_flag]]) else FALSE
+clin$ever_bone <- if (!is.na(col_bone_flag)) flag_yes(clin[[col_bone_flag]]) else FALSE
+clin$ever_pns  <- if (!is.na(col_pns_flag))  flag_yes(clin[[col_pns_flag]])  else FALSE
+clin$tropism_class <- ifelse(clin$ever_lung & clin$ever_bone, "lung_and_bone",
+                      ifelse(clin$ever_lung & !clin$ever_bone, "lung_only",
+                      ifelse(!clin$ever_lung & clin$ever_bone, "bone_only", "neither")))
+
+log_msg("Assay by sample type: ",
+        paste(names(table(clin$SAMPLE_TYPE[clin$has_assay])),
+              table(clin$SAMPLE_TYPE[clin$has_assay]), sep = "=", collapse = ", "))
+log_msg("Metastatic organs with assay: ",
+        paste(names(table(clin$organ[clin$has_assay & clin$SAMPLE_TYPE == "Metastatic"], useNA = "ifany")),
+              table(clin$organ[clin$has_assay & clin$SAMPLE_TYPE == "Metastatic"], useNA = "ifany"),
+              sep = "=", collapse = ", "))
+
+site_tab <- as.data.frame(table(SAMPLE_TYPE = clin$SAMPLE_TYPE, SITE = clin$SITE_RAW), stringsAsFactors = FALSE)
+site_tab <- site_tab[site_tab$Freq > 0, ]
+site_tab$organ <- classify_organ(site_tab$SITE, site_tab$SAMPLE_TYPE)
+save_tbl(site_tab[order(-site_tab$Freq), ], file.path(result_dir, "01_pairing", "sample_site_to_organ.csv"))
+
+pick_one_primary <- function(rows) {
+  if (nrow(rows) == 1) return(rows$SAMPLE_ID[1])
+  naive <- grepl("treatment naive|treatment-naive|naive primary", rows$SITE_RAW, ignore.case = TRUE)
+  if (any(naive)) rows <- rows[naive, , drop = FALSE]
+  if (nrow(rows) == 1) return(rows$SAMPLE_ID[1])
+  nuc <- if ("PERCENT_TUMOR_NUCLEI" %in% names(rows)) {
+    suppressWarnings(as.numeric(rows$PERCENT_TUMOR_NUCLEI))
+  } else {
+    rep(NA_real_, nrow(rows))
+  }
+  if (all(is.na(nuc))) return(rows$SAMPLE_ID[1])
+  rows$SAMPLE_ID[which.max(replace(nuc, is.na(nuc), -Inf))]
+}
+
+# 同一患者、同一器官：多枚转移灶先平均，保证 1 个原发 : 1 个该器官转移轮廓
+build_pairs <- function(organ_name) {
+  prim <- clin[which(clin$SAMPLE_TYPE == "Primary" & clin$has_assay), , drop = FALSE]
+  mets <- clin[which(clin$SAMPLE_TYPE == "Metastatic" & clin$has_assay &
+                       !is.na(clin$organ) & clin$organ == organ_name), , drop = FALSE]
+  both <- intersect(unique(prim$PATIENT_ID), unique(mets$PATIENT_ID))
+  if (length(both) == 0) {
+    return(data.frame(
+      patient_id = character(), primary_sample = character(), met_sample = character(),
+      primary_site = character(), met_site = character(), n_met = integer(),
+      stringsAsFactors = FALSE
+    ))
+  }
+  rows <- lapply(both, function(pid) {
+    pr <- prim[prim$PATIENT_ID == pid, , drop = FALSE]
+    mt <- mets[mets$PATIENT_ID == pid, , drop = FALSE]
+    prim_id <- pick_one_primary(pr)
+    data.frame(
+      patient_id = pid,
+      primary_sample = prim_id,
+      met_sample = paste(mt$SAMPLE_ID, collapse = ";"),
+      primary_site = paste(pr$SITE_RAW[match(prim_id, pr$SAMPLE_ID)], collapse = ";"),
+      met_site = paste(mt$SITE_RAW, collapse = ";"),
+      n_met = nrow(mt),
+      stringsAsFactors = FALSE
+    )
+  })
+  dplyr::bind_rows(rows)
+}
+
+pair_expr <- function(pairs) {
+  if (nrow(pairs) == 0) {
+    return(list(
+      primary = matrix(numeric(0), nrow = nrow(mat), ncol = 0, dimnames = list(rownames(mat), NULL)),
+      met = matrix(numeric(0), nrow = nrow(mat), ncol = 0, dimnames = list(rownames(mat), NULL))
+    ))
+  }
+  prim_mat <- mat[, pairs$primary_sample, drop = FALSE]
+  met_mat <- sapply(seq_len(nrow(pairs)), function(i) {
+    ids <- strsplit(pairs$met_sample[i], ";", fixed = TRUE)[[1]]
+    ids <- intersect(ids, colnames(mat))
+    if (length(ids) == 1) return(mat[, ids])
+    matrixStats::rowMeans2(mat[, ids, drop = FALSE], na.rm = TRUE)
+  })
+  if (is.null(dim(met_mat))) met_mat <- matrix(met_mat, ncol = 1)
+  colnames(prim_mat) <- pairs$patient_id
+  colnames(met_mat) <- pairs$patient_id
+  rownames(met_mat) <- rownames(mat)
+  list(primary = prim_mat, met = met_mat)
+}
+
+pairs_lung <- build_pairs("Lung")
+pairs_bone <- build_pairs("Bone")
+save_tbl(pairs_lung, file.path(result_dir, "01_pairing", "pairs_primary_vs_lung.csv"))
+save_tbl(pairs_bone, file.path(result_dir, "01_pairing", "pairs_primary_vs_bone.csv"))
+log_msg("Paired primary–lung patients: ", nrow(pairs_lung),
+        " | ", paste(pairs_lung$patient_id, collapse = ", "))
+log_msg("Paired primary–bone patients: ", nrow(pairs_bone),
+        " | ", paste(pairs_bone$patient_id, collapse = ", "))
+if (nrow(pairs_lung) < 3) {
+  log_msg("WARNING: 肺转移配对 < 3，不能稳定估计 p 值，不伪造 p。")
+} else if (nrow(pairs_lung) == 3) {
+  log_msg("WARNING: 肺转移配对仅 3 人，p 值可算但不稳定，结果只作探索。")
+}
+if (nrow(pairs_bone) < 3) {
+  log_msg("WARNING: 骨转移配对 < 3，不能稳定估计 p 值，不伪造 p。")
+}
+
+writeLines(
+  c(
+    "MSK-MET 通常每人只测 1 个样本。脚本仍先尝试：同一 PATIENT_ID 的测序原发 vs 测序肺/骨转移。",
+    paste0("样本级肺配对 n=", nrow(pairs_lung), "  骨配对 n=", nrow(pairs_bone)),
+    "若样本级配对 < 3：不伪造 p，Q1 改用该患者自己的 Distant Mets 表型。",
+    "1 号原发只对 1 号患者的 DMETS_DX_LUNG / DMETS_DX_BONE，不用别人的转移样本。",
+    "不要把不同患者的原发和肺转移混成两组来冒充配对。",
+    paste0("当前矩阵模式: ", assay_mode)
+  ),
+  file.path(result_dir, "01_pairing", "PAIRING_README.txt")
+)
+
+# 1 原发 : 该患者自己的肺/骨表型
+prim_cols <- c("PATIENT_ID", "SAMPLE_ID", "SITE_RAW", "ever_lung", "ever_bone",
+               "ever_pns", "tropism_class")
+prim_cols <- c(prim_cols, intersect(c("SUBTYPE", "CANCER_TYPE_DETAILED"), names(clin)))
+prim_map <- clin[which(clin$SAMPLE_TYPE == "Primary" & clin$has_assay), prim_cols, drop = FALSE]
+names(prim_map)[1:3] <- c("patient_id", "primary_sample", "primary_site")
+# 同一患者多枚原发时只留 1 枚
+if (nrow(prim_map) > 0) {
+  keep_one <- !duplicated(prim_map$patient_id)
+  if (any(!keep_one)) {
+    prim_map <- dplyr::bind_rows(lapply(unique(prim_map$patient_id), function(pid) {
+      rows <- clin[which(clin$SAMPLE_TYPE == "Primary" & clin$has_assay & clin$PATIENT_ID == pid), ]
+      sid <- pick_one_primary(rows)
+      prim_map[prim_map$primary_sample == sid, , drop = FALSE]
+    }))
+  }
+}
+save_tbl(prim_map, file.path(result_dir, "01_pairing", "primary_to_own_lung_bone_tropism.csv"))
+log_msg("Primary–own tropism map: ", nrow(prim_map),
+        " | lung Yes=", sum(prim_map$ever_lung, na.rm = TRUE),
+        " bone Yes=", sum(prim_map$ever_bone, na.rm = TRUE),
+        " lung_only=", sum(prim_map$tropism_class == "lung_only", na.rm = TRUE),
+        " bone_only=", sum(prim_map$tropism_class == "bone_only", na.rm = TRUE))
+
+# -----------------------------------------------------------------------------
+# 4. 配对差异：原发低剂量 = 转移灶相对原发灶升高
+# -----------------------------------------------------------------------------
+paired_de <- function(pairs, label) {
+  pe <- pair_expr(pairs)
+  n <- ncol(pe$primary)
+  genes_all <- rownames(pe$primary)
+  if (n == 0) {
+    log_msg(label, ": 0 pairs, skip")
+    return(data.frame(gene = genes_all, n_pairs = 0, mean_primary = NA_real_,
+                      mean_met = NA_real_, log2FC = NA_real_, FC = NA_real_,
+                      pvalue = NA_real_, padj = NA_real_, direction = NA_character_,
+                      stringsAsFactors = FALSE))
+  }
+  delta <- pe$met - pe$primary
+  mean_p <- matrixStats::rowMeans2(pe$primary, na.rm = TRUE)
+  mean_m <- matrixStats::rowMeans2(pe$met, na.rm = TRUE)
+  log2fc <- matrixStats::rowMeans2(delta, na.rm = TRUE)
+  n_ok <- rowSums(is.finite(delta))
+  pval <- rep(NA_real_, length(genes_all))
+  if (n >= 3) {
+    pval <- apply(delta, 1, function(x) {
+      x <- x[is.finite(x)]
+      if (length(x) < 3) return(NA_real_)
+      if (stats::sd(x) == 0) return(if (abs(mean(x)) < 1e-12) 1 else NA_real_)
+      tryCatch(stats::t.test(x)$p.value, error = function(e) NA_real_)
+    })
+  } else {
+    log_msg(label, ": n_pairs=", n, " < 3，不估计 p 值（不伪造）")
+  }
+  padj <- if (all(is.na(pval))) rep(NA_real_, length(pval)) else p.adjust(pval, method = "BH")
+  data.frame(
+    gene = genes_all,
+    n_pairs = n_ok,
+    mean_primary = mean_p,
+    mean_met = mean_m,
+    log2FC = log2fc,
+    FC = 2^log2fc,
+    pvalue = pval,
+    padj = padj,
+    direction = ifelse(log2fc > 0, "low_in_primary_vs_matched_met",
+                       ifelse(log2fc < 0, "high_in_primary_vs_matched_met", "unchanged")),
+    stringsAsFactors = FALSE
+  )
+}
+
+select_low_in_primary <- function(de, fc_min, p_min = p_cutoff) {
+  ok_fc <- is.finite(de$FC) & de$FC >= fc_min & de$log2FC > 0
+  has_p <- any(is.finite(de$pvalue))
+  if (has_p) {
+    de[ok_fc & is.finite(de$pvalue) & de$pvalue < p_min, , drop = FALSE]
+  } else {
+    log_msg("无 p 值：不把 FC 列表当成显著基因，避免 1 对样本刷出上千“阳性”")
+    de[0, , drop = FALSE]
+  }
+}
+
+xlab_fc <- if (grepl("^CNA", assay_mode)) {
+  "log2FC (no-met primary minus tropism-positive primary CNA)"
+} else {
+  "log2FC (no-met primary / tropism-positive primary)"
+}
+
+plot_volcano <- function(de, highlight, title, outfile, fc_line = 1) {
+  df <- de
+  has_p <- "pvalue" %in% names(df) && any(is.finite(df$pvalue))
+  if (has_p) {
+    df$y <- -log10(pmax(df$pvalue, 1e-300))
+    ylab <- "-log10(p value)"
+    hline <- -log10(p_cutoff)
+  } else {
+    df$y <- abs(df$log2FC)
+    ylab <- "|paired log2FC| (p not estimated)"
+    hline <- NULL
+  }
+  df$set <- ifelse(df$gene %in% highlight, "selected", "other")
+  df$label <- ifelse(df$gene %in% utils::head(highlight, 20), df$gene, NA)
+  lfc_line <- log2(fc_line)
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = log2FC, y = y, color = set)) +
+    ggplot2::geom_point(alpha = 0.7, size = 1.4) +
+    ggplot2::scale_color_manual(values = c(other = "grey70", selected = "#D62828")) +
+    ggplot2::geom_vline(xintercept = c(-lfc_line, lfc_line), linetype = 2, color = "grey40") +
+    ggrepel::geom_text_repel(ggplot2::aes(label = label), size = 3, max.overlaps = 30, na.rm = TRUE) +
+    ggplot2::theme_bw(base_size = 12) +
+    ggplot2::labs(title = title, x = xlab_fc, y = ylab, color = NULL)
+  if (!is.null(hline)) p <- p + ggplot2::geom_hline(yintercept = hline, linetype = 2, color = "grey40")
+  save_gg(p, outfile)
+}
+
+plot_pair_heatmap <- function(pairs, genes, title, outfile) {
+  genes <- intersect(genes, rownames(mat))
+  if (length(genes) > 200) genes <- genes[seq_len(200)]
+  if (length(genes) < 2 || nrow(pairs) == 0) {
+    log_msg("Heatmap skipped: ", title)
+    return(invisible(NULL))
+  }
+  pe <- pair_expr(pairs)
+  heat <- cbind(pe$primary[genes, , drop = FALSE], pe$met[genes, , drop = FALSE])
+  colnames(heat) <- c(paste0(pairs$patient_id, "_Primary"), paste0(pairs$patient_id, "_Met"))
+  interleaved <- as.vector(rbind(
+    paste0(pairs$patient_id, "_Primary"),
+    paste0(pairs$patient_id, "_Met")
+  ))
+  heat <- heat[, interleaved, drop = FALSE]
+  ann <- data.frame(
+    Tissue = ifelse(grepl("_Primary$", colnames(heat)), "Primary", "Matched_met"),
+    Patient = gsub("_(Primary|Met)$", "", colnames(heat)),
+    row.names = colnames(heat)
+  )
+  pal <- list(Tissue = c(Primary = "#4C78A8", Matched_met = "#D62828"))
+  use_scale <- if (grepl("^CNA_discrete", assay_mode)) "none" else "row"
+  grDevices::pdf(paste0(outfile, ".pdf"), width = max(8, 0.45 * ncol(heat) + 4),
+                 height = max(6, min(18, 0.18 * nrow(heat) + 3)))
+  pheatmap::pheatmap(
+    heat, scale = use_scale, annotation_col = ann, annotation_colors = pal,
+    show_rownames = nrow(heat) <= 80, fontsize_row = 6, main = title,
+    color = colorRampPalette(rev(RColorBrewer::brewer.pal(9, "RdBu")))(100),
+    cluster_cols = FALSE
+  )
+  grDevices::dev.off()
+}
+
+# 原发灶内：该患者自己有器官转移 vs 无。正 FC = 有转移的原发更低。
+tropism_de <- function(yes_ids, no_ids, label) {
+  yes_ids <- intersect(yes_ids, colnames(mat))
+  no_ids <- intersect(no_ids, colnames(mat))
+  genes_all <- rownames(mat)
+  log_msg(label, " tropism primaries: Yes=", length(yes_ids), " No=", length(no_ids))
+  if (length(yes_ids) < 2 || length(no_ids) < 2) {
+    log_msg(label, ": too few tropism groups, skip p")
+    return(data.frame(
+      gene = genes_all, n_yes = length(yes_ids), n_no = length(no_ids),
+      mean_yes = NA_real_, mean_no = NA_real_, log2FC = NA_real_, FC = NA_real_,
+      pvalue = NA_real_, padj = NA_real_, direction = NA_character_,
+      stringsAsFactors = FALSE
+    ))
+  }
+  y <- mat[, yes_ids, drop = FALSE]
+  n <- mat[, no_ids, drop = FALSE]
+  mean_y <- matrixStats::rowMeans2(y, na.rm = TRUE)
+  mean_n <- matrixStats::rowMeans2(n, na.rm = TRUE)
+  log2fc <- mean_n - mean_y
+  n_ok <- pmin(rowSums(is.finite(y)), rowSums(is.finite(n)))
+  pval <- apply(mat, 1, function(x) {
+    a <- x[yes_ids]; b <- x[no_ids]
+    a <- a[is.finite(a)]; b <- b[is.finite(b)]
+    if (length(a) < 2 || length(b) < 2) return(NA_real_)
+    if (stats::sd(a) == 0 && stats::sd(b) == 0) {
+      return(if (abs(mean(a) - mean(b)) < 1e-12) 1 else NA_real_)
+    }
+    tryCatch(stats::t.test(a, b)$p.value, error = function(e) NA_real_)
+  })
+  data.frame(
+    gene = genes_all,
+    n_yes = length(yes_ids),
+    n_no = length(no_ids),
+    n_pairs = n_ok,
+    mean_primary = mean_y,
+    mean_met = mean_n,
+    mean_yes = mean_y,
+    mean_no = mean_n,
+    log2FC = log2fc,
+    FC = 2^log2fc,
+    pvalue = pval,
+    padj = p.adjust(pval, method = "BH"),
+    direction = ifelse(log2fc > 0, "low_in_tropism_positive_primary",
+                       ifelse(log2fc < 0, "high_in_tropism_positive_primary", "unchanged")),
+    stringsAsFactors = FALSE
+  )
+}
+
+plot_group_heatmap <- function(yes_ids, no_ids, genes, title, outfile, yes_lab, no_lab) {
+  genes <- intersect(genes, rownames(mat))
+  yes_ids <- intersect(yes_ids, colnames(mat))
+  no_ids <- intersect(no_ids, colnames(mat))
+  if (length(genes) > 80) genes <- genes[seq_len(80)]
+  if (length(genes) < 2 || length(yes_ids) < 2 || length(no_ids) < 2) {
+    log_msg("Heatmap skipped: ", title)
+    return(invisible(NULL))
+  }
+  set.seed(1)
+  if (length(yes_ids) > 60) yes_ids <- sample(yes_ids, 60)
+  if (length(no_ids) > 60) no_ids <- sample(no_ids, 60)
+  heat <- cbind(mat[genes, yes_ids, drop = FALSE], mat[genes, no_ids, drop = FALSE])
+  ann <- data.frame(
+    Tropism = c(rep(yes_lab, length(yes_ids)), rep(no_lab, length(no_ids))),
+    row.names = colnames(heat)
+  )
+  pal <- list(Tropism = setNames(c("#D62828", "#4C78A8"), c(yes_lab, no_lab)))
+  use_scale <- if (grepl("^CNA_discrete", assay_mode)) "none" else "row"
+  grDevices::pdf(paste0(outfile, ".pdf"), width = max(8, 0.18 * ncol(heat) + 4),
+                 height = max(6, min(18, 0.18 * nrow(heat) + 3)))
+  pheatmap::pheatmap(
+    heat, scale = use_scale, annotation_col = ann, annotation_colors = pal,
+    show_rownames = nrow(heat) <= 80, show_colnames = ncol(heat) <= 40,
+    fontsize_row = 6, main = title,
+    color = colorRampPalette(rev(RColorBrewer::brewer.pal(9, "RdBu")))(100),
+    cluster_cols = FALSE
+  )
+  grDevices::dev.off()
+}
+
+map_to_entrez <- function(symbols) {
+  symbols <- unique(as.character(symbols))
+  symbols <- symbols[!is.na(symbols) & nzchar(symbols)]
+  if (length(symbols) == 0 || !has_pkg("org.Hs.eg.db") || !has_pkg("AnnotationDbi")) {
+    return(data.frame(gene = character(), entrez = character()))
+  }
+  mp <- tryCatch(
+    AnnotationDbi::select(org.Hs.eg.db, keys = symbols, keytype = "SYMBOL",
+                          columns = c("ENTREZID", "SYMBOL")),
+    error = function(e) NULL
+  )
+  if (is.null(mp) || nrow(mp) == 0) return(data.frame(gene = character(), entrez = character()))
+  mp <- mp[!is.na(mp$ENTREZID), , drop = FALSE]
+  data.frame(gene = mp$SYMBOL, entrez = as.character(mp$ENTREZID), stringsAsFactors = FALSE)
+}
+
+run_ora <- function(genes, de_sub, outdir, label, tag) {
+  dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  writeLines(as.character(genes), file.path(outdir, paste0(tag, "_gene_list.txt")))
+  if (!has_pkg("clusterProfiler") || !has_pkg("org.Hs.eg.db")) {
+    writeLines("clusterProfiler / org.Hs.eg.db 未安装，已跳过 ORA。",
+               file.path(outdir, paste0(tag, "_ORA_skipped.txt")))
+    return(invisible(NULL))
+  }
+  mp <- map_to_entrez(genes)
+  entrez <- unique(mp$entrez)
+  if (length(entrez) < 5) {
+    writeLines(paste("mapped_entrez", length(entrez)), file.path(outdir, paste0(tag, "_ORA_skipped.txt")))
+    return(invisible(NULL))
+  }
+  ego <- tryCatch(
+    clusterProfiler::enrichGO(
+      gene = entrez, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = "BP",
+      pAdjustMethod = "BH", pvalueCutoff = 0.05, qvalueCutoff = 0.2, readable = TRUE
+    ),
+    error = function(e) NULL
+  )
+  if (!is.null(ego) && nrow(as.data.frame(ego)) > 0) {
+    save_tbl(as.data.frame(ego), file.path(outdir, paste0(tag, "_ORA_GO_BP.csv")))
+    if (has_pkg("enrichplot")) {
+      tryCatch({
+        p <- enrichplot::dotplot(ego, showCategory = 15) +
+          ggplot2::ggtitle(paste(label, "| ORA GO BP"))
+        save_gg(p, file.path(outdir, paste0(tag, "_ORA_GO_BP_dotplot")), width = 9, height = 7)
+      }, error = function(e) NULL)
+    }
+  }
+  ek <- tryCatch(
+    clusterProfiler::enrichKEGG(gene = entrez, organism = "hsa", pvalueCutoff = 0.05, qvalueCutoff = 0.2),
+    error = function(e) NULL
+  )
+  if (!is.null(ek) && nrow(as.data.frame(ek)) > 0) {
+    if (has_pkg("AnnotationDbi")) {
+      ek <- tryCatch(clusterProfiler::setReadable(ek, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) ek)
+    }
+    save_tbl(as.data.frame(ek), file.path(outdir, paste0(tag, "_ORA_KEGG.csv")))
+    if (has_pkg("enrichplot")) {
+      tryCatch({
+        p <- enrichplot::dotplot(ek, showCategory = 15) +
+          ggplot2::ggtitle(paste(label, "| ORA KEGG"))
+        save_gg(p, file.path(outdir, paste0(tag, "_ORA_KEGG_dotplot")), width = 9, height = 7)
+      }, error = function(e) NULL)
+    }
+  }
+}
+
+export_de_set <- function(de, pairs, organ, fc_min, tag, out_root,
+                          yes_ids = NULL, no_ids = NULL, yes_lab = NULL, no_lab = NULL) {
+  hit <- select_low_in_primary(de, fc_min)
+  hit <- hit[order(hit$pvalue, -hit$FC, na.last = TRUE), , drop = FALSE]
+  outdir <- file.path(out_root, tag)
+  dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  ranked <- de[order(de$pvalue, -de$FC, na.last = TRUE), ]
+  save_tbl(ranked, file.path(outdir, paste0(tag, "_all_genes.csv")))
+  save_tbl(hit, file.path(outdir, paste0(tag, "_low_in_primary.csv")))
+  if (!any(is.finite(de$pvalue))) {
+    fc_only <- ranked[is.finite(ranked$FC) & ranked$FC >= fc_min & ranked$log2FC > 0, , drop = FALSE]
+    save_tbl(fc_only, file.path(outdir, paste0(tag, "_FC_ranked_NO_PVALUE.csv")))
+    writeLines(
+      "样本数不足，p 值未估计。本表仅按 FC 排序，不能当作显著差异基因。",
+      file.path(outdir, paste0(tag, "_NO_PVALUE_README.txt"))
+    )
+  }
+  log_msg(organ, " ", tag, ": ", nrow(hit), " genes (low in tropism-positive primary, FC>=", fc_min,
+          if (any(is.finite(de$pvalue))) paste0(", p<", p_cutoff) else ", no p", ")")
+  plot_volcano(
+    de, hit$gene,
+    paste0("MSK2021 | primary tropism ", organ, " | ", tag, " | ", assay_mode),
+    file.path(outdir, paste0(tag, "_volcano")),
+    fc_line = fc_min
+  )
+  if (!is.null(yes_ids) && !is.null(no_ids)) {
+    plot_group_heatmap(
+      yes_ids, no_ids, hit$gene,
+      paste0("MSK2021 primary ", organ, " tropism | ", tag),
+      file.path(outdir, paste0(tag, "_heatmap_tropism")),
+      yes_lab = yes_lab, no_lab = no_lab
+    )
+  } else {
+    plot_pair_heatmap(
+      pairs, hit$gene,
+      paste0("MSK2021 paired ", organ, " | ", tag, " low in primary"),
+      file.path(outdir, paste0(tag, "_heatmap_paired"))
+    )
+  }
+  run_ora(hit$gene, de, file.path(outdir, "ORA"), paste("MSK2021", organ, tag), tag)
+  hit
+}
+
+log_msg("==== Q1: each primary vs that patient's own lung / bone tropism ====")
+# 样本级配对若存在则另存；MSK-MET 通常为 0，不拿别人的肺转移来配
+if (nrow(pairs_lung) >= 3 || nrow(pairs_bone) >= 3) {
+  de_lung_paired <- paired_de(pairs_lung, "Lung_sample_pairs")
+  de_bone_paired <- paired_de(pairs_bone, "Bone_sample_pairs")
+  save_tbl(de_lung_paired, file.path(result_dir, "02_lung", "OPTIONAL_sample_paired_all_genes.csv"))
+  save_tbl(de_bone_paired, file.path(result_dir, "03_bone", "OPTIONAL_sample_paired_all_genes.csv"))
+} else {
+  writeLines(
+    "MSK-MET 乳腺癌每人 1 个测序样本，没有同一人的原发+肺/骨转移双测序。Q1 用该患者自己的 Distant Mets 表型。",
+    file.path(result_dir, "01_pairing", "NO_SAMPLE_PAIRS.txt")
+  )
+}
+
+lung_yes <- prim_map$primary_sample[which(prim_map$ever_lung %in% TRUE)]
+lung_no  <- prim_map$primary_sample[which(prim_map$ever_lung %in% FALSE)]
+bone_yes <- prim_map$primary_sample[which(prim_map$ever_bone %in% TRUE)]
+bone_no  <- prim_map$primary_sample[which(prim_map$ever_bone %in% FALSE)]
+
+de_lung <- tropism_de(lung_yes, lung_no, "Lung")
+de_bone <- tropism_de(bone_yes, bone_no, "Bone")
+save_tbl(de_lung, file.path(result_dir, "02_lung", "lung_tropism_all_genes.csv"))
+save_tbl(de_bone, file.path(result_dir, "03_bone", "bone_tropism_all_genes.csv"))
+log_msg("Lung genes with FC>1 (any p): ",
+        sum(is.finite(de_lung$FC) & de_lung$log2FC > 0),
+        " | finite p: ", sum(is.finite(de_lung$pvalue)))
+log_msg("Bone genes with FC>1 (any p): ",
+        sum(is.finite(de_bone$FC) & de_bone$log2FC > 0),
+        " | finite p: ", sum(is.finite(de_bone$pvalue)))
+
+lung_sets <- list()
+bone_sets <- list()
+for (nm in names(fc_cutoffs)) {
+  lung_sets[[nm]] <- export_de_set(
+    de_lung, pairs_lung, "Lung", fc_cutoffs[[nm]], nm, file.path(result_dir, "02_lung"),
+    yes_ids = lung_yes, no_ids = lung_no, yes_lab = "Lung_met_Yes", no_lab = "Lung_met_No"
+  )
+  bone_sets[[nm]] <- export_de_set(
+    de_bone, pairs_bone, "Bone", fc_cutoffs[[nm]], nm, file.path(result_dir, "03_bone"),
+    yes_ids = bone_yes, no_ids = bone_no, yes_lab = "Bone_met_Yes", no_lab = "Bone_met_No"
+  )
+}
+
+# -----------------------------------------------------------------------------
+# 5. Q2 器官特异：只肺或只骨（该患者自己的表型，不用别人的转移）
+# -----------------------------------------------------------------------------
+log_msg("==== Q2: organ-specific low dosage in primary (own tropism) ====")
+org_dir <- file.path(result_dir, "04_organ_specific")
+dir.create(org_dir, recursive = TRUE, showWarnings = FALSE)
+
+patient_organs <- prim_map %>%
+  dplyr::transmute(
+    PATIENT_ID = .data$patient_id,
+    ever_lung = .data$ever_lung,
+    ever_bone = .data$ever_bone
+  )
+
+lung_only_ids <- prim_map$primary_sample[which(prim_map$tropism_class == "lung_only")]
+bone_only_ids <- prim_map$primary_sample[which(prim_map$tropism_class == "bone_only")]
+de_lung_only_vs_bone_only <- tropism_de(lung_only_ids, bone_only_ids, "Lung_only_vs_Bone_only")
+save_tbl(de_lung_only_vs_bone_only, file.path(org_dir, "lung_only_vs_bone_only_all_genes.csv"))
+# 正 FC = lung-only 原发更低（相对 bone-only）
+for (nm in names(fc_cutoffs)) {
+  hit_lo <- select_low_in_primary(de_lung_only_vs_bone_only, fc_cutoffs[[nm]])
+  save_tbl(hit_lo, file.path(org_dir, paste0(nm, "_low_in_lung_only_vs_bone_only.csv")))
+  # 反过来：bone-only 更低 = 负 log2FC 且 |FC| 对应
+  hit_bo <- de_lung_only_vs_bone_only[
+    is.finite(de_lung_only_vs_bone_only$log2FC) & de_lung_only_vs_bone_only$log2FC < 0 &
+      is.finite(de_lung_only_vs_bone_only$FC) & (2^(-de_lung_only_vs_bone_only$log2FC) >= fc_cutoffs[[nm]]) &
+      is.finite(de_lung_only_vs_bone_only$pvalue) & de_lung_only_vs_bone_only$pvalue < p_cutoff, ,
+    drop = FALSE
+  ]
+  save_tbl(hit_bo, file.path(org_dir, paste0(nm, "_low_in_bone_only_vs_lung_only.csv")))
+  log_msg(nm, " lung-only vs bone-only: low-in-lung-only=", nrow(hit_lo),
+          " low-in-bone-only=", nrow(hit_bo))
+}
+
+for (nm in names(fc_cutoffs)) {
+  g_lung <- lung_sets[[nm]]$gene
+  g_bone <- bone_sets[[nm]]$gene
+  only_lung <- setdiff(g_lung, g_bone)
+  only_bone <- setdiff(g_bone, g_lung)
+  both <- intersect(g_lung, g_bone)
+  tab <- data.frame(
+    gene = c(only_lung, only_bone, both),
+    organ_specificity = c(
+      rep("lung_only", length(only_lung)),
+      rep("bone_only", length(only_bone)),
+      rep("lung_and_bone", length(both))
+    ),
+    stringsAsFactors = FALSE
+  )
+  if (nrow(tab) > 0) {
+    tab$FC_lung <- de_lung$FC[match(tab$gene, de_lung$gene)]
+    tab$p_lung <- de_lung$pvalue[match(tab$gene, de_lung$gene)]
+    tab$FC_bone <- de_bone$FC[match(tab$gene, de_bone$gene)]
+    tab$p_bone <- de_bone$pvalue[match(tab$gene, de_bone$gene)]
+  }
+  save_tbl(tab, file.path(org_dir, paste0(nm, "_organ_specific_genes.csv")))
+  save_tbl(data.frame(gene = only_lung), file.path(org_dir, paste0(nm, "_lung_ONLY.csv")))
+  save_tbl(data.frame(gene = only_bone), file.path(org_dir, paste0(nm, "_bone_ONLY.csv")))
+  log_msg(nm, " lung-only=", length(only_lung), " bone-only=", length(only_bone),
+          " both=", length(both))
+  run_ora(only_lung, de_lung, file.path(org_dir, paste0(nm, "_lung_ONLY_ORA")),
+          paste("MSK2021 lung-only", nm), paste0(nm, "_lung_ONLY"))
+  run_ora(only_bone, de_bone, file.path(org_dir, paste0(nm, "_bone_ONLY_ORA")),
+          paste("MSK2021 bone-only", nm), paste0(nm, "_bone_ONLY"))
+}
+
+# -----------------------------------------------------------------------------
+# 6. 神经浸润基因集（轴突导向 / 施旺 / 神经营养）
+# -----------------------------------------------------------------------------
+curated_sets <- list(
+  axon_guidance = c(
+    "ROBO1", "ROBO2", "ROBO3", "SLIT1", "SLIT2", "SLIT3",
+    "SEMA3A", "SEMA3B", "SEMA3C", "SEMA3D", "SEMA3E", "SEMA3F", "SEMA3G",
+    "SEMA4A", "SEMA4B", "SEMA4C", "SEMA4D", "SEMA4F", "SEMA4G",
+    "SEMA5A", "SEMA5B", "SEMA6A", "SEMA6B", "SEMA6C", "SEMA6D", "SEMA7A",
+    "NRP1", "NRP2", "PLXNA1", "PLXNA2", "PLXNA3", "PLXNA4",
+    "PLXNB1", "PLXNB2", "PLXNB3", "PLXNC1", "PLXND1",
+    "EPHA1", "EPHA2", "EPHA3", "EPHA4", "EPHA5", "EPHA7", "EPHA8",
+    "EPHB1", "EPHB2", "EPHB3", "EPHB4", "EPHB6",
+    "EFNA1", "EFNA2", "EFNA3", "EFNA4", "EFNA5", "EFNB1", "EFNB2", "EFNB3",
+    "NTN1", "NTN4", "DCC", "UNC5A", "UNC5B", "UNC5C", "UNC5D", "NEO1",
+    "CXCL12", "CXCR4", "MET", "PTK2", "FYN", "RAC1", "CDC42", "RHOA",
+    "PAK1", "MAPK1", "MAPK3", "GSK3B", "CDK5", "ABL1", "NCK1", "NCK2",
+    "SRGAP1", "SRGAP2", "SRGAP3", "LIMK1", "LIMK2", "CFL1", "ROCK1", "ROCK2",
+    "ITGB1", "L1CAM", "NCAM1", "CNTN2"
+  ),
+  schwann = c(
+    "SOX10", "S100B", "MPZ", "MBP", "PMP22", "MAG", "PRX", "EGR2",
+    "POU3F1", "POU3F2", "ERBB2", "ERBB3", "NRG1", "NGFR", "GFAP", "GAP43",
+    "NCAM1", "L1CAM", "DHH", "CDH19", "MAL", "PLP1", "GJB1", "MPZL1",
+    "SCN7A", "NES", "FOXD3", "PAX3", "TFAP2A", "SOX2", "CDH2", "ITGA6",
+    "LAMA2", "LAMA4", "LAMB2", "DRP2"
+  ),
+  neurotrophic = c(
+    "NGF", "BDNF", "NTF3", "NTF4", "GDNF", "NRTN", "ARTN", "PSPN", "CNTF",
+    "NTRK1", "NTRK2", "NTRK3", "NGFR", "RET", "GFRA1", "GFRA2", "GFRA3", "GFRA4",
+    "SORT1", "IRS1", "PIK3CA", "AKT1", "PLCG1", "MTOR", "MAPK1", "MAPK3",
+    "CREB1", "BCL2", "BAX", "TP53", "FRS2", "SHC1", "GRB2", "SOS1",
+    "VGF", "GAL", "NPY"
+  )
+)
+
+expand_with_msig <- function(sets) {
+  if (!has_pkg("msigdbr")) return(sets)
+  ms <- tryCatch(msigdbr::msigdbr(species = "Homo sapiens"), error = function(e) NULL)
+  if (is.null(ms) || nrow(ms) == 0) return(sets)
+  name_col <- if ("gs_name" %in% names(ms)) "gs_name" else names(ms)[grepl("name", names(ms), ignore.case = TRUE)][1]
+  gene_col <- if ("gene_symbol" %in% names(ms)) "gene_symbol" else if ("symbol" %in% names(ms)) "symbol" else "gene_symbol"
+  if (is.na(name_col) || !gene_col %in% names(ms)) return(sets)
+  pick <- function(keys) {
+    hit <- ms[grepl(keys, ms[[name_col]], ignore.case = TRUE), , drop = FALSE]
+    unique(as.character(hit[[gene_col]]))
+  }
+  sets$axon_guidance <- unique(c(sets$axon_guidance, pick("AXON_GUIDANCE|AXON_GUIDE")))
+  sets$schwann <- unique(c(sets$schwann, pick("SCHWANN")))
+  sets$neurotrophic <- unique(c(
+    sets$neurotrophic,
+    pick("NEUROTROPHIN|NEUROTROPHIC|NGF_SIGNALLING|BDNF")
+  ))
+  sets
+}
+
+gene_sets_full <- expand_with_msig(curated_sets)
+gene_sets <- lapply(gene_sets_full, function(g) intersect(unique(g), rownames(mat)))
+log_msg("Gene set sizes on panel: axon=", length(gene_sets$axon_guidance),
+        "/", length(unique(gene_sets_full$axon_guidance)),
+        " schwann=", length(gene_sets$schwann),
+        "/", length(unique(gene_sets_full$schwann)),
+        " neurotrophic=", length(gene_sets$neurotrophic),
+        "/", length(unique(gene_sets_full$neurotrophic)))
+if (grepl("^CNA", assay_mode)) {
+  log_msg("IMPACT 面板基因有限，神经浸润基因集大部分不在芯片上；评分只用面板交集。")
+}
+
+score_signature <- function(expr_mat, genes) {
+  genes <- intersect(genes, rownames(expr_mat))
+  if (length(genes) < 3) return(rep(NA_real_, ncol(expr_mat)))
+  sub <- expr_mat[genes, , drop = FALSE]
+  as.numeric(matrixStats::colMeans2(sub, na.rm = TRUE))
+}
+
+prim_ids <- clin$SAMPLE_ID[clin$SAMPLE_TYPE == "Primary" & clin$has_assay]
+prim_mat <- mat[, prim_ids, drop = FALSE]
+prim_ann <- clin[match(prim_ids, clin$SAMPLE_ID), , drop = FALSE]
+prim_ann$score_axon <- score_signature(prim_mat, gene_sets$axon_guidance)
+prim_ann$score_schwann <- score_signature(prim_mat, gene_sets$schwann)
+prim_ann$score_neurotrophic <- score_signature(prim_mat, gene_sets$neurotrophic)
+prim_ann$has_paired_lung <- prim_ann$PATIENT_ID %in% pairs_lung$patient_id
+prim_ann$has_paired_bone <- prim_ann$PATIENT_ID %in% pairs_bone$patient_id
+if (nrow(patient_organs) > 0) {
+  prim_ann$ever_lung <- patient_organs$ever_lung[match(prim_ann$PATIENT_ID, patient_organs$PATIENT_ID)]
+  prim_ann$ever_bone <- patient_organs$ever_bone[match(prim_ann$PATIENT_ID, patient_organs$PATIENT_ID)]
+} else {
+  prim_ann$ever_lung <- NA
+  prim_ann$ever_bone <- NA
+}
+prim_ann$ever_lung[is.na(prim_ann$ever_lung)] <- FALSE
+prim_ann$ever_bone[is.na(prim_ann$ever_bone)] <- FALSE
+
+# 离散 CNA 大量并列在 0：用“严格大于中位数”当 High，避免所有二倍体被标成 High。
+# RNA/连续值仍用 >= 中位数。
+mark_by_score <- function(score, high_lab, low_lab, label) {
+  out <- rep(NA_character_, length(score))
+  ok <- is.finite(score)
+  if (sum(ok) < 4) {
+    log_msg(label, ": too few finite scores")
+    return(out)
+  }
+  if (length(unique(score[ok])) < 2) {
+    log_msg(label, ": no variation, skip high/low split")
+    return(out)
+  }
+  med <- stats::median(score[ok])
+  if (grepl("^CNA", assay_mode)) {
+    high <- ok & score > med
+    low <- ok & !high
+  } else {
+    high <- ok & score >= med
+    low <- ok & !high
+  }
+  if (sum(high) < 2 || sum(low) < 2) {
+    qs <- stats::quantile(score[ok], probs = c(1 / 3, 2 / 3), names = FALSE, na.rm = TRUE)
+    high <- ok & score >= qs[2]
+    low <- ok & score <= qs[1]
+  }
+  if (sum(high) < 2 || sum(low) < 2) {
+    log_msg(label, ": still cannot split high=", sum(high), " low=", sum(low))
+    return(out)
+  }
+  out[high] <- high_lab
+  out[low] <- low_lab
+  log_msg(label, " split: high=", sum(high), " low=", sum(low), " unmarked=", sum(ok) - sum(high) - sum(low))
+  out
+}
+
+prim_ann$mark_axon <- mark_by_score(prim_ann$score_axon, "High_axon_guidance", "Low_axon_guidance", "axon_guidance")
+prim_ann$mark_schwann <- mark_by_score(prim_ann$score_schwann, "High_Schwann", "Low_Schwann", "schwann")
+prim_ann$mark_neurotrophic <- mark_by_score(
+  prim_ann$score_neurotrophic, "High_neurotrophic", "Low_neurotrophic", "neurotrophic"
+)
+save_tbl(prim_ann, file.path(result_dir, "05_neural_invasion", "primary_neural_invasion_marks.csv"))
+log_msg("Marked ", nrow(prim_ann), " assay primaries with 3 neural-invasion scores")
+
+# 高神经浸润原发灶 vs 低：找低剂量基因（高浸润组更低）
+unpaired_low_in_high <- function(high_ids, low_ids, label) {
+  high_ids <- intersect(high_ids, colnames(mat))
+  low_ids <- intersect(low_ids, colnames(mat))
+  if (length(high_ids) < 2 || length(low_ids) < 2) {
+    log_msg(label, ": too few samples high=", length(high_ids), " low=", length(low_ids))
+    return(data.frame(gene = rownames(mat), n_high = length(high_ids), n_low = length(low_ids),
+                      mean_high = NA_real_, mean_low = NA_real_, log2FC = NA_real_,
+                      FC = NA_real_, pvalue = NA_real_, padj = NA_real_,
+                      stringsAsFactors = FALSE))
+  }
+  h <- mat[, high_ids, drop = FALSE]
+  l <- mat[, low_ids, drop = FALSE]
+  mean_h <- matrixStats::rowMeans2(h, na.rm = TRUE)
+  mean_l <- matrixStats::rowMeans2(l, na.rm = TRUE)
+  log2fc <- mean_l - mean_h  # 正值 = 高浸润组更低 = 低剂量伴随神经浸润
+  pval <- apply(mat, 1, function(x) {
+    a <- x[high_ids]; b <- x[low_ids]
+    a <- a[is.finite(a)]; b <- b[is.finite(b)]
+    if (length(a) < 2 || length(b) < 2) return(NA_real_)
+    if (stats::sd(a) == 0 && stats::sd(b) == 0) {
+      return(if (abs(mean(a) - mean(b)) < 1e-12) 1 else NA_real_)
+    }
+    tryCatch(stats::t.test(a, b)$p.value, error = function(e) NA_real_)
+  })
+  data.frame(
+    gene = rownames(mat),
+    n_high = length(high_ids),
+    n_low = length(low_ids),
+    mean_high = mean_h,
+    mean_low = mean_l,
+    log2FC = log2fc,
+    FC = 2^log2fc,
+    pvalue = pval,
+    padj = p.adjust(pval, method = "BH"),
+    stringsAsFactors = FALSE
+  )
+}
+
+neural_specs <- list(
+  axon_guidance = list(mark = "mark_axon", high = "High_axon_guidance", score = "score_axon", genes = gene_sets$axon_guidance),
+  schwann = list(mark = "mark_schwann", high = "High_Schwann", score = "score_schwann", genes = gene_sets$schwann),
+  neurotrophic = list(mark = "mark_neurotrophic", high = "High_neurotrophic", score = "score_neurotrophic", genes = gene_sets$neurotrophic)
+)
+
+log_msg("==== Q3: genes low in high neural-invasion primaries (3 signatures) ====")
+neural_de <- list()
+for (nm in names(neural_specs)) {
+  sp <- neural_specs[[nm]]
+  ok <- !is.na(prim_ann[[sp$mark]])
+  high_ids <- prim_ann$SAMPLE_ID[ok & prim_ann[[sp$mark]] == sp$high]
+  low_ids <- prim_ann$SAMPLE_ID[ok & prim_ann[[sp$mark]] != sp$high]
+  de_n <- unpaired_low_in_high(high_ids, low_ids, nm)
+  neural_de[[nm]] <- de_n
+  ndir <- file.path(result_dir, "05_neural_invasion", nm)
+  save_tbl(de_n, file.path(ndir, paste0(nm, "_all_genes_high_vs_low_PNI.csv")))
+  for (fcnm in names(fc_cutoffs)) {
+    hit <- de_n[is.finite(de_n$FC) & de_n$FC >= fc_cutoffs[[fcnm]] & de_n$log2FC > 0 &
+                  is.finite(de_n$pvalue) & de_n$pvalue < p_cutoff, , drop = FALSE]
+    hit <- hit[order(hit$pvalue, -hit$FC), ]
+    save_tbl(hit, file.path(ndir, paste0(fcnm, "_low_in_high_", nm, ".csv")))
+    in_set <- hit[hit$gene %in% sp$genes, , drop = FALSE]
+    save_tbl(in_set, file.path(ndir, paste0(fcnm, "_", nm, "_geneset_only.csv")))
+    log_msg("Q3 ", nm, " ", fcnm, ": genome-wide ", nrow(hit),
+            " | in gene set ", nrow(in_set))
+    plot_volcano(
+      de_n, hit$gene,
+      paste0("Primary high vs low ", nm, " | ", fcnm),
+      file.path(ndir, paste0(fcnm, "_volcano")),
+      fc_line = fc_cutoffs[[fcnm]]
+    )
+    run_ora(hit$gene, de_n, file.path(ndir, paste0(fcnm, "_ORA")),
+            paste("PNI", nm, fcnm), paste0(fcnm, "_", nm))
+  }
+  gs_tbl <- data.frame(
+    gene = unique(gene_sets_full[[nm]]),
+    in_matrix = unique(gene_sets_full[[nm]]) %in% rownames(mat),
+    stringsAsFactors = FALSE
+  )
+  if (nrow(gs_tbl) > 0) {
+    gs_tbl$mean_high_PNI <- de_n$mean_high[match(gs_tbl$gene, de_n$gene)]
+    gs_tbl$mean_low_PNI <- de_n$mean_low[match(gs_tbl$gene, de_n$gene)]
+    gs_tbl$FC_low_over_high <- de_n$FC[match(gs_tbl$gene, de_n$gene)]
+    gs_tbl$pvalue <- de_n$pvalue[match(gs_tbl$gene, de_n$gene)]
+    gs_tbl$log2FC <- de_n$log2FC[match(gs_tbl$gene, de_n$gene)]
+  }
+  save_tbl(gs_tbl, file.path(ndir, paste0(nm, "_geneset_membership.csv")))
+}
+
+# -----------------------------------------------------------------------------
+# 7. Q4：三种神经浸润 vs 肺转移
+# -----------------------------------------------------------------------------
+log_msg("==== Q4: three neural-invasion scores vs lung metastasis ====")
+q4_dir <- file.path(result_dir, "06_neural_vs_lung")
+dir.create(q4_dir, recursive = TRUE, showWarnings = FALSE)
+
+score_long <- prim_ann %>%
+  dplyr::select("PATIENT_ID", "SAMPLE_ID", "has_paired_lung", "ever_lung",
+                "score_axon", "score_schwann", "score_neurotrophic") %>%
+  tidyr::pivot_longer(
+    cols = c("score_axon", "score_schwann", "score_neurotrophic"),
+    names_to = "signature", values_to = "score"
+  )
+score_long$signature <- dplyr::recode(
+  score_long$signature,
+  score_axon = "axon_guidance",
+  score_schwann = "schwann",
+  score_neurotrophic = "neurotrophic"
+)
+save_tbl(score_long, file.path(q4_dir, "primary_scores_long.csv"))
+
+assoc_one <- function(nm, grp) {
+  sc <- switch(nm,
+               axon_guidance = prim_ann$score_axon,
+               schwann = prim_ann$score_schwann,
+               neurotrophic = prim_ann$score_neurotrophic)
+  ok <- is.finite(sc) & !is.na(grp)
+  wt <- tryCatch(stats::wilcox.test(sc[ok & grp], sc[ok & !grp])$p.value, error = function(e) NA_real_)
+  tt <- tryCatch(stats::t.test(sc[ok & grp], sc[ok & !grp])$p.value, error = function(e) NA_real_)
+  data.frame(
+    signature = nm,
+    n_yes = sum(ok & grp),
+    n_no = sum(ok & !grp),
+    mean_score_yes = mean(sc[ok & grp], na.rm = TRUE),
+    mean_score_no = mean(sc[ok & !grp], na.rm = TRUE),
+    wilcoxon_p = wt,
+    ttest_p = tt,
+    stringsAsFactors = FALSE
+  )
+}
+
+if (sum(prim_ann$has_paired_lung, na.rm = TRUE) >= 3) {
+  assoc_paired <- dplyr::bind_rows(lapply(
+    c("axon_guidance", "schwann", "neurotrophic"),
+    function(nm) {
+      out <- assoc_one(nm, prim_ann$has_paired_lung)
+      names(out)[names(out) == "n_yes"] <- "n_paired_lung_primary"
+      names(out)[names(out) == "n_no"] <- "n_other_primary"
+      names(out)[names(out) == "mean_score_yes"] <- "mean_score_paired_lung"
+      names(out)[names(out) == "mean_score_no"] <- "mean_score_other"
+      out
+    }
+  ))
+  save_tbl(assoc_paired, file.path(q4_dir, "neural_score_vs_paired_lung_wilcoxon.csv"))
+  pbox <- ggplot2::ggplot(
+    score_long[!is.na(score_long$has_paired_lung), ],
+    ggplot2::aes(x = ifelse(.data$has_paired_lung, "Paired lung met", "No paired lung met"),
+                 y = .data$score, fill = ifelse(.data$has_paired_lung, "Paired lung met", "No paired lung met"))
+  ) +
+    ggplot2::geom_boxplot(outlier.shape = NA, alpha = 0.8) +
+    ggplot2::geom_jitter(width = 0.15, size = 1.4, alpha = 0.8) +
+    ggplot2::facet_wrap(~signature, scales = "free_y") +
+    ggplot2::theme_bw(base_size = 12) +
+    ggplot2::theme(legend.position = "none", axis.text.x = ggplot2::element_text(angle = 20, hjust = 1)) +
+    ggplot2::labs(
+      title = "MSK 2021 primary neural-invasion scores vs paired lung metastasis",
+      x = NULL,
+      y = if (grepl("^CNA", assay_mode)) "Signature score (mean CNA of gene set)" else "Signature score (mean of gene set)"
+    )
+  save_gg(pbox, file.path(q4_dir, "boxplot_neural_score_vs_paired_lung"), width = 10, height = 5)
+} else {
+  log_msg("Skip sample-paired lung vs neural score: n_paired_lung=",
+          sum(prim_ann$has_paired_lung, na.rm = TRUE),
+          "；Q4 用该患者自己的 DMETS_DX_LUNG。")
+}
+
+assoc_ever <- dplyr::bind_rows(lapply(
+  c("axon_guidance", "schwann", "neurotrophic"),
+  function(nm) {
+    out <- assoc_one(nm, prim_ann$ever_lung)
+    names(out)[names(out) == "n_yes"] <- "n_ever_lung"
+    names(out)[names(out) == "n_no"] <- "n_never_lung"
+    names(out)[names(out) == "mean_score_yes"] <- "mean_score_ever_lung"
+    names(out)[names(out) == "mean_score_no"] <- "mean_score_never_lung"
+    out
+  }
+))
+save_tbl(assoc_ever, file.path(q4_dir, "neural_score_vs_ever_lung_wilcoxon.csv"))
+log_msg("Neural score vs own lung tropism: ",
+        paste(assoc_ever$signature, "p=", signif(assoc_ever$wilcoxon_p, 3), collapse = "; "))
+
+pbox2 <- ggplot2::ggplot(
+  score_long[!is.na(score_long$ever_lung), ],
+  ggplot2::aes(x = ifelse(.data$ever_lung, "Ever lung met (clinical)", "No lung met recorded"),
+               y = .data$score, fill = ifelse(.data$ever_lung, "Ever lung met (clinical)", "No lung met recorded"))
+) +
+  ggplot2::geom_boxplot(outlier.shape = NA, alpha = 0.8) +
+  ggplot2::geom_jitter(width = 0.15, size = 0.8, alpha = 0.35) +
+  ggplot2::facet_wrap(~signature, scales = "free_y") +
+  ggplot2::theme_bw(base_size = 12) +
+  ggplot2::theme(legend.position = "none", axis.text.x = ggplot2::element_text(angle = 20, hjust = 1)) +
+  ggplot2::labs(
+    title = "MSK 2021 primary neural-invasion scores vs own lung tropism",
+    x = NULL,
+    y = if (grepl("^CNA", assay_mode)) "Signature score (mean CNA of gene set)" else "Signature score (mean of gene set)"
+  )
+save_gg(pbox2, file.path(q4_dir, "boxplot_neural_score_vs_ever_lung"), width = 10, height = 5)
+
+for (nm in names(neural_specs)) {
+  sp <- neural_specs[[nm]]
+  keep <- !is.na(prim_ann[[sp$mark]])
+  if (sum(prim_ann$has_paired_lung, na.rm = TRUE) >= 3) {
+    tab <- table(
+      High = prim_ann[[sp$mark]][keep] == sp$high,
+      PairedLung = prim_ann$has_paired_lung[keep]
+    )
+    ft <- tryCatch(stats::fisher.test(tab), error = function(e) NULL)
+    cap <- data.frame(
+      signature = nm,
+      comparison = "paired_lung",
+      fisher_p = if (is.null(ft)) NA_real_ else ft$p.value,
+      odds_ratio = if (is.null(ft)) NA_real_ else unname(ft$estimate),
+      stringsAsFactors = FALSE
+    )
+    save_tbl(as.data.frame.matrix(tab), file.path(q4_dir, paste0(nm, "_highLow_vs_paired_lung_counts.csv")))
+    save_tbl(cap, file.path(q4_dir, paste0(nm, "_fisher_highPNI_vs_paired_lung.csv")))
+  }
+
+  tab2 <- table(
+    High = prim_ann[[sp$mark]][keep] == sp$high,
+    EverLung = prim_ann$ever_lung[keep]
+  )
+  ft2 <- tryCatch(stats::fisher.test(tab2), error = function(e) NULL)
+  cap2 <- data.frame(
+    signature = nm,
+    comparison = "ever_lung",
+    fisher_p = if (is.null(ft2)) NA_real_ else ft2$p.value,
+    odds_ratio = if (is.null(ft2)) NA_real_ else unname(ft2$estimate),
+    stringsAsFactors = FALSE
+  )
+  save_tbl(as.data.frame.matrix(tab2), file.path(q4_dir, paste0(nm, "_highLow_vs_ever_lung_counts.csv")))
+  save_tbl(cap2, file.path(q4_dir, paste0(nm, "_fisher_highPNI_vs_ever_lung.csv")))
+  log_msg("Fisher high ", nm, " vs own lung tropism: p=",
+          if (is.null(ft2)) "NA" else signif(ft2$p.value, 3))
+}
+
+for (fcnm in names(fc_cutoffs)) {
+  g_lung <- lung_sets[[fcnm]]$gene
+  ov_rows <- lapply(names(neural_specs), function(nm) {
+    de_n <- neural_de[[nm]]
+    g_pni <- de_n$gene[is.finite(de_n$FC) & de_n$FC >= fc_cutoffs[[fcnm]] &
+                         de_n$log2FC > 0 & is.finite(de_n$pvalue) & de_n$pvalue < p_cutoff]
+    inter <- intersect(g_lung, g_pni)
+    in_set <- intersect(inter, neural_specs[[nm]]$genes)
+    data.frame(
+      signature = nm,
+      n_lung_low = length(g_lung),
+      n_pni_low = length(g_pni),
+      n_overlap = length(inter),
+      n_overlap_in_signature_geneset = length(in_set),
+      overlap_genes = paste(inter, collapse = ";"),
+      overlap_in_geneset = paste(in_set, collapse = ";"),
+      stringsAsFactors = FALSE
+    )
+  })
+  ov <- dplyr::bind_rows(ov_rows)
+  save_tbl(ov, file.path(q4_dir, paste0(fcnm, "_overlap_lung_low_AND_PNI_low.csv")))
+  log_msg(fcnm, " overlap lung-low & PNI-low: ",
+          paste(ov$signature, ov$n_overlap, sep = "=", collapse = ", "))
+}
+
+if (nrow(pairs_lung) >= 3) {
+  pe <- pair_expr(pairs_lung)
+  sig_fc <- lapply(names(gene_sets), function(nm) {
+    g <- intersect(gene_sets[[nm]], rownames(pe$primary))
+    if (length(g) < 3) return(rep(NA_real_, nrow(pairs_lung)))
+    d <- pe$met[g, , drop = FALSE] - pe$primary[g, , drop = FALSE]
+    matrixStats::colMeans2(d, na.rm = TRUE)
+  })
+  names(sig_fc) <- paste0("paired_log2FC_", names(gene_sets))
+  cor_df <- cbind(pairs_lung, as.data.frame(sig_fc))
+  cor_df$score_axon <- prim_ann$score_axon[match(cor_df$patient_id, prim_ann$PATIENT_ID)]
+  cor_df$score_schwann <- prim_ann$score_schwann[match(cor_df$patient_id, prim_ann$PATIENT_ID)]
+  cor_df$score_neurotrophic <- prim_ann$score_neurotrophic[match(cor_df$patient_id, prim_ann$PATIENT_ID)]
+  save_tbl(cor_df, file.path(q4_dir, "paired_lung_patient_neural_score_vs_geneset_FC.csv"))
+  cor_tests <- data.frame(
+    signature = c("axon_guidance", "schwann", "neurotrophic"),
+    pearson_r = c(
+      suppressWarnings(stats::cor(cor_df$score_axon, cor_df$paired_log2FC_axon_guidance, use = "complete.obs")),
+      suppressWarnings(stats::cor(cor_df$score_schwann, cor_df$paired_log2FC_schwann, use = "complete.obs")),
+      suppressWarnings(stats::cor(cor_df$score_neurotrophic, cor_df$paired_log2FC_neurotrophic, use = "complete.obs"))
+    ),
+    stringsAsFactors = FALSE
+  )
+  cor_tests$pearson_p <- c(
+    tryCatch(suppressWarnings(stats::cor.test(cor_df$score_axon, cor_df$paired_log2FC_axon_guidance)$p.value), error = function(e) NA_real_),
+    tryCatch(suppressWarnings(stats::cor.test(cor_df$score_schwann, cor_df$paired_log2FC_schwann)$p.value), error = function(e) NA_real_),
+    tryCatch(suppressWarnings(stats::cor.test(cor_df$score_neurotrophic, cor_df$paired_log2FC_neurotrophic)$p.value), error = function(e) NA_real_)
+  )
+  save_tbl(cor_tests, file.path(q4_dir, "correlation_primary_neural_score_vs_paired_lung_FC.csv"))
+}
+
+# -----------------------------------------------------------------------------
+# 8. 总览
+# -----------------------------------------------------------------------------
+summary_n <- data.frame(
+  item = c(
+    "assay_mode", "n_genes", "n_primary", "n_metastasis",
+    "sample_paired_primary_lung", "sample_paired_primary_bone",
+    "tropism_lung_yes_primary", "tropism_bone_yes_primary",
+    paste0("lung_", names(fc_cutoffs), "_n_genes"),
+    paste0("bone_", names(fc_cutoffs), "_n_genes")
+  ),
+  value = c(
+    assay_mode, as.character(nrow(mat)),
+    as.character(sum(clin$SAMPLE_TYPE == "Primary" & clin$has_assay)),
+    as.character(sum(clin$SAMPLE_TYPE == "Metastatic" & clin$has_assay)),
+    as.character(nrow(pairs_lung)), as.character(nrow(pairs_bone)),
+    as.character(length(lung_yes)), as.character(length(bone_yes)),
+    as.character(vapply(lung_sets, nrow, integer(1))),
+    as.character(vapply(bone_sets, nrow, integer(1)))
+  ),
+  stringsAsFactors = FALSE
+)
+save_tbl(summary_n, file.path(result_dir, "00_logs", "analysis_summary_counts.csv"))
+log_msg("Done. Results in: ", result_dir)
+log_msg("Read 01_pairing: 1 primary maps to that patient's own lung/bone tropism flags.")
+if (grepl("^CNA", assay_mode)) {
+  log_msg("NOTE: 当前是拷贝数剂量，不是 RNA。FC = 2^(mean_无转移原发 - mean_有转移原发)。")
+}
+if (expr_is_zscore) {
+  log_msg("NOTE: 当前矩阵是 z-score。FC = 2^(z_met - z_primary)。")
+}
