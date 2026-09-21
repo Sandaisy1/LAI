@@ -240,28 +240,65 @@ score_clin_file <- function(f) {
 as_expr_matrix <- function(df) {
   if (is.null(df) || ncol(df) < 2) stop("表达表列数不足")
   nms <- as.character(names(df))
+  nms[is.na(nms) | !nzchar(nms)] <- paste0("col", seq_along(nms))[is.na(nms) | !nzchar(nms)]
+  names(df) <- nms
+  symbolish_frac <- function(x) {
+    x <- toupper(trimws(as.character(utils::head(x, 400))))
+    x <- sub(";.*$", "", x)
+    mean(grepl("^[A-Z][A-Z0-9-]{1,15}$", x))
+  }
   gene_col <- find_col(
     nms,
-    c("^gene.names$", "^gene.?name", "^gene.?symbol", "^symbol$", "^hgnc",
-      "^gene$", "gene.names", "Gene names")
+    c("^pg\\.genes$", "^genes$", "^gene.names$", "^gene.?name", "^gene.?symbol",
+      "^symbol$", "^hgnc", "^gene$", "gene.names", "Gene names")
   )
-  if (is.na(gene_col)) gene_col <- nms[1]
-  is_num_col <- function(x) {
-    if (is.numeric(x)) {
-      return(mean(is.finite(x) | is.na(x)) > 0.3)
-    }
-    ch <- trimws(as.character(x))
-    ch[ch %in% c("", "NA", "NaN", "NAN", "Filtered", "filtered", "NULL", "-")] <- NA
-    v <- suppressWarnings(as.numeric(gsub(",", "", ch)))
-    mean(!is.na(v)) > 0.5
+  if (is.na(gene_col)) {
+    cand <- nms[seq_len(min(8L, length(nms)))]
+    sc <- vapply(df[cand], symbolish_frac, numeric(1))
+    if (any(sc >= 0.25)) gene_col <- cand[which.max(sc)]
   }
-  num_ok <- vapply(df, is_num_col, logical(1))
-  num_ok[match(gene_col, nms)] <- FALSE
-  keep_cols <- unique(c(gene_col, nms[num_ok]))
+  if (is.na(gene_col)) gene_col <- nms[1]
+  annot_rx <- paste(
+    c("^gene", "gene.name", "protein.id", "protein.name", "protein.group",
+      "majority", "fasta", "peptide", "sequence", "description", "accession",
+      "uniprot", "mol.?weight", "molecular.weight", "^mass$", "^score$", "^pep$",
+      "coverage", "^unique$", "razor", "contaminant", "reverse",
+      "potential.contaminant", "^id$", "q.value", "p.value", "posterior.error",
+      "peptide.?count", "n.?unique", "n.?peptides", "ms.?ms", "^length$",
+      "^start$", "^end$", "^charge$", "missed.cleavage", "oxidation",
+      "carbamidomethyl", "only.identified", "^ibaq$", "^intensity$", "^lfq$",
+      "number.of"),
+    collapse = "|"
+  )
+  is_annot <- grepl(annot_rx, nms, ignore.case = TRUE)
+  is_annot[match(gene_col, nms)] <- TRUE
+  frac_num <- vapply(df, function(x) {
+    if (is.numeric(x)) return(mean(is.finite(as.numeric(x))))
+    ch <- trimws(as.character(x))
+    ch[ch %in% c("", "NA", "NaN", "NAN", "Filtered", "filtered", "NULL", "-", "Na")] <- NA
+    v <- suppressWarnings(as.numeric(gsub(",", "", ch)))
+    mean(is.finite(v))
+  }, numeric(1))
+  looks_sample <- grepl(
+    "ratio|intensity|lfq|reporter|tmt|channel|abundance|quantity|sample|patient|fuscc|ipx|plex",
+    nms, ignore.case = TRUE
+  )
+  min_frac <- ifelse(looks_sample, 0.05, 0.12)
+  keep <- (!is_annot) & (frac_num >= min_frac)
+  if (sum(keep) < 8 && ncol(df) > 20) {
+    keep <- (!is_annot) & (frac_num >= 0.03)
+  }
+  keep_cols <- unique(c(gene_col, nms[keep]))
+  log_msg("  columns: ", ncol(df), " total, gene=", gene_col,
+          ", kept samples=", length(keep_cols) - 1L,
+          " (", paste(utils::head(setdiff(keep_cols, gene_col), 12), collapse = ", "),
+          if (length(keep_cols) > 13) ", ..." else "", ")")
   if (length(keep_cols) < 2) stop("表达表列数不足")
   df <- df[, keep_cols, drop = FALSE]
-  numish <- vapply(df, is_num_col, logical(1))
-  # 若看起来是样本×基因（行很少、列很多基因名），转置
+  numish <- vapply(seq_along(df), function(i) {
+    if (identical(names(df)[i], gene_col)) return(FALSE)
+    is.numeric(df[[i]]) || (frac_num[match(names(df)[i], nms)] >= 0.05)
+  }, logical(1))
   if (nrow(df) < 80 && ncol(df) > 200 && mean(numish[-1]) < 0.3) {
     rn <- as.character(df[[1]])
     mat <- t(data.matrix(df[, -1, drop = FALSE]))
@@ -270,6 +307,7 @@ as_expr_matrix <- function(df) {
   }
   genes <- as.character(df[[1]])
   genes <- sub(";.*$", "", genes)
+  genes <- sub("\\|.*$", "", genes)
   genes <- trimws(genes)
   mat <- as.matrix(df[, -1, drop = FALSE])
   storage.mode(mat) <- "double"
@@ -280,9 +318,9 @@ as_expr_matrix <- function(df) {
     ord <- order(means, decreasing = TRUE, na.last = TRUE)
     mat <- mat[ord, , drop = FALSE]
     genes <- genes[ord]
-    keep <- !duplicated(genes)
-    mat <- mat[keep, , drop = FALSE]
-    genes <- genes[keep]
+    keep_g <- !duplicated(genes)
+    mat <- mat[keep_g, , drop = FALSE]
+    genes <- genes[keep_g]
   }
   rownames(mat) <- genes
   colnames(mat) <- as.character(colnames(mat))
@@ -320,11 +358,28 @@ is_time_col <- function(nm) {
 }
 
 yesish <- function(x) {
-  u <- toupper(trimws(as.character(x)))
-  u %in% c("1", "YES", "Y", "TRUE", "T", "POS", "POSITIVE", "EVENT", "MET",
-           "METASTASIS", "PRESENT", "RECURRENCE", "RELAPSE", "DISTANT",
-           "PROGRESSION", "PD", "是", "有", "阳性", "复发", "转移", "进展") |
-    grepl("LUNG|BONE|PULMO|OSSEO|肺转移|骨转移", u)
+  x <- as.character(x)
+  n <- length(x)
+  out <- rep(FALSE, n)
+  u <- toupper(trimws(x))
+  na <- is.na(x) | is.na(u) | u %in% c("", "NA", "NAN", "NULL", ".")
+  if (all(na)) return(out)
+  compact <- gsub("\\s+", "", u)
+  pref <- sub("[：:].*$", "", compact)
+  cbio <- grepl("^[01][:：]", compact)
+  if (mean(cbio | na, na.rm = TRUE) > 0.7) {
+    out[!na] <- pref[!na] == "1"
+    return(out)
+  }
+  hit <- u %in% c("1", "YES", "Y", "TRUE", "T", "POS", "POSITIVE", "EVENT", "MET",
+                  "METASTASIS", "PRESENT", "RECURRENCE", "RELAPSE", "DISTANT",
+                  "PROGRESSION", "PD", "是", "有", "阳性", "复发", "转移", "进展") |
+    grepl("RECUR|RELAPSE|PROGRESS|DENOVO|DE.?NOVO", u) |
+    grepl("(^|[^A-Z0-9])M1([^0-9]|$)|STAGE\\s*IV|IVB|远处", u) |
+    grepl("LUNG MET|BONE MET|PULMO|OSSEO|肺转移|骨转移", u)
+  hit[is.na(hit)] <- FALSE
+  out[!na] <- hit[!na]
+  out
 }
 
 parse_organs <- function(x) {
@@ -413,8 +468,8 @@ read_clin_tables <- function(path) {
 }
 
 id_patterns <- c(
-  "^patient", "^sample", "sample.?id", "patient.?id", "barcode", "fuscc",
-  "case.?id", "标本", "患者", "住院号", "病理号", "^pid$", "^id$"
+  "^patient.?id", "^sample.?id", "^study.?id", "^patient", "^sample",
+  "barcode", "fuscc", "case.?id", "标本", "患者", "住院号", "病理号", "^pid$", "^id$"
 )
 
 harmonize_clin <- function(df) {
@@ -506,6 +561,13 @@ if (is.null(raw) || is.na(expr_path)) {
 
 log_msg("Using expression file: ", basename(expr_path))
 log_msg("Expression: ", nrow(raw), " genes x ", ncol(raw), " samples")
+if (ncol(raw) < 20) {
+  log_msg("WARNING: only ", ncol(raw),
+          " samples. FUSCC proteome is usually ~261 patients. ",
+          "See 00_logs/expression_sample_names.csv. ",
+          "If names look like Score/Mol.weight, patient columns were dropped; ",
+          "if they look like 126/127N, this is one TMT plex, not the full cohort.")
+}
 
 clin_tabs <- list()
 for (p in clin_paths) {
@@ -525,7 +587,7 @@ site_cols <- if (is.null(clin)) character(0) else find_cols(
   names(clin),
   c("metastat.*site", "relapse.?site", "recur.*site", "dm.?site", "first.?site",
     "organ", "转移部位", "转移灶", "复发部位", "首发", "site of", "visceral",
-    "distant.?site")
+    "distant.?site", "sample.?site", "tissue.?origin")
 )
 lung_cols <- if (is.null(clin)) character(0) else find_cols(
   names(clin),
@@ -538,11 +600,15 @@ bone_cols <- if (is.null(clin)) character(0) else find_cols(
 any_met_cols <- if (is.null(clin)) character(0) else find_cols(
   names(clin),
   c("distant.?met", "dmfs.?event", "dmfs.?status", "ddfs.?event", "drfs.?event",
-    "rfs.?event", "rfs.?status", "dfs.?event", "dfs.?status", "metastasis",
-    "relapse", "recurrence", "dm_event",
+    "rfs.?event", "rfs.?status", "dfs.?event", "dfs.?status",
+    "disease.?free.?event", "disease.?free.?status", "disease.?free",
+    "denovo.?met", "de.?novo.?met", "metastasis.?stage", "cancer.?metastasis",
+    "metastasis", "relapse", "recurrence", "dm_event",
     "复发", "远处转移", "转移事件", "预后事件")
 )
 any_met_cols <- any_met_cols[!vapply(any_met_cols, is_time_col, logical(1))]
+any_met_cols <- any_met_cols[!grepl("overall.?surviv|vital.?status|os.?status|lymph.?node|mutation.?count",
+                                   any_met_cols, ignore.case = TRUE)]
 type_col <- if (is.null(clin)) NA_character_ else find_col(
   names(clin),
   c("sample.?type", "tissue", "specimen", "取材", "组织类型")
@@ -576,29 +642,67 @@ kt <- t(vapply(cn, function(s) infer_kind_tissue(s), character(2)))
 pheno$kind <- kt[, 1]
 pheno$tissue <- kt[, 2]
 
-match_clin_idx <- function(sample_keys, clin_keys) {
-  idx <- match(sample_keys, clin_keys)
-  if (mean(is.na(idx)) <= 0.5) return(idx)
+build_clin_key_index <- function(clin) {
+  cols <- unique(c(
+    find_cols(names(clin), id_patterns),
+    intersect(c(".id_raw", ".key"), names(clin))
+  ))
+  cols <- unique(cols)
+  keys <- character(0)
+  rows <- integer(0)
+  for (cl in cols) {
+    raw <- as.character(clin[[cl]])
+    k1 <- norm_key(raw)
+    k2 <- gsub("^(FUSCC|FDR|BRCA|STUDY|SAMPLE|PATIENT|P|PT)", "", k1)
+    k2 <- gsub("^0+", "", k2)
+    ok <- !is.na(k1) & nzchar(k1) & k1 != "NA"
+    keys <- c(keys, k1[ok], k2[ok & nzchar(k2)])
+    rows <- c(rows, which(ok), which(ok & nzchar(k2)))
+  }
+  keep <- !duplicated(keys) & nzchar(keys)
+  list(keys = keys[keep], rows = rows[keep], cols = cols)
+}
+
+match_clin_idx <- function(sample_keys, index) {
+  idx <- index$rows[match(sample_keys, index$keys)]
   relax <- function(x) {
-    x <- gsub("^(FUSCC|FDR|BRCA|P|PT|SAMPLE)", "", x)
+    x <- gsub("^(FUSCC|FDR|BRCA|STUDY|SAMPLE|PATIENT|P|PT|X)", "", x)
     x <- gsub("^0+", "", x)
     x
   }
-  idx2 <- match(relax(sample_keys), relax(clin_keys))
-  idx[is.na(idx)] <- idx2[is.na(idx)]
-  if (mean(is.na(idx)) <= 0.5) return(idx)
-  for (i in seq_along(sample_keys)) {
-    if (!is.na(idx[i])) next
-    sk <- sample_keys[i]
-    if (!nzchar(sk) || nchar(sk) < 4) next
-    hit <- which(clin_keys == sk | startsWith(sk, clin_keys) | startsWith(clin_keys, sk))
-    if (length(hit) == 1) idx[i] <- hit[1]
+  miss <- is.na(idx)
+  if (any(miss)) {
+    idx2 <- index$rows[match(relax(sample_keys), index$keys)]
+    idx[miss] <- idx2[miss]
+  }
+  miss <- is.na(idx)
+  if (any(miss)) {
+    for (i in which(miss)) {
+      sk <- sample_keys[i]
+      if (!nzchar(sk) || nchar(sk) < 5) next
+      hit <- which(index$keys == sk | startsWith(sk, index$keys) | startsWith(index$keys, sk))
+      if (length(hit) == 1) idx[i] <- index$rows[hit[1]]
+    }
   }
   idx
 }
 
+utils::write.csv(
+  data.frame(sample = cn, key = nk, stringsAsFactors = FALSE),
+  file.path(log_dir, "expression_sample_names.csv"),
+  row.names = FALSE
+)
+
 if (!is.null(clin) && ".key" %in% names(clin)) {
-  idx <- match_clin_idx(nk, clin$.key)
+  clin_index <- build_clin_key_index(clin)
+  log_msg("Clinical ID columns: ", paste(clin_index$cols, collapse = ", "))
+  log_msg("Expression samples: ", paste(utils::head(cn, 20), collapse = ", "),
+          if (length(cn) > 20) " ..." else "")
+  if (nrow(clin) > 0) {
+    log_msg("Clinical ID examples: ",
+            paste(utils::head(unique(as.character(clin$.id_raw)), 10), collapse = ", "))
+  }
+  idx <- match_clin_idx(nk, clin_index)
   log_msg("Matched clinical/prognosis rows to samples: ", sum(!is.na(idx)), " / ", length(idx))
   pheno$patient <- ifelse(!is.na(idx), as.character(clin$.id_raw[idx]), pheno$patient)
   if (!is.na(type_col)) {
@@ -690,6 +794,16 @@ if (use_deseq) {
   }
 }
 log_msg("After filter: ", nrow(logmat), " genes x ", ncol(logmat), " samples")
+sym_frac <- mean(grepl("^[A-Za-z][A-Za-z0-9-]{1,15}$", rownames(logmat)))
+if (sym_frac < 0.2 && mean(grepl("\\|", rownames(logmat))) > 0.2) {
+  tok <- vapply(strsplit(rownames(logmat), "\\|"), function(p) {
+    if (length(p) >= 3) p[3] else p[length(p)]
+  }, character(1))
+  tok <- sub("_HUMAN$", "", tok)
+  rownames(logmat) <- tok
+  log_msg("Converted protein IDs to symbols; symbol-like fraction now ",
+          signif(mean(grepl("^[A-Za-z][A-Za-z0-9-]{1,15}$", rownames(logmat))), 3))
+}
 heat_mat <- t(scale(t(logmat)))
 heat_mat[!is.finite(heat_mat)] <- 0
 pheno_use <- pheno_use[colnames(logmat), , drop = FALSE]
@@ -1404,6 +1518,15 @@ if (identical(analysis_mode, "PAIRED_TISSUE")) {
     primaries_one$sample[!primaries_one$bone_event],
     "02_bone_clinical_outcome_vs_primary"
   )
+  de_any <- analyze_grouped(
+    "clinical_primary_dfs_or_distant_met",
+    primaries_one$sample[primaries_one$any_met_event],
+    primaries_one$sample[!primaries_one$any_met_event],
+    "01c_dfs_or_distant_met_vs_primary"
+  )
+  if (is.null(de_lung) && is.null(de_bone) && is.null(de_any)) {
+    log_msg("No lung/bone/DFS groups. Check 00_logs/expression_sample_names.csv vs clinical Patient ID / Sample ID.")
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -1598,7 +1721,15 @@ utils::write.csv(score_df, file.path(pni_dir, "primary_PNI_signature_scores.csv"
 
 unpaired_limma <- function(expr, group, coef_name) {
   group <- factor(group)
+  if (nlevels(droplevels(group)) < 2 || ncol(expr) < 4) {
+    log_msg("unpaired_limma skipped: need two groups and >=4 samples")
+    return(NULL)
+  }
   design <- stats::model.matrix(~ group)
+  if (ncol(design) < 2) {
+    log_msg("unpaired_limma skipped: design has <2 coefficients")
+    return(NULL)
+  }
   fit <- limma::lmFit(expr, design)
   fit <- limma::eBayes(fit, trend = TRUE, robust = TRUE)
   coef <- grep(coef_name, colnames(design), value = TRUE)
@@ -1620,9 +1751,24 @@ for (nm in names(pni_sets)) {
   hi <- ok[sc2 >= stats::median(sc2, na.rm = TRUE)]
   lo <- ok[sc2 < stats::median(sc2, na.rm = TRUE)]
   log_msg("PNI ", nm, " high n=", length(hi), " low n=", length(lo))
+  base <- file.path(pni_dir, nm)
+  dir.create(base, recursive = TRUE, showWarnings = FALSE)
+  if (length(hi) < 2 || length(lo) < 2) {
+    writeLines(
+      c("SKIPPED: PNI signature genes missing or fewer than 2 samples per median split.",
+        paste("n_high=", length(hi), " n_low=", length(lo), " n_signature_genes=",
+              length(used_genes[[nm]]))),
+      file.path(base, "SKIPPED_not_enough_groups.txt")
+    )
+    next
+  }
   expr <- logmat[, c(lo, hi), drop = FALSE]
   grp <- factor(c(rep("low", length(lo)), rep("high", length(hi))), levels = c("low", "high"))
   de <- unpaired_limma(expr, grp, "high")
+  if (is.null(de)) {
+    writeLines("SKIPPED unpaired_limma", file.path(base, "SKIPPED_limma.txt"))
+    next
+  }
   de <- de[order(de$pvalue), ]
   # 高 PNI 原发里更低：FC_high/low < 1
   de$FC_low_over_high <- 1 / de$FC
@@ -1684,6 +1830,12 @@ if (identical(analysis_mode, "PAIRED_TISSUE")) {
   q4_box_title <- "Primary PNI signature scores vs Patient N lung-met outcome"
 }
 
+if (!any(is.finite(score_long$score))) {
+  writeLines(
+    "PNI signature genes were not found in the expression matrix; scores are NA.",
+    file.path(q4_dir, "SKIPPED_no_PNI_scores.txt")
+  )
+} else {
 p <- ggplot2::ggplot(score_long, ggplot2::aes(x = lung_status, y = score, fill = signature)) +
   ggplot2::geom_boxplot(outlier.shape = NA, alpha = 0.7) +
   ggplot2::geom_jitter(width = 0.12, size = 1.4, alpha = 0.8) +
@@ -1695,6 +1847,7 @@ p <- ggplot2::ggplot(score_long, ggplot2::aes(x = lung_status, y = score, fill =
     x = NULL, y = "z-score (primary tumor)"
   )
 save_gg(p, file.path(q4_dir, "PNI_scores_by_lung_pair_status"), width = 11, height = 5)
+}
 
 wilcox_rows <- list()
 for (nm in names(pni_sets)) {
