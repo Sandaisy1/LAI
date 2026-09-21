@@ -4,7 +4,7 @@
 
 人源乳腺癌转移的**临床组织** RNA/蛋白文献（必须同时有原发组织和转移组织，优先肺/骨/肝/脑）见 `docs/human_brca_metastasis_clinical_omics.md`。
 
-AURORA US `GSE209998`、Sinn `GSE145752`、UNC RAP `GSE110590` 的配对原发–转移分析脚本分别为 `GSE209998_Human_breast.R`、`GSE145752_Human_breast.R`、`GSE110590_Human_breast.R`（数据默认 `E:/R/Human breast cancer/<GSE>`）。
+AURORA US `GSE209998`、Sinn `GSE145752`、UNC RAP `GSE110590`、ConvertHER `GSE92977` 的配对原发–转移分析脚本分别为 `GSE209998_Human_breast.R`、`GSE145752_Human_breast.R`、`GSE110590_Human_breast.R`、`GSE92977_Human_breast.R`（数据默认 `E:/R/Human breast cancer/<GSE>`）。
 
 ## 数据位置
 
@@ -134,4 +134,15 @@ source("GSE110590_Human_breast.R")
 ```
 
 矩阵已是 RSEM 上分位数标准化 log2。按患者一一对应：肺约 10 对（A1, A2, A4, A7, A11, A12, A15, A20, A26, A28），骨约 4 对（A1, A7, A11, A12）。A8 有转移无原发，不进配对。无「只转骨」患者，器官特异以配对 DE 差集为主，原发倾向比较用只转肺 vs 肺+骨。只做 p < 0.05 且 FC > 1 / 1.25，不做 top50–300。结果在同目录 `results_GSE110590_Human_breast/`。
+
+## GSE92977 人源原发 vs 配对肺/骨（`GSE92977_Human_breast.R`）
+
+Cejalvo ConvertHER 2017 NanoString。把 `GSE92977_series_matrix.txt.gz` 和 `GSE92977_raw_data.txt.gz` 放到 `E:/R/Human breast cancer/GSE92977`，把脚本也拷到该目录，然后：
+
+```r
+setwd("E:/R/Human breast cancer/GSE92977")
+source("GSE92977_Human_breast.R")
+```
+
+123 对一一对应（Patient N 原发对 Patient N 转移）。肺 7 对（1, 11, 33, 49, 53, 80, 114），骨 16 对（6, 12, 17, 18, 21, 22, 23, 24, 27, 31, 35, 36, 40, 60, 93, 96），无人同时有肺和骨。管家基因标准化后的 ~105 基因面板。只做 p < 0.05 且 FC > 1 / 1.25，不做 top50–300。结果在同目录 `results_GSE92977_Human_breast/`。
 
