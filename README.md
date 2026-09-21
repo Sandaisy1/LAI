@@ -4,7 +4,7 @@
 
 人源乳腺癌转移的**临床组织** RNA/蛋白文献（必须同时有原发组织和转移组织，优先肺/骨/肝/脑）见 `docs/human_brca_metastasis_clinical_omics.md`。
 
-AURORA US `GSE209998`、Sinn `GSE145752`、UNC RAP `GSE110590`、ConvertHER `GSE92977` 的配对原发–转移分析脚本分别为 `GSE209998_Human_breast.R`、`GSE145752_Human_breast.R`、`GSE110590_Human_breast.R`、`GSE92977_Human_breast.R`（数据默认 `E:/R/Human breast cancer/<GSE>`）。
+AURORA US `GSE209998`、Sinn `GSE145752`、UNC RAP `GSE110590`、ConvertHER `GSE92977`、FUSCC-BRCA 的原发–转移（或原发–器官结局）分析脚本分别为 `GSE209998_Human_breast.R`、`GSE145752_Human_breast.R`、`GSE110590_Human_breast.R`、`GSE92977_Human_breast.R`、`FUSCC_Human_breast.R`（数据默认 `E:/R/Human breast cancer/<队列名>`）。
 
 ## 数据位置
 
@@ -145,4 +145,20 @@ source("GSE92977_Human_breast.R")
 ```
 
 123 对一一对应（Patient N 原发对 Patient N 转移）。肺 7 对（1, 11, 33, 49, 53, 80, 114），骨 16 对（6, 12, 17, 18, 21, 22, 23, 24, 27, 31, 35, 36, 40, 60, 93, 96），无人同时有肺和骨。管家基因标准化后的 ~105 基因面板。只做 p < 0.05 且 FC > 1 / 1.25，不做 top50–300。结果在同目录 `results_GSE92977_Human_breast/`。
+
+## FUSCC 人源原发 vs 肺/骨（`FUSCC_Human_breast.R`）
+
+复旦肿瘤医院 FUSCC-BRCA（Ma / Jiang / Shao, *Cancer Cell* 2024 及同系列原发队列）。把表达矩阵（counts / TPM / FPKM / RNA matrix）和临床表放到 `E:/R/Human breast cancer/FUSCC`，把脚本也拷到该目录，然后：
+
+```r
+setwd("E:/R/Human breast cancer/FUSCC")
+source("FUSCC_Human_breast.R")
+```
+
+公开 FUSCC RNA/蛋白几乎全是**原发灶**，没有「1 号原发组织 vs 1 号肺转移组织」。脚本自动切换：
+
+1. **PAIRED_TISSUE**：文件夹里若有同一患者的原发 + 肺/骨转移表达，做组织一一对应（FC = 该患者转移 / 该患者原发）。
+2. **CLINICAL_OUTCOME（默认）**：Patient N 的原发对应 Patient N 后来是否肺/骨转移（FC = 无该器官转移 / 有该器官转移），选出在发生该器官转移的原发里更低的基因。
+
+四个问题：肺/骨低表达、器官特异（只肺 vs 只骨）、原发神经浸润签名（轴突导向 / 施旺 / 神经营养）、三种 PNI 与肺转移的关系。只做 p < 0.05 且 FC > 1 / 1.25，不做 top50–300。结果在同目录 `results_FUSCC_Human_breast/`。临床列名中英文都认（lung/肺、bone/骨、转移部位）。
 
