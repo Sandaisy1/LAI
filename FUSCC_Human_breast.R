@@ -148,47 +148,120 @@ read_table_any <- function(path, n_max = Inf) {
   if (ext %in% c("xlsx", "xls")) {
     if (!has_pkg("readxl")) stop("需要 readxl 读 Excel: ", path)
     sheets <- tryCatch(readxl::excel_sheets(path), error = function(e) "1")
-    pick <- sheets[grepl("clinic|pheno|sample|patient|rna|count|expr|sheet1", sheets, ignore.case = TRUE)]
+    pick <- sheets[grepl("clinic|pheno|sample|patient|rna|count|expr|sheet1|ratio", sheets, ignore.case = TRUE)]
     if (length(pick) == 0) pick <- sheets[1]
-    as.data.frame(readxl::read_excel(path, sheet = pick[1], guess_max = 5000), stringsAsFactors = FALSE)
+    as.data.frame(readxl::read_excel(path, sheet = pick[1], guess_max = 8000), stringsAsFactors = FALSE)
   } else {
-    con <- if (grepl("\\.gz$", path, ignore.case = TRUE)) gzfile(path, "rt") else path
-    utils::read.delim(con, check.names = FALSE, stringsAsFactors = FALSE,
-                      nrows = if (is.finite(n_max)) n_max else -1)
+    open_text <- function() {
+      if (grepl("\\.gz$", path, ignore.case = TRUE)) gzfile(path, "rt") else file(path, "rt")
+    }
+    peek <- function() {
+      con <- open_text()
+      on.exit(close(con), add = TRUE)
+      skip <- 0L
+      line <- ""
+      repeat {
+        raw_line <- readLines(con, n = 1, warn = FALSE)
+        if (!length(raw_line)) break
+        raw_line <- sub("^\ufeff", "", raw_line)
+        if (!nzchar(trimws(raw_line))) {
+          skip <- skip + 1L
+          next
+        }
+        if (grepl("^#", raw_line) && !grepl("[\t,;]", sub("^#\\s*", "", raw_line))) {
+          skip <- skip + 1L
+          next
+        }
+        line <- raw_line
+        break
+      }
+      list(skip = skip, line = line)
+    }
+    pk <- peek()
+    counts <- c(
+      tab = length(strsplit(pk$line, "\t", fixed = TRUE)[[1]]),
+      comma = length(strsplit(pk$line, ",", fixed = TRUE)[[1]]),
+      semi = length(strsplit(pk$line, ";", fixed = TRUE)[[1]])
+    )
+    sep <- c(tab = "\t", comma = ",", semi = ";")[names(counts)[which.max(counts)]]
+    if (max(counts) < 2) {
+      sep <- if (identical(ext, "csv")) "," else "\t"
+    }
+    con <- open_text()
+    on.exit(close(con), add = TRUE)
+    utils::read.delim(
+      con, sep = unname(sep), check.names = FALSE, stringsAsFactors = FALSE,
+      quote = "\"", fill = TRUE, comment.char = "",
+      skip = pk$skip,
+      nrows = if (is.finite(n_max)) n_max else -1
+    )
   }
+}
+
+is_junk_omics_file <- function(f) {
+  b <- basename(f)
+  grepl(paste(
+    "oncoscan", "probelevel", "probe.?level", "idat", "\\.cel(\\.|$)",
+    "fastq", "\\.bam$", "\\.vcf", "copynumber", "copy.?number",
+    "\\bcna\\b", "\\bcnv\\b", "snp.?array", "GSE118527"
+  , collapse = "|"), b, ignore.case = TRUE)
 }
 
 score_expr_file <- function(f) {
   b <- basename(f)
   s <- 0
+  if (is_junk_omics_file(f)) return(-999)
   if (grepl("count", b, ignore.case = TRUE)) s <- s + 50
   if (grepl("tpm", b, ignore.case = TRUE)) s <- s + 40
-  if (grepl("fpkm|fpkm", b, ignore.case = TRUE)) s <- s + 35
-  if (grepl("rna|express|matrix|oep|gene", b, ignore.case = TRUE)) s <- s + 20
-  if (grepl("protein|proteome|ratio_matrix|tmt", b, ignore.case = TRUE)) s <- s + 10
+  if (grepl("fpkm", b, ignore.case = TRUE)) s <- s + 35
+  if (grepl("rna|express|oep|gene", b, ignore.case = TRUE)) s <- s + 20
+  if (grepl("protein|proteome|ratio_matrix|tmt", b, ignore.case = TRUE)) s <- s + 25
+  if (grepl("matrix", b, ignore.case = TRUE)) s <- s + 15
   if (grepl("\\.(csv|tsv|txt|xlsx)(\\.gz)?$", b, ignore.case = TRUE)) s <- s + 5
   if (grepl("clinic|pheno|annot|supplement|mmc|prognos|follow|survival|预后|随访", b, ignore.case = TRUE) &&
-      !grepl("rna|count|tpm|fpkm|matrix", b, ignore.case = TRUE)) s <- s - 40
+      !grepl("rna|count|tpm|fpkm|ratio_matrix", b, ignore.case = TRUE)) s <- s - 40
   s
 }
 
 score_clin_file <- function(f) {
   b <- basename(f)
+  if (is_junk_omics_file(f)) return(-999)
   s <- 0
   if (grepl("prognos|follow.?up|surviv|dfs|rfs|dmfs|ddfs|drfs|os_event|预后|随访|生存",
             b, ignore.case = TRUE)) s <- s + 60
   if (grepl("clinic", b, ignore.case = TRUE)) s <- s + 50
-  if (grepl("pheno|annot|sample|patient|meta", b, ignore.case = TRUE)) s <- s + 30
+  if (grepl("pheno|annot|patient|clinical_data|meta.?data", b, ignore.case = TRUE)) s <- s + 30
   if (grepl("table.?s1|mmc1|supplement", b, ignore.case = TRUE)) s <- s + 25
-  if (grepl("\\.(csv|tsv|txt|xlsx|xls)(\\.gz)?$", b, ignore.case = TRUE)) s <- s + 5
-  if (grepl("count|tpm|fpkm|fastq|bam|vcf", b, ignore.case = TRUE)) s <- s - 40
+  if (s > 0 && grepl("\\.(csv|tsv|txt|xlsx|xls)(\\.gz)?$", b, ignore.case = TRUE)) s <- s + 5
+  if (grepl("count|tpm|fpkm|fastq|bam|vcf|ratio_matrix", b, ignore.case = TRUE)) s <- s - 40
   s
 }
 
 as_expr_matrix <- function(df) {
-  if (ncol(df) < 2) stop("表达表列数不足")
+  if (is.null(df) || ncol(df) < 2) stop("表达表列数不足")
+  nms <- as.character(names(df))
+  gene_col <- find_col(
+    nms,
+    c("^gene.names$", "^gene.?name", "^gene.?symbol", "^symbol$", "^hgnc",
+      "^gene$", "gene.names", "Gene names")
+  )
+  if (is.na(gene_col)) gene_col <- nms[1]
+  is_num_col <- function(x) {
+    if (is.numeric(x)) {
+      return(mean(is.finite(x) | is.na(x)) > 0.3)
+    }
+    ch <- trimws(as.character(x))
+    ch[ch %in% c("", "NA", "NaN", "NAN", "Filtered", "filtered", "NULL", "-")] <- NA
+    v <- suppressWarnings(as.numeric(gsub(",", "", ch)))
+    mean(!is.na(v)) > 0.5
+  }
+  num_ok <- vapply(df, is_num_col, logical(1))
+  num_ok[match(gene_col, nms)] <- FALSE
+  keep_cols <- unique(c(gene_col, nms[num_ok]))
+  if (length(keep_cols) < 2) stop("表达表列数不足")
+  df <- df[, keep_cols, drop = FALSE]
+  numish <- vapply(df, is_num_col, logical(1))
   # 若看起来是样本×基因（行很少、列很多基因名），转置
-  numish <- vapply(df, function(x) mean(suppressWarnings(!is.na(as.numeric(as.character(x))))), numeric(1))
   if (nrow(df) < 80 && ncol(df) > 200 && mean(numish[-1]) < 0.3) {
     rn <- as.character(df[[1]])
     mat <- t(data.matrix(df[, -1, drop = FALSE]))
@@ -196,6 +269,8 @@ as_expr_matrix <- function(df) {
     df <- data.frame(gene = rownames(mat), mat, check.names = FALSE, stringsAsFactors = FALSE)
   }
   genes <- as.character(df[[1]])
+  genes <- sub(";.*$", "", genes)
+  genes <- trimws(genes)
   mat <- as.matrix(df[, -1, drop = FALSE])
   storage.mode(mat) <- "double"
   genes[is.na(genes) | genes == ""] <- paste0("row", seq_along(genes))
@@ -211,6 +286,9 @@ as_expr_matrix <- function(df) {
   }
   rownames(mat) <- genes
   colnames(mat) <- as.character(colnames(mat))
+  if (ncol(mat) < 3 || nrow(mat) < 20) {
+    stop("表达矩阵太小: ", nrow(mat), " x ", ncol(mat))
+  }
   mat
 }
 
@@ -374,29 +452,59 @@ if (length(all_files) == 0) {
 }
 expr_scores <- vapply(all_files, score_expr_file, numeric(1))
 clin_scores <- vapply(all_files, score_clin_file, numeric(1))
-expr_path <- if (max(expr_scores) > 0) all_files[which.max(expr_scores)] else NA_character_
+expr_order <- all_files[order(expr_scores, decreasing = TRUE)]
+expr_order <- expr_order[expr_scores[match(expr_order, all_files)] > 0]
 clin_cands <- all_files[clin_scores > 0]
-clin_cands <- setdiff(clin_cands, expr_path)
 clin_cands <- clin_cands[order(clin_scores[match(clin_cands, all_files)], decreasing = TRUE)]
-clin_paths <- clin_cands
 
-log_msg("Detected expression file: ", if (is.na(expr_path)) "NONE" else basename(expr_path))
-log_msg("Detected clinical/prognosis files: ",
-        if (length(clin_paths) == 0) "NONE" else paste(basename(clin_paths), collapse = "; "))
+log_msg("Expression candidates: ",
+        if (length(expr_order) == 0) "NONE" else paste(basename(expr_order), collapse = "; "))
+log_msg("Clinical/prognosis candidates: ",
+        if (length(clin_cands) == 0) "NONE" else paste(basename(utils::head(clin_cands, 15)), collapse = "; "))
+
+raw <- NULL
+expr_path <- NA_character_
+tried <- character(0)
+for (f in expr_order) {
+  tried <- c(tried, basename(f))
+  log_msg("Trying expression file: ", basename(f))
+  df <- tryCatch(read_table_any(f), error = function(e) {
+    log_msg("  read failed: ", e$message)
+    NULL
+  })
+  if (is.null(df)) next
+  log_msg("  raw table: ", nrow(df), " rows x ", ncol(df), " cols")
+  mat <- tryCatch(as_expr_matrix(df), error = function(e) {
+    log_msg("  not an expression matrix: ", e$message)
+    NULL
+  })
+  if (is.null(mat)) next
+  raw <- mat
+  expr_path <- f
+  break
+}
+clin_paths <- setdiff(clin_cands, expr_path)
+
 writeLines(
   c(paste("project_dir:", project_dir),
     paste("expression:", expr_path),
+    paste("tried_expression:", paste(tried, collapse = " | ")),
     paste("clinical/prognosis:", paste(clin_paths, collapse = " | ")),
     "All files:",
     paste0("  ", basename(all_files), collapse = "\n")),
   file.path(log_dir, "detected_files.txt")
 )
-if (is.na(expr_path) || !file.exists(expr_path)) {
-  stop("找不到表达矩阵（counts/TPM/FPKM/RNA matrix）。请放在: ", project_dir,
-       "\n文件名尽量包含 count、tpm、fpkm、rna 或 matrix。")
+if (is.null(raw) || is.na(expr_path)) {
+  stop(
+    "找不到能读入的表达矩阵。当前目录: ", project_dir, "\n",
+    "已忽略 OncoScan/ProbeLevel 拷贝数文件。\n",
+    "请放 RNA counts/TPM/FPKM，或 iProX 蛋白 ratio_matrix_original.csv。\n",
+    "尝试过: ", paste(tried, collapse = ", "), "\n",
+    "临床表应类似 FUSCC_BRCA_panel_4000_clinical_data.tsv。"
+  )
 }
 
-raw <- as_expr_matrix(read_table_any(expr_path))
+log_msg("Using expression file: ", basename(expr_path))
 log_msg("Expression: ", nrow(raw), " genes x ", ncol(raw), " samples")
 
 clin_tabs <- list()
