@@ -289,7 +289,9 @@ classify_organ <- function(site, sample_type) {
   is_met <- grepl("metasta", st)
   lung <- is_met & grepl("lung|lobe", s) & !grepl("liver", s)
   bone <- is_met & grepl("bone|vertebra|rib|iliac|spine|femur|sternum|calvarium|perioste", s)
-  brain <- is_met & grepl("brain|cereb|dura|occipital", s)
+  # 不要用孤立的 "dura"：epidural 会误匹配成脑
+  brain <- is_met & grepl("brain|cerebr|cerebel|occipital|\\bdura\\b|meninge", s) &
+    !grepl("epidural", s)
   liver <- is_met & grepl("liver", s)
   out[liver] <- "Liver"
   out[brain] <- "Brain"
@@ -350,11 +352,12 @@ build_pairs <- function(organ_name) {
   rows <- lapply(both, function(pid) {
     pr <- prim[prim$PATIENT_ID == pid, , drop = FALSE]
     mt <- mets[mets$PATIENT_ID == pid, , drop = FALSE]
+    prim_id <- pick_one_primary(pr)
     data.frame(
       patient_id = pid,
-      primary_sample = pick_one_primary(pr),
+      primary_sample = prim_id,
       met_sample = paste(mt$SAMPLE_ID, collapse = ";"),
-      primary_site = paste(pr$SITE_RAW[match(pick_one_primary(pr), pr$SAMPLE_ID)], collapse = ";"),
+      primary_site = paste(pr$SITE_RAW[match(prim_id, pr$SAMPLE_ID)], collapse = ";"),
       met_site = paste(mt$SITE_RAW, collapse = ";"),
       n_met = nrow(mt),
       stringsAsFactors = FALSE
@@ -639,6 +642,12 @@ de_lung <- paired_de(pairs_lung, "Lung")
 de_bone <- paired_de(pairs_bone, "Bone")
 save_tbl(de_lung, file.path(result_dir, "02_lung", "lung_paired_all_genes.csv"))
 save_tbl(de_bone, file.path(result_dir, "03_bone", "bone_paired_all_genes.csv"))
+log_msg("Lung genes with FC>1 (any p): ",
+        sum(is.finite(de_lung$FC) & de_lung$log2FC > 0),
+        " | finite p: ", sum(is.finite(de_lung$pvalue)))
+log_msg("Bone genes with FC>1 (any p): ",
+        sum(is.finite(de_bone$FC) & de_bone$log2FC > 0),
+        " | finite p: ", sum(is.finite(de_bone$pvalue)))
 
 lung_sets <- list()
 bone_sets <- list()
@@ -789,14 +798,50 @@ if (nrow(patient_organs) > 0) {
 }
 prim_ann$ever_lung[is.na(prim_ann$ever_lung)] <- FALSE
 prim_ann$ever_bone[is.na(prim_ann$ever_bone)] <- FALSE
-prim_ann$mark_axon <- ifelse(prim_ann$score_axon >= stats::median(prim_ann$score_axon, na.rm = TRUE),
-                             "High_axon_guidance", "Low_axon_guidance")
-prim_ann$mark_schwann <- ifelse(prim_ann$score_schwann >= stats::median(prim_ann$score_schwann, na.rm = TRUE),
-                                "High_Schwann", "Low_Schwann")
-prim_ann$mark_neurotrophic <- ifelse(prim_ann$score_neurotrophic >= stats::median(prim_ann$score_neurotrophic, na.rm = TRUE),
-                                     "High_neurotrophic", "Low_neurotrophic")
+
+# 离散 CNA 大量并列在 0：用“严格大于中位数”当 High，避免所有二倍体被标成 High。
+# RNA/连续值仍用 >= 中位数。
+mark_by_score <- function(score, high_lab, low_lab, label) {
+  out <- rep(NA_character_, length(score))
+  ok <- is.finite(score)
+  if (sum(ok) < 4) {
+    log_msg(label, ": too few finite scores")
+    return(out)
+  }
+  if (length(unique(score[ok])) < 2) {
+    log_msg(label, ": no variation, skip high/low split")
+    return(out)
+  }
+  med <- stats::median(score[ok])
+  if (grepl("^CNA", assay_mode)) {
+    high <- ok & score > med
+    low <- ok & !high
+  } else {
+    high <- ok & score >= med
+    low <- ok & !high
+  }
+  if (sum(high) < 2 || sum(low) < 2) {
+    qs <- stats::quantile(score[ok], probs = c(1 / 3, 2 / 3), names = FALSE, na.rm = TRUE)
+    high <- ok & score >= qs[2]
+    low <- ok & score <= qs[1]
+  }
+  if (sum(high) < 2 || sum(low) < 2) {
+    log_msg(label, ": still cannot split high=", sum(high), " low=", sum(low))
+    return(out)
+  }
+  out[high] <- high_lab
+  out[low] <- low_lab
+  log_msg(label, " split: high=", sum(high), " low=", sum(low), " unmarked=", sum(ok) - sum(high) - sum(low))
+  out
+}
+
+prim_ann$mark_axon <- mark_by_score(prim_ann$score_axon, "High_axon_guidance", "Low_axon_guidance", "axon_guidance")
+prim_ann$mark_schwann <- mark_by_score(prim_ann$score_schwann, "High_Schwann", "Low_Schwann", "schwann")
+prim_ann$mark_neurotrophic <- mark_by_score(
+  prim_ann$score_neurotrophic, "High_neurotrophic", "Low_neurotrophic", "neurotrophic"
+)
 save_tbl(prim_ann, file.path(result_dir, "05_neural_invasion", "primary_neural_invasion_marks.csv"))
-log_msg("Marked ", nrow(prim_ann), " assay primaries with 3 neural-invasion scores (median split)")
+log_msg("Marked ", nrow(prim_ann), " assay primaries with 3 neural-invasion scores")
 
 # 高神经浸润原发灶 vs 低：找低剂量基因（高浸润组更低）
 unpaired_low_in_high <- function(high_ids, low_ids, label) {
@@ -1077,9 +1122,9 @@ if (nrow(pairs_lung) >= 3) {
     stringsAsFactors = FALSE
   )
   cor_tests$pearson_p <- c(
-    tryCatch(stats::cor.test(cor_df$score_axon, cor_df$paired_log2FC_axon_guidance)$p.value, error = function(e) NA_real_),
-    tryCatch(stats::cor.test(cor_df$score_schwann, cor_df$paired_log2FC_schwann)$p.value, error = function(e) NA_real_),
-    tryCatch(stats::cor.test(cor_df$score_neurotrophic, cor_df$paired_log2FC_neurotrophic)$p.value, error = function(e) NA_real_)
+    tryCatch(suppressWarnings(stats::cor.test(cor_df$score_axon, cor_df$paired_log2FC_axon_guidance)$p.value), error = function(e) NA_real_),
+    tryCatch(suppressWarnings(stats::cor.test(cor_df$score_schwann, cor_df$paired_log2FC_schwann)$p.value), error = function(e) NA_real_),
+    tryCatch(suppressWarnings(stats::cor.test(cor_df$score_neurotrophic, cor_df$paired_log2FC_neurotrophic)$p.value), error = function(e) NA_real_)
   )
   save_tbl(cor_tests, file.path(q4_dir, "correlation_primary_neural_score_vs_paired_lung_FC.csv"))
 }
