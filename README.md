@@ -148,12 +148,14 @@ source("GSE92977_Human_breast.R")
 
 ## FUSCC 人源原发 vs 肺/骨（`FUSCC_Human_breast.R`）
 
-复旦肿瘤医院 FUSCC-BRCA（Ma / Jiang / Shao, *Cancer Cell* 2024 及同系列原发队列）。把表达矩阵（counts / TPM / FPKM / RNA matrix）和临床表放到 `E:/R/Human breast cancer/FUSCC`，把脚本也拷到该目录，然后：
+复旦肿瘤医院 FUSCC-BRCA（Ma / Jiang / Shao, *Cancer Cell* 2024 及同系列原发队列）。把 RNA counts/TPM/FPKM（或 iProX `ratio_matrix_original.csv` 蛋白比值）和临床/预后表放到 `E:/R/Human breast cancer/FUSCC`，把脚本也拷到该目录，然后：
 
 ```r
 setwd("E:/R/Human breast cancer/FUSCC")
 source("FUSCC_Human_breast.R")
 ```
+
+**不要把 GSE118527 OncoScan `ProbeLevel.txt.gz` 当成表达矩阵**（那是拷贝数，脚本会跳过）。临床用 `FUSCC_BRCA_panel_4000_clinical_data.tsv` 这类预后表即可。CSV 会自动识别逗号/制表符。
 
 公开 FUSCC 表达矩阵几乎全是**原发灶**；**转移信息在预后/随访表里**（DFS、RFS、DMFS、复发部位、肺转移、骨转移）。Patient N 的原发对应 Patient N 预后里的肺/骨转移。脚本自动切换：
 
