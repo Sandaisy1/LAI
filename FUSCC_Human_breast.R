@@ -14,13 +14,13 @@
 #
 # 阈值：p < 0.05，FC > 1 与 FC > 1.25。不做 top50–300。
 #
-# 本队列公开组学（Cancer Cell 2024 / 2019）几乎全是**原发灶**，没有配对
-# 「1号原发组织 vs 1号肺转移组织」。脚本两种模式自动切换：
+# 公开组学矩阵几乎全是**原发灶**；转移信息在临床/预后/随访表里（DFS/RFS/DMFS、
+# 复发部位、肺转移、骨转移）。Patient N 的原发 对应 Patient N 预后里的肺/骨转移。
+# 两种模式自动切换：
 #   A) PAIRED_TISSUE：文件夹里若真有同一患者的原发 + 肺/骨转移表达，做组织一一对应
-#      （FC = 该患者转移 / 该患者原发）
-#   B) CLINICAL_OUTCOME（默认）：每位患者一条原发，按该患者后来是否肺/骨转移分组
-#      （Patient N 的原发 对应 Patient N 的肺/骨结局；FC = 无该器官转移 / 有该器官转移，
-#       选出在发生该器官转移的原发里更低的基因）
+#      （FC = 该患者转移组织 / 该患者原发）
+#   B) CLINICAL_OUTCOME（默认，FUSCC 预后转移走这条）：每位患者一条原发，按该患者
+#      随访是否肺/骨转移分组（FC = 无该器官转移 / 有该器官转移）
 #
 # 不要改 TG_RNAseq_*.R。
 # =============================================================================
@@ -106,7 +106,8 @@ resolve_project_dir <- function() {
   hit_file <- function(d) {
     if (!dir.exists(d)) return(FALSE)
     ff <- list.files(d, full.names = FALSE, ignore.case = TRUE)
-    any(grepl("FUSCC|OEP|count|tpm|fpkm|clinic|pheno|matrix|rna|PXD|OMIX", ff, ignore.case = TRUE))
+    any(grepl("FUSCC|OEP|count|tpm|fpkm|clinic|pheno|matrix|rna|PXD|OMIX|prognos|follow|survival|dfs|rfs|dmfs|预后|随访",
+              ff, ignore.case = TRUE))
   }
   for (d in candidates) {
     if (hit_file(d)) return(normalizePath(d, winslash = "/", mustWork = FALSE))
@@ -166,14 +167,16 @@ score_expr_file <- function(f) {
   if (grepl("rna|express|matrix|oep|gene", b, ignore.case = TRUE)) s <- s + 20
   if (grepl("protein|proteome|ratio_matrix|tmt", b, ignore.case = TRUE)) s <- s + 10
   if (grepl("\\.(csv|tsv|txt|xlsx)(\\.gz)?$", b, ignore.case = TRUE)) s <- s + 5
-  if (grepl("clinic|pheno|annot|supplement|mmc", b, ignore.case = TRUE) &&
-      !grepl("rna|count|tpm|fpkm|matrix", b, ignore.case = TRUE)) s <- s - 30
+  if (grepl("clinic|pheno|annot|supplement|mmc|prognos|follow|survival|预后|随访", b, ignore.case = TRUE) &&
+      !grepl("rna|count|tpm|fpkm|matrix", b, ignore.case = TRUE)) s <- s - 40
   s
 }
 
 score_clin_file <- function(f) {
   b <- basename(f)
   s <- 0
+  if (grepl("prognos|follow.?up|surviv|dfs|rfs|dmfs|ddfs|drfs|os_event|预后|随访|生存",
+            b, ignore.case = TRUE)) s <- s + 60
   if (grepl("clinic", b, ignore.case = TRUE)) s <- s + 50
   if (grepl("pheno|annot|sample|patient|meta", b, ignore.case = TRUE)) s <- s + 30
   if (grepl("table.?s1|mmc1|supplement", b, ignore.case = TRUE)) s <- s + 25
@@ -226,19 +229,44 @@ find_col <- function(nms, patterns) {
   NA_character_
 }
 
+find_cols <- function(nms, patterns) {
+  nms <- as.character(nms)
+  unique(unlist(lapply(patterns, function(pat) nms[grepl(pat, nms, ignore.case = TRUE)]),
+                use.names = FALSE))
+}
+
+is_time_col <- function(nm) {
+  grepl("time|month|day|year|年限|月数|天数|duration|interval|follow.?up.?m",
+        nm, ignore.case = TRUE) &&
+    !grepl("event|status|flag|site|部位|器官", nm, ignore.case = TRUE)
+}
+
 yesish <- function(x) {
   u <- toupper(trimws(as.character(x)))
   u %in% c("1", "YES", "Y", "TRUE", "T", "POS", "POSITIVE", "EVENT", "MET",
-           "METASTASIS", "PRESENT", "是", "有", "阳性") |
-    grepl("LUNG|BONE|PULMO|OSSEO", u)
+           "METASTASIS", "PRESENT", "RECURRENCE", "RELAPSE", "DISTANT",
+           "PROGRESSION", "PD", "是", "有", "阳性", "复发", "转移", "进展") |
+    grepl("LUNG|BONE|PULMO|OSSEO|肺转移|骨转移", u)
 }
 
 parse_organs <- function(x) {
   u <- toupper(paste(as.character(x), collapse = ";"))
-  u <- gsub("[,|/]|和|及", ";", u)
+  u <- gsub("[,|/]|和|及|、|；", ";", u)
+  u <- gsub("锁骨上|SUPRACLAV", " ", u)
+  u <- gsub("肺门淋巴|HILAR.?LN|HILAR.?LYMPH", " ", u)
+  local_only <- grepl("LOCAL|CHEST.?WALL|胸壁|局部|残腔|切口", u) &&
+    !grepl("LUNG|PULMO|BONE|OSSEO|肺|骨", u)
   data.frame(
-    lung = grepl("LUNG|PULMO|肺", u),
-    bone = grepl("BONE|OSSEO|SKELET|RIB|SPIN|SKULL|骨", u) & !grepl("BREAST", u),
+    lung = !local_only && grepl("LUNG|PULMO|PULMONARY|肺", u),
+    bone = !local_only && (
+      grepl("BONE|OSSEO|SKELET|RIB|SPIN|SKULL|VERTEBR", u) ||
+        grepl("骨转移|骨质|肋骨|脊柱|颅骨|髂骨|股骨|胸骨|骨髓", u) ||
+        grepl("(^|;|[[:space:]])骨(;|[[:space:]]|$)", u)
+    ),
+    any_distant = !local_only && grepl(
+      "LUNG|PULMO|BONE|OSSEO|LIVER|BRAIN|DISTANT|METASTA|VISCERAL|肺|骨|肝|脑|远处",
+      u
+    ),
     stringsAsFactors = FALSE
   )[1, ]
 }
@@ -248,7 +276,7 @@ infer_kind_tissue <- function(nm, extra = "") {
   if (grepl("NORMAL|NAT|ADJACENT|癌旁|正常", blob) && !grepl("TUMOR|PRIMARY|MET", blob)) {
     return(c(kind = "normal", tissue = "Normal"))
   }
-  if (grepl("\\bMET\\b|METASTA|TTM|转移", blob) && !grepl("PRIMARY|原发", blob)) {
+  if (grepl("\\bMET\\b|METASTA|TTM|转移", blob) && !grepl("PRIMARY|原发|预后|随访|DFS|RFS", blob)) {
     tissue <- "Other"
     if (grepl("LUNG|PULMO|肺", blob)) tissue <- "Lung"
     if (grepl("BONE|OSSEO|RIB|SPIN|SKULL|骨", blob)) tissue <- "Bone"
@@ -263,23 +291,102 @@ infer_kind_tissue <- function(nm, extra = "") {
   c(kind = "primary", tissue = "Breast")
 }
 
+looks_like_expr_table <- function(df) {
+  if (is.null(df) || ncol(df) < 3 || nrow(df) < 20) return(FALSE)
+  numish <- vapply(df, function(x) mean(suppressWarnings(!is.na(as.numeric(as.character(x))))), numeric(1))
+  nrow(df) > 500 && ncol(df) > 30 && mean(numish[-1], na.rm = TRUE) > 0.75
+}
+
+read_clin_tables <- function(path) {
+  ext <- tolower(sub(".*\\.", "", sub("\\.gz$", "", basename(path), ignore.case = TRUE)))
+  out <- list()
+  if (ext %in% c("xlsx", "xls")) {
+    if (!has_pkg("readxl")) {
+      log_msg("需要 readxl 读 Excel: ", path)
+      return(out)
+    }
+    sheets <- tryCatch(readxl::excel_sheets(path), error = function(e) character(0))
+    if (length(sheets) == 0) return(out)
+    for (sh in sheets) {
+      df <- tryCatch(
+        as.data.frame(readxl::read_excel(path, sheet = sh, guess_max = 8000),
+                      stringsAsFactors = FALSE),
+        error = function(e) NULL
+      )
+      if (is.null(df) || ncol(df) < 2 || nrow(df) < 2) next
+      if (looks_like_expr_table(df)) {
+        log_msg("Skip expression-like sheet: ", basename(path), " / ", sh)
+        next
+      }
+      attr(df, "source") <- paste0(basename(path), "|", sh)
+      out[[length(out) + 1]] <- df
+    }
+  } else {
+    df <- tryCatch(read_table_any(path), error = function(e) {
+      log_msg("Clinical read failed (", basename(path), "): ", e$message)
+      NULL
+    })
+    if (!is.null(df) && ncol(df) >= 2 && nrow(df) >= 2 && !looks_like_expr_table(df)) {
+      attr(df, "source") <- basename(path)
+      out[[1]] <- df
+    }
+  }
+  out
+}
+
+id_patterns <- c(
+  "^patient", "^sample", "sample.?id", "patient.?id", "barcode", "fuscc",
+  "case.?id", "标本", "患者", "住院号", "病理号", "^pid$", "^id$"
+)
+
+harmonize_clin <- function(df) {
+  id <- find_col(names(df), id_patterns)
+  if (is.na(id)) return(NULL)
+  df$.id_raw <- as.character(df[[id]])
+  df$.key <- norm_key(df$.id_raw)
+  keep <- !is.na(df$.key) & nzchar(df$.key) & df$.key != "NA"
+  df <- df[keep, , drop = FALSE]
+  if (nrow(df) == 0) return(NULL)
+  df <- df[!duplicated(df$.key), , drop = FALSE]
+  df
+}
+
+merge_clin_by_key <- function(tabs) {
+  tabs <- Filter(Negate(is.null), lapply(tabs, harmonize_clin))
+  if (length(tabs) == 0) return(NULL)
+  out <- tabs[[1]]
+  if (length(tabs) == 1) return(out)
+  for (k in seq_along(tabs)[-1]) {
+    extra <- setdiff(names(tabs[[k]]), names(out))
+    extra <- extra[extra != ".id_raw"]
+    if (length(extra) == 0) next
+    add <- tabs[[k]][, c(".key", extra), drop = FALSE]
+    out <- merge(out, add, by = ".key", all = TRUE, sort = FALSE)
+  }
+  out$.id_raw <- ifelse(is.na(out$.id_raw) | !nzchar(as.character(out$.id_raw)),
+                        out$.key, as.character(out$.id_raw))
+  out
+}
+
 all_files <- list_data_files()
 if (length(all_files) == 0) {
-  stop("在 ", project_dir, " 里没有找到数据文件。请把 FUSCC 表达矩阵和临床表放到该目录。")
+  stop("在 ", project_dir, " 里没有找到数据文件。请把 FUSCC 表达矩阵和临床/预后表放到该目录。")
 }
 expr_scores <- vapply(all_files, score_expr_file, numeric(1))
 clin_scores <- vapply(all_files, score_clin_file, numeric(1))
 expr_path <- if (max(expr_scores) > 0) all_files[which.max(expr_scores)] else NA_character_
 clin_cands <- all_files[clin_scores > 0]
 clin_cands <- setdiff(clin_cands, expr_path)
-clin_path <- if (length(clin_cands) > 0) clin_cands[which.max(clin_scores[match(clin_cands, all_files)])] else NA_character_
+clin_cands <- clin_cands[order(clin_scores[match(clin_cands, all_files)], decreasing = TRUE)]
+clin_paths <- clin_cands
 
 log_msg("Detected expression file: ", if (is.na(expr_path)) "NONE" else basename(expr_path))
-log_msg("Detected clinical file: ", if (is.na(clin_path)) "NONE" else basename(clin_path))
+log_msg("Detected clinical/prognosis files: ",
+        if (length(clin_paths) == 0) "NONE" else paste(basename(clin_paths), collapse = "; "))
 writeLines(
   c(paste("project_dir:", project_dir),
     paste("expression:", expr_path),
-    paste("clinical:", clin_path),
+    paste("clinical/prognosis:", paste(clin_paths, collapse = " | ")),
     "All files:",
     paste0("  ", basename(all_files), collapse = "\n")),
   file.path(log_dir, "detected_files.txt")
@@ -292,43 +399,57 @@ if (is.na(expr_path) || !file.exists(expr_path)) {
 raw <- as_expr_matrix(read_table_any(expr_path))
 log_msg("Expression: ", nrow(raw), " genes x ", ncol(raw), " samples")
 
-clin <- NULL
-if (!is.na(clin_path) && file.exists(clin_path)) {
-  clin <- tryCatch(read_table_any(clin_path), error = function(e) {
-    log_msg("Clinical read failed: ", e$message)
-    NULL
-  })
-  if (!is.null(clin)) log_msg("Clinical: ", nrow(clin), " rows x ", ncol(clin), " cols; names: ",
-                              paste(utils::head(names(clin), 20), collapse = ", "))
+clin_tabs <- list()
+for (p in clin_paths) {
+  clin_tabs <- c(clin_tabs, read_clin_tables(p))
+}
+clin <- merge_clin_by_key(clin_tabs)
+if (!is.null(clin)) {
+  log_msg("Merged clinical/prognosis: ", nrow(clin), " patients x ", ncol(clin),
+          " cols from ", length(clin_tabs), " table(s); names: ",
+          paste(utils::head(names(clin), 40), collapse = ", "))
+} else if (length(clin_paths) > 0) {
+  log_msg("Clinical files found but no patient/sample ID column could be merged.")
 }
 
-id_col <- if (is.null(clin)) NA_character_ else find_col(
+id_col <- if (is.null(clin)) NA_character_ else find_col(names(clin), id_patterns)
+site_cols <- if (is.null(clin)) character(0) else find_cols(
   names(clin),
-  c("^patient", "^sample", "sample.?id", "patient.?id", "barcode", "fuscc",
-    "case.?id", "标本", "患者", "^id$")
+  c("metastat.*site", "relapse.?site", "recur.*site", "dm.?site", "first.?site",
+    "organ", "转移部位", "转移灶", "复发部位", "首发", "site of", "visceral",
+    "distant.?site")
 )
-site_col <- if (is.null(clin)) NA_character_ else find_col(
+lung_cols <- if (is.null(clin)) character(0) else find_cols(
   names(clin),
-  c("metastat.*site", "relapse.?site", "dm.?site", "first.?site", "organ",
-    "转移部位", "转移灶", "site of")
+  c("lung.?met", "pulmo", "lung.?event", "lung.?relapse", "肺转移", "肺复发")
 )
-lung_col <- if (is.null(clin)) NA_character_ else find_col(
+bone_cols <- if (is.null(clin)) character(0) else find_cols(
   names(clin),
-  c("lung.?met", "pulmo", "^lung$", "肺转移", "肺")
+  c("bone.?met", "osseo", "bone.?event", "bone.?relapse", "骨转移", "骨复发")
 )
-bone_col <- if (is.null(clin)) NA_character_ else find_col(
+any_met_cols <- if (is.null(clin)) character(0) else find_cols(
   names(clin),
-  c("bone.?met", "osseo", "^bone$", "骨转移", "^骨$")
+  c("distant.?met", "dmfs.?event", "dmfs.?status", "ddfs.?event", "drfs.?event",
+    "rfs.?event", "rfs.?status", "dfs.?event", "dfs.?status", "metastasis",
+    "relapse", "recurrence", "dm_event",
+    "复发", "远处转移", "转移事件", "预后事件")
 )
-any_met_col <- if (is.null(clin)) NA_character_ else find_col(
-  names(clin),
-  c("distant.?met", "dmfs.?event", "rfs.?event", "metastasis", "relapse",
-    "复发", "远处转移", "dm_event")
-)
+any_met_cols <- any_met_cols[!vapply(any_met_cols, is_time_col, logical(1))]
 type_col <- if (is.null(clin)) NA_character_ else find_col(
   names(clin),
   c("sample.?type", "tissue", "specimen", "取材", "组织类型")
 )
+
+# 所有列里只要单元格写了肺/骨，也算预后转移部位（不依赖列名）
+organ_text_cols <- character(0)
+if (!is.null(clin)) {
+  organ_text_cols <- names(clin)[vapply(clin, function(x) {
+    u <- paste(as.character(utils::head(x, 2000)), collapse = " ")
+    grepl("LUNG|PULMO|BONE|OSSEO|肺转移|骨转移|肺,|骨,", u, ignore.case = TRUE) ||
+      grepl("肺|骨转移", u)
+  }, logical(1))]
+  organ_text_cols <- setdiff(organ_text_cols, c(".key", ".id_raw"))
+}
 
 cn <- colnames(raw)
 nk <- norm_key(cn)
@@ -340,51 +461,95 @@ pheno <- data.frame(
   lung_event = FALSE,
   bone_event = FALSE,
   any_met_event = FALSE,
+  met_site_text = "",
   stringsAsFactors = FALSE
 )
 kt <- t(vapply(cn, function(s) infer_kind_tissue(s), character(2)))
 pheno$kind <- kt[, 1]
 pheno$tissue <- kt[, 2]
 
-if (!is.null(clin) && !is.na(id_col)) {
-  clin$id_raw <- as.character(clin[[id_col]])
-  clin$key <- norm_key(clin$id_raw)
-  idx <- match(nk, clin$key)
-  if (mean(is.na(idx)) > 0.5) {
-    idx2 <- match(nk, norm_key(clin$id_raw))
-    # 部分匹配：临床 ID 是矩阵列名的前缀/后缀
-    if (mean(is.na(idx)) > 0.5) {
-      for (i in seq_along(nk)) {
-        if (!is.na(idx[i])) next
-        hit <- which(clin$key == nk[i] | grepl(paste0("^", nk[i], "$"), clin$key) |
-                       startsWith(nk[i], clin$key) | startsWith(clin$key, nk[i]))
-        if (length(hit) == 1) idx[i] <- hit[1]
-      }
-    }
+match_clin_idx <- function(sample_keys, clin_keys) {
+  idx <- match(sample_keys, clin_keys)
+  if (mean(is.na(idx)) <= 0.5) return(idx)
+  relax <- function(x) {
+    x <- gsub("^(FUSCC|FDR|BRCA|P|PT|SAMPLE)", "", x)
+    x <- gsub("^0+", "", x)
+    x
   }
-  log_msg("Matched clinical rows to samples: ", sum(!is.na(idx)), " / ", length(idx))
-  pheno$patient <- ifelse(!is.na(idx), clin$id_raw[idx], pheno$patient)
+  idx2 <- match(relax(sample_keys), relax(clin_keys))
+  idx[is.na(idx)] <- idx2[is.na(idx)]
+  if (mean(is.na(idx)) <= 0.5) return(idx)
+  for (i in seq_along(sample_keys)) {
+    if (!is.na(idx[i])) next
+    sk <- sample_keys[i]
+    if (!nzchar(sk) || nchar(sk) < 4) next
+    hit <- which(clin_keys == sk | startsWith(sk, clin_keys) | startsWith(clin_keys, sk))
+    if (length(hit) == 1) idx[i] <- hit[1]
+  }
+  idx
+}
+
+if (!is.null(clin) && ".key" %in% names(clin)) {
+  idx <- match_clin_idx(nk, clin$.key)
+  log_msg("Matched clinical/prognosis rows to samples: ", sum(!is.na(idx)), " / ", length(idx))
+  pheno$patient <- ifelse(!is.na(idx), as.character(clin$.id_raw[idx]), pheno$patient)
   if (!is.na(type_col)) {
     extra <- ifelse(!is.na(idx), as.character(clin[[type_col]][idx]), "")
     kt2 <- t(mapply(infer_kind_tissue, pheno$sample, extra, USE.NAMES = FALSE))
     pheno$kind <- kt2[, 1]
     pheno$tissue <- kt2[, 2]
   }
-  if (!is.na(site_col)) {
-    sites <- ifelse(!is.na(idx), as.character(clin[[site_col]][idx]), "")
-    org <- lapply(sites, parse_organs)
-    pheno$lung_event <- pheno$lung_event | vapply(org, function(z) isTRUE(z$lung), logical(1))
-    pheno$bone_event <- pheno$bone_event | vapply(org, function(z) isTRUE(z$bone), logical(1))
-    pheno$any_met_event <- pheno$any_met_event | (nzchar(trimws(sites)) & !grepl("^NA$|^NONE$|^无$|^0$", sites, ignore.case = TRUE))
+  take <- function(cols) {
+    if (length(cols) == 0) {
+      return(rep("", length(idx)))
+    }
+    bits <- lapply(cols, function(cl) ifelse(!is.na(idx), as.character(clin[[cl]][idx]), ""))
+    do.call(paste, c(bits, sep = ";"))
   }
-  if (!is.na(lung_col)) pheno$lung_event <- pheno$lung_event | (!is.na(idx) & yesish(clin[[lung_col]][idx]))
-  if (!is.na(bone_col)) pheno$bone_event <- pheno$bone_event | (!is.na(idx) & yesish(clin[[bone_col]][idx]))
-  if (!is.na(any_met_col)) pheno$any_met_event <- pheno$any_met_event | (!is.na(idx) & yesish(clin[[any_met_col]][idx]))
+  site_txt <- take(unique(c(site_cols, organ_text_cols)))
+  pheno$met_site_text <- site_txt
+  org <- lapply(site_txt, parse_organs)
+  pheno$lung_event <- vapply(org, function(z) isTRUE(z$lung), logical(1))
+  pheno$bone_event <- vapply(org, function(z) isTRUE(z$bone), logical(1))
+  pheno$any_met_event <- vapply(org, function(z) isTRUE(z$any_distant), logical(1))
+  for (cl in lung_cols) {
+    pheno$lung_event <- pheno$lung_event | (!is.na(idx) & yesish(clin[[cl]][idx]))
+  }
+  for (cl in bone_cols) {
+    pheno$bone_event <- pheno$bone_event | (!is.na(idx) & yesish(clin[[cl]][idx]))
+  }
+  for (cl in any_met_cols) {
+    pheno$any_met_event <- pheno$any_met_event | (!is.na(idx) & yesish(clin[[cl]][idx]))
+  }
 }
+
 pheno$any_met_event <- pheno$any_met_event | pheno$lung_event | pheno$bone_event | (pheno$kind == "met")
 pheno$lung_event <- pheno$lung_event | (pheno$kind == "met" & pheno$tissue == "Lung")
 pheno$bone_event <- pheno$bone_event | (pheno$kind == "met" & pheno$tissue == "Bone")
 rownames(pheno) <- pheno$sample
+
+col_used <- data.frame(
+  role = c(
+    rep("id", length(na.omit(id_col))),
+    rep("met_site", length(site_cols)),
+    rep("lung_flag", length(lung_cols)),
+    rep("bone_flag", length(bone_cols)),
+    rep("prognosis_event", length(any_met_cols)),
+    rep("organ_text_any_col", length(organ_text_cols))
+  ),
+  column = c(
+    if (is.na(id_col)) character(0) else id_col,
+    site_cols, lung_cols, bone_cols, any_met_cols, organ_text_cols
+  ),
+  stringsAsFactors = FALSE
+)
+if (nrow(col_used) > 0) {
+  utils::write.csv(col_used, file.path(log_dir, "prognosis_metastasis_columns.csv"),
+                   row.names = FALSE)
+}
+log_msg("Prognosis lung events: ", sum(pheno$lung_event),
+        " bone: ", sum(pheno$bone_event),
+        " any_met: ", sum(pheno$any_met_event))
 
 # -----------------------------------------------------------------------------
 # 3. 过滤 + 标准化（四个问题共用一次）
@@ -503,15 +668,23 @@ if (identical(analysis_mode, "PAIRED_TISSUE")) {
   pairs_bone <- outcome_pairs("Bone", bone_flag)
   writeLines(
     c("MODE: CLINICAL_OUTCOME",
-      "FUSCC public RNA/protein is primary tissue. There is no 1号原发组织 vs 1号肺转移组织.",
-      "Instead: Patient N primary expression is paired to Patient N lung/bone metastasis OUTCOME.",
-      "FC = (no that-organ met) / (has that-organ met); selected genes are LOWER in primaries that later metastasized to that organ.",
+      "FUSCC 表达矩阵是原发灶；转移来自同一患者的预后/随访（Patient N 原发 ↔ Patient N 肺/骨转移结局）。",
+      "DFS/RFS/DMFS 事件、复发部位、肺转移、骨转移列都会读。",
+      "FC = (无该器官转移) / (有该器官转移)；选出后来发生该器官转移的原发里更低的基因。",
       paste("lung_event n=", sum(lung_flag), " bone_event n=", sum(bone_flag),
             " any_met n=", sum(pheno_use$kind == "primary" & pheno_use$any_met_event)),
-      paste("clinical columns used: id=", id_col, " site=", site_col,
-            " lung=", lung_col, " bone=", bone_col, " any_met=", any_met_col)),
+      paste("id_col=", id_col),
+      paste("site_cols=", paste(site_cols, collapse = ",")),
+      paste("lung_cols=", paste(lung_cols, collapse = ",")),
+      paste("bone_cols=", paste(bone_cols, collapse = ",")),
+      paste("prognosis_event_cols=", paste(any_met_cols, collapse = ",")),
+      paste("organ_text_cols=", paste(utils::head(organ_text_cols, 20), collapse = ","))),
     file.path(pair_dir, "00_MODE.txt")
   )
+  if (sum(lung_flag) < 2 && sum(bone_flag) < 2) {
+    log_msg("WARNING: 预后表对上了患者，但肺/骨转移人数不足。",
+            "请确认随访表里有转移部位或肺转移/骨转移列（不是只有 OS）。")
+  }
 }
 
 utils::write.csv(pairs_lung, file.path(pair_dir, "pairs_primary_vs_lung_1to1.csv"), row.names = FALSE)
@@ -1096,7 +1269,10 @@ analyze_grouped <- function(comp_name, event_ids, nonevent_ids, folder) {
 primaries_one <- pheno_use[pheno_use$kind == "primary", , drop = FALSE]
 primaries_one <- primaries_one[!duplicated(primaries_one$patient), ]
 utils::write.csv(
-  primaries_one[, c("sample", "patient", "lung_event", "bone_event", "any_met_event")],
+  primaries_one[, intersect(
+    c("sample", "patient", "lung_event", "bone_event", "any_met_event", "met_site_text"),
+    names(primaries_one)
+  )],
   file.path(pair_dir, "patient_primary_to_organ_outcome_1to1.csv"),
   row.names = FALSE
 )
@@ -1548,7 +1724,7 @@ writeLines(
     if (identical(analysis_mode, "PAIRED_TISSUE")) {
       "Heatmaps keep patient order: Primary_i next to Met_i (cluster_cols = FALSE)."
     } else {
-      "Patient N primary is paired to Patient N lung/bone metastasis OUTCOME (no matched met tissue in public FUSCC RNA)."
+      "Patient N primary is paired to Patient N prognosis/follow-up lung/bone metastasis (DFS/RFS/DMFS and met site)."
     },
     "No Top50-300. Thresholds: p < 0.05 and FC > 1 / 1.25 only.",
     "PNI is signature-based (axon guidance / Schwann / neurotrophic); pathology PNI is not required."

@@ -155,10 +155,10 @@ setwd("E:/R/Human breast cancer/FUSCC")
 source("FUSCC_Human_breast.R")
 ```
 
-公开 FUSCC RNA/蛋白几乎全是**原发灶**，没有「1 号原发组织 vs 1 号肺转移组织」。脚本自动切换：
+公开 FUSCC 表达矩阵几乎全是**原发灶**；**转移信息在预后/随访表里**（DFS、RFS、DMFS、复发部位、肺转移、骨转移）。Patient N 的原发对应 Patient N 预后里的肺/骨转移。脚本自动切换：
 
 1. **PAIRED_TISSUE**：文件夹里若有同一患者的原发 + 肺/骨转移表达，做组织一一对应（FC = 该患者转移 / 该患者原发）。
-2. **CLINICAL_OUTCOME（默认）**：Patient N 的原发对应 Patient N 后来是否肺/骨转移（FC = 无该器官转移 / 有该器官转移），选出在发生该器官转移的原发里更低的基因。
+2. **CLINICAL_OUTCOME（默认）**：读临床和预后表（Excel 会扫每一张相关 sheet），按该患者后来是否肺/骨转移分组（FC = 无该器官转移 / 有该器官转移）。
 
-四个问题：肺/骨低表达、器官特异（只肺 vs 只骨）、原发神经浸润签名（轴突导向 / 施旺 / 神经营养）、三种 PNI 与肺转移的关系。只做 p < 0.05 且 FC > 1 / 1.25，不做 top50–300。结果在同目录 `results_FUSCC_Human_breast/`。临床列名中英文都认（lung/肺、bone/骨、转移部位）。
+四个问题：肺/骨低表达、器官特异（只肺 vs 只骨）、原发神经浸润签名（轴突导向 / 施旺 / 神经营养）、三种 PNI 与肺转移的关系。只做 p < 0.05 且 FC > 1 / 1.25，不做 top50–300。结果在同目录 `results_FUSCC_Human_breast/`。列名中英文都认；用到的预后列会写在 `results_FUSCC_Human_breast/00_logs/prognosis_metastasis_columns.csv`。
 
