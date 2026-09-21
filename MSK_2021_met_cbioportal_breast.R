@@ -183,8 +183,8 @@ save_gg <- function(plot, path_stub, width = 8, height = 6) {
 # -----------------------------------------------------------------------------
 read_cbioportal_clinical <- function(path) {
   raw <- readLines(path, warn = FALSE, encoding = "UTF-8")
-  hit <- which(grepl("^PATIENT_ID\\t", raw))
-  if (length(hit) == 0) stop("临床表没有 PATIENT_ID 表头: ", path)
+  hit <- which(grepl("^(PATIENT_ID|SAMPLE_ID)\\t", raw))
+  if (length(hit) == 0) stop("临床表没有 PATIENT_ID / SAMPLE_ID 表头: ", path)
   utils::read.delim(path, skip = hit[1] - 1, check.names = FALSE, stringsAsFactors = FALSE)
 }
 
