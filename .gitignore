@@ -4,6 +4,9 @@
 .Ruserdata
 results/
 figures/
+data/
+__pycache__/
+*.pyc
 *.html
 *.pdf
 .DS_Store

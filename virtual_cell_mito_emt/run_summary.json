@@ -1,0 +1,31 @@
+{
+  "accession": "GSE143607",
+  "model": "MCF10A TGF-beta EMT continuum, 10x, mixed days 0-7",
+  "n_cells_raw": 8678,
+  "n_cells_qc": 8464,
+  "n_training_cells": 5501,
+  "n_heldout_mesenchymal_cells": 2963,
+  "gate_check_cdh1_train_vs_heldout": [
+    0.19135926960916666,
+    0.03288475759007399
+  ],
+  "gate_check_vim_train_vs_heldout": [
+    2.0630505377907506,
+    2.622882690702957
+  ],
+  "n_universe": 2672,
+  "n_mito_tested": 693,
+  "n_nuclear_mito_tested": 681,
+  "n_null": 1611,
+  "readout_sizes": {
+    "emt": 161,
+    "migration_independent": 174,
+    "invasion_independent": 19,
+    "epithelial": 22
+  },
+  "n_called": 0,
+  "called_genes": [],
+  "fdr_cutoff": 0.05,
+  "kd_quantile": 0.05,
+  "training_rule": "epithelial state score >= quantile 0.35"
+}
