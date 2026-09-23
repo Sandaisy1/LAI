@@ -501,5 +501,7 @@ if (is.null(pb_schwann) || length(unique(si_schwann$patient)) < 2) {
 plot_each_fc125_gene(up_fc125_tab)
 
 log_msg("先打开: ", file.path(out_root, "00_请先看这里.txt"))
+log_msg("近/远: ≤", near_spots, " / ≥", far_spots, " spot  ",
+        file.path(out_root, "DISTANCE_CUTOFFS.txt"))
 log_msg("综合上调: ", out_root)
 log_msg("FC>1.25 逐基因距离图: ", file.path(dist_dir, "FC_1.25_each_gene"))
