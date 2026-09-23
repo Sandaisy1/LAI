@@ -97,3 +97,69 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## Wang 2024 空间转录组：远神经肿瘤 vs 近神经肿瘤
+
+数据在 `E:/R/Nerve`。比较是 **远神经肿瘤组织 vs 近神经肿瘤组织**（上调 = 远神经肿瘤更高）。FC **只做 >1、1.25、1.5**，没有 FC=2、没有 topN、没有下调。
+
+请 source `Wang_ST_nerve_infiltration.R`，不要 source `Nerve_RNA_primary_lung_tropism.R`（那是另一套 GPL96 分析）。
+
+```
+E:/R/Nerve/results/
+  00_请先看这里_单个病人和上调基因.txt
+  00_eligible_single_patients/                 # 符合条件的单个病人
+    符合条件病人_打开这个.csv
+    INDEX_eligible_patients.csv
+    schwann_neighborhood/TNBC32/near_and_far_tumor_RNA_expression.csv
+    schwann_neighborhood/TNBC32/DE_far_tumor_vs_near_tumor/up_FC_gt_1/
+    schwann_neighborhood/TNBC32/DE_far_tumor_vs_near_tumor/up_FC_1.25/
+    schwann_neighborhood/TNBC32/DE_far_tumor_vs_near_tumor/up_FC_1.5/
+    pathologist_nerve/TNBC50/                  # 病理神经，病人很少
+  01_combined_far_tumor_vs_near_tumor/         # 这些人合在一起
+    upregulated_far_tumor_vs_near_tumor_FC_gt_1.csv
+    upregulated_far_tumor_vs_near_tumor_FC_1.25.csv
+    upregulated_far_tumor_vs_near_tumor_FC_1.5.csv
+```
+
+旧文件夹 `tumor_near_schwann_vs_far/`、`TNBC50_tumor_near_nerve_vs_far/`、`FoldChange/FC_2/`、`TopRank/` 是上一版近 vs 远，重新跑会删掉。
+
+```r
+setwd("E:/R/Nerve")
+Sys.setenv(WANG_ST_DIR = "E:/R/Nerve")
+source("Wang_ST_nerve_infiltration.R")
+```
+
+不需要 `TG_RNAseq_pipeline.R`。先 **p < 0.05**，再上调 **FC > 1、1.25、1.5**。原 Cuffdiff 六组比较不变。
+
+真正必需的是 `Robjects/`（`counts` + `annotsBySpot`；先解压 `Robjects.tar`）。
+
+`ids.RDS` 可选。Windows 解 `Clinical.tar` 时常把 `Clinical/ids.RDS` 展成根目录的 `Clinicalids.RDS`；`Clinical.RDS` / `Clinical.xlsx` 是临床表。没有 ids 也能跑。
+
+病理 Nerve 只和极少数 spot 重叠，全队列结论以 Schwann 邻域为准。
+
+### 指定 32 个病人的综合分析（单独脚本）
+
+全队列跑完后，另跑 `Wang_ST_far_vs_near_selected_patients.R`。只综合病人 2、3、4、6、11、13、14、15、20、22、27、28、30、31、37、39、51、52、53、56、61、62、67、69、74、79、81、85、86、90、93、94。比较仍是 **远神经肿瘤 vs 近神经肿瘤**，上调只做 **FC>1、1.25**（没有 1.5）。不覆盖上面的 `00_` / `01_` 结果。
+
+```r
+setwd("E:/R/Nerve")
+Sys.setenv(WANG_ST_DIR = "E:/R/Nerve")
+source("Wang_ST_far_vs_near_selected_patients.R")
+```
+
+```
+E:/R/Nerve/results/02_selected32_far_tumor_vs_near_tumor/
+  00_请先看这里.txt
+  INDEX_requested_vs_used.csv
+  upregulated_far_tumor_vs_near_tumor_FC_gt_1.csv
+  upregulated_far_tumor_vs_near_tumor_FC_1.25.csv
+  03_distance_to_Schwann/
+    INDEX_FC_1.25_each_gene_each_patient.csv
+    FC_1.25_each_gene/GENE/TNBC病人_GENE_high_vs_low_vs_Schwann_distance.pdf
+```
+
+近/远仍是主脚本那套：肿瘤 spot 到施旺 **≤2 spot 为近，>4 spot 为远**。1 spot ≈ 0.1 mm。
+
+距离图只画 **`upregulated_far_tumor_vs_near_tumor_FC_1.25.csv` 里那几个上调基因**（你这份大约 10 个，例如 PCYOX1L、ABHD3、CEP152）。**每个基因、每个病人各一张**高/低表达 vs 施旺距离图，不把病人拼成一张总图。
+
+不要看 `03_distance_to_Schwann/genes/`。那里的 ARTN、NGF、CXCL12 是上一版误画的文献配体，不是这批上调基因；更新脚本后重跑会删掉这个文件夹。
