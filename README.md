@@ -150,6 +150,8 @@ source("Wang_ST_far_vs_near_selected_patients.R")
 ```
 E:/R/Nerve/results/02_selected32_far_tumor_vs_near_tumor/
   00_请先看这里.txt
+  DISTANCE_CUTOFFS.txt                       # 近≤2 / 远≥10 spot
+  DISTANCE_per_patient.csv
   INDEX_requested_vs_used.csv
   upregulated_far_tumor_vs_near_tumor_FC_gt_1.csv
   upregulated_far_tumor_vs_near_tumor_FC_1.25.csv
@@ -157,6 +159,8 @@ E:/R/Nerve/results/02_selected32_far_tumor_vs_near_tumor/
     INDEX_FC_1.25_each_gene.csv              # 每个 FC>1.25 上调基因一张图
     FC_1.25_each_gene/GENE_high_vs_low_vs_Schwann_distance.pdf
 ```
+
+指定 32 人综合分析的近/远按一套标准：肿瘤 spot 到施旺 **≤2 spot 为近，≥10 spot 为远**（中间不进近/远）。旧版远>4 间隔太小。1 spot ≈ 0.1 mm。看 `DISTANCE_CUTOFFS.txt`。
 
 距离图只画 **`upregulated_far_tumor_vs_near_tumor_FC_1.25.csv` 里那几个上调基因**（你这份大约 10 个，例如 PCYOX1L、ABHD3、CEP152），每个基因一张高/低表达 vs 施旺距离图。
 

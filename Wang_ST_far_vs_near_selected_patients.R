@@ -2,6 +2,7 @@
 # =============================================================================
 # 单独运行：指定病人综合  远神经肿瘤组织 vs 近神经肿瘤组织
 # 上调只做 FC>1、1.25。不做 FC=1.5、不做 FC=2、不做 topN、不做下调、不做 GO。
+# 近/远：近 ≤2 spot，远 ≥10 spot（这批病人统一；旧版远>4 间隔太小）。
 # 不改 Wang_ST_nerve_infiltration.R 的全队列结果（00_ / 01_ 文件夹不动）。
 #
 # 用法（Windows R / RStudio）：
@@ -72,8 +73,26 @@ p_cutoff <- 0.05
 fc_cutoffs_up <- c("FC_gt_1" = 1, "FC_1.25" = 1.25)
 # Wang ST spot 中心距约 100 μm；距离用 spot 网格换算成 mm
 spot_pitch_mm <- 0.1
+# 指定病人统一用更大间隔：近 ≤2 spot，远 ≥10 spot（旧版近≤2、远>4 间隔太小）
+# 可用环境变量覆盖：WANG_ST_NEAR_SPOTS / WANG_ST_FAR_SPOTS
+near_spots <- 2
+far_spots <- 10
+env_near <- suppressWarnings(as.numeric(Sys.getenv("WANG_ST_NEAR_SPOTS", unset = "")))
+env_far <- suppressWarnings(as.numeric(Sys.getenv("WANG_ST_FAR_SPOTS", unset = "")))
+if (is.finite(env_near) && env_near > 0) near_spots <- env_near
+if (is.finite(env_far) && env_far > near_spots) far_spots <- env_far
 # 距离参照：施旺细胞签名
 schwann_distance_markers <- schwann_genes
+
+apply_selected_near_far <- function(sp, near_d, far_d) {
+  d_s <- as.numeric(sp$dist_schwann)
+  d_n <- as.numeric(sp$dist_nerve)
+  sp$near_schwann <- sp$is_tumor & !sp$is_schwann_high & is.finite(d_s) & d_s <= near_d
+  sp$far_schwann  <- sp$is_tumor & !sp$is_schwann_high & is.finite(d_s) & d_s >= far_d
+  sp$near_nerve <- sp$is_tumor & !sp$is_nerve_path & is.finite(d_n) & d_n <= near_d
+  sp$far_nerve  <- sp$is_tumor & !sp$is_nerve_path & is.finite(d_n) & d_n >= far_d
+  sp
+}
 
 out_root <- file.path(nerve_dir, "results", "02_selected32_far_tumor_vs_near_tumor")
 expr_dir <- file.path(out_root, "eligible_single_patients")
@@ -159,6 +178,11 @@ writeLines(c(
   "上调 = 远神经肿瘤更高。FC 只有 >1、1.25。没有 1.5、没有 2、没有 topN、没有下调。",
   "这是指定 32 个病人的综合分析，不覆盖 00_eligible_single_patients / 01_combined。",
   "",
+  paste0("近/远统一按这 32 个病人一套标准：近 ≤", near_spots,
+         " spot，远 ≥", far_spots, " spot（中间 ", near_spots,
+         "–", far_spots, " 不进近/远）。旧版远>4 间隔太小。"),
+  "1 spot ≈ 0.1 mm。看 DISTANCE_CUTOFFS.txt 和 DISTANCE_per_patient.csv。",
+  "",
   "先打开：INDEX_requested_vs_used.csv",
   "综合上调基因：",
   "  upregulated_far_tumor_vs_near_tumor_FC_gt_1.csv",
@@ -178,12 +202,15 @@ log_msg("Main functions from: ", main_r)
 log_msg("Output: ", out_root)
 log_msg("Requested patients n=", length(selected_patients), ": ",
         paste(selected_patients, collapse = ","))
+log_msg("Near/far cutoffs (selected-patient average analysis): near<=",
+        near_spots, " spot, far>=", far_spots, " spot (1 spot ~ 0.1 mm)")
 
 available <- list_patient_ids()
 ids <- load_ids()
 
 status_rows <- list()
 qc_rows <- list()
+dist_rows <- list()
 pb_schwann <- NULL
 si_schwann <- NULL
 mean_schwann_wide <- NULL
@@ -219,7 +246,23 @@ for (pid in selected_patients) {
     next
   }
   row$classified <- TRUE
+  obj$spots <- apply_selected_near_far(obj$spots, near_spots, far_spots)
   sp <- obj$spots
+  td <- as.numeric(sp$dist_schwann[sp$is_tumor & !sp$is_schwann_high &
+                                   is.finite(sp$dist_schwann)])
+  dist_rows[[as.character(pid)]] <- data.frame(
+    patient = pid,
+    n_tumor_to_schwann = length(td),
+    mean_dist_spot = if (length(td) > 0) mean(td) else NA_real_,
+    median_dist_spot = if (length(td) > 0) stats::median(td) else NA_real_,
+    q90_dist_spot = if (length(td) > 0) as.numeric(stats::quantile(td, 0.90, names = FALSE)) else NA_real_,
+    max_dist_spot = if (length(td) > 0) max(td) else NA_real_,
+    near_spots = near_spots,
+    far_spots = far_spots,
+    n_tumor_near_schwann = sum(sp$near_schwann),
+    n_tumor_far_schwann = sum(sp$far_schwann),
+    stringsAsFactors = FALSE
+  )
   qc_rows[[as.character(pid)]] <- data.frame(
     patient = pid,
     n_spots = nrow(sp),
@@ -230,6 +273,8 @@ for (pid in selected_patients) {
     n_tumor_far_nerve = sum(sp$far_nerve),
     n_tumor_near_schwann = sum(sp$near_schwann),
     n_tumor_far_schwann = sum(sp$far_schwann),
+    near_spots = near_spots,
+    far_spots = far_spots,
     stringsAsFactors = FALSE
   )
   row$n_tumor_near_schwann <- sum(sp$near_schwann)
@@ -253,9 +298,9 @@ for (pid in selected_patients) {
   elig <- length(n_near_s) >= 5 && length(n_far_s) >= 10
   row$eligible_combined_DE <- elig
   if (!elig) {
-    row$note <- paste0("近神经肿瘤 spot=", length(n_near_s),
-                       " 远神经肿瘤 spot=", length(n_far_s),
-                       "（需要近>=5 且 远>=10）")
+    row$note <- paste0("近(≤", near_spots, " spot)肿瘤=", length(n_near_s),
+                       " 远(≥", far_spots, " spot)肿瘤=", length(n_far_s),
+                       "（需要近>=5 且 远>=10 个spot）")
     status_rows[[as.character(pid)]] <- row
     rm(obj, cnts, logm)
     gc(verbose = FALSE)
@@ -300,6 +345,30 @@ if (length(qc_rows) > 0) {
   utils::write.csv(do.call(rbind, qc_rows),
                    file.path(out_root, "spot_class_counts.csv"), row.names = FALSE)
 }
+if (length(dist_rows) > 0) {
+  dist_tab <- do.call(rbind, dist_rows)
+  utils::write.csv(dist_tab, file.path(out_root, "DISTANCE_per_patient.csv"),
+                   row.names = FALSE)
+  avg_mean <- mean(dist_tab$mean_dist_spot, na.rm = TRUE)
+  avg_med <- mean(dist_tab$median_dist_spot, na.rm = TRUE)
+  avg_q90 <- mean(dist_tab$q90_dist_spot, na.rm = TRUE)
+  avg_max <- mean(dist_tab$max_dist_spot, na.rm = TRUE)
+  writeLines(c(
+    paste0("指定病人统一近/远（综合分析同一套）：近 ≤", near_spots,
+           " spot，远 ≥", far_spots, " spot。"),
+    "中间距离不进近组、也不进远组。1 spot ≈ 0.1 mm。",
+    "",
+    paste0("这批已分类病人肿瘤→施旺距离平均：mean=",
+           signif(avg_mean, 4), "  median=", signif(avg_med, 4),
+           "  q90=", signif(avg_q90, 4), "  max=", signif(avg_max, 4),
+           " spot。"),
+    "近=2、远=10 是按这批病人平均后定的更大间隔（旧版远>4 太近）。",
+    "逐病人数字：DISTANCE_per_patient.csv"
+  ), file.path(out_root, "DISTANCE_CUTOFFS.txt"))
+  log_msg("Selected-patient avg tumor-Schwann dist (spot): mean=",
+          signif(avg_mean, 4), " median=", signif(avg_med, 4),
+          " q90=", signif(avg_q90, 4), " max=", signif(avg_max, 4))
+}
 used <- st$patient[st$eligible_combined_DE]
 log_msg("Requested ", nrow(st),
         " | with counts ", sum(st$has_counts),
@@ -337,6 +406,7 @@ plot_each_fc125_gene <- function(up_tab) {
     "名单：INDEX_FC_1.25_each_gene.csv 和 本次要画的上调基因.txt",
     "施旺 marker：SOX10, MPZ, PMP22, S100B, PLP1, NGFR, NCAM1, MBP, L1CAM。",
     "红 = 该基因高表达，蓝 = 该基因低表达。1 spot = 0.1 mm。",
+    paste0("近/远：近 ≤", near_spots, " spot，远 ≥", far_spots, " spot。"),
     "这是空间转录组 RNA，不是蛋白质组。"
   ), file.path(dist_dir, "00_READ_ME.txt"))
 
@@ -409,7 +479,8 @@ up_fc125_tab <- NULL
 if (is.null(pb_schwann) || length(unique(si_schwann$patient)) < 2) {
   log_msg("能进入综合分析的病人不足 2 例。看 INDEX_requested_vs_used.csv")
   writeLines(
-    "能进入综合分析的病人不足 2 例（需要近神经肿瘤 spot>=5 且 远>=10）。",
+    paste0("能进入综合分析的病人不足 2 例（需要近(≤", near_spots,
+           " spot)>=5 且 远(≥", far_spots, " spot)>=10 个肿瘤spot）。"),
     flag_no_de
   )
 } else {
