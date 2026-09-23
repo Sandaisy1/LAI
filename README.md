@@ -1,3 +1,10 @@
+# TG BRCA RNA-seq 与 SUC 蛋白质组分析
+
+本仓库有两套互不套用的 R 流程：
+
+- **TG BRCA RNA-seq**（Cuffdiff）：`TG_RNAseq_pipeline.R`、`TG_RNAseq_TGsh_mean_vs_NTC_reps.R`
+- **SUC 蛋白质组**（DIA-NN）：`SUC_protein_pipeline.R`
+
 # TG BRCA 细胞 RNA-seq 分析
 
 针对 `NTC_rep0`、`NTC_rep1`、`TG_sh1`、`TG_sh5` 四个样品的 RNA-seq 分析。两个 NTC **不在 1-vs-1 比较里合并**。
@@ -97,3 +104,64 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+---
+
+# SUC 蛋白质组分析（DIA-NN）
+
+数据目录默认 `E:/R/SUC-protein`。16 个样品名称必须是 `1`–`16`，**不要合并样品**。
+
+输入文件：
+
+- `report.pg_matrix`（首选，蛋白质组定量）
+- `report.pr_matrix`（无 pg 矩阵时按 Protein.Group 汇总）
+- `mitochondria`（关注的 GO / 通路名，专项分析只用这里的条目）
+
+```r
+setwd("E:/R/SUC-protein")
+source("SUC_protein_pipeline.R")
+```
+
+也可设置环境变量 `SUC_PROTEIN_DIR`。
+
+## 六类蛋白
+
+`X vs Y` 的 FC = 样品X / 样品Y。无变化：`1/1.25 < FC < 1.25`（与上/下调档位独立）。1-vs-1 无重复，**不估计、不伪造差异蛋白 p 值**。
+
+1. A：2 vs 1 上调，且 3 vs 4 无变化
+2. B：5 vs 6 下调，且 7 vs 8 无变化
+3. C：9 vs 10 上调，且 11 vs 12 无变化
+4. D：13 vs 14 下调，且 15 vs 16 无变化
+5. E：同一档位下 A ∩ B
+6. F：同一档位下 C ∩ D
+
+每类只按 **FC ≥ 1 和 1.25**（下调为倒数）出差异表、火山图、热图、GO、通路、KEGG、GSEA。不做 FC 1.5/2，也不做 top 50–300。富集作图显著性为 **p.adjust < 0.05**。口中的「GWAS」按 **GSEA** 输出。
+
+## 结果目录
+
+```
+results/
+  classA_2vs1_up_3vs4_unchanged/
+  classB_5vs6_down_7vs8_unchanged/
+  classC_9vs10_up_11vs12_unchanged/
+  classD_13vs14_down_15vs16_unchanged/
+  classE_A_intersect_B/
+  classF_C_intersect_D/
+```
+
+同一档里有两套富集，不要只看 GSEA 文件夹：
+
+- `GO/`、`Pathway/`、`KEGG/`：ORA，文件名以 `ORA_` 开头
+- `GSEA/`：GSEA，文件名以 `GSEA_` 开头
+- `Focused_mitochondria/`：只检验 `mitochondria` 文本中的通路（图上写通路名称，不写 `GO:` 编号）
+- 全库表旁的 `*_FOCUS_mitochondria.csv` 保留原始 p 与 `genome_wide_rank`，不会改全库排名
+- `results/00_logs/mitochondria_term_mapping.csv`：文件里每条通路是否映射到基因（`mapped` / `unmapped_name` / `no_genes`）
+
+全库 GO 图只显示 p.adjust < 0.05 的条目，所以你关注的很多通路不会出现在 `GO/` 里。请看 `Focused_mitochondria/` 和 `*_FOCUS_mitochondria.csv`。
+
+`00_GSEA_all_genes_NOT_FC` 是全部蛋白的 GSEA，**不是** FC 分层图。分层结果在：
+
+```
+results/classA_2vs1_up_3vs4_unchanged/FoldChange/FC_1/
+results/classA_2vs1_up_3vs4_unchanged/FoldChange/FC_1.25/
+```
