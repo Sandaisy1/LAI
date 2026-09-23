@@ -126,7 +126,7 @@ source("SUC_protein_pipeline.R")
 
 ## 六类蛋白
 
-`X vs Y` 的 FC = 样品X / 样品Y。无变化：`1/1.25 < FC < 1.25`（与上/下调档位独立）。1-vs-1 无重复，**不估计、不伪造 p 值**。
+`X vs Y` 的 FC = 样品X / 样品Y。无变化：`1/1.25 < FC < 1.25`（与上/下调档位独立）。1-vs-1 无重复，**不估计、不伪造差异蛋白 p 值**。
 
 1. A：2 vs 1 上调，且 3 vs 4 无变化
 2. B：5 vs 6 下调，且 7 vs 8 无变化
@@ -135,7 +135,7 @@ source("SUC_protein_pipeline.R")
 5. E：同一档位下 A ∩ B
 6. F：同一档位下 C ∩ D
 
-每类再按 FC ≥ 1 / 1.25 / 1.5 / 2（下调为倒数）以及 top 50–300 出差异表、火山图、热图、GO、通路、KEGG、GSEA。口中的「GWAS」按 **GSEA** 输出。
+每类只按 **FC ≥ 1 和 1.25**（下调为倒数）出差异表、火山图、热图、GO、通路、KEGG、GSEA。不做 FC 1.5/2，也不做 top 50–300。富集作图显著性为 **p.adjust < 0.05**。口中的「GWAS」按 **GSEA** 输出。
 
 ## 结果目录
 
@@ -157,6 +157,11 @@ results/
 - 全库表旁的 `*_FOCUS_mitochondria.csv` 保留原始 p 与 `genome_wide_rank`，不会改全库排名
 - `results/00_logs/mitochondria_term_mapping.csv`：文件里每条通路是否映射到基因（`mapped` / `unmapped_name` / `no_genes`）
 
-全库 GO 图只显示显著条目，所以你关注的很多通路不会出现在 `GO/` 里。请看 `Focused_mitochondria/` 和 `*_FOCUS_mitochondria.csv`。
+全库 GO 图只显示 p.adjust < 0.05 的条目，所以你关注的很多通路不会出现在 `GO/` 里。请看 `Focused_mitochondria/` 和 `*_FOCUS_mitochondria.csv`。
 
-`00_GSEA_all_genes_NOT_FC_or_topN` 是全部蛋白的 GSEA，**不是** FC/topN 分层图。
+`00_GSEA_all_genes_NOT_FC` 是全部蛋白的 GSEA，**不是** FC 分层图。分层结果在：
+
+```
+results/classA_2vs1_up_3vs4_unchanged/FoldChange/FC_1/
+results/classA_2vs1_up_3vs4_unchanged/FoldChange/FC_1.25/
+```

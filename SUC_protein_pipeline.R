@@ -10,8 +10,9 @@
 #   E) 同一档位下 A ∩ B
 #   F) 同一档位下 C ∩ D
 # 预处理：16 个样品一起过滤低丰度 + log2 分位数标准化，再用标准化值算 FC。
-# 1-vs-1 无重复：不伪造 p 值。
-# 分层：FC >= 1 / 1.25 / 1.5 / 2（下调为倒数）以及 top 50–300。
+# 1-vs-1 无重复：不伪造差异蛋白 p 值。
+# 分层：只做 FC >= 1 和 1.25（下调为倒数），不做 FC 1.5/2，不做 topN。
+# 富集（GO / 通路 / KEGG / GSEA / 专项 mitochondria）显著性：p.adjust < 0.05。
 # 每个非空子集：差异表、火山图、热图、ORA GO / 通路 / KEGG、GSEA，
 # 以及 mitochondria 文本内通路的专项 GO / KEGG / 通路图（图上写通路名称，不写 GO 编号）。
 # 「GWAS」按 GSEA（基因集富集）实现，不是 SNP 全基因组关联。
@@ -112,8 +113,8 @@ log_msg <- function(...) {
   cat(msg, "\n", file = log_file, append = TRUE)
 }
 
-fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5, "FC_2" = 2)
-top_ns <- c(50, 75, 100, 150, 200, 250, 300)
+fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25)
+p_cutoff <- 0.05
 unchanged_max_fc <- 1.25
 pseudo <- 1
 
@@ -998,7 +999,7 @@ title_maybe_relaxed <- function(obj, base) {
   if (isTRUE(attr(obj, "relaxed"))) paste0(base, " (relaxed cutoff)") else base
 }
 
-filter_enrich_sig <- function(obj, p = 0.05) {
+filter_enrich_sig <- function(obj, p = p_cutoff) {
   if (is.null(obj) || nrow(as.data.frame(obj)) == 0) return(obj)
   df <- as.data.frame(obj)
   if (!("p.adjust" %in% names(df))) return(obj)
@@ -1120,7 +1121,7 @@ run_focused_mito_ora <- function(entrez, outdir, label, tag, fc_sym, mito) {
   writeLines(
     c("这不是改全库 GO/KEGG 的 p 值或排名。",
       "全库 GO 只画显著条目，所以 mitochondria 文件里很多通路不会出现在全库 GO 图上。",
-      "本文件夹用 mitochondria 文本中的通路做专项 ORA，凡能映射且与本类蛋白有交集的通路都会出图。",
+      "本文件夹用 mitochondria 文本中的通路做专项 ORA；作图只保留 p.adjust < 0.05 的条目。",
       "图纵轴是通路名称，不是 GO:数字。",
       "全库结果旁边的 *_FOCUS_mitochondria.csv 保留原始 p 值和 genome_wide_rank。",
       "映射情况见 results/00_logs/mitochondria_term_mapping.csv。"),
@@ -1137,11 +1138,11 @@ run_focused_mito_ora <- function(entrez, outdir, label, tag, fc_sym, mito) {
   obj <- enrich_or_relax(
     function() clusterProfiler::enricher(
       entrez, TERM2GENE = t2g, minGSSize = 1, maxGSSize = 5000,
-      pvalueCutoff = 1, qvalueCutoff = 1
+      pvalueCutoff = p_cutoff, qvalueCutoff = p_cutoff
     ),
     function() clusterProfiler::enricher(
       entrez, TERM2GENE = t2g, minGSSize = 1, maxGSSize = 5000,
-      pvalueCutoff = 1, qvalueCutoff = 1
+      pvalueCutoff = p_cutoff, qvalueCutoff = p_cutoff
     ),
     "focused ORA mitochondria"
   )
@@ -1193,7 +1194,7 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag, mito) {
     if (!is.null(ego_all) && nrow(as.data.frame(ego_all)) > 0) {
       ego_all <- label_enrich_object(ego_all)
     }
-    ego_plot <- filter_enrich_sig(ego_all, 0.05)
+    ego_plot <- filter_enrich_sig(ego_all, p_cutoff)
     plot_ora_object(ego_plot, file.path(go_dir, paste0(pref, "ORA_GO_", ont)),
                     title_maybe_relaxed(ego_plot, paste(label, "| ORA GO", ont, "(not GSEA)")),
                     fold_change = fc_sym, mito = NULL)
@@ -1215,7 +1216,7 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag, mito) {
     ek_all <- tryCatch(clusterProfiler::setReadable(ek_all, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) ek_all)
     ek_all <- label_enrich_object(ek_all)
   }
-  ek_plot <- filter_enrich_sig(ek_all, 0.05)
+  ek_plot <- filter_enrich_sig(ek_all, p_cutoff)
   plot_ora_object(ek_plot, file.path(kg_dir, paste0(pref, "ORA_KEGG")),
                   title_maybe_relaxed(ek_plot, paste(label, "| ORA KEGG (not GSEA)")),
                   fold_change = fc_sym, mito = NULL)
@@ -1235,7 +1236,7 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag, mito) {
     if (!is.null(er_all) && nrow(as.data.frame(er_all)) > 0) {
       er_all <- label_enrich_object(er_all)
     }
-    er_plot <- filter_enrich_sig(er_all, 0.05)
+    er_plot <- filter_enrich_sig(er_all, p_cutoff)
     plot_ora_object(er_plot, file.path(pw_dir, paste0(pref, "ORA_Reactome_pathway")),
                     title_maybe_relaxed(er_plot, paste(label, "| ORA Reactome pathway (not GSEA)")),
                     fold_change = fc_sym, mito = NULL)
@@ -1258,7 +1259,7 @@ run_ora_plots <- function(genes, de_sub, outdir, label, tag, mito) {
     hm_all <- tryCatch(clusterProfiler::setReadable(hm_all, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"), error = function(e) hm_all)
     hm_all <- label_enrich_object(hm_all)
   }
-  hm_plot <- filter_enrich_sig(hm_all, 0.05)
+  hm_plot <- filter_enrich_sig(hm_all, p_cutoff)
   plot_ora_object(hm_plot, file.path(pw_dir, paste0(pref, "ORA_MSigDB_Hallmark_pathway")),
                   title_maybe_relaxed(hm_plot, paste(label, "| ORA Hallmark pathway (not GSEA)")),
                   fold_change = fc_sym, mito = NULL)
@@ -1300,11 +1301,11 @@ plot_fgsea_hallmark <- function(stats, outdir, title, prefix = "") {
   utils::write.csv(fg, stub("GSEA_Hallmark_fgsea.csv"), row.names = FALSE)
   plot_df <- utils::head(fg, 15)
   plot_df$pathway <- factor(plot_df$pathway, levels = rev(plot_df$pathway))
-  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = NES, y = pathway, fill = padj < 0.05)) +
+  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = NES, y = pathway, fill = padj < p_cutoff)) +
     ggplot2::geom_col() +
     ggplot2::scale_fill_manual(values = c("TRUE" = "#D62828", "FALSE" = "grey70")) +
     ggplot2::theme_bw(base_size = 11) +
-    ggplot2::labs(title = title, y = NULL, fill = "padj < 0.05")
+    ggplot2::labs(title = title, y = NULL, fill = paste("padj <", p_cutoff))
   save_gg(p, stub("GSEA_Hallmark_fgsea_barplot"), 10, 7)
 }
 
@@ -1340,8 +1341,8 @@ build_gsea_cache <- function(de) {
   if (length(stats) < 10) return(out)
   gsea_one <- function(fun, label) {
     enrich_or_relax(
-      function() fun(pvalueCutoff = 0.05, minGSSize = 10),
-      function() fun(pvalueCutoff = 1, minGSSize = 5),
+      function() fun(pvalueCutoff = p_cutoff, minGSSize = 10),
+      function() fun(pvalueCutoff = p_cutoff, minGSSize = 10),
       label
     )
   }
@@ -1414,11 +1415,11 @@ run_gsea_plots <- function(sub, gsea_cache, outdir, tag, label, mito) {
       hm <- enrich_or_relax(
         function() clusterProfiler::GSEA(
           geneList = sub_stats, TERM2GENE = term2gene, minGSSize = 5,
-          maxGSSize = 500, pvalueCutoff = 0.05, eps = 0, verbose = FALSE
+          maxGSSize = 500, pvalueCutoff = p_cutoff, eps = 0, verbose = FALSE
         ),
         function() clusterProfiler::GSEA(
-          geneList = sub_stats, TERM2GENE = term2gene, minGSSize = 3,
-          maxGSSize = 500, pvalueCutoff = 1, eps = 0, verbose = FALSE
+          geneList = sub_stats, TERM2GENE = term2gene, minGSSize = 5,
+          maxGSSize = 500, pvalueCutoff = p_cutoff, eps = 0, verbose = FALSE
         ),
         paste("subset Hallmark GSEA", tag)
       )
@@ -1428,11 +1429,11 @@ run_gsea_plots <- function(sub, gsea_cache, outdir, tag, label, mito) {
     kegg <- enrich_or_relax(
       function() clusterProfiler::gseKEGG(
         geneList = sub_stats, organism = "hsa", minGSSize = 5, maxGSSize = 500,
-        pvalueCutoff = 0.05, verbose = FALSE, eps = 0
+        pvalueCutoff = p_cutoff, verbose = FALSE, eps = 0
       ),
       function() clusterProfiler::gseKEGG(
-        geneList = sub_stats, organism = "hsa", minGSSize = 3, maxGSSize = 500,
-        pvalueCutoff = 1, verbose = FALSE, eps = 0
+        geneList = sub_stats, organism = "hsa", minGSSize = 5, maxGSSize = 500,
+        pvalueCutoff = p_cutoff, verbose = FALSE, eps = 0
       ),
       paste("subset KEGG GSEA", tag)
     )
@@ -1459,7 +1460,7 @@ run_focused_mito_gsea <- function(stats, outdir, label, mito) {
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   writeLines(
     c("这不是改全库 GO/KEGG 的 p 值或排名。",
-      "本文件夹只检验 mitochondria 文本中的通路；凡能映射的通路都会参与 GSEA。",
+      "本文件夹只检验 mitochondria 文本中的通路；作图只保留 p.adjust < 0.05 的条目。",
       "图纵轴是通路名称，不是 GO:数字。",
       "全库结果旁边的 *_FOCUS_mitochondria.csv 保留原始 p 值和 genome_wide_rank。"),
     file.path(outdir, "00_README.txt")
@@ -1475,11 +1476,11 @@ run_focused_mito_gsea <- function(stats, outdir, label, mito) {
   obj <- enrich_or_relax(
     function() clusterProfiler::GSEA(
       geneList = stats, TERM2GENE = t2g, minGSSize = 1, maxGSSize = 5000,
-      pvalueCutoff = 1, eps = 0, verbose = FALSE
+      pvalueCutoff = p_cutoff, eps = 0, verbose = FALSE
     ),
     function() clusterProfiler::GSEA(
       geneList = stats, TERM2GENE = t2g, minGSSize = 1, maxGSSize = 5000,
-      pvalueCutoff = 1, eps = 0, verbose = FALSE
+      pvalueCutoff = p_cutoff, eps = 0, verbose = FALSE
     ),
     "focused GSEA mitochondria"
   )
@@ -1507,7 +1508,9 @@ emit_subset_analysis <- function(class_name, sub, tag, title, outdir, full_de_fo
       paste("subset:", tag),
       paste("title:", title),
       paste("n_proteins:", nrow(sub)),
-      "p-values were not estimated for 1-vs-1 samples."),
+      paste("FC cutoffs: 1 and 1.25 only"),
+      paste("enrichment p.adjust <", p_cutoff),
+      "1-vs-1 DE p-values were not estimated; class membership is FC-only."),
     file.path(outdir, paste0("00_", tag, "_THIS_FOLDER.txt"))
   )
   utils::write.csv(sub, file.path(outdir, paste0(tag, "_DE_selected_proteins.csv")), row.names = FALSE)
@@ -1569,12 +1572,13 @@ analyze_one_class <- function(cls, heat_mat, sample_info, mito) {
       paste("change:", cls$change_treat, "vs", cls$change_ctrl, cls$direction),
       paste("stable/no-change:", cls$stable_treat, "vs", cls$stable_ctrl,
             "| 1/", unchanged_max_fc, "< FC <", unchanged_max_fc),
-      "1-vs-1: no p-value was estimated."),
+      paste("FC cutoffs: 1 and 1.25 only (no FC 1.5/2, no topN)"),
+      paste("enrichment significance: p.adjust <", p_cutoff),
+      "1-vs-1: no DE p-value was estimated; protein classes are FC-only."),
     file.path(base, "00_READ_ME_先看这里.txt")
   )
   fc_dirs <- file.path(base, "FoldChange", names(fc_cutoffs))
-  top_dirs <- file.path(base, "TopRank", paste0("top", top_ns))
-  invisible(lapply(c(fc_dirs, top_dirs), dir.create, recursive = TRUE, showWarnings = FALSE))
+  invisible(lapply(fc_dirs, dir.create, recursive = TRUE, showWarnings = FALSE))
 
   gsea_cache <- list()
   for (nm in names(fc_cutoffs)) {
@@ -1590,30 +1594,17 @@ analyze_one_class <- function(cls, heat_mat, sample_info, mito) {
       error = function(e) log_msg("ERROR subset ", cls$id, " ", nm, ": ", e$message)
     )
   }
-  for (n in top_ns) {
-    tag <- paste0("top", n)
-    sub <- cls$select_top(n)
-    tryCatch(
-      emit_subset_analysis(
-        cls$id, sub, tag, paste0(cls$label, " | ", tag),
-        file.path(base, "TopRank", tag),
-        cls$de, heat_mat, sample_info, gsea_cache, mito,
-        fc_line = 1, heat_samples = cls$heat_samples, stable_de = cls$stable_de
-      ),
-      error = function(e) log_msg("ERROR subset ", cls$id, " ", tag, ": ", e$message)
-    )
-  }
 
   tryCatch({
     log_msg("Building full-list GSEA after subset plots: ", cls$id)
     gsea_cache <- build_gsea_cache(cls$gsea_de)
-    full_gsea_dir <- file.path(base, "00_GSEA_all_genes_NOT_FC_or_topN")
+    full_gsea_dir <- file.path(base, "00_GSEA_all_genes_NOT_FC")
     dir.create(full_gsea_dir, recursive = TRUE, showWarnings = FALSE)
-    writeLines("全蛋白 GSEA，不是 FC/topN 分层结果。分层图在 FoldChange/ 和 TopRank/。用户所称 GWAS 在此按 GSEA 输出。",
+    writeLines("全蛋白 GSEA，不是 FC 分层结果。分层图在 FoldChange/FC_1 和 FoldChange/FC_1.25。用户所称 GWAS 在此按 GSEA 输出。",
                file.path(full_gsea_dir, "00_README.txt"))
     for (nm in c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "Hallmark")) {
       plot_gsea_object(gsea_cache[[nm]], file.path(full_gsea_dir, paste0("allGenes_GSEA_", nm)),
-                       paste("GSEA", nm, "|", cls$label, "| ALL proteins, NOT FC/topN"), mito = mito)
+                       paste("GSEA", nm, "|", cls$label, "| ALL proteins, NOT FC"), mito = mito)
     }
     plot_fgsea_hallmark(gsea_cache$stats, full_gsea_dir,
                         paste("GSEA Hallmark |", cls$label, "| ALL proteins"), prefix = "allGenes_")
@@ -1646,8 +1637,19 @@ annotate_de <- function(de, meta) {
   de
 }
 
+passes_significance <- function(de) {
+  if (is.null(de) || nrow(de) == 0) return(logical(0))
+  p <- if ("pvalue" %in% names(de)) de$pvalue else NULL
+  padj <- if ("padj" %in% names(de)) de$padj else NULL
+  has_p <- !is.null(p) && any(is.finite(p))
+  has_padj <- !is.null(padj) && any(is.finite(padj))
+  if (has_p) return(!is.na(p) & is.finite(p) & p < p_cutoff)
+  if (has_padj) return(!is.na(padj) & is.finite(padj) & padj < p_cutoff)
+  rep(TRUE, nrow(de))
+}
+
 select_up_stable <- function(change_de, stable_de, fc) {
-  keep <- is.finite(change_de$log2FC) & (2^change_de$log2FC >= fc)
+  keep <- is.finite(change_de$log2FC) & (2^change_de$log2FC >= fc) & passes_significance(change_de)
   stab <- is_unchanged(stable_de$log2FC[match(change_de$gene, stable_de$gene)])
   out <- change_de[keep & stab, , drop = FALSE]
   if (nrow(out) > 0) out <- out[order(out$log2FC, decreasing = TRUE), , drop = FALSE]
@@ -1655,21 +1657,11 @@ select_up_stable <- function(change_de, stable_de, fc) {
 }
 
 select_down_stable <- function(change_de, stable_de, fc) {
-  keep <- is.finite(change_de$log2FC) & (2^change_de$log2FC <= (1 / fc))
+  keep <- is.finite(change_de$log2FC) & (2^change_de$log2FC <= (1 / fc)) & passes_significance(change_de)
   stab <- is_unchanged(stable_de$log2FC[match(change_de$gene, stable_de$gene)])
   out <- change_de[keep & stab, , drop = FALSE]
   if (nrow(out) > 0) out <- out[order(out$log2FC, decreasing = FALSE), , drop = FALSE]
   out
-}
-
-select_up_stable_top <- function(change_de, stable_de, n) {
-  pool <- select_up_stable(change_de, stable_de, fc = 1)
-  utils::head(pool, n)
-}
-
-select_down_stable_top <- function(change_de, stable_de, n) {
-  pool <- select_down_stable(change_de, stable_de, fc = 1)
-  utils::head(pool, n)
 }
 
 intersect_tables <- function(a, b, log2fc_fun) {
@@ -1690,14 +1682,14 @@ intersect_tables <- function(a, b, log2fc_fun) {
 
 make_class <- function(id, dir, label, direction, change_de, stable_de,
                        change_treat, change_ctrl, stable_treat, stable_ctrl,
-                       heat_samples, gsea_de, select_fc, select_top) {
+                       heat_samples, gsea_de, select_fc) {
   list(
     id = id, dir = dir, label = label, direction = direction,
     de = change_de, stable_de = stable_de, gsea_de = gsea_de,
     change_treat = change_treat, change_ctrl = change_ctrl,
     stable_treat = stable_treat, stable_ctrl = stable_ctrl,
     heat_samples = as.character(heat_samples),
-    select_fc = select_fc, select_top = select_top
+    select_fc = select_fc
   )
 }
 
@@ -1718,8 +1710,10 @@ save_two_set_venn <- function(lst, outfile, title, fill_color) {
 # 10. 主流程
 # -----------------------------------------------------------------------------
 log_msg("Project dir: ", project_dir)
+log_msg("FC cutoffs: 1 and 1.25 only (no FC 1.5/2, no topN)")
 log_msg("Unchanged definition: 1/", unchanged_max_fc, " < FC < ", unchanged_max_fc)
-log_msg("No p-values will be fabricated for 1-vs-1 sample pairs.")
+log_msg("Enrichment significance: p.adjust < ", p_cutoff)
+log_msg("No DE p-values will be fabricated for 1-vs-1 sample pairs.")
 
 obj <- load_protein_matrix(project_dir)
 mito <- parse_mitochondria_file(project_dir)
@@ -1767,29 +1761,25 @@ classes <- list(
     "A", "classA_2vs1_up_3vs4_unchanged",
     "Class A: 2 vs 1 up AND 3 vs 4 unchanged", "up",
     fc_2v1, fc_3v4, 2, 1, 3, 4, c(1, 2, 3, 4), fc_2v1,
-    function(fc) select_up_stable(fc_2v1, fc_3v4, fc),
-    function(n) select_up_stable_top(fc_2v1, fc_3v4, n)
+    function(fc) select_up_stable(fc_2v1, fc_3v4, fc)
   ),
   make_class(
     "B", "classB_5vs6_down_7vs8_unchanged",
     "Class B: 5 vs 6 down AND 7 vs 8 unchanged", "down",
     fc_5v6, fc_7v8, 5, 6, 7, 8, c(5, 6, 7, 8), fc_5v6,
-    function(fc) select_down_stable(fc_5v6, fc_7v8, fc),
-    function(n) select_down_stable_top(fc_5v6, fc_7v8, n)
+    function(fc) select_down_stable(fc_5v6, fc_7v8, fc)
   ),
   make_class(
     "C", "classC_9vs10_up_11vs12_unchanged",
     "Class C: 9 vs 10 up AND 11 vs 12 unchanged", "up",
     fc_9v10, fc_11v12, 9, 10, 11, 12, c(9, 10, 11, 12), fc_9v10,
-    function(fc) select_up_stable(fc_9v10, fc_11v12, fc),
-    function(n) select_up_stable_top(fc_9v10, fc_11v12, n)
+    function(fc) select_up_stable(fc_9v10, fc_11v12, fc)
   ),
   make_class(
     "D", "classD_13vs14_down_15vs16_unchanged",
     "Class D: 13 vs 14 down AND 15 vs 16 unchanged", "down",
     fc_13v14, fc_15v16, 13, 14, 15, 16, c(13, 14, 15, 16), fc_13v14,
-    function(fc) select_down_stable(fc_13v14, fc_15v16, fc),
-    function(n) select_down_stable_top(fc_13v14, fc_15v16, n)
+    function(fc) select_down_stable(fc_13v14, fc_15v16, fc)
   )
 )
 
@@ -1812,11 +1802,6 @@ classes[[5]] <- make_class(
     select_up_stable(fc_2v1, fc_3v4, fc),
     select_down_stable(fc_5v6, fc_7v8, fc),
     function(a, b) (a - b) / 2
-  ),
-  function(n) intersect_tables(
-    select_up_stable_top(fc_2v1, fc_3v4, n),
-    select_down_stable_top(fc_5v6, fc_7v8, n),
-    function(a, b) (a - b) / 2
   )
 )
 classes[[6]] <- make_class(
@@ -1826,11 +1811,6 @@ classes[[6]] <- make_class(
   function(fc) intersect_tables(
     select_up_stable(fc_9v10, fc_11v12, fc),
     select_down_stable(fc_13v14, fc_15v16, fc),
-    function(a, b) (a - b) / 2
-  ),
-  function(n) intersect_tables(
-    select_up_stable_top(fc_9v10, fc_11v12, n),
-    select_down_stable_top(fc_13v14, fc_15v16, n),
     function(a, b) (a - b) / 2
   )
 )
@@ -1856,21 +1836,6 @@ tryCatch({
            D = select_down_stable(fc_13v14, fc_15v16, fc)$gene),
       file.path(result_dir, "classF_C_intersect_D", "FoldChange", nm, paste0("venn_", nm)),
       paste("Class F = C ∩ D |", nm), c("#4C78A8", "#E45756")
-    )
-  }
-  for (n in top_ns) {
-    tag <- paste0("top", n)
-    save_two_set_venn(
-      list(A = select_up_stable_top(fc_2v1, fc_3v4, n)$gene,
-           B = select_down_stable_top(fc_5v6, fc_7v8, n)$gene),
-      file.path(result_dir, "classE_A_intersect_B", "TopRank", tag, paste0("venn_", tag)),
-      paste("Class E = A ∩ B |", tag), c("#F58518", "#54A24B")
-    )
-    save_two_set_venn(
-      list(C = select_up_stable_top(fc_9v10, fc_11v12, n)$gene,
-           D = select_down_stable_top(fc_13v14, fc_15v16, n)$gene),
-      file.path(result_dir, "classF_C_intersect_D", "TopRank", tag, paste0("venn_", tag)),
-      paste("Class F = C ∩ D |", tag), c("#4C78A8", "#E45756")
     )
   }
 }, error = function(e) log_msg("venn plots error: ", e$message))
