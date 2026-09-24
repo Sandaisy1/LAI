@@ -1,15 +1,14 @@
 ################################################################################
-# 下载后放到 E:/R/BRCA ，用 RStudio 打开，点 Source
+# 单独跑：下载后放到 E:/R/BRCA，RStudio 打开，只 Source 本文件
+# 不要 Source GO_pathway_individual_analysis.R
 #
-# 比较：转移 vs 未转移 样本中，各神经相关 GO 通路的表达，并做亚组预后
+# 比较转移 vs 未转移样本中各神经 GO 的表达，并做亚组预后
 # 转移 = M1 或 Stage IV；未转移 = M0 且不是 IV
-# 每个 GO 单独比较，不合并基因集
 #
-# 需要同目录已有：
-#   TCGA-BRCA.clinical.tsv
-#   TCGA-BRCA.survival.tsv（可缺，缺了就只做表达比较）
-# 通路分数优先读 results_GO_individual/01_pathway_scores_each_GO.csv
-# 若没有该汇总表，会从 per_GO/*/pathway_score.csv 自动拼出来
+# 自动查找：
+#   results_GO_individual-1/01_pathway_scores_each_GO.csv
+#   results_GO_individual/01_pathway_scores_each_GO.csv
+#   或任意子目录里的同名 csv / per_GO/*/pathway_score.csv
 ################################################################################
 
 library(data.table)
@@ -18,21 +17,20 @@ library(ggpubr)
 library(survival)
 library(survminer)
 
-setwd("E:/R/BRCA")
-# 自动找结果目录：results_GO_individual 或 results_GO_individual-1 等
+if (dir.exists("E:/R/BRCA")) setwd("E:/R/BRCA")
+if (!file.exists("TCGA-BRCA.clinical.tsv")) stop("找不到 TCGA-BRCA.clinical.tsv，请把本文件放在 E:/R/BRCA")
+
 pick_res_dir <- function() {
-  cands <- c(
-    "results_GO_individual",
-    "results_GO_individual-1",
-    "results_GO_individual-2",
-    list.files(".", pattern = "^results_GO_individual", include.dirs = TRUE)
-  )
+  hits <- list.files(".", pattern = "^01_pathway_scores_each_GO\\.csv$",
+                     recursive = TRUE, full.names = TRUE, ignore.case = TRUE)
+  if (length(hits) > 0) {
+    pref <- hits[grepl("results_GO_individual-1", hits, fixed = TRUE)]
+    return(dirname(if (length(pref) > 0) pref[1] else hits[1]))
+  }
+  cands <- c("results_GO_individual-1", "results_GO_individual",
+             list.files(".", pattern = "^results_GO_individual", include.dirs = TRUE))
   cands <- unique(cands[dir.exists(cands)])
-  if (length(cands) == 0) return("results_GO_individual")
-  has_csv <- vapply(cands, function(d) {
-    file.exists(file.path(d, "01_pathway_scores_each_GO.csv"))
-  }, logical(1))
-  if (any(has_csv)) return(cands[has_csv][1])
+  if (length(cands) == 0) return("results_GO_individual-1")
   has_per <- vapply(cands, function(d) {
     length(list.files(file.path(d, "per_GO"), pattern = "^pathway_score\\.csv$", recursive = TRUE)) > 0
   }, logical(1))
@@ -41,7 +39,6 @@ pick_res_dir <- function() {
 }
 res_dir <- pick_res_dir()
 message("使用结果目录：", normalizePath(res_dir, winslash = "/", mustWork = FALSE))
-if (!file.exists("TCGA-BRCA.clinical.tsv")) stop("找不到 TCGA-BRCA.clinical.tsv")
 
 load_or_build_score_mat <- function(res_dir) {
   candidates <- c(
