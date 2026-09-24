@@ -6,9 +6,10 @@
 # 每个 GO 单独比较，不合并基因集
 #
 # 需要同目录已有：
-#   results_GO_individual/01_pathway_scores_each_GO.csv
 #   TCGA-BRCA.clinical.tsv
 #   TCGA-BRCA.survival.tsv（可缺，缺了就只做表达比较）
+# 通路分数优先读 results_GO_individual/01_pathway_scores_each_GO.csv
+# 若没有该汇总表，会从 per_GO/*/pathway_score.csv 自动拼出来
 ################################################################################
 
 library(data.table)
@@ -19,9 +20,83 @@ library(survminer)
 
 setwd("E:/R/BRCA")
 res_dir <- "results_GO_individual"
-score_file <- file.path(res_dir, "01_pathway_scores_each_GO.csv")
-if (!file.exists(score_file)) stop("找不到 ", score_file)
 if (!file.exists("TCGA-BRCA.clinical.tsv")) stop("找不到 TCGA-BRCA.clinical.tsv")
+
+load_or_build_score_mat <- function(res_dir) {
+  candidates <- c(
+    file.path(res_dir, "01_pathway_scores_each_GO.csv"),
+    file.path(res_dir, "01_pathway_scores_each_GO.CSV"),
+    "01_pathway_scores_each_GO.csv"
+  )
+  hit <- candidates[file.exists(candidates)][1]
+  if (!is.na(hit) && length(hit) == 1) {
+    message("读取汇总分数表：", normalizePath(hit, winslash = "/"))
+    sm <- fread(hit)
+    go_cols <- setdiff(names(sm), "sample")
+    if (length(go_cols) == 0) stop("分数表没有 GO 列：", hit)
+    mat <- as.matrix(sm[, go_cols, with = FALSE])
+    storage.mode(mat) <- "double"
+    rownames(mat) <- as.character(sm$sample)
+    colnames(mat) <- go_cols
+    return(mat)
+  }
+
+  per_dir <- file.path(res_dir, "per_GO")
+  score_files <- character()
+  if (dir.exists(per_dir)) {
+    score_files <- list.files(per_dir, pattern = "^pathway_score\\.csv$", recursive = TRUE, full.names = TRUE)
+  }
+  if (length(score_files) == 0) {
+    message("当前工作目录：", getwd())
+    message("results_GO_individual 是否存在：", dir.exists(res_dir))
+    if (dir.exists(res_dir)) {
+      message("该目录下的文件：")
+      message(paste("  ", list.files(res_dir), collapse = "\n"))
+      if (dir.exists(per_dir)) {
+        message("per_GO 子文件夹：")
+        message(paste("  ", list.files(per_dir), collapse = "\n"))
+      }
+    }
+    stop(
+      "找不到通路分数。请先完整跑完 GO_pathway_individual_analysis.R，",
+      "生成 results_GO_individual/01_pathway_scores_each_GO.csv 或 per_GO/*/pathway_score.csv"
+    )
+  }
+
+  message("未找到汇总表，改为从 ", length(score_files), " 个 per_GO/pathway_score.csv 拼接")
+  lst <- lapply(score_files, function(f) {
+    dt <- fread(f)
+    if (!all(c("sample", "pathway_score") %in% names(dt))) return(NULL)
+    folder <- basename(dirname(f))
+    go_id <- sub("^GO_", "GO:", folder)
+    go_id <- sub("_.*$", "", go_id)
+    if (!grepl("^GO:", go_id)) go_id <- folder
+    v <- as.numeric(dt$pathway_score)
+    names(v) <- as.character(dt$sample)
+    attr(v, "GO") <- go_id
+    v
+  })
+  lst <- Filter(Negate(is.null), lst)
+  if (length(lst) == 0) stop("per_GO 里的 pathway_score.csv 格式不对")
+  names(lst) <- vapply(lst, function(x) attr(x, "GO"), character(1))
+  common <- Reduce(intersect, lapply(lst, names))
+  if (length(common) < 10) common <- unique(unlist(lapply(lst, names), use.names = FALSE))
+  mat <- do.call(cbind, lapply(lst, function(x) {
+    out <- rep(NA_real_, length(common))
+    names(out) <- common
+    out[intersect(names(x), common)] <- x[intersect(names(x), common)]
+    out
+  }))
+  colnames(mat) <- names(lst)
+  rownames(mat) <- common
+  out_csv <- file.path(res_dir, "01_pathway_scores_each_GO.csv")
+  fwrite(data.table(sample = rownames(mat), as.data.table(mat)), out_csv)
+  message("已写出拼接后的分数表：", out_csv)
+  mat
+}
+
+score_mat <- load_or_build_score_mat(res_dir)
+message("通路分数：", nrow(score_mat), " 样本 x ", ncol(score_mat), " 个 GO")
 
 go_name_map <- c(
   "GO:0023041" = "neuronal signal transduction",
@@ -77,13 +152,6 @@ classify_n <- function(x) {
   out[is.na(out) & grepl("\\bN0\\b", x)] <- "N0"
   out
 }
-
-sm <- fread(score_file)
-go_cols <- setdiff(names(sm), "sample")
-score_mat <- as.matrix(sm[, go_cols, with = FALSE])
-storage.mode(score_mat) <- "double"
-rownames(score_mat) <- as.character(sm$sample)
-colnames(score_mat) <- go_cols
 
 clin <- fread("TCGA-BRCA.clinical.tsv")
 idc <- first_present(names(clin), c("sampleID", "sample", "bcr_patient_barcode", "submitter_id", names(clin)[1]))

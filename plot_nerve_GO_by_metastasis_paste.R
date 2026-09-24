@@ -13,8 +13,6 @@ library(survminer)
 
 setwd("E:/R/BRCA")
 res_dir <- "results_GO_individual"
-score_file <- file.path(res_dir, "01_pathway_scores_each_GO.csv")
-if (!file.exists(score_file)) stop("找不到 ", score_file)
 if (!file.exists("TCGA-BRCA.clinical.tsv")) stop("找不到 TCGA-BRCA.clinical.tsv")
 
 go_name_map <- c(
@@ -72,12 +70,45 @@ classify_n <- function(x) {
   out
 }
 
-sm <- fread(score_file)
-go_cols <- setdiff(names(sm), "sample")
-score_mat <- as.matrix(sm[, go_cols, with = FALSE])
-storage.mode(score_mat) <- "double"
-rownames(score_mat) <- as.character(sm$sample)
-colnames(score_mat) <- go_cols
+source_loader <- "use nerve_GO_by_metastasis.R instead if this paste is stale"
+if (!exists("load_or_build_score_mat", mode = "function")) {
+  load_or_build_score_mat <- function(res_dir) {
+    hit <- file.path(res_dir, "01_pathway_scores_each_GO.csv")
+    if (file.exists(hit)) {
+      sm <- fread(hit)
+      go_cols <- setdiff(names(sm), "sample")
+      mat <- as.matrix(sm[, go_cols, with = FALSE])
+      storage.mode(mat) <- "double"
+      rownames(mat) <- as.character(sm$sample)
+      colnames(mat) <- go_cols
+      return(mat)
+    }
+    per_dir <- file.path(res_dir, "per_GO")
+    score_files <- if (dir.exists(per_dir)) {
+      list.files(per_dir, pattern = "^pathway_score\\.csv$", recursive = TRUE, full.names = TRUE)
+    } else character()
+    if (length(score_files) == 0) {
+      message("results 目录内容：", paste(list.files(res_dir), collapse = ", "))
+      stop("找不到通路分数，请先跑完主分析")
+    }
+    lst <- lapply(score_files, function(f) {
+      dt <- fread(f)
+      folder <- basename(dirname(f))
+      go_id <- sub("_.*$", "", sub("^GO_", "GO:", folder))
+      v <- as.numeric(dt$pathway_score); names(v) <- as.character(dt$sample)
+      attr(v, "GO") <- go_id; v
+    })
+    names(lst) <- vapply(lst, function(x) attr(x, "GO"), character(1))
+    common <- Reduce(intersect, lapply(lst, names))
+    mat <- do.call(cbind, lapply(lst, function(x) x[common]))
+    colnames(mat) <- names(lst)
+    rownames(mat) <- common
+    fwrite(data.table(sample = rownames(mat), as.data.table(mat)),
+           file.path(res_dir, "01_pathway_scores_each_GO.csv"))
+    mat
+  }
+}
+score_mat <- load_or_build_score_mat(res_dir)
 
 clin <- fread("TCGA-BRCA.clinical.tsv")
 idc <- first_present(names(clin), c("sampleID", "sample", "bcr_patient_barcode", "submitter_id", names(clin)[1]))
