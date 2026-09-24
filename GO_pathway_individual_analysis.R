@@ -17,6 +17,8 @@
 # 9. 若 17 个 GO 已经跑完、只想补画气泡图：把下面 run_mode 改成 "bubbles_only" 再 Source
 #    或在控制台运行：draw_prognosis_metastasis_bubbles()
 # 10. 转移 vs 未转移的神经通路表达：analyze_nerve_go_by_metastasis()
+#     只跑这一段请用 nerve_GO_by_metastasis.R（不要再粘贴 factor(meta_M)）
+#     若 clinical.tsv 没有分期，请再放 TCGA-BRCA.GDC_phenotype.tsv
 # ====================================================================
 ################################################################################
 
@@ -140,12 +142,28 @@ if (!identical(run_mode, "bubbles_only")) {
   clinical_data <- fread("TCGA-BRCA.clinical.tsv")
   survival_data <- fread("TCGA-BRCA.survival.tsv")
   protein_data  <- if (file.exists("TCGA-BRCA.protein.tsv")) fread("TCGA-BRCA.protein.tsv") else NULL
+  # clinical.tsv 常常只有人口学列；若目录里有 GDC phenotype / clinicalMatrix 一并读入
+  pheno_cands <- c(
+    "TCGA-BRCA.GDC_phenotype.tsv", "TCGA-BRCA.GDC_phenotype.tsv.gz",
+    "BRCA_clinicalMatrix", "BRCA_clinicalMatrix.gz",
+    "TCGA-BRCA.clinicalMatrix.tsv"
+  )
+  pheno_hit <- pheno_cands[file.exists(pheno_cands)][1]
+  if (!is.na(pheno_hit)) {
+    message("临床表可能缺少分期，附加读取：", pheno_hit)
+    pheno <- fread(pheno_hit)
+    clinical_data <- pheno
+  }
   if (is.null(protein_data)) message("未找到 TCGA-BRCA.protein.tsv，将跳过蛋白相关性")
 } else {
   message("run_mode = bubbles_only：跳过 FPKM 读取，只用已有结果画气泡图")
-  if (file.exists("TCGA-BRCA.clinical.tsv")) {
-    clinical_data <- fread("TCGA-BRCA.clinical.tsv")
-  }
+  pheno_cands <- c(
+    "TCGA-BRCA.GDC_phenotype.tsv", "TCGA-BRCA.GDC_phenotype.tsv.gz",
+    "BRCA_clinicalMatrix", "BRCA_clinicalMatrix.gz",
+    "TCGA-BRCA.clinicalMatrix.tsv", "TCGA-BRCA.clinical.tsv"
+  )
+  pheno_hit <- pheno_cands[file.exists(pheno_cands)][1]
+  if (!is.na(pheno_hit)) clinical_data <- fread(pheno_hit)
 }
 
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
@@ -354,37 +372,121 @@ classify_early_late <- function(stage_simplified) {
   out
 }
 
-# 在临床表上补转移相关二分类列（可重复调用）
+# 按列名（含 GDC 扁平名 ajcc_pathologic_m.diagnoses）找分期 / M / N
+pick_clin_col <- function(dt, patterns) {
+  nms <- names(dt)
+  skip <- grepl(
+    "^(sample|patient|barcode|submitter|case_id|id|project|age_|days_|year_|uuid)",
+    nms, ignore.case = TRUE
+  )
+  nms2 <- nms[!skip]
+  for (p in patterns) {
+    hit <- grep(p, nms2, ignore.case = TRUE, value = TRUE)
+    if (length(hit) > 0) return(hit[1])
+  }
+  NA_character_
+}
+
+# 在临床表上补转移相关二分类列（可重复调用；只用向量赋值，不在 i 里写 meta_M）
 ensure_metastasis_clin_columns <- function(clin) {
   if (is.null(clin) || nrow(clin) == 0) return(clin)
-  clin <- copy(clin)
+  clin <- copy(as.data.table(clin))
+  n <- nrow(clin)
   if (!"sample_std" %in% names(clin)) {
     cid <- detect_id_col(clin, c("sampleID", "sample", "bcr_patient_barcode", "submitter_id"))
-    clin[, sample_std := normalize_barcode(get(cid))]
+    clin[, sample_std := normalize_barcode(clin[[cid]])]
     clin <- clin[!duplicated(sample_std)]
+    n <- nrow(clin)
   }
-  if (!"stage_simplified" %in% names(clin)) {
+  stage_col <- pick_clin_col(clin, c(
+    "ajcc_pathologic_tumor_stage", "ajcc_pathologic_stage", "pathologic_stage",
+    "tumor_stage", "clinical_stage", "figo_stage", "stage"
+  ))
+  if (is.na(stage_col)) {
     stage_col <- first_present(names(clin), c(
       "ajcc_pathologic_tumor_stage", "pathologic_stage", "clinical_stage", "ajcc_pathologic_stage"
     ))
-    if (!is.na(stage_col)) clin[, stage_simplified := simplify_stage(get(stage_col))]
   }
-  m_col <- first_present(names(clin), c(
-    "ajcc_metastasis_pathologic_pm", "pathologic_M", "pathologic_m",
-    "ajcc_pathologic_m", "M", "metastasis"
+  m_col <- pick_clin_col(clin, c(
+    "ajcc_pathologic_m", "ajcc_metastasis_pathologic_pm", "pathologic_m",
+    "clinical_m", "metastasis"
   ))
-  n_col <- first_present(names(clin), c(
-    "ajcc_nodes_pathologic_pn", "pathologic_N", "pathologic_n",
-    "ajcc_pathologic_n", "N"
-  ))
-  if (!is.na(m_col)) clin[, meta_M := classify_m(get(m_col))] else if (!"meta_M" %in% names(clin)) clin[, meta_M := NA_character_]
-  if (!is.na(n_col)) clin[, meta_N := classify_n(get(n_col))] else if (!"meta_N" %in% names(clin)) clin[, meta_N := NA_character_]
-  if ("stage_simplified" %in% names(clin)) {
-    clin[, meta_stage := classify_early_late(stage_simplified)]
-  } else if (!"meta_stage" %in% names(clin)) {
-    clin[, meta_stage := NA_character_]
+  if (is.na(m_col)) {
+    m_col <- first_present(names(clin), c(
+      "ajcc_metastasis_pathologic_pm", "pathologic_M", "pathologic_m",
+      "ajcc_pathologic_m", "M", "metastasis"
+    ))
   }
+  n_col <- pick_clin_col(clin, c(
+    "ajcc_pathologic_n", "ajcc_nodes_pathologic_pn", "pathologic_n", "clinical_n"
+  ))
+  if (is.na(n_col)) {
+    n_col <- first_present(names(clin), c(
+      "ajcc_nodes_pathologic_pn", "pathologic_N", "pathologic_n",
+      "ajcc_pathologic_n", "N"
+    ))
+  }
+  st_vec <- if (!is.na(stage_col) && stage_col %in% names(clin)) {
+    simplify_stage(clin[[stage_col]])
+  } else {
+    rep(NA_character_, n)
+  }
+  m_vec <- if (!is.na(m_col) && m_col %in% names(clin)) {
+    classify_m(clin[[m_col]])
+  } else {
+    rep(NA_character_, n)
+  }
+  n_vec <- if (!is.na(n_col) && n_col %in% names(clin)) {
+    classify_n(clin[[n_col]])
+  } else {
+    rep(NA_character_, n)
+  }
+  clin[, stage_simplified := st_vec]
+  clin[, meta_M := m_vec]
+  clin[, meta_N := n_vec]
+  clin[, meta_stage := classify_early_late(st_vec)]
   clin
+}
+
+# 用向量写转移分组，禁止 ann[meta_M == ...] 这种会查找父环境的写法
+assign_met_group_vectors <- function(ann) {
+  ann <- as.data.table(ann)
+  n <- nrow(ann)
+  m_vec <- if ("meta_M" %in% names(ann)) as.character(ann[["meta_M"]]) else rep(NA_character_, n)
+  st_vec <- if ("stage_simplified" %in% names(ann)) as.character(ann[["stage_simplified"]]) else rep(NA_character_, n)
+  n_vec <- if ("meta_N" %in% names(ann)) as.character(ann[["meta_N"]]) else rep(NA_character_, n)
+  sid <- if ("sample" %in% names(ann)) ann[["sample"]] else if ("sample_std" %in% names(ann)) ann[["sample_std"]] else rep(NA_character_, n)
+  type_vec <- {
+    x <- toupper(gsub("\\.", "-", as.character(sid)))
+    x <- sub("A$", "", x)
+    ifelse(nchar(x) >= 15, substr(x, 14, 15), NA_character_)
+  }
+  any_vec <- rep(NA_character_, n)
+  any_vec[!is.na(m_vec) & m_vec == "M1"] <- "转移"
+  any_vec[!is.na(st_vec) & st_vec == "Stage IV"] <- "转移"
+  any_vec[!is.na(type_vec) & type_vec %in% c("06", "07")] <- "转移"
+  any_vec[is.na(any_vec) & !is.na(m_vec) & m_vec == "M0"] <- "未转移"
+  any_vec[is.na(any_vec) & !is.na(st_vec) & st_vec %in% c("Stage I", "Stage II", "Stage III")] <- "未转移"
+  if (sum(!is.na(any_vec)) < 4 && "PFI" %in% names(ann)) {
+    pfi <- suppressWarnings(as.numeric(ann[["PFI"]]))
+    any_vec[is.na(any_vec) & !is.na(pfi) & pfi == 1] <- "转移"
+    any_vec[is.na(any_vec) & !is.na(pfi) & pfi == 0] <- "未转移"
+    message("临床分期/M 不足，any_met 用 PFI 进展代替（进展=转移，未进展=未转移）")
+  }
+  ann[, stage_simplified := st_vec]
+  ann[, meta_M := m_vec]
+  ann[, meta_N := n_vec]
+  ann[, distant_M := factor(m_vec, levels = c("M0", "M1"))]
+  ann[, node_N := factor(n_vec, levels = c("N0", "Nplus"))]
+  ann[, any_met := factor(any_vec, levels = c("未转移", "转移"))]
+  if ("PFI" %in% names(ann)) {
+    pfi <- suppressWarnings(as.numeric(ann[["PFI"]]))
+    prog <- rep(NA_character_, n)
+    prog[!is.na(pfi) & pfi == 0] <- "未进展"
+    prog[!is.na(pfi) & pfi == 1] <- "进展"
+    ann[, progressed := factor(prog, levels = c("未进展", "进展"))]
+  }
+  ann
 }
 
 # 两组 Wilcoxon：pos 为“更差/转移相关”组，effect = median(pos) - median(neg)
@@ -1516,7 +1618,16 @@ analyze_nerve_go_by_metastasis <- function(result_dir = NULL) {
 
   # ---- 临床 + 生存 ----
   clin <- NULL
-  if (exists("clinical_data", inherits = TRUE)) {
+  pheno_cands <- c(
+    "TCGA-BRCA.GDC_phenotype.tsv", "TCGA-BRCA.GDC_phenotype.tsv.gz",
+    "BRCA_clinicalMatrix", "BRCA_clinicalMatrix.gz",
+    "TCGA-BRCA.clinicalMatrix.tsv"
+  )
+  pheno_hit <- pheno_cands[file.exists(pheno_cands)][1]
+  if (!is.na(pheno_hit)) {
+    message("读取含分期的表型：", pheno_hit)
+    clin <- fread(pheno_hit)
+  } else if (exists("clinical_data", inherits = TRUE)) {
     clin <- copy(as.data.table(get("clinical_data", inherits = TRUE)))
   } else if (file.exists("TCGA-BRCA.clinical.tsv")) {
     clin <- fread("TCGA-BRCA.clinical.tsv")
@@ -1557,20 +1668,10 @@ analyze_nerve_go_by_metastasis <- function(result_dir = NULL) {
     ann <- merge(ann, surv[, keep_surv, with = FALSE], by.x = "sample", by.y = "sample_std", all.x = TRUE)
   }
 
-  ann[, distant_M := factor(meta_M, levels = c("M0", "M1"))]
-  ann[, node_N := factor(meta_N, levels = c("N0", "Nplus"))]
-  ann[, any_met := NA_character_]
-  # 远处转移：M1 或 Stage IV；未转移：M0 且不是 IV，或 I–III 且非 M1
-  ann[meta_M == "M1" | stage_simplified == "Stage IV", any_met := "转移"]
-  ann[is.na(any_met) & meta_M == "M0" & (is.na(stage_simplified) | stage_simplified != "Stage IV"), any_met := "未转移"]
-  ann[is.na(any_met) & stage_simplified %in% c("Stage I", "Stage II", "Stage III") & (is.na(meta_M) | meta_M != "M1"), any_met := "未转移"]
-  ann[, any_met := factor(any_met, levels = c("未转移", "转移"))]
-  if ("PFI" %in% names(ann)) {
-    ann[, progressed := NA_character_]
-    ann[as.numeric(PFI) == 0, progressed := "未进展"]
-    ann[as.numeric(PFI) == 1, progressed := "进展"]
-    ann[, progressed := factor(progressed, levels = c("未进展", "进展"))]
+  if (!exists("assign_met_group_vectors", mode = "function")) {
+    stop("缺少 assign_met_group_vectors。请从脚本开头 Source，不要从中间粘贴。")
   }
+  ann <- assign_met_group_vectors(ann)
 
   fwrite(ann[, intersect(c(
     "sample", "distant_M", "node_N", "any_met", "progressed", "meta_M", "meta_N",
