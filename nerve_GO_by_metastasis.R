@@ -19,7 +19,28 @@ library(survival)
 library(survminer)
 
 setwd("E:/R/BRCA")
-res_dir <- "results_GO_individual"
+# 自动找结果目录：results_GO_individual 或 results_GO_individual-1 等
+pick_res_dir <- function() {
+  cands <- c(
+    "results_GO_individual",
+    "results_GO_individual-1",
+    "results_GO_individual-2",
+    list.files(".", pattern = "^results_GO_individual", include.dirs = TRUE)
+  )
+  cands <- unique(cands[dir.exists(cands)])
+  if (length(cands) == 0) return("results_GO_individual")
+  has_csv <- vapply(cands, function(d) {
+    file.exists(file.path(d, "01_pathway_scores_each_GO.csv"))
+  }, logical(1))
+  if (any(has_csv)) return(cands[has_csv][1])
+  has_per <- vapply(cands, function(d) {
+    length(list.files(file.path(d, "per_GO"), pattern = "^pathway_score\\.csv$", recursive = TRUE)) > 0
+  }, logical(1))
+  if (any(has_per)) return(cands[has_per][1])
+  cands[1]
+}
+res_dir <- pick_res_dir()
+message("使用结果目录：", normalizePath(res_dir, winslash = "/", mustWork = FALSE))
 if (!file.exists("TCGA-BRCA.clinical.tsv")) stop("找不到 TCGA-BRCA.clinical.tsv")
 
 load_or_build_score_mat <- function(res_dir) {
