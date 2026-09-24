@@ -171,16 +171,38 @@ classify_n <- function(x) {
   out
 }
 
+find_col <- function(nms, pattern) {
+  hit <- grep(pattern, nms, ignore.case = TRUE, value = TRUE)
+  hit <- hit[!grepl("sample|patient|barcode|submitter|days_|_id$|project", hit, ignore.case = TRUE)]
+  if (length(hit) == 0) NA_character_ else hit[1]
+}
+
 clin <- fread("TCGA-BRCA.clinical.tsv")
 idc <- first_present(names(clin), c("sampleID", "sample", "bcr_patient_barcode", "submitter_id", names(clin)[1]))
 clin[, sample_std := normalize_barcode(get(idc))]
 clin <- clin[!duplicated(sample_std)]
-st <- first_present(names(clin), c("ajcc_pathologic_tumor_stage", "pathologic_stage", "clinical_stage", "ajcc_pathologic_stage"))
-mc <- first_present(names(clin), c("ajcc_metastasis_pathologic_pm", "pathologic_M", "pathologic_m", "ajcc_pathologic_m"))
-nc <- first_present(names(clin), c("ajcc_nodes_pathologic_pn", "pathologic_N", "pathologic_n", "ajcc_pathologic_n"))
-if (!is.na(st)) clin[, stage_simplified := simplify_stage(get(st))]
-if (!is.na(mc)) clin[, meta_M := classify_m(get(mc))]
-if (!is.na(nc)) clin[, meta_N := classify_n(get(nc))]
+
+st <- first_present(names(clin), c(
+  "ajcc_pathologic_tumor_stage", "pathologic_stage", "clinical_stage",
+  "ajcc_pathologic_stage", "AJCC_PATHOLOGIC_TUMOR_STAGE", "tumor_stage"
+))
+if (is.na(st)) st <- find_col(names(clin), "stage")
+mc <- first_present(names(clin), c(
+  "ajcc_metastasis_pathologic_pm", "pathologic_M", "pathologic_m",
+  "ajcc_pathologic_m", "ajcc_clinical_m", "clinical_M", "pathologic_M_stage"
+))
+if (is.na(mc)) mc <- find_col(names(clin), "pathologic_m|clinical_m|metastasis_pathologic|_pm$|ajcc.*\\bm\\b")
+nc <- first_present(names(clin), c(
+  "ajcc_nodes_pathologic_pn", "pathologic_N", "pathologic_n",
+  "ajcc_pathologic_n", "ajcc_clinical_n", "clinical_N"
+))
+if (is.na(nc)) nc <- find_col(names(clin), "pathologic_n|clinical_n|nodes_pathologic|_pn$|ajcc.*\\bn\\b")
+
+clin[, stage_simplified := if (!is.na(st)) simplify_stage(get(st)) else NA_character_]
+clin[, meta_M := if (!is.na(mc)) classify_m(get(mc)) else NA_character_]
+clin[, meta_N := if (!is.na(nc)) classify_n(get(nc)) else NA_character_]
+message("临床列：ID=", idc, "  stage=", st, "  M=", mc, "  N=", nc)
+message("分期/M/N 相关列名：", paste(grep("stage|pathologic_m|pathologic_n|metastasis|_pm|_pn", names(clin), ignore.case = TRUE, value = TRUE), collapse = ", "))
 
 surv <- if (file.exists("TCGA-BRCA.survival.tsv")) fread("TCGA-BRCA.survival.tsv") else NULL
 if (!is.null(surv)) {
@@ -195,18 +217,21 @@ if (!is.null(surv)) {
   keep <- intersect(c("sample_std", "OS", "OS.time", "PFI", "PFI.time"), names(surv))
   ann <- merge(ann, surv[, keep, with = FALSE], by.x = "sample", by.y = "sample_std", all.x = TRUE)
 }
+if (!"meta_M" %in% names(ann)) ann[, meta_M := NA_character_]
+if (!"meta_N" %in% names(ann)) ann[, meta_N := NA_character_]
+if (!"stage_simplified" %in% names(ann)) ann[, stage_simplified := NA_character_]
 
-ann[, distant_M := factor(meta_M, levels = c("M0", "M1"))]
-ann[, node_N := factor(meta_N, levels = c("N0", "Nplus"))]
+ann[, distant_M := factor(ann[["meta_M"]], levels = c("M0", "M1"))]
+ann[, node_N := factor(ann[["meta_N"]], levels = c("N0", "Nplus"))]
 ann[, any_met := NA_character_]
-ann[meta_M == "M1" | stage_simplified == "Stage IV", any_met := "转移"]
-ann[is.na(any_met) & meta_M == "M0" & (is.na(stage_simplified) | stage_simplified != "Stage IV"), any_met := "未转移"]
-ann[is.na(any_met) & stage_simplified %in% c("Stage I", "Stage II", "Stage III") & (is.na(meta_M) | meta_M != "M1"), any_met := "未转移"]
+ann[ann[["meta_M"]] == "M1" | ann[["stage_simplified"]] == "Stage IV", any_met := "转移"]
+ann[is.na(any_met) & ann[["meta_M"]] == "M0" & (is.na(ann[["stage_simplified"]]) | ann[["stage_simplified"]] != "Stage IV"), any_met := "未转移"]
+ann[is.na(any_met) & ann[["stage_simplified"]] %in% c("Stage I", "Stage II", "Stage III") & (is.na(ann[["meta_M"]]) | ann[["meta_M"]] != "M1"), any_met := "未转移"]
 ann[, any_met := factor(any_met, levels = c("未转移", "转移"))]
 if ("PFI" %in% names(ann)) {
   ann[, progressed := NA_character_]
-  ann[as.numeric(PFI) == 0, progressed := "未进展"]
-  ann[as.numeric(PFI) == 1, progressed := "进展"]
+  ann[as.numeric(ann[["PFI"]]) == 0, progressed := "未进展"]
+  ann[as.numeric(ann[["PFI"]]) == 1, progressed := "进展"]
   ann[, progressed := factor(progressed, levels = c("未进展", "进展"))]
 }
 
