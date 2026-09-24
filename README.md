@@ -97,3 +97,32 @@ source("TG_RNAseq_TGsh_mean_vs_NTC_reps.R")    # 只加上面两组
 ```
 
 也可以只跑这个新脚本（会自己读入并标准化数据）。
+
+## 病人转移 / 预后 × 神经通路（新脚本，不改原流程）
+
+`TG_RNAseq_patient_metastasis_neural.R` 用**病人表达 + 临床表**，比较有转移 vs 无转移样本里神经相关信号通路的表达，并用生存信息做预后。
+
+- 不改 `TG_RNAseq_pipeline.R` 的六组细胞系比较
+- 转移两组有生物学重复，用真实 p 值；**先 p < 0.01**，再按上调 FC ≥ 1 / 1.25 / 1.5 / 2 和 top 50–300 出表和图
+- 神经通路做专项分数（均值 z-score）、箱线、热图、Focused GSEA/ORA；全库表另出 `*_FOCUS_neural.csv`，**不改全基因组 p 值**
+- 预后：按转移状态和各神经通路高/低分做 KM；有 `survival` 包时再做 Cox
+
+```r
+setwd("E:/R/TG_BRCA/TG")
+# 把 patient_expression.csv 与 patient_clinical.csv 放在该目录
+source("TG_RNAseq_patient_metastasis_neural.R")
+```
+
+列格式见 `examples/patient_metastasis_neural/`。也可用环境变量 `TG_PATIENT_EXPR` / `TG_PATIENT_CLINICAL`。演示数据不会自动当病人数据用；只有设置 `TG_PATIENT_USE_EXAMPLE=1` 才读仓库里的示例表。
+
+结果在：
+
+```
+results/patient_metastasis_neural/
+  neural_pathway_Metastasis_vs_NoMetastasis.csv
+  boxplot_neural_by_metastasis.pdf
+  Survival/KM_by_metastasis.pdf
+  Metastasis_vs_NoMetastasis/FoldChange/FC_1.5/
+  Metastasis_vs_NoMetastasis/TopRank/top100/
+  Metastasis_vs_NoMetastasis/Focused_neural/
+```

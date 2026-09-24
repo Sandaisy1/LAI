@@ -34,6 +34,7 @@ alwaysApply: true
 6. `mean(TG_sh1, TG_sh5)` vs `NTC_rep1`（不要混入 NTC_rep0）
 
 脚本分工：1–4 在 `TG_RNAseq_pipeline.R`；5–6 在 `TG_RNAseq_TGsh_mean_vs_NTC_reps.R`，不要为加 5–6 而改 1–4。
+病人转移/预后 × 神经通路在 `TG_RNAseq_patient_metastasis_neural.R`，不要为加病人分析而改 1–4。
 
 ## 显著性（先 p，再倍数或排名）
 
@@ -53,6 +54,7 @@ alwaysApply: true
 - ORA 放 `GO/`、`Pathway/`、`KEGG/`，文件名以 `ORA_` 开头（不要写进 GSEA/）
 - GSEA 放 `GSEA/`，文件名以 `GSEA_` 开头；全基因 GSEA 只能放 `00_GSEA_all_genes_NOT_FC_or_topN`
 - 细胞骨架/线粒体假说放 `Focused_cytoskeleton_mito/`；全基因组表另出 `*_FOCUS_cytoskeleton_mito.csv`（保留原始 p 与 `genome_wide_rank`），不要为凸显假说去改全基因组 p 值
+- 病人神经通路假说放 `Focused_neural/`；全基因组表另出 `*_FOCUS_neural.csv`（同样保留原始 p 与 `genome_wide_rank`）
 
 ```r
 # ❌ BAD: 把两个 NTC 并成一组再做 sh1 vs NTC；跳过 FC>=1 或 top75
