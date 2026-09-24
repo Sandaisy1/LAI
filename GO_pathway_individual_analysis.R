@@ -16,6 +16,7 @@
 # 8. 汇总后会画两张气泡图：预后（OS/DSS）、转移（PFI/DFI + M/N/分期）
 # 9. 若 17 个 GO 已经跑完、只想补画气泡图：把下面 run_mode 改成 "bubbles_only" 再 Source
 #    或在控制台运行：draw_prognosis_metastasis_bubbles()
+# 10. 转移 vs 未转移的神经通路表达：analyze_nerve_go_by_metastasis()
 # ====================================================================
 ################################################################################
 
@@ -1447,5 +1448,339 @@ if (exists("expr", inherits = TRUE) && !is.null(get("expr", inherits = TRUE))) {
   plot_focus5_vs_tumor_pathways()
 } else {
   message("没有 expr，跳过 5 个 GO 与增殖/转移通路气泡图。有表达矩阵后运行：plot_focus5_vs_tumor_pathways()")
+}
+
+# ==============================================================================
+# 第十部分：转移 vs 未转移样本中，神经相关 GO 通路的表达 + 预后
+# 每个 GO 单独比较，不合并基因集。
+# 转移定义（写进表里，可核对）：
+#   distant_M : M1 vs M0
+#   any_met   : M1 或 Stage IV  = 转移；M0 且非 Stage IV = 未转移
+#   node_N    : N+ vs N0（区域淋巴结）
+#   progressed: PFI 事件 1 vs 0（预后进展/复发）
+# 主图用 any_met。TCGA-BRCA 的 M1 很少，any_met 会纳入 Stage IV。
+# 已有 01_pathway_scores_each_GO.csv 时可直接运行：
+#   analyze_nerve_go_by_metastasis()
+# ==============================================================================
+analyze_nerve_go_by_metastasis <- function(result_dir = NULL) {
+  if (!requireNamespace("data.table", quietly = TRUE)) stop("需要 data.table")
+  if (!requireNamespace("ggplot2", quietly = TRUE)) stop("需要 ggplot2")
+  library(data.table)
+  library(ggplot2)
+  if (requireNamespace("ggpubr", quietly = TRUE)) library(ggpubr)
+  if (requireNamespace("survival", quietly = TRUE)) library(survival)
+  if (requireNamespace("survminer", quietly = TRUE)) library(survminer)
+
+  if (is.null(result_dir)) {
+    result_dir <- if (exists("out_dir", inherits = TRUE)) {
+      normalizePath(out_dir, mustWork = FALSE)
+    } else {
+      "results_GO_individual"
+    }
+  }
+  dir.create(result_dir, showWarnings = FALSE, recursive = TRUE)
+
+  name_map <- if (exists("go_name_map", inherits = TRUE)) get("go_name_map", inherits = TRUE) else c()
+  name_map <- c(name_map, "GO:0036518" = "chemorepulsion of dopaminergic neuron axon")
+
+  # ---- 通路分数：优先读已有结果，否则用 expr 现算 ----
+  score_file <- file.path(result_dir, "01_pathway_scores_each_GO.csv")
+  score_mat <- NULL
+  if (file.exists(score_file)) {
+    sm <- fread(score_file)
+    go_cols <- setdiff(names(sm), "sample")
+    score_mat <- as.matrix(sm[, go_cols, with = FALSE])
+    storage.mode(score_mat) <- "double"
+    rownames(score_mat) <- as.character(sm$sample)
+    colnames(score_mat) <- go_cols
+    message("已读取通路分数：", nrow(score_mat), " 样本 x ", ncol(score_mat), " 个 GO")
+  } else if (exists("expr", inherits = TRUE) && exists("get_go_genes", mode = "function") &&
+             exists("pathway_zmean", mode = "function") && exists("go_list", inherits = TRUE)) {
+    message("没有分数表，按 go_list 逐个打分（不合并）")
+    expr_use <- get("expr", inherits = TRUE)
+    ids <- as.character(get("go_list", inherits = TRUE))
+    lst <- list()
+    for (g in ids) {
+      genes <- unique(get_go_genes(g)$SYMBOL)
+      sc <- tryCatch(pathway_zmean(expr_use, genes), error = function(e) NULL)
+      if (is.numeric(sc) && length(sc) > 0) lst[[g]] <- sc
+    }
+    if (length(lst) == 0) stop("无法计算任何神经 GO 通路分数")
+    common <- Reduce(intersect, lapply(lst, names))
+    score_mat <- do.call(cbind, lapply(lst, function(x) x[common]))
+    colnames(score_mat) <- names(lst)
+    rownames(score_mat) <- common
+  } else {
+    stop("找不到 ", score_file, "，也没有 expr。请先跑完前面的分析。")
+  }
+
+  # ---- 临床 + 生存 ----
+  clin <- NULL
+  if (exists("clinical_data", inherits = TRUE)) {
+    clin <- copy(as.data.table(get("clinical_data", inherits = TRUE)))
+  } else if (file.exists("TCGA-BRCA.clinical.tsv")) {
+    clin <- fread("TCGA-BRCA.clinical.tsv")
+  } else {
+    stop("找不到临床表 TCGA-BRCA.clinical.tsv")
+  }
+  if (exists("ensure_metastasis_clin_columns", mode = "function")) {
+    clin <- ensure_metastasis_clin_columns(clin)
+  } else {
+    stop("缺少 ensure_metastasis_clin_columns。请先运行脚本第三部分工具函数。")
+  }
+  if (!"sample_std" %in% names(clin)) stop("临床表没有 sample_std")
+
+  surv <- NULL
+  if (exists("survival_data", inherits = TRUE)) {
+    surv <- copy(as.data.table(get("survival_data", inherits = TRUE)))
+  } else if (file.exists("TCGA-BRCA.survival.tsv")) {
+    surv <- fread("TCGA-BRCA.survival.tsv")
+  }
+  if (!is.null(surv) && !"sample_std" %in% names(surv)) {
+    sid <- if (exists("detect_id_col", mode = "function")) {
+      detect_id_col(surv, c("sample", "sampleID", "bcr_patient_barcode"))
+    } else {
+      names(surv)[1]
+    }
+    if (exists("normalize_barcode", mode = "function")) {
+      surv[, sample_std := normalize_barcode(get(sid))]
+    } else {
+      surv[, sample_std := toupper(gsub("\\.", "-", as.character(get(sid))))]
+    }
+    surv <- surv[!duplicated(sample_std)]
+  }
+
+  ann <- data.table(sample = rownames(score_mat))
+  ann <- merge(ann, clin, by.x = "sample", by.y = "sample_std", all.x = TRUE)
+  if (!is.null(surv)) {
+    keep_surv <- intersect(c("sample_std", "OS", "OS.time", "DSS", "DSS.time", "PFI", "PFI.time", "DFI", "DFI.time"), names(surv))
+    ann <- merge(ann, surv[, keep_surv, with = FALSE], by.x = "sample", by.y = "sample_std", all.x = TRUE)
+  }
+
+  ann[, distant_M := factor(meta_M, levels = c("M0", "M1"))]
+  ann[, node_N := factor(meta_N, levels = c("N0", "Nplus"))]
+  ann[, any_met := NA_character_]
+  # 远处转移：M1 或 Stage IV；未转移：M0 且不是 IV，或 I–III 且非 M1
+  ann[meta_M == "M1" | stage_simplified == "Stage IV", any_met := "转移"]
+  ann[is.na(any_met) & meta_M == "M0" & (is.na(stage_simplified) | stage_simplified != "Stage IV"), any_met := "未转移"]
+  ann[is.na(any_met) & stage_simplified %in% c("Stage I", "Stage II", "Stage III") & (is.na(meta_M) | meta_M != "M1"), any_met := "未转移"]
+  ann[, any_met := factor(any_met, levels = c("未转移", "转移"))]
+  if ("PFI" %in% names(ann)) {
+    ann[, progressed := NA_character_]
+    ann[as.numeric(PFI) == 0, progressed := "未进展"]
+    ann[as.numeric(PFI) == 1, progressed := "进展"]
+    ann[, progressed := factor(progressed, levels = c("未进展", "进展"))]
+  }
+
+  fwrite(ann[, intersect(c(
+    "sample", "distant_M", "node_N", "any_met", "progressed", "meta_M", "meta_N",
+    "meta_stage", "stage_simplified", "OS", "OS.time", "PFI", "PFI.time"
+  ), names(ann)), with = FALSE], file.path(result_dir, "09_sample_metastasis_prognosis.csv"))
+  message(
+    "分组人数：any_met 转移=", sum(ann$any_met == "转移", na.rm = TRUE),
+    " 未转移=", sum(ann$any_met == "未转移", na.rm = TRUE),
+    " ；M1=", sum(ann$distant_M == "M1", na.rm = TRUE),
+    " M0=", sum(ann$distant_M == "M0", na.rm = TRUE),
+    " ；N+=", sum(ann$node_N == "Nplus", na.rm = TRUE),
+    " N0=", sum(ann$node_N == "N0", na.rm = TRUE)
+  )
+
+  compare_one <- function(go_score_vec, group, pos_level, neg_level, grouping) {
+    df <- data.frame(
+      pathway_score = as.numeric(go_score_vec),
+      group = as.character(group),
+      stringsAsFactors = FALSE
+    )
+    df <- df[is.finite(df$pathway_score) & df$group %in% c(pos_level, neg_level), ]
+    n_pos <- sum(df$group == pos_level)
+    n_neg <- sum(df$group == neg_level)
+    min_n <- if (exists("min_group_n", inherits = TRUE)) get("min_group_n", inherits = TRUE) else 2
+    if (n_pos < min_n || n_neg < min_n) return(NULL)
+    wt <- suppressWarnings(wilcox.test(pathway_score ~ group, data = df))
+    data.table(
+      grouping = grouping,
+      pos_level = pos_level,
+      neg_level = neg_level,
+      n_pos = n_pos,
+      n_neg = n_neg,
+      median_pos = stats::median(df$pathway_score[df$group == pos_level], na.rm = TRUE),
+      median_neg = stats::median(df$pathway_score[df$group == neg_level], na.rm = TRUE),
+      delta_median = stats::median(df$pathway_score[df$group == pos_level], na.rm = TRUE) -
+        stats::median(df$pathway_score[df$group == neg_level], na.rm = TRUE),
+      pvalue = wt$p.value
+    )
+  }
+
+  go_ids <- colnames(score_mat)
+  stat_rows <- list()
+  long_rows <- list()
+  for (g in go_ids) {
+    gnm <- if (g %in% names(name_map)) unname(name_map[g]) else g
+    sc <- as.numeric(score_mat[, g])
+    names(sc) <- rownames(score_mat)
+    sc <- sc[ann$sample]
+    pieces <- list(
+      compare_one(sc, ann$any_met, "转移", "未转移", "any_met"),
+      compare_one(sc, ann$distant_M, "M1", "M0", "distant_M"),
+      compare_one(sc, ann$node_N, "Nplus", "N0", "node_N")
+    )
+    if ("progressed" %in% names(ann)) {
+      pieces[[length(pieces) + 1]] <- compare_one(sc, ann$progressed, "进展", "未进展", "PFI_progressed")
+    }
+    one <- rbindlist(Filter(Negate(is.null), pieces), fill = TRUE)
+    if (nrow(one) > 0) {
+      one[, `:=`(GO = g, GO_name = gnm)]
+      stat_rows[[g]] <- one
+    }
+    long_rows[[g]] <- data.table(
+      sample = ann$sample, GO = g, GO_name = gnm,
+      pathway_score = as.numeric(sc),
+      any_met = ann$any_met,
+      distant_M = ann$distant_M,
+      node_N = ann$node_N
+    )
+  }
+  stat_dt <- rbindlist(stat_rows, fill = TRUE)
+  if (nrow(stat_dt) == 0) stop("转移分组后没有可比较的通路（每组人数不足）")
+  stat_dt[, fdr := p.adjust(pvalue, method = "BH"), by = grouping]
+  setcolorder(stat_dt, c("GO", "GO_name", "grouping"))
+  fwrite(stat_dt, file.path(result_dir, "09_nerve_GO_score_by_metastasis.csv"))
+  fwrite(rbindlist(long_rows, fill = TRUE), file.path(result_dir, "09_nerve_GO_score_long_by_sample.csv"))
+
+  long_any <- rbindlist(long_rows, fill = TRUE)
+  long_any <- long_any[!is.na(any_met) & is.finite(pathway_score)]
+  if (nrow(long_any) > 0) {
+    long_any[, go_lab := factor(paste(GO, GO_name), levels = unique(paste(GO, GO_name)))]
+    n_go <- uniqueN(long_any$GO)
+    ht <- max(7, min(16, 0.55 * n_go + 2.5))
+    p_box <- ggplot(long_any, aes(x = any_met, y = pathway_score, fill = any_met)) +
+      geom_boxplot(outlier.size = 0.4, width = 0.65) +
+      facet_wrap(~ go_lab, scales = "free_y", ncol = 4) +
+      scale_fill_manual(values = c("未转移" = "#4DBBD5", "转移" = "#E64B35")) +
+      labs(
+        title = "神经相关 GO 通路在转移 vs 未转移样本中的表达",
+        subtitle = "转移 = M1 或 Stage IV；每个 GO 单独打分，未合并基因集",
+        x = NULL, y = "Pathway score", fill = NULL
+      ) +
+      theme_bw(base_size = 10) +
+      theme(
+        legend.position = "bottom",
+        strip.text = element_text(size = 7),
+        axis.text.x = element_text(angle = 20, hjust = 1)
+      )
+    if (requireNamespace("ggpubr", quietly = TRUE)) {
+      p_box <- p_box + ggpubr::stat_compare_means(size = 2.6, label = "p.format")
+    }
+    ggsave(file.path(result_dir, "09_nerve_GO_boxplot_any_met.pdf"), p_box, width = 12, height = ht)
+    ggsave(file.path(result_dir, "09_nerve_GO_boxplot_any_met.png"), p_box, width = 12, height = ht, dpi = 150)
+    message("已保存箱线图：", file.path(result_dir, "09_nerve_GO_boxplot_any_met.pdf"))
+  }
+
+  any_stat <- stat_dt[grouping == "any_met"]
+  if (nrow(any_stat) > 0) {
+    any_stat[, lab := paste(GO, GO_name)]
+    any_stat[, lab := factor(lab, levels = lab[order(delta_median)])]
+    p_for <- ggplot(any_stat, aes(x = delta_median, y = lab)) +
+      geom_vline(xintercept = 0, linetype = 2, color = "grey50") +
+      geom_point(aes(color = pvalue < 0.05, size = -log10(pmax(pvalue, 1e-12)))) +
+      scale_color_manual(values = c("FALSE" = "grey50", "TRUE" = "#E64B35"), name = "p < 0.05") +
+      labs(
+        title = "转移 − 未转移：神经 GO 通路分数差",
+        x = "Δ median score (转移 − 未转移)", y = NULL, size = expression(-log[10](p))
+      ) +
+      theme_bw()
+    ggsave(file.path(result_dir, "09_nerve_GO_delta_any_met.pdf"), p_for, width = 10, height = max(5, 0.32 * nrow(any_stat) + 2))
+    message("已保存分数差图：", file.path(result_dir, "09_nerve_GO_delta_any_met.pdf"))
+  }
+
+  # ---- 预后：在转移 / 未转移亚组内，通路高 vs 低 的 OS Cox ----
+  surv_rows <- list()
+  if (!is.null(surv) && all(c("OS", "OS.time") %in% names(ann))) {
+    min_n <- if (exists("min_surv_n", inherits = TRUE)) get("min_surv_n", inherits = TRUE) else 10
+    min_ev <- if (exists("min_surv_events", inherits = TRUE)) get("min_surv_events", inherits = TRUE) else 3
+    pdf_km <- file.path(result_dir, "09_nerve_GO_KM_OS_within_met.pdf")
+    n_km <- 0L
+    pdf(pdf_km, width = 10, height = 5)
+    for (g in go_ids) {
+      gnm <- if (g %in% names(name_map)) unname(name_map[g]) else g
+      d0 <- data.frame(
+        sample = ann$sample,
+        time = as.numeric(ann[["OS.time"]]),
+        event = as.numeric(ann[["OS"]]),
+        pathway_score = as.numeric(score_mat[ann$sample, g]),
+        met = as.character(ann$any_met),
+        stringsAsFactors = FALSE
+      )
+      d0 <- d0[is.finite(d0$time) & d0$time > 0 & d0$event %in% c(0, 1) & is.finite(d0$pathway_score) & !is.na(d0$met), ]
+      for (mg in c("未转移", "转移")) {
+        d <- d0[d0$met == mg, ]
+        if (nrow(d) < min_n || sum(d$event) < min_ev) next
+        d$group <- ifelse(d$pathway_score >= stats::median(d$pathway_score, na.rm = TRUE), "High", "Low")
+        d$group <- factor(d$group, levels = c("Low", "High"))
+        cox_g <- tryCatch(survival::coxph(survival::Surv(time, event) ~ group, data = d), error = function(e) NULL)
+        if (!is.null(cox_g)) {
+          s2 <- summary(cox_g)
+          surv_rows[[paste(g, mg, sep = "_")]] <- data.table(
+            GO = g, GO_name = gnm, met_group = mg, model = "High_vs_Low_within_met",
+            n = nrow(d), events = sum(d$event),
+            HR = s2$conf.int[1, 1], HR_low = s2$conf.int[1, 3], HR_high = s2$conf.int[1, 4],
+            pvalue = s2$coefficients[1, "Pr(>|z|)"]
+          )
+        }
+        fit <- tryCatch(survival::survfit(survival::Surv(time / 30.44, event) ~ group, data = d), error = function(e) NULL)
+        if (!is.null(fit)) {
+          ok <- tryCatch({
+            print(survminer::ggsurvplot(
+              fit, data = d, pval = TRUE, risk.table = TRUE,
+              legend.labs = c("Low", "High"),
+              xlab = "Time (months)", ylab = "Overall survival",
+              title = paste0(g, " | ", gnm, "\n", mg, " 亚组内 High vs Low"),
+              ggtheme = ggplot2::theme_bw()
+            ))
+            TRUE
+          }, error = function(e) FALSE)
+          if (isTRUE(ok)) n_km <- n_km + 1L
+        }
+      }
+    }
+    invisible(dev.off())
+    if (n_km == 0L && file.exists(pdf_km)) file.remove(pdf_km)
+    if (n_km > 0L) message("已保存亚组 KM：", pdf_km, " （", n_km, " 张）")
+  }
+
+  if (length(surv_rows) > 0) {
+    surv_dt <- rbindlist(surv_rows, fill = TRUE)
+    fwrite(surv_dt, file.path(result_dir, "09_nerve_GO_OS_cox_within_met.csv"))
+    surv_dt[, lab := paste(GO, met_group)]
+    p_hr <- ggplot(surv_dt, aes(x = HR, y = reorder(lab, HR))) +
+      geom_vline(xintercept = 1, linetype = 2, color = "grey50") +
+      geom_errorbar(aes(xmin = HR_low, xmax = HR_high), orientation = "y", width = 0.2) +
+      geom_point(aes(color = pvalue < 0.05), size = 2.5) +
+      scale_x_log10() +
+      facet_wrap(~ met_group, scales = "free_y") +
+      labs(
+        title = "OS：通路 High vs Low（在转移 / 未转移亚组内分别计算）",
+        x = "Hazard ratio", y = NULL, color = "p < 0.05"
+      ) +
+      theme_bw()
+    ggsave(file.path(result_dir, "09_nerve_GO_OS_forest_within_met.pdf"), p_hr, width = 11, height = 7)
+    message("已保存亚组 OS 森林图：", file.path(result_dir, "09_nerve_GO_OS_forest_within_met.pdf"))
+  }
+
+  message("转移 vs 未转移的神经通路分析完成。主表：09_nerve_GO_score_by_metastasis.csv")
+  invisible(stat_dt)
+}
+
+score_ready <- file.exists(file.path(
+  if (exists("out_dir", inherits = TRUE)) out_dir else "results_GO_individual",
+  "01_pathway_scores_each_GO.csv"
+))
+if (score_ready || (exists("expr", inherits = TRUE) && exists("clinical_data", inherits = TRUE))) {
+  tryCatch(
+    analyze_nerve_go_by_metastasis(),
+    error = function(e) message("转移 vs 未转移分析未完成：", conditionMessage(e))
+  )
+} else {
+  message("还没有通路分数或临床数据。跑完前面分析后执行：analyze_nerve_go_by_metastasis()")
 }
 
