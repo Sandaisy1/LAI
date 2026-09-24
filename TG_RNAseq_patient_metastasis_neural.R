@@ -370,7 +370,7 @@ patient_filter_low <- function(mat, sample_info, value_type) {
   } else {
     keep <- rowSums(mat > 1, na.rm = TRUE) >= min_n
   }
-  if (sum(keep) < 50) {
+  if (sum(keep) < 20) {
     keep <- rowSums(is.finite(mat) & mat > 0, na.rm = TRUE) >= min_n
     log_msg("Patient filter fallback: keep expressed-in-", min_n, "-samples")
   }
