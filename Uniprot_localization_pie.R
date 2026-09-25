@@ -7,6 +7,8 @@
 #   也可为带表头的 csv/tsv，默认取第一列
 # 物种：基因符号默认按人（NCBI taxId 9606）检索已审核的 Swiss-Prot 条目
 # 定位：只使用 UniProt 条目级 SUBCELLULAR LOCATION（不含各 isoform 的单独注释）
+# 圆饼图按细胞区室计数。一个蛋白可同时计入多个区室（例如细胞核和线粒体）。
+# 扇区上只标蛋白数，图注为英文。
 #
 # 运行：
 #   setwd("E:/R/Uniprot")
@@ -242,7 +244,7 @@ pick_gene_hit <- function(tab, gene) {
 }
 
 # -----------------------------------------------------------------------------
-# 解析亚细胞定位，分成互斥类别（圆饼图各扇区相加为 100%）
+# 解析亚细胞定位。一个蛋白可以同时属于多个区室。
 # -----------------------------------------------------------------------------
 extract_locations <- function(cc) {
   if (is.na(cc) || !nzchar(cc)) return(character(0))
@@ -264,23 +266,47 @@ extract_locations <- function(cc) {
   unique(locs)
 }
 
-is_nucleus_term <- function(loc) {
-  grepl("^(Nucleus|Nucleoplasm|Nucleolus|Nuclear)\\b", loc, ignore.case = TRUE)
+# 先匹配细胞器，再匹配细胞膜，避免把 "Mitochondrion membrane" 算成细胞膜
+compartment_defs <- data.frame(
+  key = c(
+    "nucleus", "cytoplasm", "mitochondrion", "lysosome", "peroxisome",
+    "golgi", "er", "endosome", "plasma_membrane", "secreted", "cytoskeleton"
+  ),
+  label = c(
+    "Nucleus", "Cytoplasm", "Mitochondrion", "Lysosome", "Peroxisome",
+    "Golgi apparatus", "Endoplasmic reticulum", "Endosome", "Plasma membrane",
+    "Secreted", "Cytoskeleton"
+  ),
+  pattern = c(
+    "^(Nucleus|Nucleoplasm|Nucleolus|Nuclear)\\b",
+    "^(Cytoplasm|Cytosol|Cytoplasmic)\\b",
+    "^(Mitochondrion|Mitochondrial)\\b",
+    "^(Lysosome|Lysosomal)\\b",
+    "^(Peroxisome|Peroxisomal)\\b",
+    "^Golgi\\b",
+    "^Endoplasmic reticulum\\b",
+    "^(Endosome|Endosomal)\\b",
+    "^(Cell membrane|Plasma membrane|Cell surface)\\b",
+    "^(Secreted|Extracellular)\\b",
+    "cytoskeleton"
+  ),
+  stringsAsFactors = FALSE
+)
+
+match_compartments <- function(locs) {
+  flags <- setNames(rep(FALSE, nrow(compartment_defs)), compartment_defs$key)
+  if (length(locs) == 0) return(flags)
+  for (i in seq_len(nrow(compartment_defs))) {
+    flags[[i]] <- any(grepl(compartment_defs$pattern[i], locs, ignore.case = TRUE))
+  }
+  flags
 }
 
-is_cytoplasm_term <- function(loc) {
-  grepl("^(Cytoplasm|Cytosol|Cytoplasmic)\\b", loc, ignore.case = TRUE)
+compartment_labels <- function(flags) {
+  compartment_defs$label[as.logical(flags)]
 }
 
-classify_locations <- function(locs) {
-  in_nuc <- any(is_nucleus_term(locs))
-  in_cyt <- any(is_cytoplasm_term(locs))
-  if (in_nuc && in_cyt) return("细胞核和细胞质")
-  if (in_nuc) return("细胞核")
-  if (in_cyt) return("细胞质")
-  if (length(locs) == 0) return("无定位信息")
-  "其他细胞定位"
-}
+empty_flags <- setNames(rep(FALSE, nrow(compartment_defs)), compartment_defs$key)
 
 empty_row <- function(query) {
   data.frame(
@@ -290,9 +316,8 @@ empty_row <- function(query) {
     gene = NA_character_,
     protein_name = NA_character_,
     locations = NA_character_,
-    in_nucleus = FALSE,
-    in_cytoplasm = FALSE,
-    category = "无定位信息",
+    compartments = NA_character_,
+    as.list(empty_flags),
     stringsAsFactors = FALSE
   )
 }
@@ -314,8 +339,8 @@ for (i in seq_along(proteins)) {
     next
   }
   locs <- extract_locations(hit$location_cc)
-  in_nuc <- any(is_nucleus_term(locs))
-  in_cyt <- any(is_cytoplasm_term(locs))
+  flags <- match_compartments(locs)
+  labels <- compartment_labels(flags)
   rows[[i]] <- data.frame(
     query = q,
     accession = hit$accession,
@@ -323,86 +348,76 @@ for (i in seq_along(proteins)) {
     gene = hit$gene,
     protein_name = hit$protein_name,
     locations = if (length(locs)) paste(locs, collapse = "; ") else NA_character_,
-    in_nucleus = in_nuc,
-    in_cytoplasm = in_cyt,
-    category = classify_locations(locs),
+    compartments = if (length(labels)) paste(labels, collapse = "; ") else NA_character_,
+    as.list(flags),
     stringsAsFactors = FALSE
   )
 }
 
 result <- do.call(rbind, rows)
 rownames(result) <- NULL
-
-category_levels <- c("细胞核", "细胞质", "细胞核和细胞质", "其他细胞定位", "无定位信息")
-result$category <- factor(result$category, levels = category_levels)
+flag_cols <- compartment_defs$key
+known <- rowSums(result[, flag_cols, drop = FALSE]) > 0
+has_location <- !is.na(result$locations) & nzchar(result$locations)
+result$other <- has_location & !known
+result$not_available <- !has_location
 
 detail_file <- file.path(out_dir, "protein_localization.csv")
 utils::write.csv(result, detail_file, row.names = FALSE, fileEncoding = "UTF-8")
 
-summary_df <- as.data.frame(table(result$category), stringsAsFactors = FALSE)
-colnames(summary_df) <- c("category", "n")
+pie_labels <- c(compartment_defs$label, "Other", "Not available")
+pie_counts <- c(
+  vapply(flag_cols, function(col) sum(result[[col]]), numeric(1)),
+  sum(result$other),
+  sum(result$not_available)
+)
+summary_df <- data.frame(
+  category = pie_labels,
+  n = as.integer(pie_counts),
+  stringsAsFactors = FALSE
+)
 summary_df <- summary_df[summary_df$n > 0, , drop = FALSE]
-summary_df$category <- factor(summary_df$category, levels = category_levels)
-summary_df <- summary_df[order(summary_df$category), , drop = FALSE]
 summary_df$percent <- summary_df$n / sum(summary_df$n) * 100
-summary_df$label <- sprintf("%s\n%d (%.1f%%)", summary_df$category, summary_df$n, summary_df$percent)
+summary_df$category <- factor(summary_df$category, levels = summary_df$category)
 
-n_nucleus <- sum(result$in_nucleus)
-n_cytoplasm <- sum(result$in_cytoplasm)
 n_total <- nrow(result)
-
 summary_file <- file.path(out_dir, "localization_summary.csv")
-utils::write.csv(summary_df[, c("category", "n", "percent")], summary_file,
-                 row.names = FALSE, fileEncoding = "UTF-8")
+utils::write.csv(summary_df, summary_file, row.names = FALSE, fileEncoding = "UTF-8")
 
-message(sprintf("共 %d 个蛋白：注释到细胞核 %d 个，注释到细胞质 %d 个（同时定位的两边都计入）。",
-                n_total, n_nucleus, n_cytoplasm))
-print(summary_df[, c("category", "n", "percent")])
+message(sprintf("共 %d 个蛋白。同一蛋白可同时计入多个区室，因此各区室人数之和可以大于蛋白总数。", n_total))
+print(summary_df[, c("category", "n", "percent")], row.names = FALSE)
 
 # -----------------------------------------------------------------------------
-# 圆饼图
+# 圆饼图：扇区只标人数，图注用英文
 # -----------------------------------------------------------------------------
 pie_colors <- c(
-  "细胞核" = "#2F6FAD",
-  "细胞质" = "#E07A3D",
-  "细胞核和细胞质" = "#7B5EA7",
-  "其他细胞定位" = "#6E9B6A",
-  "无定位信息" = "#B0B3B8"
-)
-
-font_family <- "sans"
-if (.Platform$OS.type == "windows") {
-  win_fonts <- c("Microsoft YaHei", "SimHei", "SimSun")
-  font_family <- win_fonts[1]
-} else if (any(grepl("WenQuanYi Micro Hei", system("fc-list : family", intern = TRUE), fixed = TRUE))) {
-  font_family <- "WenQuanYi Micro Hei"
-}
-
-subtitle <- sprintf(
-  "共 %d 个蛋白；含细胞核注释 %d 个，含细胞质注释 %d 个",
-  n_total, n_nucleus, n_cytoplasm
+  "Nucleus" = "#2F6FAD",
+  "Cytoplasm" = "#E07A3D",
+  "Mitochondrion" = "#C0392B",
+  "Lysosome" = "#C9A227",
+  "Peroxisome" = "#7A9A3A",
+  "Golgi apparatus" = "#D47BA0",
+  "Endoplasmic reticulum" = "#2A9D8F",
+  "Endosome" = "#8C6BB1",
+  "Plasma membrane" = "#1D6A4F",
+  "Secreted" = "#4C78A8",
+  "Cytoskeleton" = "#B85C38",
+  "Other" = "#8E8E8E",
+  "Not available" = "#C8C8C8"
 )
 
 p <- ggplot(summary_df, aes(x = "", y = n, fill = category)) +
   geom_col(width = 1, color = "white", linewidth = 0.6) +
   coord_polar(theta = "y") +
   geom_text(
-    aes(label = label),
+    aes(label = n),
     position = position_stack(vjust = 0.5),
-    family = font_family,
-    size = 3.6,
-    lineheight = 0.95
+    size = 3.4
   ) +
-  scale_fill_manual(values = pie_colors, drop = FALSE) +
-  labs(
-    title = "蛋白质亚细胞定位",
-    subtitle = subtitle,
-    fill = "定位"
-  ) +
-  theme_void(base_family = font_family) +
+  scale_fill_manual(values = pie_colors, drop = TRUE) +
+  labs(fill = "Localization") +
+  theme_void() +
   theme(
-    plot.title = element_text(hjust = 0.5, face = "bold", size = 16, margin = margin(b = 4)),
-    plot.subtitle = element_text(hjust = 0.5, size = 11, color = "grey30", margin = margin(b = 8)),
     legend.position = "right",
     legend.title = element_text(size = 12),
     legend.text = element_text(size = 11),
