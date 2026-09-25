@@ -9,7 +9,8 @@
 # 定位：只使用 UniProt 条目级 SUBCELLULAR LOCATION（不含各 isoform 的单独注释）
 # 圆饼图只分六组：Nucleus、Mitochondrion、Cytoplasm、Endoplasmic reticulum、
 # Golgi apparatus、Other。不做组合组。一个蛋白若同时位于其中几组，各组都计入。
-# 扇区上只标蛋白数，图注为英文。整张图保存在 localization/localization_pie.png。
+# 扇区大小按各组人数占比计算，扇区上只标百分比，图注为英文。
+# 整张图保存在 localization/localization_pie.png。
 # 线粒体蛋白再做 GO 富集（BP、MF），并单独抽出线粒体功能相关条目。
 # 结果在 localization/Mitochondrion/GO/。
 #
@@ -374,7 +375,7 @@ summary_file <- file.path(out_dir, "localization_summary.csv")
 utils::write.csv(summary_df, summary_file, row.names = FALSE, fileEncoding = "UTF-8")
 
 message(sprintf(
-  "共 %d 个蛋白。只统计细胞核、线粒体、细胞质、内质网、高尔基体；其余（含无定位）计入 Other。同时位于多组的蛋白各组都计入。",
+  "共 %d 个蛋白。圆饼图按各组人数占比绘制，扇区文字为百分比，六组百分比之和为 100%%。同时位于多组的蛋白各组都计入。",
   n_total
 ))
 print(summary_df[, c("category", "n", "percent")], row.names = FALSE)
@@ -395,7 +396,7 @@ p <- ggplot(summary_df, aes(x = "", y = n, fill = category)) +
   geom_col(width = 1, color = "white", linewidth = 0.6) +
   coord_polar(theta = "y", clip = "off") +
   geom_text(
-    aes(label = n),
+    aes(label = sprintf("%.1f%%", percent)),
     position = position_stack(vjust = 0.5),
     size = 4
   ) +
