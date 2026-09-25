@@ -10,6 +10,8 @@
 # 圆饼图只分六组：Nucleus、Mitochondrion、Cytoplasm、Endoplasmic reticulum、
 # Golgi apparatus、Other。不做组合组。一个蛋白若同时位于其中几组，各组都计入。
 # 扇区上只标蛋白数，图注为英文。整张图保存在 localization/localization_pie.png。
+# 线粒体蛋白再做 GO 富集（BP、MF），并单独抽出线粒体功能相关条目。
+# 结果在 localization/Mitochondrion/GO/。
 #
 # 运行：
 #   setwd("E:/R/Uniprot")
@@ -417,3 +419,192 @@ message("明细表: ", detail_file)
 message("计数表: ", summary_file)
 message("圆饼图: ", pdf_file)
 message("圆饼图: ", png_file)
+
+# -----------------------------------------------------------------------------
+# 线粒体蛋白的 GO 富集：看这些蛋白主要参与哪些线粒体功能
+# 背景是本次 protein.txt 里能映射到的全部基因，而不是整个人类基因组
+# -----------------------------------------------------------------------------
+ensure_bioc <- function(pkgs) {
+  miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(miss) == 0) return(invisible(TRUE))
+  if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager", repos = "https://cloud.r-project.org")
+  }
+  BiocManager::install(miss, update = FALSE, ask = FALSE)
+  still <- miss[!vapply(miss, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(still) > 0) {
+    stop("缺少 GO 分析所需的 R 包: ", paste(still, collapse = ", "),
+         "。请先安装 clusterProfiler 和 org.Hs.eg.db 后再运行。")
+  }
+  invisible(TRUE)
+}
+
+ensure_bioc(c("clusterProfiler", "org.Hs.eg.db"))
+suppressPackageStartupMessages({
+  library(clusterProfiler)
+  library(org.Hs.eg.db)
+})
+
+symbol_for_go <- function(query, gene) {
+  if (!is.na(query) && nzchar(query) && !is_accession(query) && !is_entry_name(query)) {
+    return(query)
+  }
+  if (is.na(gene) || !nzchar(gene)) return(NA_character_)
+  parts <- unlist(strsplit(gene, "[;[:space:]]+"))
+  parts <- parts[nzchar(parts)]
+  if (length(parts) == 0) return(NA_character_)
+  parts[[1]]
+}
+
+result$symbol <- mapply(symbol_for_go, result$query, result$gene, USE.NAMES = FALSE)
+mito_tbl <- result[result$mitochondrion %in% TRUE, , drop = FALSE]
+mito_dir <- file.path(out_dir, "Mitochondrion")
+go_dir <- file.path(mito_dir, "GO")
+dir.create(go_dir, recursive = TRUE, showWarnings = FALSE)
+utils::write.csv(mito_tbl, file.path(mito_dir, "mitochondrial_proteins.csv"),
+                 row.names = FALSE, fileEncoding = "UTF-8")
+
+mito_sym <- unique(mito_tbl$symbol[!is.na(mito_tbl$symbol) & nzchar(mito_tbl$symbol)])
+all_sym <- unique(result$symbol[!is.na(result$symbol) & nzchar(result$symbol)])
+message("线粒体蛋白 ", nrow(mito_tbl), " 个，可用于 GO 的基因符号 ", length(mito_sym), " 个。")
+
+if (length(mito_sym) < 3) {
+  writeLines(
+    "线粒体蛋白少于 3 个，跳过 GO 富集。",
+    file.path(go_dir, "ORA_GO_skipped.txt")
+  )
+  message("线粒体蛋白少于 3 个，跳过 GO 富集。")
+} else {
+  mapped <- tryCatch(
+    clusterProfiler::bitr(all_sym, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db),
+    error = function(e) {
+      stop("基因符号无法映射到 Entrez ID: ", conditionMessage(e))
+    }
+  )
+  mapped <- mapped[!duplicated(mapped$ENTREZID), , drop = FALSE]
+  mito_entrez <- unique(mapped$ENTREZID[mapped$SYMBOL %in% mito_sym])
+  universe <- unique(mapped$ENTREZID)
+  message("映射到 Entrez：线粒体 ", length(mito_entrez), " 个，背景 ", length(universe), " 个。")
+
+  mito_fun_pattern <- paste(
+    "mitochond",
+    "oxidative phosphorylation",
+    "electron transport",
+    "respiratory chain",
+    "respirasome",
+    "tricarboxylic",
+    "citrate cycle",
+    "\\bTCA\\b",
+    "Krebs",
+    "crista",
+    "mitophag",
+    "ATP synth",
+    "NADH dehydrogenase",
+    "ubiquinone",
+    "cytochrome c oxidase",
+    "oxphos",
+    sep = "|"
+  )
+
+  plot_go_bar <- function(df, path_prefix, title) {
+    if (is.null(df) || nrow(df) == 0) return(invisible(NULL))
+    df <- df[order(df$p.adjust, df$pvalue), , drop = FALSE]
+    df <- head(df, 15)
+    df$Description <- factor(df$Description, levels = rev(unique(df$Description)))
+    g <- ggplot(df, aes(x = -log10(pmax(p.adjust, 1e-300)), y = Description)) +
+      geom_col(fill = "#C0392B", width = 0.72) +
+      labs(title = title, x = expression(-log[10](adjusted~italic(p))), y = NULL) +
+      theme_bw(base_size = 12) +
+      theme(
+        plot.title = element_text(face = "bold", size = 13),
+        axis.text.y = element_text(size = 10),
+        plot.margin = margin(10, 16, 10, 10)
+      )
+    h <- max(5, 0.38 * nrow(df) + 1.6)
+    ggsave(paste0(path_prefix, ".pdf"), g, width = 10, height = h, device = cairo_pdf, bg = "white")
+    ggsave(paste0(path_prefix, ".png"), g, width = 10, height = h, dpi = 180, bg = "white")
+    invisible(g)
+  }
+
+  run_go <- function(ont) {
+    ego <- tryCatch(
+      clusterProfiler::enrichGO(
+        gene = mito_entrez,
+        universe = universe,
+        OrgDb = org.Hs.eg.db,
+        keyType = "ENTREZID",
+        ont = ont,
+        pAdjustMethod = "BH",
+        pvalueCutoff = 0.05,
+        qvalueCutoff = 0.2,
+        readable = TRUE
+      ),
+      error = function(e) {
+        message("GO ", ont, " 富集失败: ", conditionMessage(e))
+        NULL
+      }
+    )
+    relaxed <- FALSE
+    if (is.null(ego) || nrow(as.data.frame(ego)) == 0) {
+      relaxed <- TRUE
+      ego <- tryCatch(
+        clusterProfiler::enrichGO(
+          gene = mito_entrez,
+          universe = universe,
+          OrgDb = org.Hs.eg.db,
+          keyType = "ENTREZID",
+          ont = ont,
+          pAdjustMethod = "BH",
+          pvalueCutoff = 1,
+          qvalueCutoff = 1,
+          readable = TRUE
+        ),
+        error = function(e) NULL
+      )
+    }
+    df <- if (is.null(ego)) data.frame() else as.data.frame(ego)
+    list(table = df, relaxed = relaxed && nrow(df) > 0)
+  }
+
+  for (ont in c("BP", "MF")) {
+    message("GO ", ont, " ...")
+    got <- run_go(ont)
+    df <- got$table
+    csv_path <- file.path(go_dir, paste0("ORA_GO_", ont, ".csv"))
+    utils::write.csv(df, csv_path, row.names = FALSE, fileEncoding = "UTF-8")
+    title <- paste0("Mitochondrial proteins | GO ", ont)
+    if (isTRUE(got$relaxed)) {
+      title <- paste0(title, " (no term with adjusted p < 0.05)")
+    }
+    plot_go_bar(df, file.path(go_dir, paste0("ORA_GO_", ont, "_barplot")), title)
+    message("GO ", ont, " 表: ", csv_path)
+  }
+
+  bp <- utils::read.csv(file.path(go_dir, "ORA_GO_BP.csv"), stringsAsFactors = FALSE, check.names = FALSE)
+  if (nrow(bp) > 0 && "Description" %in% names(bp)) {
+    focus <- bp[grepl(mito_fun_pattern, bp$Description, ignore.case = TRUE), , drop = FALSE]
+  } else {
+    focus <- bp
+  }
+  focus_csv <- file.path(go_dir, "ORA_GO_BP_mitochondrial_function.csv")
+  utils::write.csv(focus, focus_csv, row.names = FALSE, fileEncoding = "UTF-8")
+  if (nrow(focus) == 0) {
+    writeLines(
+      "BP 富集结果里没有匹配到线粒体功能相关条目。请查看 ORA_GO_BP.csv 的全部生物学过程。",
+      file.path(go_dir, "ORA_GO_BP_mitochondrial_function_empty.txt")
+    )
+    message("没有筛到线粒体功能相关的 GO 条目，完整 BP 表仍在 ORA_GO_BP.csv。")
+  } else {
+    focus <- focus[order(focus$p.adjust, focus$pvalue), , drop = FALSE]
+    plot_go_bar(
+      focus,
+      file.path(go_dir, "ORA_GO_BP_mitochondrial_function_barplot"),
+      "Mitochondrial proteins | mitochondrial functions (GO BP)"
+    )
+    message("线粒体功能相关 GO 条目 ", nrow(focus), " 个。靠前的是：")
+    show_n <- min(10, nrow(focus))
+    print(focus[seq_len(show_n), c("Description", "pvalue", "p.adjust", "Count")], row.names = FALSE)
+  }
+  message("线粒体蛋白表: ", file.path(mito_dir, "mitochondrial_proteins.csv"))
+  message("线粒体功能 GO 图: ", file.path(go_dir, "ORA_GO_BP_mitochondrial_function_barplot.png"))
+}
