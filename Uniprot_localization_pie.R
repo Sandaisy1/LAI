@@ -15,7 +15,7 @@
 
 options(stringsAsFactors = FALSE, timeout = 600)
 
-cran_required <- c("ggplot2")
+cran_required <- c("ggplot2", "curl")
 
 install_if_missing <- function(pkgs) {
   miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
@@ -107,6 +107,53 @@ message("蛋白数: ", length(proteins))
 # -----------------------------------------------------------------------------
 # UniProt REST 查询（分批，避免 URL 过长）
 # -----------------------------------------------------------------------------
+# Windows 自带的 libcurl 常会协商 HTTP/2，随后报
+# "Error in the HTTP2 framing layer"。这里强制 HTTP/1.1，失败再改用 wininet。
+download_uniprot <- function(url) {
+  tmp <- tempfile(fileext = ".tsv")
+  last_err <- "未知错误"
+
+  if (requireNamespace("curl", quietly = TRUE)) {
+    for (attempt in 1:3) {
+      handle <- curl::new_handle()
+      curl::handle_setopt(
+        handle,
+        http_version = 2L,
+        timeout = 180,
+        followlocation = TRUE,
+        useragent = "Uniprot_localization_pie.R"
+      )
+      ok <- tryCatch({
+        curl::curl_download(url, tmp, handle = handle, quiet = TRUE)
+        TRUE
+      }, error = function(e) {
+        last_err <<- conditionMessage(e)
+        FALSE
+      })
+      if (isTRUE(ok) && file.exists(tmp) && file.info(tmp)$size > 0) return(tmp)
+      Sys.sleep(1.5 * attempt)
+    }
+  }
+
+  methods <- if (.Platform$OS.type == "windows") c("wininet", "libcurl") else "libcurl"
+  for (method in methods) {
+    ok <- tryCatch({
+      utils::download.file(url, tmp, quiet = TRUE, mode = "wb", method = method)
+      TRUE
+    }, error = function(e) {
+      last_err <<- conditionMessage(e)
+      FALSE
+    })
+    if (isTRUE(ok) && file.exists(tmp) && file.info(tmp)$size > 0) return(tmp)
+  }
+
+  unlink(tmp)
+  stop(
+    "访问 UniProt 失败: ", last_err,
+    "\n若仍是 HTTP2 framing layer，请换一个网络后重新 source 本脚本。"
+  )
+}
+
 uniprot_search <- function(query) {
   url <- paste0(
     "https://rest.uniprot.org/uniprotkb/search?",
@@ -114,18 +161,8 @@ uniprot_search <- function(query) {
     "&fields=", utils::URLencode(UNIPROT_FIELDS, reserved = TRUE),
     "&format=tsv&size=500"
   )
-  tmp <- tempfile(fileext = ".tsv")
+  tmp <- download_uniprot(url)
   on.exit(unlink(tmp), add = TRUE)
-  status <- tryCatch(
-    utils::download.file(url, tmp, quiet = TRUE, mode = "wb", method = "libcurl"),
-    error = function(e) {
-      stop("访问 UniProt 失败: ", conditionMessage(e))
-    }
-  )
-  if (!identical(status, 0L)) stop("访问 UniProt 失败，HTTP 状态码: ", status)
-  if (!file.exists(tmp) || file.info(tmp)$size == 0) {
-    return(data.frame())
-  }
   utils::read.delim(tmp, sep = "\t", quote = "", comment.char = "", check.names = FALSE)
 }
 
