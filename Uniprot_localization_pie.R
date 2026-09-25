@@ -7,7 +7,8 @@
 #   也可为带表头的 csv/tsv，默认取第一列
 # 物种：基因符号默认按人（NCBI taxId 9606）检索已审核的 Swiss-Prot 条目
 # 定位：只使用 UniProt 条目级 SUBCELLULAR LOCATION（不含各 isoform 的单独注释）
-# 圆饼图按细胞区室计数。一个蛋白可同时计入多个区室（例如细胞核和线粒体）。
+# 圆饼图各组互斥：只出现在一个区室的蛋白单独成组；
+# 同时出现在多个区室的蛋白归入组合组（如 Nucleus and Mitochondrion）。
 # 扇区上只标蛋白数，图注为英文。
 #
 # 运行：
@@ -362,29 +363,44 @@ has_location <- !is.na(result$locations) & nzchar(result$locations)
 result$other <- has_location & !known
 result$not_available <- !has_location
 
+# 只在一个区室：组名就是该区室，表示其他区室没有。
+# 同时在多个区室：单独成组，组名列出全部区室。
+exclusive_label <- function(labels) {
+  labels <- labels[!is.na(labels) & nzchar(labels)]
+  if (length(labels) == 0) return(NA_character_)
+  if (length(labels) == 1) return(labels)
+  if (length(labels) == 2) return(paste(labels, collapse = " and "))
+  paste0(paste(labels[-length(labels)], collapse = ", "), " and ", labels[length(labels)])
+}
+
+result$pie_group <- vapply(seq_len(nrow(result)), function(i) {
+  labs <- compartment_defs$label[as.logical(unlist(result[i, flag_cols]))]
+  if (length(labs) == 0) {
+    if (isTRUE(result$other[i])) return("Other")
+    return("Not available")
+  }
+  exclusive_label(labs)
+}, character(1))
+
 detail_file <- file.path(out_dir, "protein_localization.csv")
 utils::write.csv(result, detail_file, row.names = FALSE, fileEncoding = "UTF-8")
 
-pie_labels <- c(compartment_defs$label, "Other", "Not available")
-pie_counts <- c(
-  vapply(flag_cols, function(col) sum(result[[col]]), numeric(1)),
-  sum(result$other),
-  sum(result$not_available)
-)
-summary_df <- data.frame(
-  category = pie_labels,
-  n = as.integer(pie_counts),
-  stringsAsFactors = FALSE
-)
-summary_df <- summary_df[summary_df$n > 0, , drop = FALSE]
+count_tab <- as.data.frame(table(result$pie_group), stringsAsFactors = FALSE)
+colnames(count_tab) <- c("category", "n")
+single_levels <- compartment_defs$label[compartment_defs$label %in% count_tab$category]
+multi_levels <- setdiff(count_tab$category, c(single_levels, "Other", "Not available"))
+multi_levels <- multi_levels[order(-count_tab$n[match(multi_levels, count_tab$category)])]
+level_order <- c(single_levels, multi_levels, intersect(c("Other", "Not available"), count_tab$category))
+summary_df <- count_tab
+summary_df$category <- factor(summary_df$category, levels = level_order)
+summary_df <- summary_df[order(summary_df$category), , drop = FALSE]
 summary_df$percent <- summary_df$n / sum(summary_df$n) * 100
-summary_df$category <- factor(summary_df$category, levels = summary_df$category)
 
 n_total <- nrow(result)
 summary_file <- file.path(out_dir, "localization_summary.csv")
 utils::write.csv(summary_df, summary_file, row.names = FALSE, fileEncoding = "UTF-8")
 
-message(sprintf("共 %d 个蛋白。同一蛋白可同时计入多个区室，因此各区室人数之和可以大于蛋白总数。", n_total))
+message(sprintf("共 %d 个蛋白。只写一个区室的组表示该蛋白仅在该区室；多个区室写成组合组。各组人数之和等于蛋白总数。", n_total))
 print(summary_df[, c("category", "n", "percent")], row.names = FALSE)
 
 # -----------------------------------------------------------------------------
@@ -406,28 +422,47 @@ pie_colors <- c(
   "Not available" = "#C8C8C8"
 )
 
+slice_colors <- pie_colors[intersect(names(pie_colors), levels(summary_df$category))]
+combo_levels <- setdiff(levels(summary_df$category), names(slice_colors))
+if (length(combo_levels) > 0) {
+  extra <- grDevices::hcl(
+    h = seq(15, 360, length.out = length(combo_levels) + 1)[seq_along(combo_levels)],
+    c = 75, l = 58
+  )
+  names(extra) <- combo_levels
+  slice_colors <- c(slice_colors, extra)
+}
+slice_colors <- slice_colors[levels(summary_df$category)]
+
 p <- ggplot(summary_df, aes(x = "", y = n, fill = category)) +
-  geom_col(width = 1, color = "white", linewidth = 0.6) +
+  geom_col(width = 1, color = "white", linewidth = 0.4) +
   coord_polar(theta = "y") +
   geom_text(
-    aes(label = n),
+    aes(label = ifelse(n / sum(n) >= 0.035, n, "")),
     position = position_stack(vjust = 0.5),
-    size = 3.4
+    size = 3.2
   ) +
-  scale_fill_manual(values = pie_colors, drop = TRUE) +
+  scale_fill_manual(
+    values = slice_colors,
+    drop = FALSE,
+    labels = setNames(
+      sprintf("%s (%d)", summary_df$category, summary_df$n),
+      summary_df$category
+    )
+  ) +
   labs(fill = "Localization") +
   theme_void() +
   theme(
     legend.position = "right",
     legend.title = element_text(size = 12),
-    legend.text = element_text(size = 11),
+    legend.text = element_text(size = 9),
     plot.margin = margin(12, 12, 12, 12)
   )
 
 pdf_file <- file.path(out_dir, "localization_pie.pdf")
 png_file <- file.path(out_dir, "localization_pie.png")
-ggsave(pdf_file, p, width = 8, height = 6, device = cairo_pdf)
-ggsave(png_file, p, width = 8, height = 6, dpi = 180)
+ggsave(pdf_file, p, width = 11, height = 7, device = cairo_pdf)
+ggsave(png_file, p, width = 11, height = 7, dpi = 180)
 
 message("明细表: ", detail_file)
 message("计数表: ", summary_file)
