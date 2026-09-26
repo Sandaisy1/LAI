@@ -336,16 +336,20 @@ compare_go_groups <- function(go_score_vec, group, pos, neg, grouping) {
   df <- df[is.finite(df$pathway_score) & df$group %in% c(pos, neg), ]
   n_pos <- sum(df$group == pos)
   n_neg <- sum(df$group == neg)
-  if (n_pos < min_group_n || n_neg < min_group_n) return(NULL)
-  wt <- suppressWarnings(stats::wilcox.test(pathway_score ~ group, data = df))
+  if (n_pos < 1 && n_neg < 1) return(NULL)
+  pval <- NA_real_
+  if (n_pos >= min_group_n && n_neg >= min_group_n) {
+    wt <- suppressWarnings(stats::wilcox.test(pathway_score ~ group, data = df))
+    pval <- wt$p.value
+  }
+  med_pos <- if (n_pos > 0) stats::median(df$pathway_score[df$group == pos], na.rm = TRUE) else NA_real_
+  med_neg <- if (n_neg > 0) stats::median(df$pathway_score[df$group == neg], na.rm = TRUE) else NA_real_
   data.table(
     grouping = grouping, pos_level = pos, neg_level = neg,
     n_pos = n_pos, n_neg = n_neg,
-    median_pos = stats::median(df$pathway_score[df$group == pos], na.rm = TRUE),
-    median_neg = stats::median(df$pathway_score[df$group == neg], na.rm = TRUE),
-    delta_median = stats::median(df$pathway_score[df$group == pos], na.rm = TRUE) -
-      stats::median(df$pathway_score[df$group == neg], na.rm = TRUE),
-    pvalue = wt$p.value
+    median_pos = med_pos, median_neg = med_neg,
+    delta_median = med_pos - med_neg,
+    pvalue = pval
   )
 }
 
@@ -395,28 +399,53 @@ maybe_label <- function() {
   function(...) ggplot2::geom_blank()
 }
 
-plot_go_bubble <- function(stat_dt, title, subtitle, path_stub, x_lab = NULL) {
+# 每个 GO 拆成两列：未转移 / 转移，分别画该组通路分数中位数
+expand_met_two_cols <- function(stat_dt) {
   d <- copy(as.data.table(stat_dt))
-  d <- d[is.finite(pvalue) & is.finite(delta_median)]
-  if (nrow(d) == 0) return(invisible(NULL))
-  d[, y_lab := factor(paste0(GO, "  ", GO_name), levels = rev(unique(paste0(GO, "  ", GO_name))))]
-  x_vals <- if (is.null(x_lab)) as.character(d$grp_lab) else rep(as.character(x_lab), nrow(d))
-  d[, x_lab := x_vals]
-  d[, neglogp := pmin(10, -log10(pmax(pvalue, 1e-12)))]
-  p <- ggplot(d, aes(x = x_lab, y = y_lab)) +
-    geom_point(aes(size = neglogp, color = pmin(pmax(delta_median, -1), 1))) +
-    scale_color_gradient2(low = "#3C5488", mid = "white", high = "#E64B35",
-                          midpoint = 0, name = "Δ median\n(转移 − 未转移)") +
-    scale_size_continuous(range = c(3, 12), name = expression(-log[10](p))) +
+  if (nrow(d) == 0) return(d)
+  rbindlist(list(
+    d[, .(
+      GO, GO_name, grouping, panel,
+      side = "未转移", x_lab = neg_lab,
+      n = n_neg, median_score = median_neg, pvalue
+    )],
+    d[, .(
+      GO, GO_name, grouping, panel,
+      side = "转移", x_lab = pos_lab,
+      n = n_pos, median_score = median_pos, pvalue
+    )]
+  ), fill = TRUE)
+}
+
+plot_go_bubble_two_cols <- function(stat_dt, title, subtitle, path_stub, facet = FALSE) {
+  long <- expand_met_two_cols(stat_dt)
+  long <- long[is.finite(median_score)]
+  if (nrow(long) == 0) return(invisible(NULL))
+  go_lv <- unique(paste0(stat_dt$GO, "  ", stat_dt$GO_name))
+  long[, y_lab := factor(paste0(GO, "  ", GO_name), levels = rev(go_lv))]
+  long[, x_lab := factor(x_lab, levels = unique(c(stat_dt$neg_lab, stat_dt$pos_lab)))]
+  long[, neglogp := ifelse(is.finite(pvalue), pmin(10, -log10(pmax(pvalue, 1e-12))), 0.5)]
+  p <- ggplot(long, aes(x = x_lab, y = y_lab)) +
+    geom_point(aes(size = neglogp, color = median_score)) +
+    scale_color_gradient2(
+      low = "#3C5488", mid = "white", high = "#E64B35",
+      midpoint = 0, name = "通路分数\n中位数"
+    ) +
+    scale_size_continuous(range = c(3, 11), name = expression(-log[10](p))) +
     labs(title = title, subtitle = subtitle, x = NULL, y = NULL) +
     theme_bw(base_size = 12) +
     theme(
-      axis.text.x = element_text(angle = 18, hjust = 1, size = 11),
+      axis.text.x = element_text(angle = 20, hjust = 1, size = 11),
       axis.text.y = element_text(size = 9),
       legend.position = "right",
-      plot.title = element_text(face = "bold")
+      plot.title = element_text(face = "bold"),
+      strip.text = element_text(size = 10)
     )
-  save_plot(p, path_stub, 11, max(6, 0.38 * uniqueN(d$y_lab) + 2.2))
+  if (isTRUE(facet) && "panel" %in% names(long) && uniqueN(long$panel) > 1) {
+    p <- p + facet_wrap(~ panel, nrow = 1, scales = "free_x")
+  }
+  n_panel <- if (isTRUE(facet)) max(1, uniqueN(long$panel)) else 1
+  save_plot(p, path_stub, max(8, 4.2 * n_panel + 4), max(6, 0.38 * uniqueN(long$y_lab) + 2.4))
 }
 
 # ==============================================================================
@@ -594,22 +623,26 @@ run_tcga_brca_2026 <- function() {
   ann_t <- ann_all[sample %in% rownames(score_tumor_mat)]
 
   designs <- list(
-    list(key = "a_distant_M", title = "1a 诊断时远处转移",
-         xlab = "M1 vs M0",
+    list(key = "a_distant_M", title = "1a 诊断时远处转移", panel = "1a 远处转移",
          group = setNames(as.character(ann_p$distant_M), ann_p$sample),
-         pos = "M1", neg = "M0", score_mat = score_primary_mat),
-    list(key = "b_AJCC_stageIV", title = "1b AJCC 分期",
-         xlab = "Stage IV vs I–III",
+         pos = "M1", neg = "M0",
+         pos_lab = "M1（转移）", neg_lab = "M0（未转移）",
+         score_mat = score_primary_mat),
+    list(key = "b_AJCC_stageIV", title = "1b AJCC 分期", panel = "1b AJCC 分期",
          group = setNames(as.character(ann_p$stage_IV), ann_p$sample),
-         pos = "Stage IV", neg = "Stage I-III", score_mat = score_primary_mat),
-    list(key = "c_node_N", title = "1c 淋巴结",
-         xlab = "N+ vs N0",
+         pos = "Stage IV", neg = "Stage I-III",
+         pos_lab = "Stage IV（转移）", neg_lab = "Stage I–III（未转移）",
+         score_mat = score_primary_mat),
+    list(key = "c_node_N", title = "1c 淋巴结", panel = "1c 淋巴结",
          group = setNames(as.character(ann_p$node_N), ann_p$sample),
-         pos = "Nplus", neg = "N0", score_mat = score_primary_mat),
-    list(key = "d_sample_type", title = "1d 样本类型",
-         xlab = "转移组织 vs 原位",
+         pos = "Nplus", neg = "N0",
+         pos_lab = "N+（转移）", neg_lab = "N0（未转移）",
+         score_mat = score_primary_mat),
+    list(key = "d_sample_type", title = "1d 样本类型", panel = "1d 样本类型",
          group = setNames(as.character(ann_t$sample_class), ann_t$sample),
-         pos = "转移组织", neg = "原位肿瘤", score_mat = score_tumor_mat)
+         pos = "转移组织", neg = "原位肿瘤",
+         pos_lab = "转移组织", neg_lab = "原位肿瘤（未转移）",
+         score_mat = score_tumor_mat)
   )
 
   all_go_stats <- list()
@@ -621,10 +654,12 @@ run_tcga_brca_2026 <- function() {
       sc <- as.numeric(sm[, g])
       names(sc) <- rownames(sm)
       one <- compare_go_groups(sc, ds$group[names(sc)], ds$pos, ds$neg, ds$key)
-      if (!is.null(one)) {
-        one[, `:=`(GO = g, GO_name = go_title(g), grp_lab = ds$xlab)]
-        stat_rows[[g]] <- one
-      }
+      if (is.null(one)) next
+      one[, `:=`(
+        GO = g, GO_name = go_title(g),
+        panel = ds$panel, pos_lab = ds$pos_lab, neg_lab = ds$neg_lab
+      )]
+      stat_rows[[g]] <- one
     }
     stat_dt <- rbindlist(stat_rows, fill = TRUE)
     if (nrow(stat_dt) == 0) {
@@ -633,28 +668,28 @@ run_tcga_brca_2026 <- function() {
     }
     stat_dt[, fdr := p.adjust(pvalue, method = "BH")]
     fwrite(stat_dt, file.path(out_dir, paste0("02_", ds$key, "_GO_vs_metastasis.csv")))
+    fwrite(expand_met_two_cols(stat_dt),
+           file.path(out_dir, paste0("02_", ds$key, "_GO_vs_metastasis_two_cols.csv")))
     all_go_stats[[ds$key]] <- stat_dt
-    plot_go_bubble(
+    plot_go_bubble_two_cols(
       stat_dt,
-      title = paste0(ds$title, "：神经 GO vs 转移"),
-      subtitle = paste0("纵轴=各神经信号 GO（单独打分）；横轴=", ds$xlab,
-                        "；颜色=通路分数差（红=转移侧更高）"),
-      path_stub = file.path(out_dir, paste0("02_", ds$key, "_bubble")),
-      x_lab = ds$xlab
+      title = paste0(ds$title, "：神经 GO 在未转移 / 转移"),
+      subtitle = "纵轴=各神经信号 GO（单独打分）；横轴两列=未转移、转移；颜色=该组通路分数中位数，点大小=-log10(Wilcoxon p)",
+      path_stub = file.path(out_dir, paste0("02_", ds$key, "_bubble"))
     )
   }
 
   if (length(all_go_stats) > 0) {
     bubble <- rbindlist(all_go_stats, fill = TRUE)
-    bubble[, grp_lab := factor(grp_lab, levels = c(
-      "M1 vs M0", "Stage IV vs I–III", "N+ vs N0", "转移组织 vs 原位"
-    ))]
     fwrite(bubble, file.path(out_dir, "02_summary_GO_vs_metastasis.csv"))
-    plot_go_bubble(
+    fwrite(expand_met_two_cols(bubble),
+           file.path(out_dir, "02_summary_GO_vs_metastasis_two_cols.csv"))
+    plot_go_bubble_two_cols(
       bubble,
       title = "神经浸润（各神经信号 GO）与乳腺癌转移",
-      subtitle = "纵轴=GO 通路（未合并基因集）；横轴=四种转移定义；点大小=-log10(p)，颜色=Δ median",
-      path_stub = file.path(out_dir, "02_summary_bubble_GO_vs_metastasis")
+      subtitle = "每个面板两列：未转移 | 转移；颜色=该组通路分数中位数；点大小=两组比较的 -log10(p)",
+      path_stub = file.path(out_dir, "02_summary_bubble_GO_vs_metastasis"),
+      facet = TRUE
     )
     if (interactive()) {
       message("主气泡图已保存：02_summary_bubble_GO_vs_metastasis.png")
