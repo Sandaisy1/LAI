@@ -3,8 +3,8 @@
 # 单独脚本：放到 E:/R/TCGA-BRCA-2026，RStudio 打开后从第一行 Source
 # 不要从中间粘贴，不要运行旧的 factor(meta_M) 行
 #
-# 数据目录（.tsv / .tsv.gz 均可）：
-#   TCGA-BRCA.star_fpkm.tsv(.gz)
+# 数据目录（.tsv / .tsv.gz 均可；空的 .tsv 会自动跳过，改读 .gz）：
+#   TCGA-BRCA.star_fpkm.tsv(.gz)         # 若 .tsv 是 WinRAR 留下的空文件，删掉即可
 #   TCGA-BRCA.clinical.tsv(.gz)
 #   TCGA-BRCA.survival.tsv(.gz)          # 可选
 #   gencode.v36.annotation.gtf.gene.probemap
@@ -30,7 +30,7 @@ library(ggpubr)
 # ==============================================================================
 # 参数
 # ==============================================================================
-work_dir <- "E:/R/TCGA-BRCA-2026"
+work_dir <- Sys.getenv("TCGA_BRCA_2026_DIR", unset = "E:/R/TCGA-BRCA-2026")
 out_dir <- "results_TCGA-BRCA-2026"
 min_signature_genes <- 1
 min_group_n <- 2
@@ -96,30 +96,82 @@ safe_name <- function(x) {
 
 existing_files <- function(stems) {
   cands <- unique(unlist(lapply(stems, function(s) c(s, paste0(s, ".gz")))))
-  cands[file.exists(cands)]
+  cands[file.exists(cands) & !is.na(file.info(cands)$isdir) & !file.info(cands)$isdir]
 }
-pick_one_file <- function(stems, must = TRUE) {
+
+# WinRAR 没解压完时会留下空的 .tsv；空文件 / 0 列一律跳过，改用 .gz
+probe_table_file <- function(f) {
+  info <- file.info(f)
+  if (is.null(info) || is.na(info$size) || info$size < 200) {
+    return(data.table(file = f, size = if (is.null(info) || is.na(info$size)) 0 else info$size,
+                      n_col = 0L, readable = FALSE, err = "empty_or_tiny"))
+  }
+  hdr <- tryCatch(names(fread(f, nrows = 0, fill = TRUE, showProgress = FALSE)),
+                  error = function(e) character())
+  data.table(
+    file = f, size = as.numeric(info$size), n_col = length(hdr),
+    readable = length(hdr) >= 1L,
+    err = if (length(hdr) >= 1L) NA_character_ else "unreadable_header"
+  )
+}
+
+pick_best_table <- function(stems, must = TRUE, min_cols = 1L, label = "数据表") {
   hits <- existing_files(stems)
   if (length(hits) == 0) {
-    if (must) stop("找不到文件：", paste(stems, collapse = " / "), "（.tsv 或 .tsv.gz）")
+    if (must) stop("找不到", label, "：", paste(stems, collapse = " / "), "（.tsv 或 .tsv.gz）")
     return(NA_character_)
   }
-  hits[1]
+  tab <- rbindlist(lapply(hits, probe_table_file), fill = TRUE)
+  message(label, "候选：\n",
+          paste(sprintf("  %s  大小=%.1fMB  列=%d  可读=%s",
+                        tab$file, tab$size / 1024^2, tab$n_col, tab$readable),
+                collapse = "\n"))
+  ok <- tab[readable == TRUE & n_col >= min_cols]
+  if (nrow(ok) == 0) {
+    if (must) {
+      stop(
+        label, "存在但读不了（常见原因：WinRAR 还没解压完，留下了空的 .tsv）。",
+        "请删掉空的 .tsv，直接保留 .tsv.gz，或等解压完成后再 Source。\n",
+        "已看到：", paste(tab$file, collapse = " ; ")
+      )
+    }
+    return(NA_character_)
+  }
+  setorder(ok, -n_col, -size)
+  ok$file[1]
+}
+
+safe_fread <- function(path, ...) {
+  out <- tryCatch(fread(path, showProgress = TRUE, ...), error = function(e) e)
+  if (!inherits(out, "error")) return(out)
+  alt <- if (grepl("\\.gz$", path, ignore.case = TRUE)) {
+    sub("\\.gz$", "", path, ignore.case = TRUE)
+  } else {
+    paste0(path, ".gz")
+  }
+  if (file.exists(alt) && isTRUE(file.info(alt)$size > 200)) {
+    message("读 ", path, " 失败（", conditionMessage(out), "），改读 ", alt)
+    return(fread(alt, showProgress = TRUE, ...))
+  }
+  stop(
+    "读不了 ", path, "：", conditionMessage(out),
+    "。若这是空的 .tsv，请删除它并改用同名 .tsv.gz（data.table 可以直接读 gz）。"
+  )
+}
+
+pick_one_file <- function(stems, must = TRUE) {
+  pick_best_table(stems, must = must, min_cols = 1L, label = "文件")
 }
 pick_best_clinical <- function() {
-  hits <- existing_files(c("TCGA-BRCA.clinical.tsv", "TCGA-BRCA.GDC_phenotype.tsv"))
-  if (length(hits) == 0) stop("找不到 TCGA-BRCA.clinical.tsv 或 .gz")
-  scored <- lapply(hits, function(f) {
-    hdr <- tryCatch(names(fread(f, nrows = 0)), error = function(e) character())
-    n_hit <- sum(grepl("ajcc_pathologic_m|ajcc_pathologic_stage|pathologic_m|pathologic_stage",
-                       hdr, ignore.case = TRUE))
-    data.table(file = f, n_col = length(hdr), n_hit = n_hit)
-  })
-  tab <- rbindlist(scored)
-  setorder(tab, -n_hit, -n_col)
-  message("临床候选：\n", paste(sprintf("  %s  列=%d  分期/M列=%d",
-                                       tab$file, tab$n_col, tab$n_hit), collapse = "\n"))
-  tab$file[1]
+  f <- pick_best_table(
+    c("TCGA-BRCA.clinical.tsv", "TCGA-BRCA.GDC_phenotype.tsv"),
+    must = TRUE, min_cols = 5L, label = "临床表"
+  )
+  hdr <- names(fread(f, nrows = 0, fill = TRUE, showProgress = FALSE))
+  n_hit <- sum(grepl("ajcc_pathologic_m|ajcc_pathologic_stage|pathologic_m|pathologic_stage",
+                     hdr, ignore.case = TRUE))
+  message("选用临床：", f, "  列=", length(hdr), "  分期/M列=", n_hit)
+  f
 }
 pick_clin_col <- function(dt, patterns) {
   nms <- names(dt)
@@ -308,7 +360,7 @@ as_symbol_matrix <- function(fpkm_data, probe_annot) {
 save_plot <- function(p, path_stub, width = 11, height = 8) {
   ggsave(paste0(path_stub, ".pdf"), p, width = width, height = height)
   ggsave(paste0(path_stub, ".png"), p, width = width, height = height, dpi = 150)
-  print(p)
+  if (interactive()) print(p)
 }
 theme_pub <- function() {
   theme_bw(base_size = 11) +
@@ -337,23 +389,23 @@ if (dir.exists(work_dir)) {
   message("未找到 ", work_dir, " ，改用当前目录：", getwd())
 }
 
-fpkm_file <- pick_one_file(c("TCGA-BRCA.star_fpkm.tsv"))
+fpkm_file <- pick_best_table(c("TCGA-BRCA.star_fpkm.tsv"), must = TRUE, min_cols = 20L, label = "FPKM")
 clin_file <- pick_best_clinical()
-probe_file <- pick_one_file(c(
+probe_file <- pick_best_table(c(
   "gencode.v36.annotation.gtf.gene.probemap",
   "gencode.v36.annotation.gtf.gene.probemap.tsv"
-))
-surv_file <- pick_one_file(c("TCGA-BRCA.survival.tsv"), must = FALSE)
+), must = TRUE, min_cols = 2L, label = "基因注释")
+surv_file <- pick_best_table(c("TCGA-BRCA.survival.tsv"), must = FALSE, min_cols = 2L, label = "生存表")
 
 message("FPKM：", fpkm_file)
 message("临床：", clin_file)
 message("注释：", probe_file)
 if (!is.na(surv_file)) message("生存：", surv_file)
 
-fpkm_data <- fread(fpkm_file)
-probe_annot <- fread(probe_file)
-clinical_data <- fread(clin_file)
-survival_data <- if (!is.na(surv_file)) fread(surv_file) else NULL
+fpkm_data <- safe_fread(fpkm_file)
+probe_annot <- safe_fread(probe_file)
+clinical_data <- safe_fread(clin_file)
+survival_data <- if (!is.na(surv_file)) safe_fread(surv_file) else NULL
 protein_data <- NULL
 
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
