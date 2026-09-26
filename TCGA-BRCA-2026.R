@@ -385,14 +385,42 @@ as_symbol_matrix <- function(fpkm_data, probe_annot) {
 }
 
 save_plot <- function(p, path_stub, width = 11, height = 8) {
-  ggsave(paste0(path_stub, ".pdf"), p, width = width, height = height)
-  ggsave(paste0(path_stub, ".png"), p, width = width, height = height, dpi = 150)
-  if (interactive()) print(p)
+  tryCatch(
+    ggsave(paste0(path_stub, ".pdf"), p, width = width, height = height),
+    error = function(e) message("保存 PDF 失败：", conditionMessage(e))
+  )
+  tryCatch(
+    ggsave(paste0(path_stub, ".png"), p, width = width, height = height, dpi = 150),
+    error = function(e) message("保存 PNG 失败：", conditionMessage(e))
+  )
+  if (interactive()) {
+    tryCatch(print(p), error = function(e) {
+      message("预览图失败（已跳过）：", conditionMessage(e))
+    })
+  }
 }
-maybe_label <- function() {
-  if (requireNamespace("ggrepel", quietly = TRUE)) return(ggrepel::geom_text_repel)
-  message("未安装 ggrepel，火山图不标基因名。可运行 install.packages(\"ggrepel\")")
-  function(...) ggplot2::geom_blank()
+
+head_dt <- function(dt, n) {
+  if (is.null(dt) || nrow(dt) == 0L || n <= 0L) return(dt[0])
+  dt[seq_len(min(as.integer(n), nrow(dt)))]
+}
+
+pick_volcano_labels <- function(plot_dt, n_neg = 12L, n_pos = 6L) {
+  neg <- head_dt(plot_dt[significant_neg == TRUE], n_neg)
+  pos <- head_dt(plot_dt[spearman_r > 0][order(-spearman_r)], n_pos)
+  out <- unique(rbindlist(list(neg, pos), fill = TRUE))
+  if (nrow(out) == 0L) return(out)
+  out[is.finite(spearman_r) & is.finite(neglogp) & !is.na(feature) & nzchar(as.character(feature))]
+}
+
+# 不用 ggrepel：ggplot2 4.x 下会报 depth(NULL)
+add_volcano_labels <- function(p, lab_dt) {
+  if (is.null(lab_dt) || nrow(lab_dt) == 0L) return(p)
+  p + ggplot2::geom_text(
+    data = as.data.frame(lab_dt),
+    aes(x = spearman_r, y = neglogp, label = feature),
+    size = 2.3, vjust = -0.55, inherit.aes = FALSE, check_overlap = TRUE
+  )
 }
 
 # 每个 GO 拆成两列：未转移 / 转移，分别画该组通路分数中位数
@@ -579,7 +607,6 @@ message("表达矩阵：原位 ", ncol(expr_primary), " 样本 x ", nrow(expr_pr
 # ==============================================================================
 run_tcga_brca_2026 <- function() {
   if (!exists("expr_primary", inherits = TRUE)) stop("还没有 expr_primary，请从脚本开头 Source")
-  label_fun <- maybe_label()
 
   score_one <- function(expr_mat, go_id) {
     genes <- unique(get_go_genes(go_id)$SYMBOL)
@@ -731,21 +758,25 @@ run_tcga_brca_2026 <- function() {
     plot_dt[, neglogp := pmin(12, -log10(pmax(pvalue, 1e-12)))]
     plot_dt[, col := ifelse(significant_neg, "Negative",
                             ifelse(spearman_r > 0 & pvalue < neg_pvalue_cutoff, "Positive", "NS"))]
-    top_lab <- rbind(
-      plot_dt[significant_neg == TRUE][1:min(12L, .N)],
-      plot_dt[spearman_r > 0][order(-spearman_r)][1:min(6L, .N)]
-    )
-    p_vol <- ggplot(plot_dt, aes(x = spearman_r, y = neglogp, color = col)) +
-      geom_point(alpha = 0.45, size = 0.7) +
-      geom_vline(xintercept = 0, linetype = 2, color = "grey50") +
-      geom_hline(yintercept = -log10(neg_pvalue_cutoff), linetype = 2, color = "grey50") +
-      scale_color_manual(values = c("Negative" = "#3C5488", "Positive" = "#E64B35", "NS" = "grey75")) +
-      label_fun(data = top_lab, aes(label = feature), size = 2.4, max.overlaps = 30, show.legend = FALSE) +
-      labs(title = md$title,
-           subtitle = paste0("Spearman: gene vs ", md$pos, " (1) / ", md$neg, " (0); blue = negative vs metastasis"),
-           x = "Spearman r", y = expression(-log[10](p)), color = NULL) +
-      theme_bw()
-    save_plot(p_vol, file.path(out_dir, paste0("03_", md$key, "_volcano_genes_vs_metastasis")), 10, 7)
+    top_lab <- pick_volcano_labels(plot_dt, 12L, 6L)
+    p_vol <- tryCatch({
+      p <- ggplot(plot_dt, aes(x = spearman_r, y = neglogp, color = col)) +
+        geom_point(alpha = 0.45, size = 0.7) +
+        geom_vline(xintercept = 0, linetype = 2, color = "grey50") +
+        geom_hline(yintercept = -log10(neg_pvalue_cutoff), linetype = 2, color = "grey50") +
+        scale_color_manual(values = c("Negative" = "#3C5488", "Positive" = "#E64B35", "NS" = "grey75")) +
+        labs(title = md$title,
+             subtitle = paste0("Spearman: gene vs ", md$pos, " (1) / ", md$neg, " (0); blue = negative vs metastasis"),
+             x = "Spearman r", y = expression(-log[10](p)), color = NULL) +
+        theme_bw()
+      add_volcano_labels(p, top_lab)
+    }, error = function(e) {
+      message("火山图失败（已跳过）：", conditionMessage(e))
+      NULL
+    })
+    if (!is.null(p_vol)) {
+      save_plot(p_vol, file.path(out_dir, paste0("03_", md$key, "_volcano_genes_vs_metastasis")), 10, 7)
+    }
   }
 
   if (length(met_ids) >= min_group_n) {
@@ -796,22 +827,26 @@ run_tcga_brca_2026 <- function() {
     plot_dt[, neglogp := pmin(12, -log10(pmax(pvalue, 1e-12)))]
     plot_dt[, col := ifelse(significant_neg, "Negative",
                             ifelse(spearman_r > 0 & pvalue < neg_pvalue_cutoff, "Positive", "NS"))]
-    top_lab <- rbind(
-      plot_dt[significant_neg == TRUE][1:min(10L, .N)],
-      plot_dt[spearman_r > 0][order(-spearman_r)][1:min(5L, .N)]
-    )
-    p_vol <- ggplot(plot_dt, aes(x = spearman_r, y = neglogp, color = col)) +
-      geom_point(alpha = 0.4, size = 0.65) +
-      geom_vline(xintercept = 0, linetype = 2, color = "grey50") +
-      geom_hline(yintercept = -log10(neg_pvalue_cutoff), linetype = 2, color = "grey50") +
-      scale_color_manual(values = c("Negative" = "#3C5488", "Positive" = "#E64B35", "NS" = "grey75")) +
-      label_fun(data = top_lab, aes(label = feature), size = 2.3, max.overlaps = 25, show.legend = FALSE) +
-      labs(title = "Genes negatively correlated with neural invasion",
-           subtitle = paste0(g, "  ", go_title(g), "; blue = negative vs this GO score"),
-           x = "Spearman r (gene vs neural GO score)",
-           y = expression(-log[10](p)), color = NULL) +
-      theme_bw()
-    save_plot(p_vol, file.path(gdir, "volcano_neg_vs_neural_GO"), 9, 6.5)
+    top_lab <- pick_volcano_labels(plot_dt, 10L, 5L)
+    p_vol <- tryCatch({
+      p <- ggplot(plot_dt, aes(x = spearman_r, y = neglogp, color = col)) +
+        geom_point(alpha = 0.4, size = 0.65) +
+        geom_vline(xintercept = 0, linetype = 2, color = "grey50") +
+        geom_hline(yintercept = -log10(neg_pvalue_cutoff), linetype = 2, color = "grey50") +
+        scale_color_manual(values = c("Negative" = "#3C5488", "Positive" = "#E64B35", "NS" = "grey75")) +
+        labs(title = "Genes negatively correlated with neural invasion",
+             subtitle = paste0(g, "  ", go_title(g), "; blue = negative vs this GO score"),
+             x = "Spearman r (gene vs neural GO score)",
+             y = expression(-log[10](p)), color = NULL) +
+        theme_bw()
+      add_volcano_labels(p, top_lab)
+    }, error = function(e) {
+      message("火山图失败（已跳过）：", conditionMessage(e))
+      NULL
+    })
+    if (!is.null(p_vol)) {
+      save_plot(p_vol, file.path(gdir, "volcano_neg_vs_neural_GO"), 9, 6.5)
+    }
   }
   if (length(summary_neg) > 0) {
     sum_dt <- rbindlist(summary_neg, fill = TRUE)
