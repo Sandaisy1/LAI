@@ -9,7 +9,12 @@
 #   TCGA-BRCA.survival.tsv(.gz)
 #   gencode.v36.annotation.gtf.gene.probemap
 #
-# 神经浸润：每个神经信号 GO 单独取基因、单独打分（不合并基因集）
+# 神经浸润：只分析下面 5 个神经信号 GO，每个单独取基因、单独打分（不合并）
+#   GO:0019227  neuronal action potential propagation
+#   GO:1902847  regulation of neuronal signal transduction
+#   GO:0097374  sensory neuron axon guidance
+#   GO:1902667  regulation of axon guidance
+#   GO:0007409  axonogenesis
 # 原位肿瘤：Primary Tumor / 条形码 01
 #
 # 1) 神经浸润 vs 转移：主图是气泡图（纵轴=各神经 GO，横轴=转移定义）
@@ -42,24 +47,11 @@ strict_r_cutoff <- -0.15
 min_expr_frac <- 0.20
 
 go_list <- c(
-  "GO:0023041",
-  "GO:1904457",
-  "GO:1904340",
-  "GO:2001224",
-  "GO:2001222",
   "GO:0019227",
-  "GO:0019228",
   "GO:1902847",
-  "GO:0031102",
-  "GO:0097492",
-  "GO:0097491",
   "GO:0097374",
-  "GO:0007158",
   "GO:1902667",
-  "GO:0031103",
-  "GO:0007411",
-  "GO:0007409",
-  "GO:0036518"
+  "GO:0007409"
 )
 
 go_name_map <- c(
@@ -818,8 +810,9 @@ run_tcga_brca_2026 <- function() {
   }
   if (length(summary_neg) > 0) {
     sum_dt <- rbindlist(summary_neg, fill = TRUE)
+    sum_dt[, y_lab := paste0(GO, "  ", GO_name)]
     fwrite(sum_dt, file.path(out_dir, "04_summary_neg_genes_vs_each_neural_GO.csv"))
-    p_n <- ggplot(sum_dt, aes(x = n_neg, y = reorder(go_lab(GO), n_neg))) +
+    p_n <- ggplot(sum_dt, aes(x = n_neg, y = reorder(y_lab, n_neg))) +
       geom_col(fill = "#3C5488", width = 0.7) +
       labs(title = "Number of genes negatively correlated with each neural GO",
            subtitle = paste0("Spearman r < 0 and p < ", neg_pvalue_cutoff, "; GO sets not pooled"),
