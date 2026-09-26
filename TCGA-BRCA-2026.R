@@ -4,69 +4,83 @@
 # 不要从中间粘贴，不要运行旧的 factor(meta_M) 行
 #
 # 数据目录（.tsv / .tsv.gz 均可；空的 .tsv 会自动跳过，改读 .gz）：
-#   TCGA-BRCA.star_fpkm.tsv(.gz)         # 若 .tsv 是 WinRAR 留下的空文件，删掉即可
+#   TCGA-BRCA.star_fpkm.tsv(.gz)
 #   TCGA-BRCA.clinical.tsv(.gz)
-#   TCGA-BRCA.survival.tsv(.gz)          # 可选
+#   TCGA-BRCA.survival.tsv(.gz)
 #   gencode.v36.annotation.gtf.gene.probemap
 #
-# 神经浸润标定（不用神经 GO，两套签名分开打分，不把基因合并成一套）：
-#   A. 施旺细胞 marker
-#   B. 神经营养因子（配体 + 常用受体）
+# 神经浸润：每个神经信号 GO 单独取基因、单独打分（不合并基因集）
 # 原位肿瘤：Primary Tumor / 条形码 01
 #
-# 1) 神经浸润 vs 乳腺癌转移（施旺 / 神经营养 各做一遍）
-#    a. 诊断时远处转移：原位肿瘤 M1 vs M0
-#    b. AJCC 分期：原位肿瘤 Stage IV vs I–III，以及 I/II/III/IV
-#    c. 淋巴结：原位肿瘤 N+ vs N0
-#    d. 样本类型：转移组织 vs 原位肿瘤（转移组织很少，约 7 例）
-# 2) 原位肿瘤内，与转移呈负相关的基因（转移标准与 1a/1b/1c 相同）
-# 3) 原位肿瘤内，与神经浸润分数呈负相关的基因（施旺、神经营养分开）
+# 1) 神经浸润 vs 转移：主图是气泡图（纵轴=各神经 GO，横轴=转移定义）
+#    a. 原位肿瘤 诊断时远处转移 M1 vs M0
+#    b. 原位肿瘤 AJCC Stage IV vs I–III
+#    c. 原位肿瘤 淋巴结 N+ vs N0
+#    d. 转移组织 vs 原位肿瘤
+# 2) 原位肿瘤内与转移负相关的基因（标准同 1a/1b/1c）
+# 3) 原位肿瘤内与每个神经 GO 通路分数负相关的基因（按 GO 分开）
+#
+# 负相关：Spearman r < 0 且 p < 0.05；另存 r <= -0.15 且 p < 0.05
 ################################################################################
 
 library(data.table)
 library(ggplot2)
 library(ggpubr)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
 
 # ==============================================================================
 # 参数
 # ==============================================================================
 work_dir <- Sys.getenv("TCGA_BRCA_2026_DIR", unset = "E:/R/TCGA-BRCA-2026")
 out_dir <- "results_TCGA-BRCA-2026"
-min_signature_genes <- 1
+min_pathway_genes <- 1
 min_group_n <- 2
 neg_pvalue_cutoff <- 0.05
 neg_r_cutoff <- 0
 strict_r_cutoff <- -0.15
 min_expr_frac <- 0.20
 
-# 施旺细胞 marker（髓鞘 / 施旺谱系 / 神经束膜常用基因，HGNC 符号）
-schwann_markers <- c(
-  "S100B", "SOX10", "MPZ", "MBP", "PMP22", "PLP1", "MAG", "PRX",
-  "GFAP", "NGFR", "NCAM1", "L1CAM", "CDH19", "ERBB3", "NRG1",
-  "GAP43", "SCN7A", "EGR2", "POU3F1", "MAL", "GJB1", "NES"
+go_list <- c(
+  "GO:0023041",
+  "GO:1904457",
+  "GO:1904340",
+  "GO:2001224",
+  "GO:2001222",
+  "GO:0019227",
+  "GO:0019228",
+  "GO:1902847",
+  "GO:0031102",
+  "GO:0097492",
+  "GO:0097491",
+  "GO:0097374",
+  "GO:0007158",
+  "GO:1902667",
+  "GO:0031103",
+  "GO:0007411",
+  "GO:0007409",
+  "GO:0036518"
 )
 
-# 神经营养因子：配体与常用受体（不与施旺 marker 合并打分）
-neurotrophin_markers <- c(
-  "NGF", "BDNF", "NTF3", "NTF4", "GDNF", "NRTN", "ARTN", "PSPN",
-  "CNTF", "CDNF", "MANF", "VGF",
-  "NTRK1", "NTRK2", "NTRK3", "RET",
-  "GFRA1", "GFRA2", "GFRA3", "GFRA4", "CNTFR"
-)
-
-# 图上单独展示的关键基因（必须属于上面两套之一）
-highlight_genes <- c(
-  "S100B", "SOX10", "MPZ", "MBP", "NGFR", "ERBB3",
-  "NGF", "BDNF", "NTF3", "GDNF", "ARTN", "NTRK1", "NTRK2", "RET"
-)
-
-signature_list <- list(
-  Schwann = schwann_markers,
-  Neurotrophin = neurotrophin_markers
-)
-signature_title <- c(
-  Schwann = "施旺细胞 marker",
-  Neurotrophin = "神经营养因子"
+go_name_map <- c(
+  "GO:0023041" = "neuronal signal transduction",
+  "GO:1904457" = "positive regulation of neuronal action potential",
+  "GO:1904340" = "positive regulation of dopaminergic neuron differentiation",
+  "GO:2001224" = "positive regulation of neuron migration",
+  "GO:2001222" = "regulation of neuron migration",
+  "GO:0019227" = "neuronal action potential propagation",
+  "GO:0019228" = "neuronal action potential",
+  "GO:1902847" = "regulation of neuronal signal transduction",
+  "GO:0031102" = "neuron projection regeneration",
+  "GO:0097492" = "sympathetic neuron axon guidance",
+  "GO:0097491" = "sympathetic neuron projection guidance",
+  "GO:0097374" = "sensory neuron axon guidance",
+  "GO:0007158" = "neuron cell-cell adhesion",
+  "GO:1902667" = "regulation of axon guidance",
+  "GO:0031103" = "axon regeneration",
+  "GO:0007411" = "axon guidance",
+  "GO:0007409" = "axonogenesis",
+  "GO:0036518" = "chemorepulsion of dopaminergic neuron axon"
 )
 
 # ==============================================================================
@@ -93,28 +107,25 @@ safe_name <- function(x) {
   x <- gsub("[^A-Za-z0-9]+", "_", x)
   gsub("^_|_$", "", x)
 }
+go_title <- function(go_id) {
+  if (go_id %in% names(go_name_map)) unname(go_name_map[go_id]) else go_id
+}
+go_lab <- function(go_id) paste0(go_id, "  ", go_title(go_id))
 
 existing_files <- function(stems) {
   cands <- unique(unlist(lapply(stems, function(s) c(s, paste0(s, ".gz")))))
   cands[file.exists(cands) & !is.na(file.info(cands)$isdir) & !file.info(cands)$isdir]
 }
-
-# WinRAR 没解压完时会留下空的 .tsv；空文件 / 0 列一律跳过，改用 .gz
 probe_table_file <- function(f) {
   info <- file.info(f)
   if (is.null(info) || is.na(info$size) || info$size < 200) {
-    return(data.table(file = f, size = if (is.null(info) || is.na(info$size)) 0 else info$size,
-                      n_col = 0L, readable = FALSE, err = "empty_or_tiny"))
+    return(data.table(file = f, size = 0, n_col = 0L, readable = FALSE))
   }
   hdr <- tryCatch(names(fread(f, nrows = 0, fill = TRUE, showProgress = FALSE)),
                   error = function(e) character())
-  data.table(
-    file = f, size = as.numeric(info$size), n_col = length(hdr),
-    readable = length(hdr) >= 1L,
-    err = if (length(hdr) >= 1L) NA_character_ else "unreadable_header"
-  )
+  data.table(file = f, size = as.numeric(info$size), n_col = length(hdr),
+             readable = length(hdr) >= 1L)
 }
-
 pick_best_table <- function(stems, must = TRUE, min_cols = 1L, label = "数据表") {
   hits <- existing_files(stems)
   if (length(hits) == 0) {
@@ -129,18 +140,13 @@ pick_best_table <- function(stems, must = TRUE, min_cols = 1L, label = "数据�
   ok <- tab[readable == TRUE & n_col >= min_cols]
   if (nrow(ok) == 0) {
     if (must) {
-      stop(
-        label, "存在但读不了（常见原因：WinRAR 还没解压完，留下了空的 .tsv）。",
-        "请删掉空的 .tsv，直接保留 .tsv.gz，或等解压完成后再 Source。\n",
-        "已看到：", paste(tab$file, collapse = " ; ")
-      )
+      stop(label, "存在但读不了。请删掉空的 .tsv，保留 .tsv.gz 后再 Source。")
     }
     return(NA_character_)
   }
   setorder(ok, -n_col, -size)
   ok$file[1]
 }
-
 safe_fread <- function(path, ...) {
   out <- tryCatch(fread(path, showProgress = TRUE, ...), error = function(e) e)
   if (!inherits(out, "error")) return(out)
@@ -153,14 +159,7 @@ safe_fread <- function(path, ...) {
     message("读 ", path, " 失败（", conditionMessage(out), "），改读 ", alt)
     return(fread(alt, showProgress = TRUE, ...))
   }
-  stop(
-    "读不了 ", path, "：", conditionMessage(out),
-    "。若这是空的 .tsv，请删除它并改用同名 .tsv.gz（data.table 可以直接读 gz）。"
-  )
-}
-
-pick_one_file <- function(stems, must = TRUE) {
-  pick_best_table(stems, must = must, min_cols = 1L, label = "文件")
+  stop("读不了 ", path, "：", conditionMessage(out), "。空的 .tsv 请删除，改用 .tsv.gz。")
 }
 pick_best_clinical <- function() {
   f <- pick_best_table(
@@ -214,9 +213,8 @@ classify_n <- function(x) {
   out
 }
 classify_sample_type <- function(x, barcode) {
-  x <- as.character(x)
   out <- rep(NA_character_, length(x))
-  xl <- toupper(x)
+  xl <- toupper(as.character(x))
   out[grepl("PRIMARY", xl)] <- "原位肿瘤"
   out[grepl("METASTATIC", xl)] <- "转移组织"
   out[grepl("NORMAL", xl)] <- "正常"
@@ -227,10 +225,44 @@ classify_sample_type <- function(x, barcode) {
   out
 }
 
-# 签名活性：基因 z-score 后对样本取均值。不要用 scale()/t()，变量不要叫 score
-signature_zmean <- function(expr_mat, genes) {
+get_go_genes <- function(go_id) {
+  pick <- function(keytype) {
+    tryCatch(
+      AnnotationDbi::select(
+        org.Hs.eg.db, keys = go_id, keytype = keytype,
+        columns = c("SYMBOL", "ENSEMBL", "ENTREZID")
+      ),
+      error = function(e) NULL
+    )
+  }
+  res <- suppressMessages(pick("GOALL"))
+  if (is.null(res) || nrow(res) == 0) res <- suppressMessages(pick("GO"))
+  extra <- tryCatch({
+    go2eg <- as.list(org.Hs.eg.db::org.Hs.egGO2ALLEGS)
+    eg <- unique(as.character(go2eg[[go_id]]))
+    if (length(eg) == 0) NULL else {
+      AnnotationDbi::select(org.Hs.eg.db, keys = eg, keytype = "ENTREZID",
+                            columns = c("SYMBOL", "ENSEMBL"))
+    }
+  }, error = function(e) NULL)
+  if (!is.null(extra) && nrow(extra) > 0) {
+    extra <- as.data.table(extra)
+    extra[, GO := go_id]
+    res <- if (is.null(res) || nrow(res) == 0) extra else rbind(as.data.table(res), extra, fill = TRUE)
+  }
+  if (is.null(res) || nrow(res) == 0) {
+    return(data.table(GO = go_id, SYMBOL = character(), ENSEMBL = character(), ENTREZID = character()))
+  }
+  res <- as.data.table(res)
+  if ("GOALL" %in% names(res)) setnames(res, "GOALL", "GO", skip_absent = TRUE)
+  if (!"GO" %in% names(res)) res[, GO := go_id]
+  unique(res[!is.na(SYMBOL) & SYMBOL != "", .(GO, SYMBOL, ENSEMBL, ENTREZID)])
+}
+
+# 通路活性：基因 z-score 后对样本取均值。不要用 scale()/t()，变量不要叫 score
+pathway_zmean <- function(expr_mat, genes) {
   genes <- unique(intersect(as.character(genes), rownames(expr_mat)))
-  if (length(genes) < min_signature_genes) return(NULL)
+  if (length(genes) < min_pathway_genes) return(NULL)
   sub <- as.matrix(expr_mat[genes, , drop = FALSE])
   storage.mode(sub) <- "double"
   gene_mean <- rowMeans(sub, na.rm = TRUE)
@@ -238,26 +270,24 @@ signature_zmean <- function(expr_mat, genes) {
   gene_sd[!is.finite(gene_sd) | gene_sd < 1e-12] <- 1
   z <- (sub - gene_mean) / gene_sd
   z[!is.finite(z)] <- 0
-  sig_score <- colMeans(z, na.rm = TRUE)
-  names(sig_score) <- colnames(sub)
-  attr(sig_score, "n_genes") <- length(genes)
-  attr(sig_score, "genes") <- genes
-  sig_score
+  go_score <- colMeans(z, na.rm = TRUE)
+  names(go_score) <- colnames(sub)
+  attr(go_score, "n_genes") <- length(genes)
+  attr(go_score, "genes") <- genes
+  go_score
 }
 
-spearman_vs_sig <- function(mat, sig_vec) {
-  common <- intersect(colnames(mat), names(sig_vec))
+spearman_vs_go_score <- function(mat, go_score_vec) {
+  common <- intersect(colnames(mat), names(go_score_vec))
   if (length(common) < 5) return(data.table())
   mat <- mat[, common, drop = FALSE]
-  sig_vec <- sig_vec[common]
+  go_score_vec <- go_score_vec[common]
   keep <- apply(mat, 1, function(x) stats::sd(x, na.rm = TRUE) > 0)
   mat <- mat[keep, , drop = FALSE]
   n <- ncol(mat)
   r <- as.numeric(cor(
-    base::t(as.matrix(mat)),
-    sig_vec,
-    method = "spearman",
-    use = "pairwise.complete.obs"
+    base::t(as.matrix(mat)), go_score_vec,
+    method = "spearman", use = "pairwise.complete.obs"
   ))
   names(r) <- rownames(mat)
   r <- pmin(pmax(r, -0.999999), 0.999999)
@@ -297,24 +327,24 @@ spearman_vs_binary <- function(mat, group, pos, neg) {
   )
 }
 
-compare_sig_groups <- function(sig_vec, group, pos, neg, grouping) {
+compare_go_groups <- function(go_score_vec, group, pos, neg, grouping) {
   df <- data.frame(
-    signature_score = as.numeric(sig_vec),
+    pathway_score = as.numeric(go_score_vec),
     group = as.character(group),
     stringsAsFactors = FALSE
   )
-  df <- df[is.finite(df$signature_score) & df$group %in% c(pos, neg), ]
+  df <- df[is.finite(df$pathway_score) & df$group %in% c(pos, neg), ]
   n_pos <- sum(df$group == pos)
   n_neg <- sum(df$group == neg)
   if (n_pos < min_group_n || n_neg < min_group_n) return(NULL)
-  wt <- suppressWarnings(stats::wilcox.test(signature_score ~ group, data = df))
+  wt <- suppressWarnings(stats::wilcox.test(pathway_score ~ group, data = df))
   data.table(
     grouping = grouping, pos_level = pos, neg_level = neg,
     n_pos = n_pos, n_neg = n_neg,
-    median_pos = stats::median(df$signature_score[df$group == pos], na.rm = TRUE),
-    median_neg = stats::median(df$signature_score[df$group == neg], na.rm = TRUE),
-    delta_median = stats::median(df$signature_score[df$group == pos], na.rm = TRUE) -
-      stats::median(df$signature_score[df$group == neg], na.rm = TRUE),
+    median_pos = stats::median(df$pathway_score[df$group == pos], na.rm = TRUE),
+    median_neg = stats::median(df$pathway_score[df$group == neg], na.rm = TRUE),
+    delta_median = stats::median(df$pathway_score[df$group == pos], na.rm = TRUE) -
+      stats::median(df$pathway_score[df$group == neg], na.rm = TRUE),
     pvalue = wt$p.value
   )
 }
@@ -330,13 +360,11 @@ as_symbol_matrix <- function(fpkm_data, probe_annot) {
   if (anyDuplicated(colnames(mat))) {
     mat <- mat[, !duplicated(colnames(mat)), drop = FALSE]
   }
-
   probe_annot <- as.data.table(probe_annot)
   pid <- first_present(names(probe_annot), c("id", "ensembl", "Ensembl", "ENSEMBL", names(probe_annot)[1]))
   psym <- first_present(names(probe_annot), c("gene", "symbol", "Gene", "SYMBOL", names(probe_annot)[2]))
   map_ens <- sub("\\..*$", "", as.character(probe_annot[[pid]]))
   map_sym <- as.character(probe_annot[[psym]])
-
   if (mean(grepl("^ENSG", ens, ignore.case = TRUE), na.rm = TRUE) >= 0.5) {
     sym <- map_sym[match(ens, map_ens)]
     keep <- !is.na(sym) & sym != "" & !grepl("^XLOC_", sym)
@@ -345,7 +373,6 @@ as_symbol_matrix <- function(fpkm_data, probe_annot) {
   } else {
     sym <- rid
   }
-
   if (anyDuplicated(sym)) {
     dt <- data.table(symbol = sym, as.data.table(mat))
     dt <- dt[, lapply(.SD, mean, na.rm = TRUE), by = symbol]
@@ -362,22 +389,34 @@ save_plot <- function(p, path_stub, width = 11, height = 8) {
   ggsave(paste0(path_stub, ".png"), p, width = width, height = height, dpi = 150)
   if (interactive()) print(p)
 }
-theme_pub <- function() {
-  theme_bw(base_size = 11) +
-    theme(
-      legend.position = "bottom",
-      strip.text = element_text(size = 9),
-      plot.title = element_text(size = 13, face = "bold"),
-      axis.text.x = element_text(angle = 20, hjust = 1)
-    )
-}
-
 maybe_label <- function() {
-  if (requireNamespace("ggrepel", quietly = TRUE)) {
-    return(ggrepel::geom_text_repel)
-  }
+  if (requireNamespace("ggrepel", quietly = TRUE)) return(ggrepel::geom_text_repel)
   message("未安装 ggrepel，火山图不标基因名。可运行 install.packages(\"ggrepel\")")
   function(...) ggplot2::geom_blank()
+}
+
+plot_go_bubble <- function(stat_dt, title, subtitle, path_stub, x_lab = NULL) {
+  d <- copy(as.data.table(stat_dt))
+  d <- d[is.finite(pvalue) & is.finite(delta_median)]
+  if (nrow(d) == 0) return(invisible(NULL))
+  d[, y_lab := factor(paste0(GO, "  ", GO_name), levels = rev(unique(paste0(GO, "  ", GO_name))))]
+  x_vals <- if (is.null(x_lab)) as.character(d$grp_lab) else rep(as.character(x_lab), nrow(d))
+  d[, x_lab := x_vals]
+  d[, neglogp := pmin(10, -log10(pmax(pvalue, 1e-12)))]
+  p <- ggplot(d, aes(x = x_lab, y = y_lab)) +
+    geom_point(aes(size = neglogp, color = pmin(pmax(delta_median, -1), 1))) +
+    scale_color_gradient2(low = "#3C5488", mid = "white", high = "#E64B35",
+                          midpoint = 0, name = "Δ median\n(转移 − 未转移)") +
+    scale_size_continuous(range = c(3, 12), name = expression(-log[10](p))) +
+    labs(title = title, subtitle = subtitle, x = NULL, y = NULL) +
+    theme_bw(base_size = 12) +
+    theme(
+      axis.text.x = element_text(angle = 18, hjust = 1, size = 11),
+      axis.text.y = element_text(size = 9),
+      legend.position = "right",
+      plot.title = element_text(face = "bold")
+    )
+  save_plot(p, path_stub, 11, max(6, 0.38 * uniqueN(d$y_lab) + 2.2))
 }
 
 # ==============================================================================
@@ -420,9 +459,6 @@ if (is.finite(mx) && mx > 50) {
   message("表达值范围较小（max=", round(mx, 2), "），视为已 log 转换")
 }
 
-# ==============================================================================
-# 临床分组（只用向量赋值）
-# ==============================================================================
 build_annotation <- function(sample_ids, clin, surv) {
   ann <- data.table(sample = normalize_barcode(sample_ids))
   ann <- ann[!is.na(sample) & sample != ""]
@@ -470,7 +506,6 @@ build_annotation <- function(sample_ids, clin, surv) {
   n_vec  <- if (!is.na(nc) && nc %in% names(ann)) classify_n(ann[[nc]]) else rep(NA_character_, n)
   raw_type <- if (!is.na(tc) && tc %in% names(ann)) ann[[tc]] else rep(NA_character_, n)
   type_vec <- classify_sample_type(raw_type, ann$sample)
-
   stage_iv <- rep(NA_character_, n)
   stage_iv[!is.na(st_vec) & st_vec == "Stage IV"] <- "Stage IV"
   stage_iv[!is.na(st_vec) & st_vec %in% c("Stage I", "Stage II", "Stage III")] <- "Stage I-III"
@@ -513,46 +548,27 @@ run_tcga_brca_2026 <- function() {
   if (!exists("expr_primary", inherits = TRUE)) stop("还没有 expr_primary，请从脚本开头 Source")
   label_fun <- maybe_label()
 
-  used_rows <- list()
-  score_one <- function(expr_mat, sig_id, genes) {
-    present <- intersect(genes, rownames(expr_mat))
-    missing <- setdiff(genes, rownames(expr_mat))
-    used_rows[[length(used_rows) + 1]] <<- data.table(
-      signature = sig_id, signature_name = unname(signature_title[sig_id]),
-      gene = genes,
-      in_matrix = genes %in% rownames(expr_mat)
-    )
-    sc <- signature_zmean(expr_mat, present)
+  score_one <- function(expr_mat, go_id) {
+    genes <- unique(get_go_genes(go_id)$SYMBOL)
+    sc <- pathway_zmean(expr_mat, genes)
     if (is.null(sc)) {
-      message("  ", sig_id, " 在表达矩阵中找不到 marker，跳过")
+      message("  ", go_id, " 映射基因不足，跳过")
       return(NULL)
     }
-    message("  ", sig_id, "  ", signature_title[sig_id],
-            "  用到 ", attr(sc, "n_genes"), " 个基因：",
-            paste(attr(sc, "genes"), collapse = ", "))
-    if (length(missing) > 0) message("    缺失：", paste(missing, collapse = ", "))
+    message("  ", go_id, "  ", go_title(go_id), "  基因数=", attr(sc, "n_genes"))
     sc
   }
 
-  message("计算原位肿瘤神经浸润分数（施旺 / 神经营养 分开）")
-  score_primary_list <- list()
-  for (sid in names(signature_list)) {
-    score_primary_list[[sid]] <- score_one(expr_primary, sid, signature_list[[sid]])
-  }
+  message("计算原位肿瘤各神经 GO 通路分数（每个 GO 单独，不合并）")
+  score_primary_list <- lapply(go_list, function(g) score_one(expr_primary, g))
+  names(score_primary_list) <- go_list
   score_primary_list <- Filter(Negate(is.null), score_primary_list)
-  if (length(score_primary_list) == 0) stop("施旺细胞 marker 和神经营养因子都无法打分")
+  if (length(score_primary_list) == 0) stop("没有任何神经 GO 能打分")
 
-  message("计算原位+转移组织神经浸润分数（供 1d）")
-  score_tumor_list <- list()
-  for (sid in names(score_primary_list)) {
-    score_tumor_list[[sid]] <- score_one(expr_tumor, sid, signature_list[[sid]])
-  }
+  message("计算原位+转移组织各神经 GO 通路分数（供 1d）")
+  score_tumor_list <- lapply(names(score_primary_list), function(g) score_one(expr_tumor, g))
+  names(score_tumor_list) <- names(score_primary_list)
   score_tumor_list <- Filter(Negate(is.null), score_tumor_list)
-
-  if (length(used_rows) > 0) {
-    used_dt <- unique(rbindlist(used_rows, fill = TRUE))
-    fwrite(used_dt, file.path(out_dir, "00_neural_markers_used.csv"))
-  }
 
   mat_from_list <- function(lst) {
     common <- Reduce(intersect, lapply(lst, names))
@@ -564,59 +580,51 @@ run_tcga_brca_2026 <- function() {
   score_primary_mat <- mat_from_list(score_primary_list)
   score_tumor_mat <- mat_from_list(score_tumor_list)
   fwrite(data.table(sample = rownames(score_primary_mat), as.data.table(score_primary_mat)),
-         file.path(out_dir, "01_neural_invasion_scores_primary.csv"))
+         file.path(out_dir, "01_pathway_scores_primary_each_GO.csv"))
   fwrite(data.table(sample = rownames(score_tumor_mat), as.data.table(score_tumor_mat)),
-         file.path(out_dir, "01_neural_invasion_scores_tumor.csv"))
+         file.path(out_dir, "01_pathway_scores_tumor_each_GO.csv"))
+
+  gene_map_rows <- lapply(names(score_primary_list), function(g) {
+    data.table(GO = g, GO_name = go_title(g), n_genes = attr(score_primary_list[[g]], "n_genes"),
+               genes = paste(attr(score_primary_list[[g]], "genes"), collapse = ";"))
+  })
+  fwrite(rbindlist(gene_map_rows), file.path(out_dir, "00_GO_genes_used.csv"))
 
   ann_p <- ann_all[sample %in% rownames(score_primary_mat)]
   ann_t <- ann_all[sample %in% rownames(score_tumor_mat)]
 
-  # ---- 1) 神经浸润 vs 转移：四个思路 × 两套签名 ----
   designs <- list(
-    list(key = "a_distant_M", title = "1a 诊断时远处转移（原位肿瘤）",
-         subtitle = "神经浸润分数：原位肿瘤 M1 vs M0",
+    list(key = "a_distant_M", title = "1a 诊断时远处转移",
+         xlab = "M1 vs M0",
          group = setNames(as.character(ann_p$distant_M), ann_p$sample),
-         pos = "M1", neg = "M0", score_mat = score_primary_mat,
-         fill = c("M0" = "#4DBBD5", "M1" = "#E64B35")),
-    list(key = "b_AJCC_stageIV", title = "1b AJCC 分期（原位肿瘤）",
-         subtitle = "神经浸润分数：Stage IV vs Stage I–III",
+         pos = "M1", neg = "M0", score_mat = score_primary_mat),
+    list(key = "b_AJCC_stageIV", title = "1b AJCC 分期",
+         xlab = "Stage IV vs I–III",
          group = setNames(as.character(ann_p$stage_IV), ann_p$sample),
-         pos = "Stage IV", neg = "Stage I-III", score_mat = score_primary_mat,
-         fill = c("Stage I-III" = "#4DBBD5", "Stage IV" = "#E64B35")),
-    list(key = "c_node_N", title = "1c 淋巴结（原位肿瘤）",
-         subtitle = "神经浸润分数：N+ vs N0",
+         pos = "Stage IV", neg = "Stage I-III", score_mat = score_primary_mat),
+    list(key = "c_node_N", title = "1c 淋巴结",
+         xlab = "N+ vs N0",
          group = setNames(as.character(ann_p$node_N), ann_p$sample),
-         pos = "Nplus", neg = "N0", score_mat = score_primary_mat,
-         fill = c("N0" = "#4DBBD5", "Nplus" = "#E64B35")),
-    list(key = "d_sample_type", title = "1d 样本类型（原位 vs 转移组织）",
-         subtitle = "神经浸润分数：转移组织 vs 原位肿瘤（转移组织例数很少）",
+         pos = "Nplus", neg = "N0", score_mat = score_primary_mat),
+    list(key = "d_sample_type", title = "1d 样本类型",
+         xlab = "转移组织 vs 原位",
          group = setNames(as.character(ann_t$sample_class), ann_t$sample),
-         pos = "转移组织", neg = "原位肿瘤", score_mat = score_tumor_mat,
-         fill = c("原位肿瘤" = "#4DBBD5", "转移组织" = "#E64B35"))
+         pos = "转移组织", neg = "原位肿瘤", score_mat = score_tumor_mat)
   )
 
-  all_sig_stats <- list()
+  all_go_stats <- list()
   for (ds in designs) {
-    message("作图：", ds$title)
+    message("气泡图：", ds$title)
     stat_rows <- list()
-    long_rows <- list()
     sm <- ds$score_mat
-    for (sid in colnames(sm)) {
-      sc <- as.numeric(sm[, sid])
+    for (g in colnames(sm)) {
+      sc <- as.numeric(sm[, g])
       names(sc) <- rownames(sm)
-      grp <- ds$group[names(sc)]
-      one <- compare_sig_groups(sc, grp, ds$pos, ds$neg, ds$key)
+      one <- compare_go_groups(sc, ds$group[names(sc)], ds$pos, ds$neg, ds$key)
       if (!is.null(one)) {
-        one[, `:=`(signature = sid, signature_name = unname(signature_title[sid]))]
-        stat_rows[[sid]] <- one
+        one[, `:=`(GO = g, GO_name = go_title(g), grp_lab = ds$xlab)]
+        stat_rows[[g]] <- one
       }
-      long_rows[[sid]] <- data.table(
-        sample = names(sc),
-        signature = sid,
-        signature_name = unname(signature_title[sid]),
-        signature_score = as.numeric(sc),
-        group = factor(as.character(grp), levels = c(ds$neg, ds$pos))
-      )
     }
     stat_dt <- rbindlist(stat_rows, fill = TRUE)
     if (nrow(stat_dt) == 0) {
@@ -624,100 +632,33 @@ run_tcga_brca_2026 <- function() {
       next
     }
     stat_dt[, fdr := p.adjust(pvalue, method = "BH")]
-    fwrite(stat_dt, file.path(out_dir, paste0("02_", ds$key, "_neural_vs_group.csv")))
-    all_sig_stats[[ds$key]] <- stat_dt
+    fwrite(stat_dt, file.path(out_dir, paste0("02_", ds$key, "_GO_vs_metastasis.csv")))
+    all_go_stats[[ds$key]] <- stat_dt
+    plot_go_bubble(
+      stat_dt,
+      title = paste0(ds$title, "：神经 GO vs 转移"),
+      subtitle = paste0("纵轴=各神经信号 GO（单独打分）；横轴=", ds$xlab,
+                        "；颜色=通路分数差（红=转移侧更高）"),
+      path_stub = file.path(out_dir, paste0("02_", ds$key, "_bubble")),
+      x_lab = ds$xlab
+    )
+  }
 
-    long_dt <- rbindlist(long_rows, fill = TRUE)
-    long_dt <- long_dt[!is.na(group) & is.finite(signature_score)]
-    p_box <- ggplot(long_dt, aes(x = group, y = signature_score, fill = group)) +
-      geom_boxplot(outlier.size = 0.4, width = 0.65) +
-      stat_compare_means(size = 3.2, label = "p.format") +
-      facet_wrap(~ signature_name, scales = "free_y", ncol = 2) +
-      scale_fill_manual(values = ds$fill) +
-      labs(title = ds$title, subtitle = ds$subtitle,
-           x = NULL, y = "Neural invasion signature score", fill = NULL) +
-      theme_pub()
-    save_plot(p_box, file.path(out_dir, paste0("02_", ds$key, "_boxplot")), 10, 6)
-
-    p_delta <- ggplot(stat_dt, aes(x = delta_median, y = reorder(signature_name, delta_median))) +
-      geom_vline(xintercept = 0, linetype = 2, color = "grey50") +
-      geom_point(aes(color = pvalue < 0.05, size = -log10(pmax(pvalue, 1e-12)))) +
-      scale_color_manual(values = c("FALSE" = "grey50", "TRUE" = "#E64B35"), name = "p < 0.05") +
-      labs(title = paste0(ds$title, "：神经浸润分数差"),
-           subtitle = paste0("Δ median (", ds$pos, " − ", ds$neg, ")"),
-           x = "Δ median signature score", y = NULL, size = expression(-log[10](p))) +
-      theme_bw()
-    save_plot(p_delta, file.path(out_dir, paste0("02_", ds$key, "_delta")), 8, 4)
-
-    # 关键单个 marker
-    expr_use <- if (identical(ds$key, "d_sample_type")) expr_tumor else expr_primary
-    genes_ok <- intersect(highlight_genes, rownames(expr_use))
-    if (length(genes_ok) >= 1) {
-      g_long <- rbindlist(lapply(genes_ok, function(gn) {
-        v <- as.numeric(expr_use[gn, ])
-        names(v) <- colnames(expr_use)
-        data.table(
-          gene = gn, sample = names(v), expression = v,
-          group = factor(as.character(ds$group[names(v)]), levels = c(ds$neg, ds$pos))
-        )
-      }), fill = TRUE)
-      g_long <- g_long[!is.na(group) & is.finite(expression)]
-      p_g <- ggplot(g_long, aes(x = group, y = expression, fill = group)) +
-        geom_boxplot(outlier.size = 0.3, width = 0.65) +
-        stat_compare_means(size = 2.4, label = "p.format") +
-        facet_wrap(~ gene, scales = "free_y", ncol = 4) +
-        scale_fill_manual(values = ds$fill) +
-        labs(title = paste0(ds$title, "：关键 marker 单基因表达"),
-             subtitle = "施旺细胞 marker 与神经营养因子；未合并打分",
-             x = NULL, y = "log expression", fill = NULL) +
-        theme_pub()
-      save_plot(p_g, file.path(out_dir, paste0("02_", ds$key, "_key_markers")), 12, 8)
+  if (length(all_go_stats) > 0) {
+    bubble <- rbindlist(all_go_stats, fill = TRUE)
+    bubble[, grp_lab := factor(grp_lab, levels = c(
+      "M1 vs M0", "Stage IV vs I–III", "N+ vs N0", "转移组织 vs 原位"
+    ))]
+    fwrite(bubble, file.path(out_dir, "02_summary_GO_vs_metastasis.csv"))
+    plot_go_bubble(
+      bubble,
+      title = "神经浸润（各神经信号 GO）与乳腺癌转移",
+      subtitle = "纵轴=GO 通路（未合并基因集）；横轴=四种转移定义；点大小=-log10(p)，颜色=Δ median",
+      path_stub = file.path(out_dir, "02_summary_bubble_GO_vs_metastasis")
+    )
+    if (interactive()) {
+      message("主气泡图已保存：02_summary_bubble_GO_vs_metastasis.png")
     }
-  }
-
-  # 1b 附加：原位肿瘤按 Stage I–IV
-  if (sum(!is.na(ann_p$stage_simplified)) >= 10) {
-    long_st <- rbindlist(lapply(colnames(score_primary_mat), function(sid) {
-      sc <- score_primary_mat[, sid]
-      data.table(
-        signature = sid, signature_name = unname(signature_title[sid]),
-        sample = names(sc), signature_score = as.numeric(sc),
-        stage = factor(as.character(ann_p$stage_simplified[match(names(sc), ann_p$sample)]),
-                       levels = c("Stage I", "Stage II", "Stage III", "Stage IV"))
-      )
-    }), fill = TRUE)
-    long_st <- long_st[!is.na(stage) & is.finite(signature_score)]
-    p_st <- ggplot(long_st, aes(x = stage, y = signature_score, fill = stage)) +
-      geom_boxplot(outlier.size = 0.35, width = 0.7) +
-      facet_wrap(~ signature_name, scales = "free_y", ncol = 2) +
-      scale_fill_manual(values = c("Stage I" = "#3C5488", "Stage II" = "#4DBBD5",
-                                   "Stage III" = "#E64B35", "Stage IV" = "#F39B7F")) +
-      labs(title = "1b AJCC 分期（原位肿瘤，I–IV）",
-           subtitle = "施旺细胞 marker 与神经营养因子分开打分",
-           x = NULL, y = "Neural invasion signature score", fill = NULL) +
-      theme_pub()
-    save_plot(p_st, file.path(out_dir, "02_b_AJCC_stage_I_to_IV_boxplot"), 10, 6)
-  }
-
-  if (length(all_sig_stats) > 0) {
-    bubble <- rbindlist(all_sig_stats, fill = TRUE)
-    bubble[, grp_lab := factor(grouping, levels = c(
-      "a_distant_M", "b_AJCC_stageIV", "c_node_N", "d_sample_type"
-    ), labels = c("1a 远处转移 M1 vs M0", "1b Stage IV vs I–III",
-                  "1c N+ vs N0", "1d 转移组织 vs 原位"))]
-    p_bub <- ggplot(bubble, aes(x = grp_lab, y = signature_name)) +
-      geom_point(aes(size = -log10(pmax(pvalue, 1e-12)),
-                     color = pmin(pmax(delta_median, -1), 1))) +
-      scale_color_gradient2(low = "#3C5488", mid = "white", high = "#E64B35",
-                            midpoint = 0, name = "Δ median") +
-      scale_size_continuous(name = expression(-log[10](p))) +
-      labs(title = "神经浸润 vs 乳腺癌转移（四个定义）",
-           subtitle = "红=转移侧神经浸润更高，蓝=更低；施旺与神经营养未合并",
-           x = NULL, y = NULL) +
-      theme_bw(base_size = 12) +
-      theme(axis.text.x = element_text(angle = 18, hjust = 1), legend.position = "right")
-    save_plot(p_bub, file.path(out_dir, "02_summary_bubble_neural_vs_metastasis"), 10, 5)
-    fwrite(bubble, file.path(out_dir, "02_summary_neural_vs_metastasis.csv"))
   }
 
   # ---- 2) 原位肿瘤内，与转移负相关的基因 ----
@@ -732,16 +673,11 @@ run_tcga_brca_2026 <- function() {
          group = setNames(as.character(ann_p$node_N), ann_p$sample),
          pos = "Nplus", neg = "N0")
   )
-
   for (md in met_defs) {
     message("全基因组相关：", md$title)
     tab <- spearman_vs_binary(expr_primary, md$group, md$pos, md$neg)
-    if (nrow(tab) == 0) {
-      message("  分组不足，跳过")
-      next
-    }
+    if (nrow(tab) == 0) next
     tab[, `:=`(
-      direction = ifelse(spearman_r < 0, "negative", "positive"),
       significant_neg = spearman_r < neg_r_cutoff & pvalue < neg_pvalue_cutoff,
       strict_neg = spearman_r <= strict_r_cutoff & pvalue < neg_pvalue_cutoff
     )]
@@ -774,7 +710,6 @@ run_tcga_brca_2026 <- function() {
   }
 
   if (length(met_ids) >= min_group_n) {
-    message("全基因组：原位 vs 转移组织（对应 1d）")
     common <- intersect(colnames(expr_tumor), c(primary_ids, met_ids))
     grp <- ifelse(common %in% met_ids, "转移组织", "原位肿瘤")
     names(grp) <- common
@@ -791,28 +726,28 @@ run_tcga_brca_2026 <- function() {
     }
   }
 
-  # ---- 3) 原位肿瘤内，与神经浸润负相关的基因（施旺 / 神经营养分开）----
-  dir.create(file.path(out_dir, "04_neg_vs_neural_per_signature"), showWarnings = FALSE)
+  # ---- 3) 原位肿瘤内，与每个神经 GO 负相关的基因 ----
+  dir.create(file.path(out_dir, "04_neg_vs_neural_per_GO"), showWarnings = FALSE)
   summary_neg <- list()
-  for (sid in names(score_primary_list)) {
-    message("与神经浸润负相关：", sid, " ", signature_title[sid])
-    sig_vec <- score_primary_list[[sid]]
-    tab <- spearman_vs_sig(expr_primary, sig_vec)
+  for (g in names(score_primary_list)) {
+    message("与神经浸润负相关：", g, " ", go_title(g))
+    go_score_vec <- score_primary_list[[g]]
+    tab <- spearman_vs_go_score(expr_primary, go_score_vec)
     if (nrow(tab) == 0) next
     tab[, `:=`(
-      signature = sid, signature_name = unname(signature_title[sid]),
+      GO = g, GO_name = go_title(g),
       significant_neg = spearman_r < neg_r_cutoff & pvalue < neg_pvalue_cutoff,
       strict_neg = spearman_r <= strict_r_cutoff & pvalue < neg_pvalue_cutoff
     )]
     setorder(tab, spearman_r)
-    sdir <- file.path(out_dir, "04_neg_vs_neural_per_signature", safe_name(sid))
-    dir.create(sdir, showWarnings = FALSE)
-    fwrite(tab, file.path(sdir, "genes_vs_neural_score_all.csv"))
-    fwrite(tab[significant_neg == TRUE], file.path(sdir, "genes_NEG_vs_neural_score.csv"))
-    fwrite(tab[strict_neg == TRUE], file.path(sdir, "genes_NEG_strict_vs_neural_score.csv"))
-    summary_neg[[sid]] <- data.table(
-      signature = sid, signature_name = unname(signature_title[sid]),
-      n_signature_genes = attr(sig_vec, "n_genes"),
+    gdir <- file.path(out_dir, "04_neg_vs_neural_per_GO", paste0("GO_", safe_name(sub("GO:", "", g))))
+    dir.create(gdir, showWarnings = FALSE)
+    fwrite(tab, file.path(gdir, "genes_vs_neural_GO_all.csv"))
+    fwrite(tab[significant_neg == TRUE], file.path(gdir, "genes_NEG_vs_neural_GO.csv"))
+    fwrite(tab[strict_neg == TRUE], file.path(gdir, "genes_NEG_strict_vs_neural_GO.csv"))
+    summary_neg[[g]] <- data.table(
+      GO = g, GO_name = go_title(g),
+      n_pathway_genes = attr(go_score_vec, "n_genes"),
       n_tested = nrow(tab),
       n_neg = sum(tab$significant_neg),
       n_neg_strict = sum(tab$strict_neg)
@@ -833,30 +768,29 @@ run_tcga_brca_2026 <- function() {
       scale_color_manual(values = c("负相关" = "#3C5488", "正相关" = "#E64B35", "不显著" = "grey75")) +
       label_fun(data = top_lab, aes(label = feature), size = 2.3, max.overlaps = 25, show.legend = FALSE) +
       labs(title = "3 原位肿瘤：与神经浸润负相关的基因",
-           subtitle = paste0(signature_title[sid], "；蓝=与该签名分数负相关"),
-           x = "Spearman r (gene vs neural invasion score)",
+           subtitle = paste0(g, "  ", go_title(g), "；蓝=与该 GO 通路分数负相关"),
+           x = "Spearman r (gene vs neural GO score)",
            y = expression(-log[10](p)), color = NULL) +
       theme_bw()
-    save_plot(p_vol, file.path(sdir, "volcano_neg_vs_neural"), 9, 6.5)
+    save_plot(p_vol, file.path(gdir, "volcano_neg_vs_neural_GO"), 9, 6.5)
   }
   if (length(summary_neg) > 0) {
     sum_dt <- rbindlist(summary_neg, fill = TRUE)
-    fwrite(sum_dt, file.path(out_dir, "04_summary_neg_genes_vs_neural_signatures.csv"))
-    p_n <- ggplot(sum_dt, aes(x = n_neg, y = reorder(signature_name, n_neg))) +
-      geom_col(fill = "#3C5488", width = 0.65) +
-      labs(title = "原位肿瘤中与神经浸润负相关的基因数",
-           subtitle = paste0("Spearman r < 0 且 p < ", neg_pvalue_cutoff,
-                             "；施旺与神经营养分开，未合并"),
+    fwrite(sum_dt, file.path(out_dir, "04_summary_neg_genes_vs_each_neural_GO.csv"))
+    p_n <- ggplot(sum_dt, aes(x = n_neg, y = reorder(go_lab(GO), n_neg))) +
+      geom_col(fill = "#3C5488", width = 0.7) +
+      labs(title = "每个神经 GO：原位肿瘤中负相关基因数",
+           subtitle = paste0("Spearman r < 0 且 p < ", neg_pvalue_cutoff, "；未合并基因集"),
            x = "负相关基因数", y = NULL) +
       theme_bw()
-    save_plot(p_n, file.path(out_dir, "04_summary_neg_gene_counts"), 8, 4)
+    save_plot(p_n, file.path(out_dir, "04_summary_neg_gene_counts"), 10, 6)
   }
 
   message("完成。结果目录：", normalizePath(out_dir, winslash = "/", mustWork = FALSE))
-  message("神经浸润分数：01_neural_invasion_scores_primary.csv")
-  message("主图：02_summary_bubble_neural_vs_metastasis.png")
+  message("主气泡图：02_summary_bubble_GO_vs_metastasis.png")
+  message("分面气泡图：02_a/b/c/d_*_bubble.png")
   message("转移负相关基因：03_*_genes_NEG_vs_metastasis.csv")
-  message("神经浸润负相关基因：04_neg_vs_neural_per_signature/")
+  message("神经 GO 负相关基因：04_neg_vs_neural_per_GO/")
   invisible(TRUE)
 }
 
