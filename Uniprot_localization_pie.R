@@ -12,7 +12,7 @@
 # 扇区大小按各组人数占比计算，扇区上只标百分比，图注为英文。
 # 整张图保存在 localization/localization_pie.png。
 # 线粒体蛋白再做 GO 富集（BP、MF），并单独抽出线粒体功能相关条目。
-# 结果在 localization/Mitochondrion/GO/。
+# 每个富集结果出柱状图和气泡图。结果在 localization/Mitochondrion/GO/。
 #
 # 运行：
 #   setwd("E:/R/Uniprot")
@@ -527,6 +527,41 @@ if (length(mito_sym) < 3) {
     invisible(g)
   }
 
+  # 气泡图：横轴为富集比例，点的大小是基因数，颜色是校正后 p 值
+  plot_go_bubble <- function(df, path_prefix, title) {
+    if (is.null(df) || nrow(df) == 0) return(invisible(NULL))
+    if (!all(c("Description", "p.adjust", "Count") %in% names(df))) return(invisible(NULL))
+    df <- df[order(df$p.adjust, df$pvalue), , drop = FALSE]
+    df <- head(df, 15)
+    if ("GeneRatio" %in% names(df)) {
+      ratio <- strsplit(as.character(df$GeneRatio), "/", fixed = TRUE)
+      df$GeneRatioNum <- vapply(ratio, function(p) {
+        if (length(p) < 2) return(NA_real_)
+        as.numeric(p[[1]]) / as.numeric(p[[2]])
+      }, numeric(1))
+    } else {
+      df$GeneRatioNum <- df$Count / max(df$Count)
+    }
+    df <- df[!is.na(df$GeneRatioNum), , drop = FALSE]
+    if (nrow(df) == 0) return(invisible(NULL))
+    df$Description <- factor(df$Description, levels = rev(unique(df$Description)))
+    g <- ggplot(df, aes(x = GeneRatioNum, y = Description)) +
+      geom_point(aes(size = Count, color = p.adjust)) +
+      scale_color_gradient(low = "#C0392B", high = "#6BAED6", name = "adjusted p") +
+      scale_size_continuous(name = "Count", range = c(3, 9)) +
+      labs(title = title, x = "Gene ratio", y = NULL) +
+      theme_bw(base_size = 12) +
+      theme(
+        plot.title = element_text(face = "bold", size = 13),
+        axis.text.y = element_text(size = 10),
+        plot.margin = margin(10, 16, 10, 10)
+      )
+    h <- max(5, 0.42 * nrow(df) + 1.8)
+    ggsave(paste0(path_prefix, ".pdf"), g, width = 10, height = h, device = cairo_pdf, bg = "white")
+    ggsave(paste0(path_prefix, ".png"), g, width = 10, height = h, dpi = 180, bg = "white")
+    invisible(g)
+  }
+
   run_go <- function(ont) {
     ego <- tryCatch(
       clusterProfiler::enrichGO(
@@ -578,7 +613,9 @@ if (length(mito_sym) < 3) {
       title <- paste0(title, " (no term with adjusted p < 0.05)")
     }
     plot_go_bar(df, file.path(go_dir, paste0("ORA_GO_", ont, "_barplot")), title)
+    plot_go_bubble(df, file.path(go_dir, paste0("ORA_GO_", ont, "_bubble")), title)
     message("GO ", ont, " 表: ", csv_path)
+    message("GO ", ont, " 气泡图: ", file.path(go_dir, paste0("ORA_GO_", ont, "_bubble.png")))
   }
 
   bp <- utils::read.csv(file.path(go_dir, "ORA_GO_BP.csv"), stringsAsFactors = FALSE, check.names = FALSE)
@@ -602,10 +639,16 @@ if (length(mito_sym) < 3) {
       file.path(go_dir, "ORA_GO_BP_mitochondrial_function_barplot"),
       "Mitochondrial proteins | mitochondrial functions (GO BP)"
     )
+    plot_go_bubble(
+      focus,
+      file.path(go_dir, "ORA_GO_BP_mitochondrial_function_bubble"),
+      "Mitochondrial proteins | mitochondrial functions (GO BP)"
+    )
     message("线粒体功能相关 GO 条目 ", nrow(focus), " 个。靠前的是：")
     show_n <- min(10, nrow(focus))
     print(focus[seq_len(show_n), c("Description", "pvalue", "p.adjust", "Count")], row.names = FALSE)
   }
   message("线粒体蛋白表: ", file.path(mito_dir, "mitochondrial_proteins.csv"))
-  message("线粒体功能 GO 图: ", file.path(go_dir, "ORA_GO_BP_mitochondrial_function_barplot.png"))
+  message("线粒体功能 GO 柱状图: ", file.path(go_dir, "ORA_GO_BP_mitochondrial_function_barplot.png"))
+  message("线粒体功能 GO 气泡图: ", file.path(go_dir, "ORA_GO_BP_mitochondrial_function_bubble.png"))
 }
