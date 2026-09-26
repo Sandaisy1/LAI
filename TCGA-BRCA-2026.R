@@ -38,7 +38,7 @@ library(AnnotationDbi)
 # 参数
 # ==============================================================================
 work_dir <- Sys.getenv("TCGA_BRCA_2026_DIR", unset = "E:/R/TCGA-BRCA-2026")
-out_dir <- "results_TCGA-BRCA-2026"
+out_dir <- "results_TCGA-BRCA-2026_5GO"
 min_pathway_genes <- 1
 min_group_n <- 2
 neg_pvalue_cutoff <- 0.05
@@ -421,14 +421,19 @@ plot_go_bubble_two_cols <- function(stat_dt, title, subtitle, path_stub, facet =
   long[, y_lab := factor(paste0(GO, "  ", GO_name), levels = rev(go_lv))]
   long[, x_lab := factor(x_lab, levels = unique(c(stat_dt$neg_lab, stat_dt$pos_lab)))]
   long[, neglogp := ifelse(is.finite(pvalue), pmin(10, -log10(pmax(pvalue, 1e-12))), 0.5)]
+  fill_lim <- max(abs(long$median_score), na.rm = TRUE)
+  if (!is.finite(fill_lim) || fill_lim < 1e-8) fill_lim <- 0.1
   p <- ggplot(long, aes(x = x_lab, y = y_lab)) +
     geom_point(
       aes(size = neglogp, fill = median_score),
       shape = 21, color = "black", stroke = 0.5 / ggplot2::.pt
     ) +
-    scale_fill_gradient2(
-      low = "#3C5488", mid = "white", high = "#E64B35",
-      midpoint = 0, name = "Pathway score\nmedian"
+    scale_fill_gradientn(
+      colours = c("#3C5488", "#5B7FA6", "#FFFFFF", "#EE8A7A", "#E64B35"),
+      values = c(0, 0.47, 0.50, 0.53, 1),
+      limits = c(-fill_lim, fill_lim),
+      oob = scales::squish,
+      name = "Pathway score\nmedian"
     ) +
     scale_size_continuous(range = c(3, 11), name = expression(-log[10](p))) +
     labs(title = title, subtitle = subtitle, x = NULL, y = NULL) +
