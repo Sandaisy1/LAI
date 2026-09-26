@@ -108,9 +108,13 @@ safe_name <- function(x) {
   gsub("^_|_$", "", x)
 }
 go_title <- function(go_id) {
-  if (go_id %in% names(go_name_map)) unname(go_name_map[go_id]) else go_id
+  go_id <- as.character(go_id)
+  out <- unname(go_name_map[go_id])
+  miss <- is.na(out) | !nzchar(out)
+  out[miss] <- go_id[miss]
+  out
 }
-go_lab <- function(go_id) paste0(go_id, "  ", go_title(go_id))
+go_lab <- function(go_id) paste0(as.character(go_id), "  ", go_title(go_id))
 
 existing_files <- function(stems) {
   cands <- unique(unlist(lapply(stems, function(s) c(s, paste0(s, ".gz")))))
@@ -411,7 +415,7 @@ expand_met_two_cols <- function(stat_dt) {
     )],
     d[, .(
       GO, GO_name, grouping, panel,
-      side = "转移", x_lab = pos_lab,
+      side = "Metastatic", x_lab = pos_lab,
       n = n_pos, median_score = median_pos, pvalue
     )]
   ), fill = TRUE)
