@@ -309,7 +309,7 @@ read_read_group_tracking <- function(path) {
   if (nrow(rg) == 0) return(NULL)
   rep_lab <- as.character(rg$replicate)
   rep_lab[!nzchar(rep_lab) | is.na(rep_lab)] <- "0"
-  rg$sample <- make.unique(paste(rg$condition, rep_lab, sep = "_rep"), sep = "_")
+  rg$sample <- paste(as.character(rg$condition), rep_lab, sep = "_rep")
   mat <- pivot_tracking(rg$tracking_id, rg$sample, rg[[value_col]])
   gene_map <- read_gene_map(file.path(dirname(path), "genes.fpkm_tracking"))
   mat <- label_matrix(mat, gene_map)
