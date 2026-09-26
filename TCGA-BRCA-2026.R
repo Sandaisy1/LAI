@@ -406,7 +406,7 @@ expand_met_two_cols <- function(stat_dt) {
   rbindlist(list(
     d[, .(
       GO, GO_name, grouping, panel,
-      side = "未转移", x_lab = neg_lab,
+      side = "Non-metastatic", x_lab = neg_lab,
       n = n_neg, median_score = median_neg, pvalue
     )],
     d[, .(
@@ -426,10 +426,13 @@ plot_go_bubble_two_cols <- function(stat_dt, title, subtitle, path_stub, facet =
   long[, x_lab := factor(x_lab, levels = unique(c(stat_dt$neg_lab, stat_dt$pos_lab)))]
   long[, neglogp := ifelse(is.finite(pvalue), pmin(10, -log10(pmax(pvalue, 1e-12))), 0.5)]
   p <- ggplot(long, aes(x = x_lab, y = y_lab)) +
-    geom_point(aes(size = neglogp, color = median_score)) +
-    scale_color_gradient2(
+    geom_point(
+      aes(size = neglogp, fill = median_score),
+      shape = 21, color = "black", stroke = 0.5 / ggplot2::.pt
+    ) +
+    scale_fill_gradient2(
       low = "#3C5488", mid = "white", high = "#E64B35",
-      midpoint = 0, name = "通路分数\n中位数"
+      midpoint = 0, name = "Pathway score\nmedian"
     ) +
     scale_size_continuous(range = c(3, 11), name = expression(-log[10](p))) +
     labs(title = title, subtitle = subtitle, x = NULL, y = NULL) +
@@ -623,25 +626,25 @@ run_tcga_brca_2026 <- function() {
   ann_t <- ann_all[sample %in% rownames(score_tumor_mat)]
 
   designs <- list(
-    list(key = "a_distant_M", title = "1a 诊断时远处转移", panel = "1a 远处转移",
+    list(key = "a_distant_M", title = "1a Distant metastasis", panel = "1a Distant M",
          group = setNames(as.character(ann_p$distant_M), ann_p$sample),
          pos = "M1", neg = "M0",
-         pos_lab = "M1（转移）", neg_lab = "M0（未转移）",
+         pos_lab = "M1", neg_lab = "M0",
          score_mat = score_primary_mat),
-    list(key = "b_AJCC_stageIV", title = "1b AJCC 分期", panel = "1b AJCC 分期",
+    list(key = "b_AJCC_stageIV", title = "1b AJCC stage", panel = "1b AJCC stage",
          group = setNames(as.character(ann_p$stage_IV), ann_p$sample),
          pos = "Stage IV", neg = "Stage I-III",
-         pos_lab = "Stage IV（转移）", neg_lab = "Stage I–III（未转移）",
+         pos_lab = "Stage IV", neg_lab = "Stage I-III",
          score_mat = score_primary_mat),
-    list(key = "c_node_N", title = "1c 淋巴结", panel = "1c 淋巴结",
+    list(key = "c_node_N", title = "1c Lymph node", panel = "1c Lymph node",
          group = setNames(as.character(ann_p$node_N), ann_p$sample),
          pos = "Nplus", neg = "N0",
-         pos_lab = "N+（转移）", neg_lab = "N0（未转移）",
+         pos_lab = "N+", neg_lab = "N0",
          score_mat = score_primary_mat),
-    list(key = "d_sample_type", title = "1d 样本类型", panel = "1d 样本类型",
+    list(key = "d_sample_type", title = "1d Sample type", panel = "1d Sample type",
          group = setNames(as.character(ann_t$sample_class), ann_t$sample),
          pos = "转移组织", neg = "原位肿瘤",
-         pos_lab = "转移组织", neg_lab = "原位肿瘤（未转移）",
+         pos_lab = "Metastatic tissue", neg_lab = "Primary tumor",
          score_mat = score_tumor_mat)
   )
 
@@ -673,8 +676,8 @@ run_tcga_brca_2026 <- function() {
     all_go_stats[[ds$key]] <- stat_dt
     plot_go_bubble_two_cols(
       stat_dt,
-      title = paste0(ds$title, "：神经 GO 在未转移 / 转移"),
-      subtitle = "纵轴=各神经信号 GO（单独打分）；横轴两列=未转移、转移；颜色=该组通路分数中位数，点大小=-log10(Wilcoxon p)",
+      title = paste0(ds$title, ": neural GO in non-metastatic vs metastatic"),
+      subtitle = "Y = neuronal GO (scored separately); X = non-metastatic | metastatic; fill = median pathway score; size = -log10(Wilcoxon p)",
       path_stub = file.path(out_dir, paste0("02_", ds$key, "_bubble"))
     )
   }
@@ -686,8 +689,8 @@ run_tcga_brca_2026 <- function() {
            file.path(out_dir, "02_summary_GO_vs_metastasis_two_cols.csv"))
     plot_go_bubble_two_cols(
       bubble,
-      title = "神经浸润（各神经信号 GO）与乳腺癌转移",
-      subtitle = "每个面板两列：未转移 | 转移；颜色=该组通路分数中位数；点大小=两组比较的 -log10(p)",
+      title = "Neural GO activity versus breast cancer metastasis",
+      subtitle = "Each panel: non-metastatic | metastatic; fill = median pathway score; size = -log10(p)",
       path_stub = file.path(out_dir, "02_summary_bubble_GO_vs_metastasis"),
       facet = TRUE
     )
@@ -698,13 +701,13 @@ run_tcga_brca_2026 <- function() {
 
   # ---- 2) 原位肿瘤内，与转移负相关的基因 ----
   met_defs <- list(
-    list(key = "a_distant_M", title = "2a 与诊断时远处转移负相关的基因（原位肿瘤）",
+    list(key = "a_distant_M", title = "2a Genes negatively correlated with distant M1 (primary tumors)",
          group = setNames(as.character(ann_p$distant_M), ann_p$sample),
          pos = "M1", neg = "M0"),
-    list(key = "b_AJCC_stageIV", title = "2b 与 Stage IV 负相关的基因（原位肿瘤）",
+    list(key = "b_AJCC_stageIV", title = "2b Genes negatively correlated with Stage IV (primary tumors)",
          group = setNames(as.character(ann_p$stage_IV), ann_p$sample),
          pos = "Stage IV", neg = "Stage I-III"),
-    list(key = "c_node_N", title = "2c 与淋巴结 N+ 负相关的基因（原位肿瘤）",
+    list(key = "c_node_N", title = "2c Genes negatively correlated with N+ (primary tumors)",
          group = setNames(as.character(ann_p$node_N), ann_p$sample),
          pos = "Nplus", neg = "N0")
   )
@@ -725,8 +728,8 @@ run_tcga_brca_2026 <- function() {
 
     plot_dt <- copy(tab)
     plot_dt[, neglogp := pmin(12, -log10(pmax(pvalue, 1e-12)))]
-    plot_dt[, col := ifelse(significant_neg, "负相关",
-                            ifelse(spearman_r > 0 & pvalue < neg_pvalue_cutoff, "正相关", "不显著"))]
+    plot_dt[, col := ifelse(significant_neg, "Negative",
+                            ifelse(spearman_r > 0 & pvalue < neg_pvalue_cutoff, "Positive", "NS"))]
     top_lab <- rbind(
       plot_dt[significant_neg == TRUE][1:min(12L, .N)],
       plot_dt[spearman_r > 0][order(-spearman_r)][1:min(6L, .N)]
@@ -735,10 +738,10 @@ run_tcga_brca_2026 <- function() {
       geom_point(alpha = 0.45, size = 0.7) +
       geom_vline(xintercept = 0, linetype = 2, color = "grey50") +
       geom_hline(yintercept = -log10(neg_pvalue_cutoff), linetype = 2, color = "grey50") +
-      scale_color_manual(values = c("负相关" = "#3C5488", "正相关" = "#E64B35", "不显著" = "grey75")) +
+      scale_color_manual(values = c("Negative" = "#3C5488", "Positive" = "#E64B35", "NS" = "grey75")) +
       label_fun(data = top_lab, aes(label = feature), size = 2.4, max.overlaps = 30, show.legend = FALSE) +
       labs(title = md$title,
-           subtitle = paste0("Spearman：基因 vs ", md$pos, "(1)/", md$neg, "(0)；蓝=与转移负相关"),
+           subtitle = paste0("Spearman: gene vs ", md$pos, " (1) / ", md$neg, " (0); blue = negative vs metastasis"),
            x = "Spearman r", y = expression(-log[10](p)), color = NULL) +
       theme_bw()
     save_plot(p_vol, file.path(out_dir, paste0("03_", md$key, "_volcano_genes_vs_metastasis")), 10, 7)
@@ -790,8 +793,8 @@ run_tcga_brca_2026 <- function() {
 
     plot_dt <- copy(tab)
     plot_dt[, neglogp := pmin(12, -log10(pmax(pvalue, 1e-12)))]
-    plot_dt[, col := ifelse(significant_neg, "负相关",
-                            ifelse(spearman_r > 0 & pvalue < neg_pvalue_cutoff, "正相关", "不显著"))]
+    plot_dt[, col := ifelse(significant_neg, "Negative",
+                            ifelse(spearman_r > 0 & pvalue < neg_pvalue_cutoff, "Positive", "NS"))]
     top_lab <- rbind(
       plot_dt[significant_neg == TRUE][1:min(10L, .N)],
       plot_dt[spearman_r > 0][order(-spearman_r)][1:min(5L, .N)]
@@ -800,10 +803,10 @@ run_tcga_brca_2026 <- function() {
       geom_point(alpha = 0.4, size = 0.65) +
       geom_vline(xintercept = 0, linetype = 2, color = "grey50") +
       geom_hline(yintercept = -log10(neg_pvalue_cutoff), linetype = 2, color = "grey50") +
-      scale_color_manual(values = c("负相关" = "#3C5488", "正相关" = "#E64B35", "不显著" = "grey75")) +
+      scale_color_manual(values = c("Negative" = "#3C5488", "Positive" = "#E64B35", "NS" = "grey75")) +
       label_fun(data = top_lab, aes(label = feature), size = 2.3, max.overlaps = 25, show.legend = FALSE) +
-      labs(title = "3 原位肿瘤：与神经浸润负相关的基因",
-           subtitle = paste0(g, "  ", go_title(g), "；蓝=与该 GO 通路分数负相关"),
+      labs(title = "Genes negatively correlated with neural invasion",
+           subtitle = paste0(g, "  ", go_title(g), "; blue = negative vs this GO score"),
            x = "Spearman r (gene vs neural GO score)",
            y = expression(-log[10](p)), color = NULL) +
       theme_bw()
@@ -814,9 +817,9 @@ run_tcga_brca_2026 <- function() {
     fwrite(sum_dt, file.path(out_dir, "04_summary_neg_genes_vs_each_neural_GO.csv"))
     p_n <- ggplot(sum_dt, aes(x = n_neg, y = reorder(go_lab(GO), n_neg))) +
       geom_col(fill = "#3C5488", width = 0.7) +
-      labs(title = "每个神经 GO：原位肿瘤中负相关基因数",
-           subtitle = paste0("Spearman r < 0 且 p < ", neg_pvalue_cutoff, "；未合并基因集"),
-           x = "负相关基因数", y = NULL) +
+      labs(title = "Number of genes negatively correlated with each neural GO",
+           subtitle = paste0("Spearman r < 0 and p < ", neg_pvalue_cutoff, "; GO sets not pooled"),
+           x = "Number of negative genes", y = NULL) +
       theme_bw()
     save_plot(p_n, file.path(out_dir, "04_summary_neg_gene_counts"), 10, 6)
   }
