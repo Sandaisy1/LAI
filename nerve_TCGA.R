@@ -409,7 +409,7 @@ plot_bubble_two_cols <- function(stat_dt, title, subtitle, path_stub, facet = FA
       name = "Pathway score\nmedian"
     ) +
     scale_size_continuous(range = c(3, 11), name = expression(-log[10](p))) +
-    scale_x_discrete(expand = expansion(add = 1.25)) +
+    scale_x_discrete(expand = expansion(add = 0.85)) +
     labs(title = title, subtitle = subtitle, x = NULL, y = NULL) +
     theme_bw(base_size = 12) +
     theme(
@@ -425,7 +425,7 @@ plot_bubble_two_cols <- function(stat_dt, title, subtitle, path_stub, facet = FA
   }
   n_panel <- if (isTRUE(facet)) max(1, uniqueN(long$panel)) else 1
   n_y <- uniqueN(long$y_lab)
-  fig_w <- if (isTRUE(facet)) max(9.5, 2.7 * n_panel + 3.2) else 6.2
+  fig_w <- if (isTRUE(facet)) max(9.5, 2.7 * n_panel + 3.2) else 6.8
   fig_h <- max(5.4, 0.48 * n_y + 2.4)
   save_plot(p, path_stub, fig_w, fig_h)
 }
