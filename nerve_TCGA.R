@@ -26,14 +26,26 @@
 #      biotab 列表：   https://portal.gdc.cancer.gov/repository?facetTab=files&filters=%7B%22op%22%3A%22and%22%2C%22content%22%3A%5B%7B%22op%22%3A%22in%22%2C%22content%22%3A%7B%22field%22%3A%22cases.project.project_id%22%2C%22value%22%3A%5B%22TCGA-BRCA%22%5D%7D%7D%2C%7B%22op%22%3A%22in%22%2C%22content%22%3A%7B%22field%22%3A%22files.data_format%22%2C%22value%22%3A%5B%22BCR%20Biotab%22%5D%7D%7D%5D%7D
 #      也可运行同目录 TCGA_followup_download.R
 #
-# 神经浸润只按下面 5 个神经信号 GO，每个单独取基因、单独打分（不合并）：
+# 神经浸润按下面 17 个神经信号 GO，每个单独取基因、单独打分（不合并）：
+#   GO:0023041  neuronal signal transduction
+#   GO:1904457  positive regulation of neuronal action potential
+#   GO:1904340  positive regulation of dopaminergic neuron differentiation
+#   GO:2001224  positive regulation of neuron migration
+#   GO:2001222  regulation of neuron migration
 #   GO:0019227  neuronal action potential propagation
+#   GO:0019228  neuronal action potential
 #   GO:1902847  regulation of neuronal signal transduction
+#   GO:0031102  neuron projection regeneration
+#   GO:0097492  sympathetic neuron axon guidance
+#   GO:0097491  sympathetic neuron projection guidance
 #   GO:0097374  sensory neuron axon guidance
+#   GO:0007158  neuron cell-cell adhesion
 #   GO:1902667  regulation of axon guidance
+#   GO:0031103  axon regeneration
+#   GO:0007411  axon guidance
 #   GO:0007409  axonogenesis
 #
-# 打分（五个 GO 各自打分，不合并）：
+# 打分（17 个 GO 各自打分，不合并）：
 #   主：z-mean（基因 z 后取均值）
 #   补充：z-median（基因 z 后取中位数）；ssGSEA（Barbie 2009；有 GSVA 用 GSVA，否则用脚本内实现）
 # 每种打分都对下列转移定义做 Wilcoxon，并画两列气泡图（Non-metastatic | Metastatic）
@@ -64,52 +76,195 @@ min_group_n <- 2
 min_expr_frac <- 0.20
 
 go_list <- c(
+  "GO:0023041",
+  "GO:1904457",
+  "GO:1904340",
+  "GO:2001224",
+  "GO:2001222",
   "GO:0019227",
+  "GO:0019228",
   "GO:1902847",
+  "GO:0031102",
+  "GO:0097492",
+  "GO:0097491",
   "GO:0097374",
+  "GO:0007158",
   "GO:1902667",
+  "GO:0031103",
+  "GO:0007411",
   "GO:0007409"
 )
 
 go_name_map <- c(
+  "GO:0023041" = "neuronal signal transduction",
+  "GO:1904457" = "positive regulation of neuronal action potential",
+  "GO:1904340" = "positive regulation of dopaminergic neuron differentiation",
+  "GO:2001224" = "positive regulation of neuron migration",
+  "GO:2001222" = "regulation of neuron migration",
   "GO:0019227" = "neuronal action potential propagation",
+  "GO:0019228" = "neuronal action potential",
   "GO:1902847" = "regulation of neuronal signal transduction",
+  "GO:0031102" = "neuron projection regeneration",
+  "GO:0097492" = "sympathetic neuron axon guidance",
+  "GO:0097491" = "sympathetic neuron projection guidance",
   "GO:0097374" = "sensory neuron axon guidance",
+  "GO:0007158" = "neuron cell-cell adhesion",
   "GO:1902667" = "regulation of axon guidance",
+  "GO:0031103" = "axon regeneration",
+  "GO:0007411" = "axon guidance",
   "GO:0007409" = "axonogenesis"
 )
 
 go_fallback <- list(
+  "GO:0023041" = c(
+    "MACO1", "NLGN1", "NRXN1", "OLFM1", "RTN4R", "KCNA1", "CLU", "DLG4",
+    "GRIN1", "CAMK2A", "SYNGAP1", "MAPK1", "ADCY1", "HOMER1", "GNAO1", "PRKCA",
+    "P2RY11"
+  ),
+  "GO:1904457" = c(
+    "GBA1", "SCN1A", "SCN2A", "SCN8A", "ANK3", "FGF12", "KCNA1", "SCN1B",
+    "CNTNAP1"
+  ),
+  "GO:1904340" = c(
+    "DKK1", "FGF20", "EN1", "EN2", "LMX1A", "LMX1B", "NR4A2", "PITX3",
+    "WNT1", "SHH", "FGF8"
+  ),
+  "GO:2001224" = c(
+    "ADAT2", "ARHGEF2", "DAB2IP", "FLNA", "KIF20B", "MDK", "NIPBL", "NSMF",
+    "PLAA", "RAPGEF2", "RELN", "SEMA6A", "SHTN1", "SRGAP2C", "TBC1D24", "WDR62",
+    "ZNF609", "DCX", "CDK5", "PAFAH1B1", "DAB1", "NRG1", "CXCL12", "CXCR4"
+  ),
+  "GO:2001222" = c(
+    "ADAT2", "ADGRG1", "ARHGEF2", "CAMK2A", "CAMK2B", "COL3A1", "CTNNA2", "CUL5",
+    "CX3CL1", "DAB2IP", "FLNA", "GPR161", "IGSF10", "KIF20B", "KIF26A", "MDK",
+    "NEXMIF", "NIPBL", "NSMF", "NTNG1", "NTNG2", "PHACTR1", "PLAA", "PLXNB2",
+    "RAPGEF2", "RELN", "RNF7", "SEMA6A", "SHTN1", "SOCS7", "SRGAP2", "TBC1D24",
+    "TNN", "ULK4", "VRK1", "WDR62", "ZNF609", "DCX", "CDK5", "PAFAH1B1",
+    "CXCL12", "CXCR4", "SEMA3A", "SLIT1", "ROBO1", "GPR56", "NELF", "SRGAP2C"
+  ),
   "GO:0019227" = c(
-    "CNTNAP1", "SCN1B", "SCN1A", "SCN2A", "SCN8A", "SCN2B", "SCN4B",
-    "ANK3", "NFASC", "NRCAM", "CNTN2", "SPTBN4", "KCNA1", "KCNQ2", "KCNQ3"
+    "CNTNAP1", "SCN1B", "SCN1A", "SCN2A", "SCN8A", "SCN2B", "SCN4B", "ANK3",
+    "NFASC", "NRCAM", "CNTN2", "SPTBN4", "KCNA1", "KCNQ2", "KCNQ3"
+  ),
+  "GO:0019228" = c(
+    "ANK3", "ASIC5", "CHRNA1", "FGF12", "FMR1", "GBA1", "GPER1", "GRIA1",
+    "KCNA1", "KCNA2", "KCND2", "KCNK2", "KCNK4", "KCNMB1", "KCNMB2", "KCNMB3",
+    "KCNMB4", "MTNR1B", "MTOR", "MYH14", "NALCN", "NPR2", "NPY2R", "P2RX1",
+    "SCN11A", "SCN1A", "SCN2A", "SCN8A", "SCN4B", "SCN9A", "TRPA1", "UNC79",
+    "UNC80", "CNTNAP1", "SCN1B", "NFASC", "NRCAM", "NALF1"
   ),
   "GO:1902847" = c(
-    "CLU", "ADCY1", "CAMK2A", "GRIN1", "GRIN2B", "DLG4",
-    "HOMER1", "SYNGAP1", "RGS4", "GNAO1", "PRKCA", "MAPK1"
+    "CLU", "ADCY1", "CAMK2A", "GRIN1", "GRIN2B", "DLG4", "HOMER1", "SYNGAP1",
+    "RGS4", "GNAO1", "PRKCA", "MAPK1"
+  ),
+  "GO:0031102" = c(
+    "GAP43", "CNTF", "EPHA4", "MAG", "RTN4", "RTN4R", "L1CAM", "NCAM1",
+    "BDNF", "NGF", "NTRK1", "PTEN", "DLG4", "APOA4", "APOD", "CERS2",
+    "CSPG5", "CTNNA1", "DAG1", "GRN", "INPP5F", "ISL1", "JAK2", "KIAA0319",
+    "KREMEN1", "MAP1B", "MAPK8IP3", "MMP2", "NREP", "OMG", "PTN", "PTPRS",
+    "PUM2", "RGMA", "RTCA", "RTN4RL1", "RTN4RL2", "SPP1", "STK24", "THY1",
+    "TSPO", "STAT3", "ATF3", "DHFR", "FIGNL2", "FOLR1", "MTR", "SCARF1"
+  ),
+  "GO:0097492" = c(
+    "ECE1", "EDN1", "EDNRA", "PLXNA4", "NRP1", "SEMA3A", "NGF", "NTRK1"
+  ),
+  "GO:0097491" = c(
+    "NRP1", "NRP2", "SEMA3A", "SEMA3F", "ECE1", "EDN1", "EDNRA"
   ),
   "GO:0097374" = c(
-    "NRP1", "NRP2", "SEMA3A", "SEMA3F", "PLXNA1", "PLXNA3", "PLXNA4",
-    "NTN1", "DCC", "SLIT1", "ROBO1"
+    "NRP1", "NRP2", "SEMA3A", "SEMA3F", "PLXNA1", "PLXNA3", "PLXNA4", "NTN1",
+    "DCC", "SLIT1", "ROBO1"
+  ),
+  "GO:0007158" = c(
+    "NCAM1", "NCAM2", "L1CAM", "NRCAM", "CNTN1", "CNTN2", "CNTN4", "NRXN1",
+    "NRXN2", "NRXN3", "NLGN1", "NLGN2", "NLGN3", "NLGN4X", "CADM1", "ASTN1",
+    "ASTN2", "ICAM5", "CDK5R1", "ITGAL", "ITGB2", "NINJ2", "RET", "CDH2",
+    "PCDH17", "KIAA0921", "NLGN4Y"
   ),
   "GO:1902667" = c(
-    "ATOH7", "KIF21A", "MYCBP2", "NOVA2", "POU4F2", "PTPRO",
-    "ROBO3", "SLIT2", "TUBB2B", "YTHDF1"
+    "ATOH7", "KIF21A", "MYCBP2", "NOVA2", "POU4F2", "PTPRO", "ROBO3", "SLIT2",
+    "TUBB2B", "YTHDF1"
   ),
-  "GO:0007409" = strsplit(paste(
-    "ABL1,ADGRB1,ADNP,ALCAM,AMIGO1,ANK3,ANOS1,APBB1,APLP1,APOE,APP,ATL1,ATOH7,AUTS2,",
-    "BAIAP2,BDNF,BMPR2,BRSK1,BRSK2,CDH2,CDK5,CDK5R1,CELSR1,CELSR2,CELSR3,CHN1,",
-    "CNTN1,CNTN2,CNTNAP1,CTNNA2,CXCL12,DCC,DCLK1,DISC1,DOCK7,DPYSL5,DRAXIN,DSCAM,",
-    "EFNA1,EFNA2,EFNA3,EFNA4,EFNA5,EFNB1,EFNB2,EFNB3,ENAH,EPHA3,EPHA4,EPHA5,EPHA6,",
-    "EPHA7,EPHA8,EPHB1,EPHB2,EPHB3,FEZ1,FEZ2,FGF13,FYN,FZD3,GAP43,GDNF,GSK3B,",
-    "ISL1,ISL2,KALRN,KIF21A,KIF5C,KLF7,L1CAM,LHX1,LIMK1,LRRC4C,MACF1,MAP1B,MAP2,",
-    "MAPT,MYCBP2,NCAM1,NEFH,NEO1,NFASC,NRCAM,NRP1,NRP2,NRXN1,NTN1,NTN4,NTNG1,",
-    "NTRK1,NTRK2,PAFAH1B1,PAK1,PLXNA3,PLXNA4,PLXNB1,POU4F1,POU4F2,PTEN,PTK2,",
-    "PTPRO,RELN,RET,ROBO1,ROBO2,ROBO3,RTN4,RTN4R,SEMA3A,SEMA3C,SEMA3E,SEMA3F,",
-    "SEMA4D,SEMA5A,SEMA6A,SEMA6D,SHH,SLIT1,SLIT2,SLIT3,SLITRK1,SPAST,SPTBN4,",
-    "TENM1,TENM2,TENM3,TENM4,TUBB3,ULK1,UNC5A,UNC5B,UNC5C,UNC5D,WNT5A,WNT7A"
-  ), ",", fixed = TRUE)[[1]]
+  "GO:0031103" = c(
+    "GAP43", "PTEN", "MAP3K12", "STAT3", "JAK1", "SOCS3", "SPRR1A", "ATF3",
+    "CNTF", "EPHA4", "MAG", "RTN4", "RTN4R", "L1CAM", "NCAM1", "BDNF",
+    "NTRK1", "APOA4", "APOD", "CERS2", "CSPG5", "CTNNA1", "DAG1", "GRN",
+    "ISL1", "JAK2", "MAP1B", "MMP2", "NREP", "PTN", "PTPRS", "RGMA",
+    "RTN4RL1", "SPP1", "STK24", "DHFR", "FIGNL2", "FOLR1", "INPP5F", "KIAA0319",
+    "KREMEN1", "MAPK8IP3", "MTR", "PUM2", "RTCA", "RTN4RL2", "SCARF1", "TSPO"
+  ),
+  "GO:0007411" = c(
+    "SEMA3A", "SEMA3C", "SEMA3E", "SEMA3F", "SEMA4D", "SEMA5A", "SEMA6A", "SEMA6D",
+    "SLIT1", "SLIT2", "SLIT3", "ROBO1", "ROBO2", "ROBO3", "NTN1", "NTN4",
+    "DCC", "UNC5A", "UNC5B", "UNC5C", "UNC5D", "NRP1", "NRP2", "PLXNA1",
+    "PLXNA3", "PLXNA4", "PLXNB1", "EFNA1", "EFNA2", "EFNA3", "EFNA4", "EFNA5",
+    "EFNB1", "EFNB2", "EFNB3", "EPHA3", "EPHA4", "EPHA5", "EPHA6", "EPHA7",
+    "EPHA8", "EPHB1", "EPHB2", "EPHB3", "CXCL12", "DRAXIN", "DSCAM", "ENAH",
+    "FYN", "FZD3", "GAP43", "GDNF", "WNT5A", "ADAM17", "ALCAM", "ANOS1",
+    "APP", "ARHGAP35", "ARHGEF25", "ARHGEF40", "ARK2C", "ATOH7", "BDNF", "BMPR2",
+    "BOC", "BSG", "CDK5R1", "CDK5R2", "CELSR3", "CHN1", "CNTN1", "CNTN2",
+    "CNTN4", "CNTN5", "CNTN6", "CSF1R", "CYFIP1", "CYFIP2", "DAG1", "DPYSL5",
+    "DSCAML1", "ECE1", "EDN1", "EDN3", "EDNRA", "EMB", "EPHA10", "EPHB6",
+    "EVL", "FEZ1", "FEZ2", "FGF8", "FLRT3", "GFRA3", "GLI2", "HMCN2",
+    "IGSF9", "KALRN", "KIAA1755", "KIF21A", "KIF5C", "KLF7", "L1CAM", "LGI1",
+    "LGR6", "LHX1", "LHX9", "LMO4", "LYPLA2", "MEGF8", "MYCBP2", "MYOT",
+    "MYPN", "NCAM1", "NECTIN1", "NELL2", "NEO1", "NEXN", "NFASC", "NFIB",
+    "NOTCH1", "NOTCH2", "NOTCH3", "NOVA2", "NPTN", "NRCAM", "NRXN1", "NRXN3",
+    "NTN3", "NTRK1", "OPHN1", "OTX2", "PALLD", "PRKCQ", "PTCH1", "PTK2",
+    "PTK7", "PTPRH", "PTPRJ", "PTPRM", "PTPRO", "RAC1", "RAC3", "RELN",
+    "RET", "RIC1", "ROBO4", "RPS6KA5", "RYK", "SCN1B", "SEMA3B", "SEMA3D",
+    "SEMA3G", "SEMA4A", "SEMA4B", "SEMA4C", "SEMA4F", "SEMA4G", "SEMA5B", "SEMA6B",
+    "SEMA6C", "SEMA7A", "SHH", "SIAH1", "SMO", "SOS1", "TENM1", "TENM2",
+    "TENM3", "TENM4", "TNR", "TRIO", "TUBB2B", "TUBB3", "USP33", "VANGL2",
+    "VASP", "VEGFA", "WNT7B", "YTHDF1"
+  ),
+  "GO:0007409" = c(
+    "ABL1", "ADGRB1", "ADNP", "ALCAM", "AMIGO1", "ANK3", "ANOS1", "APBB1",
+    "APLP1", "APOE", "APP", "ATL1", "ATOH7", "AUTS2", "BAIAP2", "BDNF",
+    "BMPR2", "BRSK1", "BRSK2", "CDH2", "CDK5", "CDK5R1", "CELSR1", "CELSR2",
+    "CELSR3", "CHN1", "CNTN1", "CNTN2", "CNTNAP1", "CTNNA2", "CXCL12", "DCC",
+    "DCLK1", "DISC1", "DOCK7", "DPYSL5", "DRAXIN", "DSCAM", "EFNA1", "EFNA2",
+    "EFNA3", "EFNA4", "EFNA5", "EFNB1", "EFNB2", "EFNB3", "ENAH", "EPHA3",
+    "EPHA4", "EPHA5", "EPHA6", "EPHA7", "EPHA8", "EPHB1", "EPHB2", "EPHB3",
+    "FEZ1", "FEZ2", "FGF13", "FYN", "FZD3", "GAP43", "GDNF", "GSK3B",
+    "ISL1", "ISL2", "KALRN", "KIF21A", "KIF5C", "KLF7", "L1CAM", "LHX1",
+    "LIMK1", "LRRC4C", "MACF1", "MAP1B", "MAP2", "MAPT", "MYCBP2", "NCAM1",
+    "NEFH", "NEO1", "NFASC", "NRCAM", "NRP1", "NRP2", "NRXN1", "NTN1",
+    "NTN4", "NTNG1", "NTRK1", "NTRK2", "PAFAH1B1", "PAK1", "PLXNA3", "PLXNA4",
+    "PLXNB1", "POU4F1", "POU4F2", "PTEN", "PTK2", "PTPRO", "RELN", "RET",
+    "ROBO1", "ROBO2", "ROBO3", "RTN4", "RTN4R", "SEMA3A", "SEMA3C", "SEMA3E",
+    "SEMA3F", "SEMA4D", "SEMA5A", "SEMA6A", "SEMA6D", "SHH", "SLIT1", "SLIT2",
+    "SLIT3", "SLITRK1", "SPAST", "SPTBN4", "TENM1", "TENM2", "TENM3", "TENM4",
+    "TUBB3", "ULK1", "UNC5A", "UNC5B", "UNC5C", "UNC5D", "WNT5A", "WNT7A",
+    "ACTB", "ACTBL2", "ACTG1", "ACTL8", "ADAM17", "ADCY10", "AFG3L2", "ANAPC2",
+    "APLP2", "ARHGAP35", "ARHGAP4", "ARHGEF25", "ARHGEF40", "ARK2C", "B4GALT5", "B4GALT6",
+    "BOC", "BSG", "CCK", "CDH1", "CDHR2", "CDK5R2", "CDKL3", "CDKL5",
+    "CHODL", "CHRNB2", "CNTN4", "CNTN5", "CNTN6", "COBL", "CSF1R", "CTTN",
+    "CYFIP1", "CYFIP2", "DAG1", "DCHS2", "DIP2B", "DNM2", "DRD2", "DSCAML1",
+    "ECE1", "EDN1", "EDN2", "EDN3", "EDNRA", "EMB", "EPHA10", "EPHB6",
+    "EVL", "FAT4", "FGF8", "FGFR2", "FLRT3", "FOXB1", "GDI1", "GFRA3",
+    "GLI2", "GOLGA4", "HEL113", "HMCN2", "IGSF9", "ISLR", "ISLR2", "ITGA4",
+    "JUP", "KIAA0319", "KIAA1755", "KIF13B", "KIFBP", "LGI1", "LGR6", "LHX9",
+    "LLGL1", "LMO4", "LRP4", "LYPLA2", "MAG", "MAP1A", "MAP1S", "MAP3K13",
+    "MAP6", "MARK2", "MCF2", "MEGF8", "METRN", "MT3", "MYOT", "MYPN",
+    "NECTIN1", "NELL2", "NEXN", "NFIB", "NLGN3", "NOLC1", "NOTCH1", "NOTCH2",
+    "NOTCH3", "NOVA2", "NPR2", "NPTN", "NPTX1", "NRDC", "NRXN3", "NTN3",
+    "NTNG2", "OLFM1", "OPHN1", "OTX2", "PAK2", "PAK3", "PALLD", "PARD3",
+    "PAX2", "POTEE", "POTEF", "POTEI", "POTEJ", "PRKCA", "PRKCQ", "PRKG1",
+    "PTCH1", "PTK7", "PTPRH", "PTPRJ", "PTPRM", "PTPRS", "RAB10", "RAB21",
+    "RAB3A", "RAB8A", "RAC1", "RAC3", "RGMA", "RIC1", "RNF6", "ROBO4",
+    "RPS6KA5", "RUFY3", "RYK", "S100B", "SCN11A", "SCN1B", "SEMA3B", "SEMA3D",
+    "SEMA3G", "SEMA4A", "SEMA4B", "SEMA4C", "SEMA4F", "SEMA4G", "SEMA5B", "SEMA6B",
+    "SEMA6C", "SEMA7A", "SHOX2", "SHTN1", "SIAH1", "SIN3A", "SIPA1L1", "SKIL",
+    "SLC9A6", "SLITRK2", "SLITRK3", "SLITRK4", "SLITRK5", "SLITRK6", "SMN1", "SMO",
+    "SMURF1", "SOS1", "SPG11", "SPP1", "SSNA1", "STK11", "STXBP1", "SZT2",
+    "TAOK2", "THY1", "TIAM1", "TIAM2", "TNR", "TRAK1", "TRAK2", "TRIM46",
+    "TRIO", "TRPC5", "TRPV2", "TSKU", "TUBB2B", "TWF2", "ULK2", "USP33",
+    "USP9X", "VANGL2", "VASP", "VEGFA", "VIM", "WNT7B", "YTHDF1", "ZDHHC17",
+    "ZFYVE27"
+  )
 )
+go_fallback <- lapply(go_fallback, function(x) unique(trimws(x)))
 go_fallback <- lapply(go_fallback, function(x) unique(trimws(x)))
 
 go_title <- function(go_id) {
@@ -757,7 +912,7 @@ plot_bubble_two_cols <- function(stat_dt, title, subtitle, path_stub, facet = FA
   n_panel <- if (isTRUE(facet)) max(1, uniqueN(long$panel)) else 1
   n_y <- uniqueN(long$y_lab)
   fig_w <- if (isTRUE(facet)) max(9.5, 2.7 * n_panel + 3.2) else 6.8
-  fig_h <- max(5.4, 0.48 * n_y + 2.4)
+  fig_h <- max(6.2, 0.42 * n_y + 2.6)
   save_plot(p, path_stub, fig_w, fig_h)
 }
 
@@ -907,7 +1062,7 @@ run_nerve_tcga <- function() {
     mat
   }
 
-  message("收集五个神经 GO 基因（每个 GO 单独，不合并）")
+  message("收集 17 个神经 GO 基因（每个 GO 单独，不合并）")
   go_map <- lapply(go_list, get_go_genes)
   names(go_map) <- go_list
   go_map <- Filter(function(x) length(x$genes) >= min_set_genes, go_map)
@@ -1058,7 +1213,7 @@ run_nerve_tcga <- function() {
       title = paste0("Neural GO versus metastasis (", method$title, ")"),
       subtitle = paste0(
         "Scoring = ", method$title,
-        "; each panel: non-metastatic | metastatic; five GOs scored separately and not pooled"
+        "; each panel: non-metastatic | metastatic; 17 GOs scored separately and not pooled"
       ),
       path_stub = file.path(mdir, "02_summary_bubble_GO_vs_metastasis"),
       facet = TRUE
@@ -1083,7 +1238,7 @@ run_nerve_tcga <- function() {
       plot_bubble_two_cols(
         bubble,
         title = "Neural GO versus metastasis (z-mean, primary)",
-        subtitle = "Primary scoring = z-mean; each panel: non-metastatic | metastatic; five GOs not pooled",
+        subtitle = "Primary scoring = z-mean; each panel: non-metastatic | metastatic; 17 GOs not pooled",
         path_stub = file.path(nerve_out_dir, "02_summary_bubble_GO_vs_metastasis"),
         facet = TRUE
       )
