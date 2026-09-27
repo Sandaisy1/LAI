@@ -6,8 +6,25 @@
 # 数据（.tsv / .tsv.gz 均可；空的 .tsv 会跳过，改读 .gz）：
 #   TCGA-BRCA.star_fpkm.tsv(.gz)
 #   TCGA-BRCA.clinical.tsv(.gz)
-#   TCGA-BRCA.survival.tsv(.gz)          # 可选
+#   TCGA-BRCA.survival.tsv(.gz)          # 可选；GDC/Xena 这张只有 OS，不是随访进展
 #   gencode.v36.annotation.gtf.gene.probemap
+#
+# 随访进展（不是诊断 M1）请另下这两套，放到同一目录。直接下载：
+#   1) Liu 2018 TCGA-CDR（Xena）：PFI / DFI / DSS / OS，BRCA 约 1236 人、PFI 事件约 173
+#      浏览器：https://xenabrowser.net/datapages/?dataset=Survival_SupplementalTable_S1_20171025_xena_sp&host=https://pancanatlas.xenahubs.net
+#      文件：  https://tcga-pancan-atlas-hub.s3.us-east-1.amazonaws.com/download/Survival_SupplementalTable_S1_20171025_xena_sp
+#      同表 xlsx：https://api.gdc.cancer.gov/data/1b5f413e-a8d1-4d10-92eb-7c4ae739ed81
+#      论文页：https://gdc.cancer.gov/about-data/publications/PanCan-Clinical-2018
+#      存成： Survival_SupplementalTable_S1_20171025_xena_sp
+#   2) GDC 随访 / 新发肿瘤（同一批 BRCA，不是新队列）：
+#      follow_up v4.0：https://api.gdc.cancer.gov/data/62d4515f-a30b-4b1a-b2dd-c8bf9476e803
+#      nte 主表：      https://api.gdc.cancer.gov/data/a88c168e-4bba-4bd2-9c0c-77934444cc1c
+#      follow_up nte： https://api.gdc.cancer.gov/data/a9baecf0-5549-4396-8805-a6d1681d11cd
+#      follow_up v2.1：https://api.gdc.cancer.gov/data/403b5cef-8173-47c7-b56a-cc94dcfbb2e3
+#      patient 临床：  https://api.gdc.cancer.gov/data/8162d394-8b64-4da2-9f5b-d164c54b9608
+#      门户一页下：    https://portal.gdc.cancer.gov/projects/TCGA-BRCA  → Clinical
+#      biotab 列表：   https://portal.gdc.cancer.gov/repository?facetTab=files&filters=%7B%22op%22%3A%22and%22%2C%22content%22%3A%5B%7B%22op%22%3A%22in%22%2C%22content%22%3A%7B%22field%22%3A%22cases.project.project_id%22%2C%22value%22%3A%5B%22TCGA-BRCA%22%5D%7D%7D%2C%7B%22op%22%3A%22in%22%2C%22content%22%3A%7B%22field%22%3A%22files.data_format%22%2C%22value%22%3A%5B%22BCR%20Biotab%22%5D%7D%7D%5D%7D
+#      也可运行同目录 TCGA_followup_download.R
 #
 # 神经浸润只按下面 5 个神经信号 GO，每个单独取基因、单独打分（不合并）：
 #   GO:0019227  neuronal action potential propagation
