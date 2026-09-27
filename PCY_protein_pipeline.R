@@ -902,14 +902,15 @@ plot_bubble <- function(df, title, stub) {
     return(invisible(NULL))
   }
   if (!"p.adjust" %in% names(df)) df$p.adjust <- df$pvalue
+  df$gene_ratio <- if ("GeneRatio" %in% names(df)) ratio_to_num(df$GeneRatio) else NA_real_
+  if (all(!is.finite(df$gene_ratio)) && "Count" %in% names(df)) df$gene_ratio <- df$Count
   df <- df[order(df$p.adjust, df$pvalue), , drop = FALSE]
   nshow <- min(15L, nrow(df))
   df <- df[seq_len(nshow), , drop = FALSE]
-  df$gene_ratio <- if ("GeneRatio" %in% names(df)) ratio_to_num(df$GeneRatio) else NA_real_
-  if (all(!is.finite(df$gene_ratio)) && "Count" %in% names(df)) df$gene_ratio <- df$Count
   if (!"Count" %in% names(df)) df$Count <- 1
+  df <- df[order(df$gene_ratio, df$p.adjust), , drop = FALSE]
   df$label <- wrap_text(df$Description)
-  df$label <- factor(df$label, levels = rev(unique(df$label)))
+  df$label <- factor(df$label, levels = unique(df$label))
   p <- ggplot2::ggplot(df, ggplot2::aes(x = gene_ratio, y = label, size = Count, color = p.adjust)) +
     ggplot2::geom_point(alpha = 0.9) +
     ggplot2::scale_color_gradient(low = "#B2182B", high = "#2166AC", name = "Adjusted p") +
