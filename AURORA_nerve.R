@@ -103,7 +103,7 @@ first_present <- function(nms, candidates) {
   if (length(hit) == 0) NA_character_ else hit[1]
 }
 norm_id <- function(x) {
-  x <- toupper(gsub("[. ]", "-", as.character(x)))
+  x <- toupper(gsub("[._ ]", "-", as.character(x)))
   gsub("-+", "-", x)
 }
 looks_like_cbioportal <- function(dir) {
@@ -117,13 +117,17 @@ resolve_aurora_dir <- function() {
     env,
     "E:/R/cBioportal breast cancer/AURORA",
     "E:/R/cBioportal breast cancer/AURORA/brca_aurora_2023",
+    "E:/R/cBioportal breast cancer/AURORA/brcaaurora_2023",
     file.path(getwd(), "brca_aurora_2023"),
+    file.path(getwd(), "brcaaurora_2023"),
     getwd()
   ))
   cands <- cands[nzchar(cands)]
   extra <- unlist(lapply(cands, function(d) {
     if (!dir.exists(d)) return(character())
-    file.path(d, list.files(d, pattern = "aurora", ignore.case = TRUE, include.dirs = TRUE))
+    subs <- list.dirs(d, recursive = FALSE, full.names = TRUE)
+    named <- file.path(d, list.files(d, pattern = "aurora", ignore.case = TRUE, include.dirs = TRUE))
+    c(subs, named)
   }))
   cands <- unique(c(cands, extra))
   hit <- cands[vapply(cands, looks_like_cbioportal, logical(1))]
@@ -259,8 +263,8 @@ classify_n <- function(x) {
 classify_stage <- function(x) {
   x <- toupper(as.character(x))
   out <- rep(NA_character_, length(x))
-  out[grepl("IV|STAGE.?4", x)] <- "Stage IV"
-  out[is.na(out) & grepl("III|STAGE.?3|II|STAGE.?2|I\\b|STAGE.?1", x)] <- "Stage I-III"
+  out[grepl("\\bIV\\b|STAGE\\s*4", x)] <- "Stage IV"
+  out[is.na(out) & grepl("III|II|I[ABC]?\\b|STAGE\\s*[123]", x)] <- "Stage I-III"
   out[grepl("X\\b|UNKNOWN|NOT AVAILABLE|NOT REPORTED", x)] <- NA_character_
   out
 }
@@ -318,14 +322,15 @@ ssgsea_via_gsva <- function(expr_mat, gene_sets) {
   })
   if (is.null(scored)) return(NULL)
   scored <- as.matrix(scored)
-  out <- lapply(colnames(scored), function(nm) {
-    v <- as.numeric(scored[, nm])
-    names(v) <- rownames(scored)
+  # GSVA: rows = gene sets, columns = samples
+  out <- lapply(rownames(scored), function(nm) {
+    v <- as.numeric(scored[nm, ])
+    names(v) <- colnames(scored)
     attr(v, "n_genes") <- length(gsets[[nm]])
     attr(v, "genes") <- gsets[[nm]]
     v
   })
-  names(out) <- colnames(scored)
+  names(out) <- rownames(scored)
   out
 }
 
