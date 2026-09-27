@@ -2,7 +2,7 @@
 # AURORA_nerve.R
 # 单独脚本，不要和 nerve_TCGA.R / TCGA-BRCA-2026.R 在同一会话 Source
 # 数据目录：E:/R/cBioportal breast cancer/AURORA
-# 也自动识别子目录 brca_aurora_2023（cBioPortal AURORA US, Nat Cancer 2023）
+# 也自动识别子目录 brca_aurora_2023 / brcaaurora_2023（cBioPortal AURORA US, Nat Cancer 2023）
 # RStudio 打开后从第一行 Source
 #
 # 需要的文件（cBioPortal 下载即可；.txt / .txt.gz）：
