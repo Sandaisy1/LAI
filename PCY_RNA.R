@@ -16,6 +16,11 @@
 # 每一层做 GO、KEGG、Reactome 通路，并画气泡图、富集热图和表达热图。
 # 1-vs-1 没有重复时不编造 P 值；若同目录有 gene_exp.diff，则用其中的 P 值。
 #
+# 囊泡运输专项单独出结果，不改全基因组 GO 的 p 值：
+#   内体运输与内体运动、囊泡运输、外泌体分泌，以及名称上属于这三类的 GO。
+#   每个比较的 FoldChange 下有 Focused_vesicle_transport/。
+#   六类比较放在一起的热图和相关性在 00_vesicle_transport_across_6/。
+#
 # 运行：
 #   source("E:/R/PCY_RNA/PCY_RNA.R", encoding = "UTF-8")
 # 物种：人（org.Hs.eg.db）。log2FC = log2(PCY / NTC)，正值表示 PCY 高于 NTC。
@@ -832,6 +837,14 @@ plot_expression_heatmap <- function(heat, sample_info, genes, title, outfile) {
   grDevices::dev.off()
 }
 
+spread_constant_matrix <- function(mat) {
+  vals <- mat[is.finite(mat)]
+  if (length(vals) < 2 || length(unique(vals)) >= 2) return(mat)
+  idx <- which(is.finite(mat))[1]
+  mat[idx] <- vals[1] + max(1e-3, abs(vals[1]) * 1e-3)
+  mat
+}
+
 parse_ratio <- function(x) {
   vapply(strsplit(as.character(x), "/", fixed = TRUE), function(z) {
     if (length(z) != 2) return(NA_real_)
@@ -894,6 +907,7 @@ plot_enrich_heatmap <- function(df, fc_symbol, fc_entrez, title, outfile) {
   if (sum(is.finite(mat)) < 2) return(invisible(NULL))
   gene_order <- names(sort(rowMeans(mat, na.rm = TRUE)))
   mat <- mat[gene_order, , drop = FALSE]
+  mat <- spread_constant_matrix(mat)
   height <- max(6, min(16, 0.22 * nrow(mat) + 3))
   width <- max(7, min(14, 0.45 * ncol(mat) + 4))
   draw <- function() {
@@ -992,7 +1006,459 @@ call_with_universe <- function(fun, args, universe) {
   do.call(fun, args)
 }
 
-run_downstream <- function(sub, de, heat, sample_info, comparison, outdir, id_map, fc_label) {
+# -----------------------------------------------------------------------------
+# 胞内囊泡运输专项（不改全基因组 GO/KEGG 的 p 值）
+# -----------------------------------------------------------------------------
+.vesicle_env <- new.env(parent = emptyenv())
+
+vesicle_class_labels <- c(
+  endosome_transport = "内体运输与内体运动",
+  vesicle_transport = "囊泡运输",
+  exosome_secretion = "外泌体分泌"
+)
+
+vesicle_catalog <- function() {
+  if (exists("catalog", envir = .vesicle_env, inherits = FALSE)) {
+    return(get("catalog", envir = .vesicle_env, inherits = FALSE))
+  }
+  txt <- "
+go_id	term	ontology	vesicle_class
+GO:0006897	endocytosis	BP	endosome_transport
+GO:0006898	receptor-mediated endocytosis	BP	endosome_transport
+GO:0072583	clathrin-dependent endocytosis	BP	endosome_transport
+GO:0016197	endosomal transport	BP	endosome_transport
+GO:0007032	endosome organization	BP	endosome_transport
+GO:0032456	endocytic recycling	BP	endosome_transport
+GO:0045022	early endosome to late endosome transport	BP	endosome_transport
+GO:0061502	early endosome to recycling endosome transport	BP	endosome_transport
+GO:0034498	early endosome to Golgi transport	BP	endosome_transport
+GO:0006895	Golgi to endosome transport	BP	endosome_transport
+GO:0034499	late endosome to Golgi transport	BP	endosome_transport
+GO:0008333	endosome to lysosome transport	BP	endosome_transport
+GO:0099638	endosome to plasma membrane protein transport	BP	endosome_transport
+GO:0042147	retrograde transport, endosome to Golgi	BP	endosome_transport
+GO:0032509	endosome transport via multivesicular body sorting pathway	BP	endosome_transport
+GO:0034058	endosomal vesicle fusion	BP	endosome_transport
+GO:0005768	endosome	CC	endosome_transport
+GO:0005769	early endosome	CC	endosome_transport
+GO:0005770	late endosome	CC	endosome_transport
+GO:0055037	recycling endosome	CC	endosome_transport
+GO:0010008	endosome membrane	CC	endosome_transport
+GO:0030139	endocytic vesicle	CC	endosome_transport
+GO:0030136	clathrin-coated vesicle	CC	endosome_transport
+GO:0045334	clathrin-coated endocytic vesicle	CC	endosome_transport
+GO:0016192	vesicle-mediated transport	BP	vesicle_transport
+GO:0098927	vesicle-mediated transport between endosomal compartments	BP	vesicle_transport
+GO:0098876	vesicle-mediated transport to the plasma membrane	BP	vesicle_transport
+GO:0006888	endoplasmic reticulum to Golgi vesicle-mediated transport	BP	vesicle_transport
+GO:0006901	vesicle coating	BP	vesicle_transport
+GO:0048278	vesicle docking	BP	vesicle_transport
+GO:0006906	vesicle fusion	BP	vesicle_transport
+GO:0047496	vesicle transport along microtubule	BP	vesicle_transport
+GO:0030050	vesicle transport along actin filament	BP	vesicle_transport
+GO:0030133	transport vesicle	CC	vesicle_transport
+GO:0031410	cytoplasmic vesicle	CC	vesicle_transport
+GO:0030137	COPI-coated vesicle	CC	vesicle_transport
+GO:0030134	COPII-coated ER to Golgi transport vesicle	CC	vesicle_transport
+GO:1990182	exosomal secretion	BP	exosome_secretion
+GO:1903541	regulation of exosomal secretion	BP	exosome_secretion
+GO:1903551	regulation of extracellular exosome assembly	BP	exosome_secretion
+GO:1903552	negative regulation of extracellular exosome assembly	BP	exosome_secretion
+GO:1903553	positive regulation of extracellular exosome assembly	BP	exosome_secretion
+GO:0071971	extracellular exosome assembly	BP	exosome_secretion
+GO:0097734	extracellular exosome biogenesis	BP	exosome_secretion
+GO:0140112	extracellular vesicle biogenesis	BP	exosome_secretion
+GO:0071985	multivesicular body sorting pathway	BP	exosome_secretion
+GO:0036258	multivesicular body assembly	BP	exosome_secretion
+GO:0036257	multivesicular body organization	BP	exosome_secretion
+GO:0070062	extracellular exosome	CC	exosome_secretion
+GO:1903561	extracellular vesicle	CC	exosome_secretion
+GO:0005771	multivesicular body	CC	exosome_secretion
+GO:0032585	multivesicular body membrane	CC	exosome_secretion
+"
+  catalog <- utils::read.delim(text = txt, stringsAsFactors = FALSE, strip.white = TRUE)
+  catalog <- catalog[nzchar(catalog$go_id), , drop = FALSE]
+  catalog$class_label <- vesicle_class_labels[catalog$vesicle_class]
+  .vesicle_env$catalog <- catalog
+  catalog
+}
+
+classify_vesicle_term <- function(id, term) {
+  catalog <- vesicle_catalog()
+  id <- as.character(id)
+  term_l <- tolower(as.character(term))
+  out <- rep(NA_character_, length(id))
+  known <- match(id, catalog$go_id)
+  out[!is.na(known)] <- catalog$vesicle_class[known[!is.na(known)]]
+  need <- is.na(out) & !is.na(term_l)
+  bad <- grepl(
+    paste(
+      "viral", "virus", "vitellogenesis", "melanosome", "pigment granule",
+      "neurotransmitter", "rnase", "rna polymerase", "nuclear exosome",
+      "nucleolar exosome", "bacterial extracellular", "synaptic", "acrosome",
+      "acrosomal", "pattern recognition",
+      sep = "|"
+    ),
+    term_l, perl = TRUE
+  )
+  exo <- grepl("exosomal secretion|extracellular exosome|extracellular vesicle|multivesicular body|via exosome", term_l, perl = TRUE)
+  endo <- grepl("endocyt|endosome|endosomal", term_l, perl = TRUE)
+  ves <- grepl(
+    "vesicle-mediated transport|vesicle transport along|vesicle docking|vesicle fusion|vesicle coating|transport vesicle|cytoplasmic vesicle|copi-coated vesicle|copii-coated",
+    term_l, perl = TRUE
+  )
+  bad[is.na(bad)] <- FALSE
+  exo[is.na(exo)] <- FALSE
+  endo[is.na(endo)] <- FALSE
+  ves[is.na(ves)] <- FALSE
+  out[need & exo & !bad] <- "exosome_secretion"
+  need <- is.na(out)
+  out[need & endo & !bad] <- "endosome_transport"
+  need <- is.na(out)
+  out[need & ves & !bad] <- "vesicle_transport"
+  out
+}
+
+enrich_df_ranked <- function(obj) {
+  if (is.null(obj)) return(NULL)
+  df <- as.data.frame(obj)
+  if (nrow(df) == 0) return(NULL)
+  df <- df[order(df$pvalue, df$p.adjust), , drop = FALSE]
+  df$genome_wide_rank <- seq_len(nrow(df))
+  df
+}
+
+export_go_vesicle_focus <- function(full_df, out_stub) {
+  if (is.null(full_df) || nrow(full_df) == 0) {
+    note_empty(paste0(out_stub, "_EMPTY.txt"), "no genome-wide GO terms")
+    return(NULL)
+  }
+  desc <- if ("Description" %in% names(full_df)) full_df$Description else full_df$ID
+  full_df$vesicle_class <- classify_vesicle_term(full_df$ID, desc)
+  hit <- full_df[!is.na(full_df$vesicle_class), , drop = FALSE]
+  if (nrow(hit) == 0) {
+    note_empty(paste0(out_stub, "_EMPTY.txt"), "no vesicle-transport GO terms in the genome-wide result")
+    return(NULL)
+  }
+  hit$class_label <- vesicle_class_labels[hit$vesicle_class]
+  write_csv(hit, paste0(out_stub, ".csv"))
+  hit
+}
+
+vesicle_term2gene <- function() {
+  if (exists("t2g", envir = .vesicle_env, inherits = FALSE)) {
+    got <- get("t2g", envir = .vesicle_env, inherits = FALSE)
+    if (!is.null(got)) return(got)
+  }
+  empty <- data.frame(go_id = character(), entrez = character(), stringsAsFactors = FALSE)
+  catalog <- vesicle_catalog()
+  if (!requireNamespace("GO.db", quietly = TRUE)) {
+    log_msg("未安装 GO.db，跳过囊泡专项基因集")
+    .vesicle_env$t2g <- empty
+    return(empty)
+  }
+  mapped <- tryCatch(
+    AnnotationDbi::mapIds(
+      org.Hs.eg.db, keys = catalog$go_id, column = "ENTREZID",
+      keytype = "GOALL", multiVals = "list"
+    ),
+    error = function(e) {
+      log_msg("GOALL 映射失败，改用 GO: ", e$message)
+      tryCatch(
+        AnnotationDbi::mapIds(
+          org.Hs.eg.db, keys = catalog$go_id, column = "ENTREZID",
+          keytype = "GO", multiVals = "list"
+        ),
+        error = function(e2) NULL
+      )
+    }
+  )
+  if (is.null(mapped)) {
+    .vesicle_env$t2g <- empty
+    return(empty)
+  }
+  rows <- lapply(names(mapped), function(gid) {
+    eg <- unique(as.character(mapped[[gid]]))
+    eg <- eg[!is.na(eg) & nzchar(eg)]
+    if (length(eg) == 0) return(NULL)
+    data.frame(go_id = gid, entrez = eg, stringsAsFactors = FALSE)
+  })
+  rows <- rows[!vapply(rows, is.null, logical(1))]
+  if (length(rows) == 0) {
+    .vesicle_env$t2g <- empty
+    return(empty)
+  }
+  t2g <- do.call(rbind, rows)
+  log_msg(
+    "囊泡 GO 基因集: ", length(unique(t2g$go_id)), " 个条目, ",
+    length(unique(t2g$entrez)), " 个 Entrez"
+  )
+  .vesicle_env$t2g <- t2g
+  t2g
+}
+
+run_vesicle_focus <- function(entrez, universe, up, id_map, heat, sample_info, comparison, comparison_id, outdir, fc_label, fc_symbol, fc_entrez, genome_hits) {
+  fdir <- file.path(outdir, "Focused_vesicle_transport")
+  dir.create(fdir, recursive = TRUE, showWarnings = FALSE)
+  writeLines(
+    c(
+      "这是胞内囊泡运输专项，不改全基因组 GO 的 p 值或排名。",
+      "三类：内体运输与内体运动、囊泡运输、外泌体分泌。",
+      "ORA_vesicle_transport.csv 只检验这批 GO。p 值是这批条目内部的超几何检验。",
+      "GO/ORA_GO_*_FOCUS_vesicle_transport.csv 来自全基因组 GO，保留原始 p 和 genome_wide_rank。",
+      "基因数超过全基因组 maxGSSize=500 的大条目，只会出现在本文件夹。"
+    ),
+    file.path(fdir, "00_README.txt")
+  )
+  t2g <- vesicle_term2gene()
+  catalog <- vesicle_catalog()
+  if (nrow(t2g) == 0 || length(entrez) < 3) {
+    note_empty(file.path(fdir, "ORA_vesicle_transport_EMPTY.txt"), "too few genes or empty vesicle GO sets")
+    return(invisible(NULL))
+  }
+  obj <- tryCatch(
+    clusterProfiler::enricher(
+      gene = entrez, universe = universe, TERM2GENE = t2g[, c("go_id", "entrez")],
+      TERM2NAME = catalog[, c("go_id", "term")],
+      pvalueCutoff = 1, qvalueCutoff = 1, pAdjustMethod = "BH",
+      minGSSize = 5, maxGSSize = 8000
+    ),
+    error = function(e) {
+      log_msg("囊泡专项 ORA 失败: ", e$message)
+      NULL
+    }
+  )
+  if (!is.null(obj) && nrow(as.data.frame(obj)) > 0) {
+    obj <- tryCatch(
+      clusterProfiler::setReadable(obj, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"),
+      error = function(e) obj
+    )
+  }
+  df <- enrich_df_ranked(obj)
+  if (is.null(df)) {
+    note_empty(file.path(fdir, "ORA_vesicle_transport_EMPTY.txt"), "no vesicle GO term passed the gene-set size filter")
+    log_msg(comparison, " ", fc_label, " 囊泡专项没有可检验的 GO")
+    return(invisible(NULL))
+  }
+  df$genome_wide_rank <- NULL
+  meta <- catalog[match(df$ID, catalog$go_id), c("vesicle_class", "class_label", "ontology", "term")]
+  df$vesicle_class <- meta$vesicle_class
+  df$class_label <- meta$class_label
+  df$ontology <- meta$ontology
+  df$Description <- meta$term
+  df <- df[!is.na(df$vesicle_class), , drop = FALSE]
+  genome_hits <- Filter(Negate(is.null), genome_hits)
+  gw <- NULL
+  if (length(genome_hits) > 0) {
+    cols <- Reduce(intersect, lapply(genome_hits, names))
+    gw <- do.call(rbind, lapply(genome_hits, function(x) x[, cols, drop = FALSE]))
+  }
+  if (!is.null(gw) && nrow(gw) > 0) {
+    gw <- gw[!duplicated(gw$ID), , drop = FALSE]
+    hit <- match(df$ID, gw$ID)
+    df$genome_wide_pvalue <- gw$pvalue[hit]
+    df$genome_wide_padj <- gw$p.adjust[hit]
+    df$genome_wide_rank <- gw$genome_wide_rank[hit]
+  } else {
+    df$genome_wide_pvalue <- NA_real_
+    df$genome_wide_padj <- NA_real_
+    df$genome_wide_rank <- NA_integer_
+  }
+  df$comparison <- comparison_id
+  df$fc_label <- fc_label
+  write_csv(df, file.path(fdir, "ORA_vesicle_transport.csv"))
+  log_msg(
+    comparison, " ", fc_label, " 囊泡 GO: ", nrow(df),
+    " 个条目，其中 P<", p_cutoff, " 的有 ", sum(df$pvalue < p_cutoff, na.rm = TRUE), " 个"
+  )
+  plot_df <- df
+  plot_df$Description <- paste(plot_df$class_label, plot_df$Description, sep = " | ")
+  sig <- plot_df[!is.na(plot_df$pvalue) & plot_df$pvalue < p_cutoff, , drop = FALSE]
+  relaxed <- nrow(sig) == 0
+  show <- if (relaxed) plot_df else sig
+  save_enrichment(
+    show, relaxed,
+    file.path(fdir, "ORA_vesicle_transport"),
+    paste0(comparison, " ", fc_label, " 囊泡运输相关 GO"),
+    fc_symbol, fc_entrez
+  )
+  # save_enrichment already wrote the csv of the plotted subset over a different stub.
+  # The full table remains ORA_vesicle_transport.csv; plots use the same stub and would
+  # overwrite that csv with only the plotted rows. Write the full table again.
+  write_csv(df, file.path(fdir, "ORA_vesicle_transport.csv"))
+
+  core_ids <- c("GO:0006897", "GO:0016197", "GO:0016192", "GO:1990182", "GO:0071985", "GO:0047496", "GO:0030050")
+  sig_bp <- df$ID[!is.na(df$pvalue) & df$pvalue < p_cutoff & df$ontology == "BP"]
+  sig_ids <- df$ID[!is.na(df$pvalue) & df$pvalue < p_cutoff]
+  use_ids <- if (length(sig_bp) > 0) sig_bp else if (length(sig_ids) > 0) sig_ids else core_ids
+  t2g_use <- t2g[t2g$go_id %in% use_ids, , drop = FALSE]
+  up_map <- id_map[id_map$gene %in% up$gene, , drop = FALSE]
+  up_hit <- up_map[up_map$entrez %in% t2g_use$entrez, , drop = FALSE]
+  if (nrow(up_hit) > 0) {
+    class_of <- tapply(t2g_use$go_id, t2g_use$entrez, function(gids) {
+      paste(unique(catalog$class_label[match(gids, catalog$go_id)]), collapse = ";")
+    })
+    gene_tbl <- data.frame(
+      gene = up_hit$gene,
+      entrez = up_hit$entrez,
+      log2FC = up$log2FC[match(up_hit$gene, up$gene)],
+      vesicle_class_label = unname(class_of[up_hit$entrez]),
+      stringsAsFactors = FALSE
+    )
+    gene_tbl <- gene_tbl[order(-gene_tbl$log2FC), , drop = FALSE]
+    gene_tbl <- gene_tbl[!duplicated(gene_tbl$gene), , drop = FALSE]
+    write_csv(gene_tbl, file.path(fdir, "vesicle_up_genes.csv"))
+    tryCatch(
+      plot_expression_heatmap(
+        heat, sample_info, gene_tbl$gene,
+        paste0(comparison, " ", fc_label, " 囊泡运输相关上调基因"),
+        file.path(fdir, "vesicle_up_expression_heatmap")
+      ),
+      error = function(e) log_msg("囊泡表达热图失败: ", e$message)
+    )
+  } else {
+    note_empty(file.path(fdir, "vesicle_up_genes_EMPTY.txt"), "no upregulated gene mapped to the vesicle GO sets")
+  }
+
+  keep <- c("comparison", "fc_label", "ID", "Description", "vesicle_class", "class_label", "ontology", "pvalue", "p.adjust", "Count")
+  # Description in df is still the GO term name; plot_df changed a copy.
+  slim <- df[, intersect(keep, names(df)), drop = FALSE]
+  .vesicle_env$focused[[length(.vesicle_env$focused) + 1L]] <- slim
+  invisible(df)
+}
+
+write_vesicle_across <- function(result_dir) {
+  outdir <- file.path(result_dir, "00_vesicle_transport_across_6")
+  dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  writeLines(
+    c(
+      "六类比较里，胞内囊泡运输相关 GO 是否一起变化。",
+      "列的顺序是四组 1 对 1、两个 knockdown 的均值对两个 NTC、",
+      "相对每个 NTC 的共同上调、均值分别对 NTC_rep0 和 NTC_rep1。",
+      "数值是专项检验的 -log10(p.adjust)，不是改过的全基因组 p 值。",
+      "比较之间的相关性是这些 -log10(p.adjust) 的 Pearson 相关。",
+      "FC_1 和 FC_1.25 分开，因为用的上调基因集合不同。"
+    ),
+    file.path(outdir, "00_README.txt")
+  )
+  hits <- .vesicle_env$focused
+  if (length(hits) == 0) {
+    note_empty(file.path(outdir, "vesicle_across_EMPTY.txt"), "no focused vesicle GO results")
+    log_msg("没有囊泡专项结果，跳过六类比较汇总")
+    return(invisible(NULL))
+  }
+  all <- do.call(rbind, hits)
+  write_csv(all, file.path(outdir, "vesicle_focused_GO_all_comparisons.csv"))
+  comps <- .vesicle_env$comparison_order
+  if (is.null(comps) || length(comps) == 0) comps <- unique(all$comparison)
+  draw_heat <- function(mat, title, stub) {
+    if (nrow(mat) < 1 || ncol(mat) < 1 || sum(is.finite(mat)) < 1) {
+      note_empty(paste0(stub, "_EMPTY.txt"), "nothing to plot")
+      return(invisible(NULL))
+    }
+    plot_mat <- spread_constant_matrix(mat)
+    plot_mat[is.finite(plot_mat) & plot_mat > 20] <- 20
+    diverging <- isTRUE(min(plot_mat, na.rm = TRUE) < 0 && max(plot_mat, na.rm = TRUE) <= 1)
+    if (diverging) plot_mat[is.finite(plot_mat) & plot_mat < -1] <- -1
+    width <- max(8, min(16, 0.7 * ncol(plot_mat) + 4))
+    height <- max(4, min(16, 0.28 * nrow(plot_mat) + 2))
+    draw <- function() {
+      cols <- if (diverging) {
+        grDevices::colorRampPalette(c("#2166AC", "white", "#B2182B"))(100)
+      } else {
+        grDevices::colorRampPalette(c("white", "#F4A582", "#B2182B"))(100)
+      }
+      args <- list(
+        plot_mat,
+        cluster_rows = nrow(plot_mat) >= 2 && !anyNA(plot_mat),
+        cluster_cols = ncol(plot_mat) >= 2 && !anyNA(plot_mat),
+        na_col = "grey92",
+        color = cols,
+        main = title,
+        fontsize_row = 7,
+        fontsize_col = 8,
+        border_color = NA
+      )
+      if (diverging) args$breaks <- seq(-1, 1, length.out = 101)
+      do.call(pheatmap::pheatmap, args)
+    }
+    grDevices::pdf(paste0(stub, ".pdf"), width = width, height = height)
+    on.exit(while (grDevices::dev.cur() > 1) grDevices::dev.off(), add = TRUE)
+    tryCatch(draw(), error = function(e) log_msg("囊泡汇总热图失败: ", e$message))
+    grDevices::dev.off()
+    grDevices::png(paste0(stub, ".png"), width = width, height = height, units = "in", res = 200)
+    tryCatch(draw(), error = function(e) log_msg("囊泡汇总热图失败: ", e$message))
+    grDevices::dev.off()
+  }
+  for (fc in names(fc_levels)) {
+    sub <- all[all$fc_label == fc, , drop = FALSE]
+    fc_dir <- file.path(outdir, fc)
+    dir.create(fc_dir, recursive = TRUE, showWarnings = FALSE)
+    if (nrow(sub) == 0) {
+      note_empty(file.path(fc_dir, "EMPTY.txt"), "no rows for this FC")
+      next
+    }
+    terms <- unique(sub$ID)
+    row_lab <- vapply(terms, function(gid) {
+      hit <- sub[sub$ID == gid, , drop = FALSE][1, ]
+      paste(hit$class_label, hit$Description, sep = " | ")
+    }, character(1))
+    mat <- matrix(NA_real_, nrow = length(terms), ncol = length(comps), dimnames = list(row_lab, comps))
+    for (i in seq_len(nrow(sub))) {
+      rid <- match(sub$ID[i], terms)
+      cid <- match(sub$comparison[i], comps)
+      if (is.na(rid) || is.na(cid)) next
+      padj <- sub$p.adjust[i]
+      if (is.na(padj)) padj <- sub$pvalue[i]
+      if (!is.na(padj) && padj > 0) mat[rid, cid] <- -log10(padj)
+    }
+    write_csv(
+      data.frame(term = row_lab, go_id = terms, mat, check.names = FALSE),
+      file.path(fc_dir, "vesicle_GO_neglogp_by_comparison.csv")
+    )
+    draw_heat(mat, paste0(fc, " 囊泡 GO 在六类比较中的 -log10(p.adjust)"), file.path(fc_dir, "vesicle_GO_neglogp_heatmap"))
+    class_rows <- lapply(unique(sub$vesicle_class), function(cl) {
+      piece <- sub[sub$vesicle_class == cl, , drop = FALSE]
+      lapply(comps, function(comp) {
+        x <- piece[piece$comparison == comp, , drop = FALSE]
+        data.frame(
+          fc_label = fc,
+          comparison = comp,
+          vesicle_class = cl,
+          class_label = vesicle_class_labels[[cl]],
+          n_terms = nrow(x),
+          n_p_lt_cutoff = sum(!is.na(x$pvalue) & x$pvalue < p_cutoff),
+          best_p = if (nrow(x) == 0 || all(is.na(x$pvalue))) NA_real_ else min(x$pvalue, na.rm = TRUE),
+          best_padj = if (nrow(x) == 0 || all(is.na(x$p.adjust))) NA_real_ else min(x$p.adjust, na.rm = TRUE),
+          stringsAsFactors = FALSE
+        )
+      })
+    })
+    class_df <- do.call(rbind, unlist(class_rows, recursive = FALSE))
+    write_csv(class_df, file.path(fc_dir, "vesicle_class_summary.csv"))
+    class_mat <- matrix(NA_real_, nrow = length(vesicle_class_labels), ncol = length(comps), dimnames = list(vesicle_class_labels, comps))
+    for (i in seq_len(nrow(class_df))) {
+      class_mat[class_df$class_label[i], class_df$comparison[i]] <- -log10(pmax(class_df$best_padj[i], 1e-300))
+    }
+    class_mat[!is.finite(class_mat)] <- NA_real_
+    draw_heat(class_mat, paste0(fc, " 三类囊泡通路在六类比较中的 -log10(最佳 p.adjust)"), file.path(fc_dir, "vesicle_class_neglogp_heatmap"))
+    usable <- mat[, colSums(is.finite(mat)) >= 3, drop = FALSE]
+    if (ncol(usable) >= 2 && nrow(usable) >= 3) {
+      corm <- stats::cor(usable, use = "pairwise.complete.obs")
+      write_csv(
+        data.frame(comparison = rownames(corm), corm, check.names = FALSE),
+        file.path(fc_dir, "vesicle_comparison_correlation.csv")
+      )
+      draw_heat(corm, paste0(fc, " 六类比较的囊泡 GO 富集相关性"), file.path(fc_dir, "vesicle_comparison_correlation_heatmap"))
+    } else {
+      note_empty(file.path(fc_dir, "vesicle_comparison_correlation_EMPTY.txt"), "fewer than 3 shared vesicle terms")
+    }
+  }
+  log_msg("囊泡专项六类比较汇总: ", outdir)
+  invisible(outdir)
+}
+
+run_downstream <- function(sub, de, heat, sample_info, comparison, outdir, id_map, fc_label, comparison_id = comparison) {
   up <- sub
   write_csv(up, file.path(outdir, paste0(fc_label, "_genes.csv")))
   log_msg(comparison, " ", fc_label, " 上调基因: ", nrow(up))
@@ -1033,28 +1499,49 @@ run_downstream <- function(sub, de, heat, sample_info, comparison, outdir, id_ma
   dir.create(kegg_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(pw_dir, recursive = TRUE, showWarnings = FALSE)
 
+  vesicle_from_go <- list()
   for (ont in c("BP", "CC", "MF")) {
     ont_name <- c(BP = "Biological Process", CC = "Cellular Component", MF = "Molecular Function")[[ont]]
-    res <- enrich_pair(
-      function() clusterProfiler::enrichGO(
-        gene = entrez, universe = universe, OrgDb = org.Hs.eg.db, keyType = "ENTREZID",
-        ont = ont, pAdjustMethod = "BH", pvalueCutoff = p_cutoff, qvalueCutoff = 1,
-        minGSSize = 5, maxGSSize = 500, readable = TRUE
-      ),
-      function() clusterProfiler::enrichGO(
+    obj <- tryCatch(
+      clusterProfiler::enrichGO(
         gene = entrez, universe = universe, OrgDb = org.Hs.eg.db, keyType = "ENTREZID",
         ont = ont, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1,
         minGSSize = 5, maxGSSize = 500, readable = TRUE
       ),
-      paste("GO", ont)
+      error = function(e) {
+        log_msg("GO ", ont, " 失败: ", e$message)
+        NULL
+      }
     )
-    save_enrichment(
-      res$obj, res$relaxed,
-      file.path(go_dir, paste0("ORA_GO_", ont)),
-      paste0(comparison, " ", fc_label, " 上调基因 GO ", ont_name),
-      fc_symbol, fc_entrez
-    )
+    full_df <- enrich_df_ranked(obj)
+    if (is.null(full_df)) {
+      note_empty(file.path(go_dir, paste0("ORA_GO_", ont, "_EMPTY.txt")), "no GO terms")
+      log_msg("没有富集条目: ", comparison, " ", fc_label, " GO ", ont_name)
+    } else {
+      sig <- full_df[!is.na(full_df$pvalue) & full_df$pvalue < p_cutoff, , drop = FALSE]
+      relaxed <- nrow(sig) == 0
+      show <- if (relaxed) full_df else sig
+      show$genome_wide_rank <- NULL
+      show$vesicle_class <- NULL
+      show$class_label <- NULL
+      save_enrichment(
+        show, relaxed,
+        file.path(go_dir, paste0("ORA_GO_", ont)),
+        paste0(comparison, " ", fc_label, " 上调基因 GO ", ont_name),
+        fc_symbol, fc_entrez
+      )
+      vesicle_from_go[[ont]] <- export_go_vesicle_focus(
+        full_df, file.path(go_dir, paste0("ORA_GO_", ont, "_FOCUS_vesicle_transport"))
+      )
+    }
   }
+  tryCatch(
+    run_vesicle_focus(
+      entrez, universe, up, id_map, heat, sample_info, comparison, comparison_id,
+      outdir, fc_label, fc_symbol, fc_entrez, vesicle_from_go
+    ),
+    error = function(e) log_msg("囊泡专项失败: ", e$message)
+  )
 
   res_k <- enrich_pair(
     function() call_with_universe(
@@ -1141,6 +1628,11 @@ write_readme <- function(result_dir) {
     "  FoldChange/FC_1/ 与 FoldChange/FC_1.25/",
     "    *_genes.csv、表达热图",
     "    GO/  KEGG/  Pathway/   文件名以 ORA_ 开头，含气泡图和富集热图",
+    "    GO/ORA_GO_*_FOCUS_vesicle_transport.csv  全基因组结果里的囊泡 GO，保留原始 p 和 genome_wide_rank",
+    "    Focused_vesicle_transport/  内体运输与内体运动、囊泡运输、外泌体分泌",
+    "",
+    "00_vesicle_transport_across_6/ 把六类比较的囊泡 GO 放在一起，",
+    "热图是 -log10(p.adjust)，相关性是这些数值在比较之间的 Pearson 相关。",
     "",
     "物种注释是人 org.Hs.eg.db。没有官方基因符号的 XLOC 会留在差异表，但通常进不了 GO/KEGG。"
   )
@@ -1167,7 +1659,7 @@ emit_comparison <- function(de, name, title, method, heat, sample_info, result_d
     fc_dir <- file.path(outdir, "FoldChange", tag)
     dir.create(fc_dir, recursive = TRUE, showWarnings = FALSE)
     tryCatch(
-      run_downstream(sub, de, heat, sample_info, title, fc_dir, id_map, tag),
+      run_downstream(sub, de, heat, sample_info, title, fc_dir, id_map, tag, name),
       error = function(e) log_msg(name, " ", tag, " 下游分析失败: ", e$message)
     )
   }
@@ -1304,6 +1796,8 @@ main <- function() {
   )
 
   write_readme(result_dir)
+  .vesicle_env$focused <- list()
+  .vesicle_env$comparison_order <- names(titles)
   id_map <- map_to_entrez(rownames(mat))
   log_msg("全基因映射到 Entrez: ", nrow(id_map), " / ", nrow(mat))
   summary_rows <- list()
@@ -1319,6 +1813,10 @@ main <- function() {
   if (length(summary_rows) > 0) {
     write_csv(do.call(rbind, summary_rows), file.path(result_dir, "00_summary.csv"))
   }
+  tryCatch(
+    write_vesicle_across(result_dir),
+    error = function(e) log_msg("囊泡六类比较汇总失败: ", e$message)
+  )
   log_msg("完成。结果在: ", result_dir)
   invisible(result_dir)
 }
