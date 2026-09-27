@@ -31,12 +31,14 @@
 #   GO:0007409  axonogenesis
 #
 # 打分：主 z-mean；补充 z-median、ssGSEA
+# 全部只用原位瘤 RNA。转移组织只用来判断该患者有没有配对转移灶，不参与打分。
 # 转移定义（人数不足的组会跳过并写日志）：
-#   a 原发样本 诊断 M1 vs M0（PRIM_M / YPM）
-#   b 原发样本 Stage IV vs I-III
-#   c 原发样本 N+ vs N0（YPN / PRIM_N）
-#   d 转移组织 vs 原发组织（SAMPLE_TYPE，AURORA 主比较）
-#   e 同一患者配对：转移 vs 原发（有配对 RNA 才做）
+#   a 原位 诊断 M1 vs M0（PRIM_M / YPM）
+#   b 原位 Stage IV vs I-III
+#   c 原位 N+ vs N0（YPN / PRIM_N）
+#   d 主：原位 已转移 vs 未转移
+#        已转移 = 诊断 M1 或 Stage IV，或该患者有配对转移组织
+#        未转移 = 诊断 M0 且不是 Stage IV，且没有配对转移组织
 #
 # 结果目录：results_AURORA_nerve/
 ################################################################################
@@ -783,6 +785,40 @@ build_aurora_annotation <- function(sample_ids, clin_sample, clin_patient) {
   ann
 }
 
+# 原位瘤转移标签：临床 M1/Stage IV，或该患者有配对转移组织
+label_primary_met_status <- function(ann, clin_sample = NULL) {
+  met_pats <- unique(na.omit(as.character(ann$patient[ann$sample_class == "Metastatic"])))
+  if (!is.null(clin_sample) && nrow(clin_sample) > 0) {
+    cs <- as.data.table(clin_sample)
+    names(cs) <- toupper(names(cs))
+    pid <- first_present(names(cs), c("PATIENT_ID", "PATIENT", "PATIENTID"))
+    st <- first_present(names(cs), c("SAMPLE_TYPE", "TUMOR_TYPE", "TISSUE_TYPE"))
+    sid <- first_present(names(cs), c("SAMPLE_ID", "SAMPLE", "SAMPLEID"))
+    if (!is.na(pid) && !is.na(st)) {
+      raw_id <- if (!is.na(sid)) cs[[sid]] else cs[[pid]]
+      cls <- classify_sample_class(cs[[st]], raw_id)
+      met_pats <- unique(c(met_pats, as.character(cs[[pid]])[cls == "Metastatic"]))
+    }
+  }
+  met_pats <- unique(met_pats[nzchar(met_pats) & !is.na(met_pats)])
+  ann[, has_paired_met := patient %in% met_pats]
+  m1 <- as.character(ann$distant_M) == "M1"
+  m0 <- as.character(ann$distant_M) == "M0"
+  st4 <- as.character(ann$stage_IV) == "Stage IV"
+  status <- rep(NA_character_, nrow(ann))
+  status[m1 | st4 | ann$has_paired_met] <- "Metastasized"
+  status[is.na(status) & m0 & !st4 & !ann$has_paired_met] <- "Non-metastasized"
+  ann[, primary_met_status := factor(status, levels = c("Non-metastasized", "Metastasized"))]
+  fwrite(data.table(
+    field = c("primary_met_status", "has_paired_met"),
+    meaning = c(
+      "Primary RNA only. Metastasized = diagnosis M1 or Stage IV or patient has a paired metastatic tissue; Non-metastasized = M0, not Stage IV, and no paired metastatic tissue",
+      "Patient has at least one metastatic sample in clinical/RNA (used only as a label, met RNA is not scored)"
+    )
+  ), file.path(aurora_out_dir, "00_primary_met_definition.csv"))
+  ann
+}
+
 # ==============================================================================
 # 读数据（分析函数在 expr 建好之后才调用）
 # ==============================================================================
@@ -820,16 +856,23 @@ if (!isTRUE(aurora_already_z) && is.finite(mx) && mx > 50) {
 
 aurora_ann <- build_aurora_annotation(colnames(aurora_expr_all), clin_sample, clin_patient)
 aurora_ann <- aurora_ann[sample %in% colnames(aurora_expr_all)]
+aurora_ann <- label_primary_met_status(aurora_ann, clin_sample)
 fwrite(aurora_ann, file.path(aurora_out_dir, "00_sample_annotation.csv"))
 
 is_prim <- aurora_ann$sample_class == "Primary"
 message(
   "样本：原发=", sum(is_prim, na.rm = TRUE),
-  "  转移组织=", sum(aurora_ann$sample_class == "Metastatic", na.rm = TRUE),
-  "  原发中 M1=", sum(is_prim & aurora_ann$distant_M == "M1", na.rm = TRUE),
-  "  原发中 Stage IV=", sum(is_prim & aurora_ann$stage_IV == "Stage IV", na.rm = TRUE),
-  "  原发中 N+=", sum(is_prim & aurora_ann$node_N == "Nplus", na.rm = TRUE)
+  "  转移组织（只用于配对标签）=", sum(aurora_ann$sample_class == "Metastatic", na.rm = TRUE),
+  "  原位已转移=", sum(is_prim & aurora_ann$primary_met_status == "Metastasized", na.rm = TRUE),
+  "  原位未转移=", sum(is_prim & aurora_ann$primary_met_status == "Non-metastasized", na.rm = TRUE),
+  "  原位中有配对转移组织=", sum(is_prim & aurora_ann$has_paired_met, na.rm = TRUE),
+  "  原位中 M1=", sum(is_prim & aurora_ann$distant_M == "M1", na.rm = TRUE),
+  "  原位中 Stage IV=", sum(is_prim & aurora_ann$stage_IV == "Stage IV", na.rm = TRUE),
+  "  原位中 N+=", sum(is_prim & aurora_ann$node_N == "Nplus", na.rm = TRUE)
 )
+if (sum(is_prim & aurora_ann$primary_met_status == "Non-metastasized", na.rm = TRUE) < min_group_n) {
+  message("注意：AURORA 几乎都是转移性乳腺癌，未转移原位瘤可能很少；主比较 d 人数不足会跳过，仍会尝试 a/b/c")
+}
 
 keep_g <- rowMeans(is.finite(aurora_expr_all), na.rm = TRUE) >= min_expr_frac
 if (!isTRUE(aurora_already_z)) {
@@ -843,13 +886,13 @@ message(
   "表达矩阵：全部 ", ncol(aurora_expr), " 样本 x ", nrow(aurora_expr),
   " 基因；原发 ", ncol(aurora_expr_primary)
 )
-if (ncol(aurora_expr) < 10) stop("有表达的样本太少：", ncol(aurora_expr))
+if (ncol(aurora_expr_primary) < 5) stop("有表达的原位样本太少：", ncol(aurora_expr_primary))
 
 # ==============================================================================
 # 主分析（必须在 expr 建好之后）
 # ==============================================================================
 run_aurora_nerve <- function() {
-  if (!exists("aurora_expr", inherits = TRUE)) stop("还没有 aurora_expr，请从脚本开头 Source")
+  if (!exists("aurora_expr_primary", inherits = TRUE)) stop("还没有 aurora_expr_primary，请从脚本开头 Source")
 
   mat_from_list <- function(lst) {
     if (length(lst) == 0) return(NULL)
@@ -899,43 +942,38 @@ run_aurora_nerve <- function() {
     Filter(Negate(is.null), lst)
   }
 
-  plot_one_method <- function(method, sm_all) {
-    if (is.null(sm_all)) {
-      message("  ", method$title, " 没有可画的分数，跳过")
+  plot_one_method <- function(method, sm_p) {
+    if (is.null(sm_p) || nrow(sm_p) == 0) {
+      message("  ", method$title, " 没有可画的原位分数，跳过")
       return(invisible(NULL))
     }
     mdir <- file.path(aurora_out_dir, method$id)
     dir.create(mdir, showWarnings = FALSE, recursive = TRUE)
-    fwrite(data.table(sample = rownames(sm_all), as.data.table(sm_all)),
-           file.path(mdir, "01_pathway_scores.csv"))
+    fwrite(data.table(sample = rownames(sm_p), as.data.table(sm_p)),
+           file.path(mdir, "01_pathway_scores_primary.csv"))
 
-    ann_use <- aurora_ann[sample %in% rownames(sm_all)]
-    ann_p <- ann_use[sample_class == "Primary"]
-    sm_p <- sm_all[intersect(rownames(sm_all), ann_p$sample), , drop = FALSE]
+    ann_p <- aurora_ann[sample %in% rownames(sm_p) & sample_class == "Primary"]
 
     designs <- list(
       list(key = "a_distant_M", title = "Distant M at first diagnosis", panel = "1a Distant M",
            group = setNames(as.character(ann_p$distant_M), ann_p$sample),
            pos = "M1", neg = "M0", pos_lab = "M1", neg_lab = "M0",
-           score_mat = sm_p, paired = FALSE),
+           score_mat = sm_p),
       list(key = "b_AJCC_stageIV", title = "AJCC stage at diagnosis", panel = "1b AJCC stage",
            group = setNames(as.character(ann_p$stage_IV), ann_p$sample),
            pos = "Stage IV", neg = "Stage I-III",
            pos_lab = "Stage IV", neg_lab = "Stage I-III",
-           score_mat = sm_p, paired = FALSE),
+           score_mat = sm_p),
       list(key = "c_node_N", title = "Lymph node", panel = "1c Lymph node",
            group = setNames(as.character(ann_p$node_N), ann_p$sample),
            pos = "Nplus", neg = "N0", pos_lab = "N+", neg_lab = "N0",
-           score_mat = sm_p, paired = FALSE),
-      list(key = "d_sample_type", title = "Sample type", panel = "1d Sample type",
-           group = setNames(as.character(ann_use$sample_class), ann_use$sample),
-           pos = "Metastatic", neg = "Primary",
-           pos_lab = "Metastatic tissue", neg_lab = "Primary tumor",
-           score_mat = sm_all, paired = FALSE),
-      list(key = "e_paired", title = "Paired primary vs metastasis", panel = "1e Paired",
-           group = NULL, pos = "Metastatic", neg = "Primary",
-           pos_lab = "Metastatic tissue", neg_lab = "Primary tumor",
-           score_mat = sm_all, paired = TRUE)
+           score_mat = sm_p),
+      list(key = "d_primary_met_status", title = "Primary later / known metastasis",
+           panel = "1d Primary met status",
+           group = setNames(as.character(ann_p$primary_met_status), ann_p$sample),
+           pos = "Metastasized", neg = "Non-metastasized",
+           pos_lab = "Metastasized primary", neg_lab = "Non-metastasized primary",
+           score_mat = sm_p)
     )
 
     all_stat <- list()
@@ -950,13 +988,9 @@ run_aurora_nerve <- function() {
       for (g in colnames(sm)) {
         value_vec <- as.numeric(sm[, g])
         names(value_vec) <- rownames(sm)
-        one <- if (isTRUE(ds$paired)) {
-          compare_paired_patients(value_vec, ann_use, ds$key)
-        } else {
-          compare_groups(value_vec, ds$group[names(value_vec)], ds$pos, ds$neg, ds$key)
-        }
+        one <- compare_groups(value_vec, ds$group[names(value_vec)], ds$pos, ds$neg, ds$key)
         if (is.null(one)) next
-        if (!isTRUE(ds$paired) && (one$n_pos < min_group_n || one$n_neg < min_group_n)) {
+        if (one$n_pos < min_group_n || one$n_neg < min_group_n) {
           next
         }
         one[, `:=`(
@@ -1005,8 +1039,8 @@ run_aurora_nerve <- function() {
       fwrite(bubble, file.path(aurora_out_dir, "02_summary_GO_vs_metastasis.csv"))
       plot_bubble_two_cols(
         bubble,
-        title = "AURORA neural GO versus metastasis (z-mean, primary)",
-        subtitle = "Primary scoring = z-mean; 17 GOs not pooled",
+        title = "AURORA primary tumors: neural GO versus metastasis (z-mean)",
+        subtitle = "Primary RNA only; Metastasized = M1 or Stage IV or paired metastatic tissue",
         path_stub = file.path(aurora_out_dir, "02_summary_bubble_GO_vs_metastasis"),
         facet = TRUE
       )
@@ -1023,13 +1057,13 @@ run_aurora_nerve <- function() {
   for (method in score_methods) {
     message("打分：", method$title, if (isTRUE(method$primary)) "（主）" else "（补充）")
     if (identical(method$id, "ssgsea")) {
-      lst <- score_ssgsea_sets(aurora_expr, gene_sets)
+      lst <- score_ssgsea_sets(aurora_expr_primary, gene_sets)
     } else {
       how <- if (identical(method$id, "zmedian")) "median" else "mean"
-      lst <- score_z_method(aurora_expr, how)
+      lst <- score_z_method(aurora_expr_primary, how)
     }
-    sm_all <- mat_from_list(lst)
-    all_method_stats[[method$id]] <- plot_one_method(method, sm_all)
+    sm_p <- mat_from_list(lst)
+    all_method_stats[[method$id]] <- plot_one_method(method, sm_p)
   }
 
   keep <- Filter(function(x) is.data.table(x) && nrow(x) > 0, all_method_stats)
@@ -1039,13 +1073,12 @@ run_aurora_nerve <- function() {
   }
 
   message("完成。结果目录：", normalizePath(aurora_out_dir, winslash = "/", mustWork = FALSE))
-  message("主图（转移组织 vs 原发）：zmean/02_d_sample_type_bubble.png")
-  message("配对图：zmean/02_e_paired_bubble.png")
+  message("主图（原位已转移 vs 未转移）：zmean/02_d_primary_met_status_bubble.png")
   invisible(TRUE)
 }
 
-if (exists("aurora_expr") && ncol(aurora_expr) > 5) {
+if (exists("aurora_expr_primary") && ncol(aurora_expr_primary) > 5) {
   run_aurora_nerve()
 } else {
-  stop("表达矩阵未建好，请从第一行完整 Source")
+  stop("原位表达矩阵未建好，请从第一行完整 Source")
 }
