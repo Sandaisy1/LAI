@@ -668,12 +668,13 @@ aurora_ann <- build_aurora_annotation(colnames(aurora_expr_all), clin_sample, cl
 aurora_ann <- aurora_ann[sample %in% colnames(aurora_expr_all)]
 fwrite(aurora_ann, file.path(aurora_out_dir, "00_sample_annotation.csv"))
 
+is_prim <- aurora_ann$sample_class == "Primary"
 message(
-  "样本：原发=", sum(aurora_ann$sample_class == "Primary", na.rm = TRUE),
+  "样本：原发=", sum(is_prim, na.rm = TRUE),
   "  转移组织=", sum(aurora_ann$sample_class == "Metastatic", na.rm = TRUE),
-  "  M1=", sum(aurora_ann$distant_M == "M1", na.rm = TRUE),
-  "  Stage IV=", sum(aurora_ann$stage_IV == "Stage IV", na.rm = TRUE),
-  "  N+=", sum(aurora_ann$node_N == "Nplus", na.rm = TRUE)
+  "  原发中 M1=", sum(is_prim & aurora_ann$distant_M == "M1", na.rm = TRUE),
+  "  原发中 Stage IV=", sum(is_prim & aurora_ann$stage_IV == "Stage IV", na.rm = TRUE),
+  "  原发中 N+=", sum(is_prim & aurora_ann$node_N == "Nplus", na.rm = TRUE)
 )
 
 keep_g <- rowMeans(is.finite(aurora_expr_all), na.rm = TRUE) >= min_expr_frac
