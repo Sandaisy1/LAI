@@ -36,11 +36,14 @@
 # 打分（五个 GO 各自打分，不合并）：
 #   主：z-mean（基因 z 后取均值）
 #   补充：z-median（基因 z 后取中位数）；ssGSEA（Barbie 2009；有 GSVA 用 GSVA，否则用脚本内实现）
-# 每种打分都对 4 种转移定义做 Wilcoxon，并画两列气泡图（Non-metastatic | Metastatic）
-#   a 原位肿瘤 M1 vs M0
+# 每种打分都对下列转移定义做 Wilcoxon，并画两列气泡图（Non-metastatic | Metastatic）
+#   a 原位肿瘤 诊断 M1 vs M0（就诊时）
 #   b 原位肿瘤 Stage IV vs I-III
 #   c 原位肿瘤 N+ vs N0
 #   d 转移组织 vs 原位肿瘤
+#   e 原位肿瘤 随访后发生远处转移 vs 未转移（主：Liu NTE/DFI + GDC NTE，并计入诊断 M1）
+#   f 原位肿瘤 Liu PFI=1 vs 0（后来进展，含局部+远处）
+#   g 原位肿瘤 Liu DFI=1 vs 0（无病后复发，更接近远处转移）
 #
 # 结果目录：results_nerve_TCGA/
 #   zmean/   主结果
@@ -248,6 +251,215 @@ classify_sample_type <- function(x, barcode) {
   out
 }
 
+is_blank_clin <- function(x) {
+  x <- trimws(gsub('^"|"$', "", as.character(x)))
+  is.na(x) | !nzchar(x) | grepl(
+    "^(NA|N/A|\\[NOT AVAILABLE\\]|\\[NOT APPLICABLE\\]|\\[UNKNOWN\\]|\\[NOT EVALUATED\\]|NOT AVAILABLE|NOT REPORTED|UNKNOWN)$",
+    x, ignore.case = TRUE
+  )
+}
+classify_nte_distant <- function(type, site = NULL) {
+  t <- toupper(gsub('"', "", as.character(type)))
+  s <- if (is.null(site)) rep("", length(t)) else toupper(gsub('"', "", as.character(site)))
+  t[is_blank_clin(t)] <- ""
+  s[is_blank_clin(s)] <- ""
+  grepl("DISTANT|METASTAS", t) |
+    grepl("\\bBONE\\b|\\bLUNG\\b|\\bLIVER\\b|\\bBRAIN\\b|\\bCNS\\b|PLEURA|PERITONE|ADRENAL", s)
+}
+as_01 <- function(x) {
+  x <- toupper(trimws(as.character(x)))
+  out <- rep(NA_integer_, length(x))
+  out[x %in% c("1", "YES", "TRUE")] <- 1L
+  out[x %in% c("0", "NO", "FALSE")] <- 0L
+  out
+}
+find_data_file <- function(patterns, label = "file") {
+  hits <- unique(unlist(lapply(patterns, function(p) {
+    list.files(getwd(), pattern = p, full.names = TRUE, ignore.case = TRUE)
+  })))
+  hits <- hits[!is.na(file.info(hits)$isdir) & !file.info(hits)$isdir]
+  hits <- hits[file.info(hits)$size > 200]
+  hits <- hits[!grepl("results_", hits, ignore.case = TRUE)]
+  if (length(hits) == 0) {
+    message("未找到", label)
+    return(NA_character_)
+  }
+  pick <- hits[which.max(file.info(hits)$size)]
+  message(label, "：", pick, "  ", sprintf("%.1fMB", file.info(pick)$size / 1024^2))
+  pick
+}
+fread_followup_table <- function(path) {
+  if (is.na(path) || !file.exists(path)) return(NULL)
+  if (grepl("\\.xlsx?$", path, ignore.case = TRUE)) {
+    if (!requireNamespace("readxl", quietly = TRUE)) {
+      message("有 xlsx 但未安装 readxl，跳过：", path)
+      return(NULL)
+    }
+    return(as.data.table(readxl::read_excel(path)))
+  }
+  dt <- safe_fread(path, sep = "\t", header = TRUE, fill = TRUE)
+  bc <- first_present(names(dt), c(
+    "bcr_patient_barcode", "bcr_sample_barcode", "_PATIENT", "sample", "PATIENT"
+  ))
+  if (!is.na(bc)) {
+    keep <- grepl("^TCGA-", as.character(dt[[bc]]))
+    if (any(keep)) dt <- dt[keep]
+  }
+  dt
+}
+
+# Liu 2018 / Xena PFI·DFI + GDC nte/follow-up → 原位瘤后来是否远处转移
+load_followup_by_patient <- function() {
+  liu_f <- find_data_file(
+    c("^Survival_SupplementalTable_S1", "TCGA-CDR-SupplementalTableS1"),
+    "Liu/Xena TCGA-CDR"
+  )
+  nte_f <- find_data_file(
+    c("clinical_nte_brca", "clinical_follow_up_v4\\.0_nte_brca"),
+    "GDC new tumor event"
+  )
+  fu_f <- find_data_file(
+    c("clinical_follow_up_v4\\.0_brca\\.txt", "clinical_follow_up_v2\\.1_brca",
+      "clinical_follow_up_v1\\.5_brca"),
+    "GDC follow-up"
+  )
+
+  chunks <- list()
+
+  if (!is.na(liu_f)) {
+    liu <- fread_followup_table(liu_f)
+    if (!is.null(liu) && nrow(liu) > 0) {
+      names(liu) <- gsub("^\\s+|\\s+$", "", names(liu))
+      typec <- first_present(names(liu), c("cancer type abbreviation", "type", "cancer type"))
+      if (!is.na(typec)) {
+        keep <- toupper(as.character(liu[[typec]])) %in% c("BRCA", "BREAST INVASIVE CARCINOMA")
+        if (any(keep)) liu <- liu[keep]
+      }
+      pid <- first_present(names(liu), c("_PATIENT", "PATIENT", "patient"))
+      sid <- first_present(names(liu), c("sample", "sampleID", "SAMPLE"))
+      liu[, patient := {
+        a <- if (!is.na(pid)) as.character(liu[[pid]]) else NA_character_
+        b <- if (!is.na(sid)) as.character(liu[[sid]]) else NA_character_
+        patient_id(fifelse(!is_blank_clin(a), a, b))
+      }]
+      pfi_c <- first_present(names(liu), c("PFI", "pfi"))
+      dfi_c <- first_present(names(liu), c("DFI", "dfi"))
+      nte_c <- first_present(names(liu), c("new_tumor_event_type", "new_tumor_event_type"))
+      site_c <- first_present(names(liu), c("new_tumor_event_site", "new_tumor_event_site"))
+      one <- liu[, .(
+        liu_pfi = if (!is.na(pfi_c)) as_01(get(pfi_c)) else NA_integer_,
+        liu_dfi = if (!is.na(dfi_c)) as_01(get(dfi_c)) else NA_integer_,
+        liu_nte_type = if (!is.na(nte_c)) as.character(get(nte_c)) else NA_character_,
+        liu_nte_site = if (!is.na(site_c)) as.character(get(site_c)) else NA_character_,
+        source_liu = TRUE
+      ), by = patient]
+      one <- one[patient != "" & !is.na(patient)]
+      one[, liu_nte_distant := classify_nte_distant(liu_nte_type, liu_nte_site)]
+      one <- one[, .(
+        liu_pfi = if (any(liu_pfi == 1L, na.rm = TRUE)) 1L else if (any(liu_pfi == 0L, na.rm = TRUE)) 0L else NA_integer_,
+        liu_dfi = if (any(liu_dfi == 1L, na.rm = TRUE)) 1L else if (any(liu_dfi == 0L, na.rm = TRUE)) 0L else NA_integer_,
+        liu_nte_type = { x <- liu_nte_type[!is_blank_clin(liu_nte_type)]; if (length(x)) x[1] else NA_character_ },
+        liu_nte_site = { x <- liu_nte_site[!is_blank_clin(liu_nte_site)]; if (length(x)) x[1] else NA_character_ },
+        liu_nte_distant = any(liu_nte_distant, na.rm = TRUE),
+        source_liu = TRUE
+      ), by = patient]
+      chunks[[length(chunks) + 1L]] <- one
+    }
+  }
+
+  if (!is.na(nte_f)) {
+    nte <- fread_followup_table(nte_f)
+    if (!is.null(nte) && nrow(nte) > 0) {
+      bc <- first_present(names(nte), c("bcr_patient_barcode", "bcr_sample_barcode"))
+      tc <- first_present(names(nte), c("new_tumor_event_type", "new_neoplasm_event_type"))
+      sc <- first_present(names(nte), c("new_tumor_event_site", "new_neoplasm_event_occurrence_anatomic_site"))
+      nte[, patient := patient_id(nte[[bc]])]
+      nte[, gdc_nte_distant := classify_nte_distant(
+        if (!is.na(tc)) nte[[tc]] else NA_character_,
+        if (!is.na(sc)) nte[[sc]] else NA_character_
+      )]
+      one <- nte[, .(gdc_nte_distant = any(gdc_nte_distant, na.rm = TRUE), source_gdc_nte = TRUE), by = patient]
+      chunks[[length(chunks) + 1L]] <- one
+    }
+  }
+
+  if (!is.na(fu_f)) {
+    fu <- fread_followup_table(fu_f)
+    if (!is.null(fu) && nrow(fu) > 0) {
+      bc <- first_present(names(fu), c("bcr_patient_barcode"))
+      yc <- first_present(names(fu), c(
+        "new_tumor_event_dx_indicator", "new_tumor_event_after_initial_treatment"
+      ))
+      fu[, patient := patient_id(fu[[bc]])]
+      fu[, fu_yes := if (!is.na(yc)) grepl("^YES$", as.character(fu[[yc]]), ignore.case = TRUE) else FALSE]
+      one <- fu[, .(gdc_fu_new_tumor = any(fu_yes, na.rm = TRUE), source_gdc_fu = TRUE), by = patient]
+      chunks[[length(chunks) + 1L]] <- one
+    }
+  }
+
+  if (length(chunks) == 0) {
+    message("没有读到 Liu / GDC 随访表，e/f/g 会跳过。请把文件放到 ", getwd())
+    return(data.table(patient = character()))
+  }
+  pat <- rbindlist(chunks, fill = TRUE)
+  pat <- pat[patient != "" & !is.na(patient)]
+  pat <- pat[, .(
+    liu_pfi = { x <- liu_pfi[!is.na(liu_pfi)]; if (length(x)) as.integer(max(x)) else NA_integer_ },
+    liu_dfi = { x <- liu_dfi[!is.na(liu_dfi)]; if (length(x)) as.integer(max(x)) else NA_integer_ },
+    liu_nte_type = { x <- liu_nte_type[!is_blank_clin(liu_nte_type)]; if (length(x)) x[1] else NA_character_ },
+    liu_nte_site = { x <- liu_nte_site[!is_blank_clin(liu_nte_site)]; if (length(x)) x[1] else NA_character_ },
+    liu_nte_distant = any(liu_nte_distant, na.rm = TRUE),
+    gdc_nte_distant = any(gdc_nte_distant, na.rm = TRUE),
+    gdc_fu_new_tumor = any(gdc_fu_new_tumor, na.rm = TRUE),
+    source_liu = any(source_liu, na.rm = TRUE),
+    source_gdc_nte = any(source_gdc_nte, na.rm = TRUE),
+    source_gdc_fu = any(source_gdc_fu, na.rm = TRUE)
+  ), by = patient]
+  pat[, followup_distant := liu_nte_distant | gdc_nte_distant | (!is.na(liu_dfi) & liu_dfi == 1L)]
+  pat[, has_followup := source_liu | source_gdc_nte | source_gdc_fu]
+  pat
+}
+
+add_followup_to_annotation <- function(ann) {
+  pat <- load_followup_by_patient()
+  if (nrow(pat) == 0) {
+    ann[, `:=`(
+      liu_pfi = NA_integer_, liu_dfi = NA_integer_,
+      followup_distant = NA,
+      pfi_event = factor(NA_character_, levels = c("NoPFI", "PFI")),
+      dfi_event = factor(NA_character_, levels = c("NoDFI", "DFI")),
+      primary_later_met = factor(NA_character_, levels = c("Non-metastasized", "Metastasized"))
+    )]
+    return(ann)
+  }
+  ann <- merge(ann, pat, by = "patient", all.x = TRUE)
+  later <- ann$followup_distant %in% TRUE
+  m1 <- as.character(ann$distant_M) == "M1"
+  has <- ann$has_followup %in% TRUE | !is.na(ann$liu_pfi) | !is.na(ann$liu_dfi)
+  prim_met <- rep(NA_character_, nrow(ann))
+  prim_met[later | m1] <- "Metastasized"
+  prim_met[is.na(prim_met) & has & !m1] <- "Non-metastasized"
+  ann[, primary_later_met := factor(prim_met, levels = c("Non-metastasized", "Metastasized"))]
+  pfi <- rep(NA_character_, nrow(ann))
+  pfi[ann$liu_pfi == 1L] <- "PFI"
+  pfi[ann$liu_pfi == 0L] <- "NoPFI"
+  dfi <- rep(NA_character_, nrow(ann))
+  dfi[ann$liu_dfi == 1L] <- "DFI"
+  dfi[ann$liu_dfi == 0L] <- "NoDFI"
+  ann[, pfi_event := factor(pfi, levels = c("NoPFI", "PFI"))]
+  ann[, dfi_event := factor(dfi, levels = c("NoDFI", "DFI"))]
+  fwrite(data.table(
+    field = c("primary_later_met", "pfi_event", "dfi_event", "followup_distant"),
+    meaning = c(
+      "Primary tumor: later distant met (Liu NTE Distant / GDC NTE distant / DFI=1) or diagnosis M1 vs followed with none of these",
+      "Liu PFI=1 vs 0 (later progression, locoregional or distant; not diagnosis M1)",
+      "Liu DFI=1 vs 0 (recurrence after disease-free; closer to later distant met)",
+      "Patient-level later distant flag used inside primary_later_met"
+    )
+  ), file.path(nerve_out_dir, "00_followup_definition.csv"))
+  ann
+}
+
 # 通路活性：基因 z 后对样本取均值或中位数。不要用 scale()/t()，变量不要叫 score
 pathway_zstat <- function(expr_mat, genes, how = "mean") {
   genes <- unique(intersect(as.character(genes), rownames(expr_mat)))
@@ -292,15 +504,16 @@ ssgsea_via_gsva <- function(expr_mat, gene_sets) {
   })
   if (is.null(scored)) return(NULL)
   scored <- as.matrix(scored)
-  out <- lapply(colnames(scored), function(nm) {
-    v <- as.numeric(scored[, nm])
-    names(v) <- rownames(scored)
+  # GSVA: rows = gene sets, columns = samples
+  out <- lapply(rownames(scored), function(nm) {
+    v <- as.numeric(scored[nm, ])
+    names(v) <- colnames(scored)
     attr(v, "n_genes") <- length(gsets[[nm]])
     attr(v, "genes") <- gsets[[nm]]
     attr(v, "ssgsea_backend") <- "GSVA"
     v
   })
-  names(out) <- colnames(scored)
+  names(out) <- rownames(scored)
   out
 }
 
@@ -647,15 +860,19 @@ if (is.finite(mx) && mx > 50) {
 
 nerve_ann <- build_annotation(colnames(nerve_expr_all), clinical_data)
 nerve_ann <- nerve_ann[sample %in% colnames(nerve_expr_all)]
+nerve_ann <- add_followup_to_annotation(nerve_ann)
 fwrite(nerve_ann, file.path(nerve_out_dir, "00_sample_annotation.csv"))
 
+is_prim <- nerve_ann$sample_class == "PrimaryTumor"
 message(
-  "样本：原位=", sum(nerve_ann$sample_class == "PrimaryTumor", na.rm = TRUE),
+  "样本：原位=", sum(is_prim, na.rm = TRUE),
   "  转移组织=", sum(nerve_ann$sample_class == "MetastaticTissue", na.rm = TRUE),
   "  正常=", sum(nerve_ann$sample_class == "Normal", na.rm = TRUE),
-  "  M1=", sum(nerve_ann$distant_M == "M1", na.rm = TRUE),
-  "  Stage IV=", sum(nerve_ann$stage_simplified == "Stage IV", na.rm = TRUE),
-  "  N+=", sum(nerve_ann$node_N == "Nplus", na.rm = TRUE)
+  "  诊断 M1=", sum(is_prim & nerve_ann$distant_M == "M1", na.rm = TRUE),
+  "  原位随访后转移=", sum(is_prim & nerve_ann$primary_later_met == "Metastasized", na.rm = TRUE),
+  "  原位随访未转移=", sum(is_prim & nerve_ann$primary_later_met == "Non-metastasized", na.rm = TRUE),
+  "  原位 PFI=1=", sum(is_prim & nerve_ann$pfi_event == "PFI", na.rm = TRUE),
+  "  原位 DFI=1=", sum(is_prim & nerve_ann$dfi_event == "DFI", na.rm = TRUE)
 )
 
 primary_ids <- nerve_ann$sample[nerve_ann$sample_class == "PrimaryTumor"]
@@ -775,7 +992,23 @@ run_nerve_tcga <- function() {
            group = setNames(as.character(ann_t$sample_class), ann_t$sample),
            pos = "MetastaticTissue", neg = "PrimaryTumor",
            pos_lab = "Metastatic tissue", neg_lab = "Primary tumor",
-           score_mat = sm_t)
+           score_mat = sm_t),
+      list(key = "e_followup_primary_met", title = "Follow-up metastasis in primary",
+           panel = "1e Follow-up met",
+           group = setNames(as.character(ann_p$primary_later_met), ann_p$sample),
+           pos = "Metastasized", neg = "Non-metastasized",
+           pos_lab = "Later / known metastasis", neg_lab = "No later metastasis",
+           score_mat = sm_p),
+      list(key = "f_Liu_PFI", title = "Liu PFI in primary", panel = "1f Liu PFI",
+           group = setNames(as.character(ann_p$pfi_event), ann_p$sample),
+           pos = "PFI", neg = "NoPFI",
+           pos_lab = "PFI event", neg_lab = "No PFI event",
+           score_mat = sm_p),
+      list(key = "g_Liu_DFI", title = "Liu DFI in primary", panel = "1g Liu DFI",
+           group = setNames(as.character(ann_p$dfi_event), ann_p$sample),
+           pos = "DFI", neg = "NoDFI",
+           pos_lab = "DFI event", neg_lab = "No DFI event",
+           score_mat = sm_p)
     )
 
     all_stat <- list()
@@ -830,6 +1063,21 @@ run_nerve_tcga <- function() {
       path_stub = file.path(mdir, "02_summary_bubble_GO_vs_metastasis"),
       facet = TRUE
     )
+    follow_keys <- c("e_followup_primary_met", "f_Liu_PFI", "g_Liu_DFI")
+    follow <- bubble[grouping %in% follow_keys]
+    if (nrow(follow) > 0) {
+      fwrite(follow, file.path(mdir, "02_summary_followup_primary_GO.csv"))
+      plot_bubble_two_cols(
+        follow,
+        title = paste0("Primary tumor follow-up metastasis (", method$title, ")"),
+        subtitle = paste0(
+          "Scoring = ", method$title,
+          "; primary RNA only; Later met = Liu distant NTE / GDC NTE / DFI=1 or diagnosis M1"
+        ),
+        path_stub = file.path(mdir, "02_summary_bubble_followup_primary"),
+        facet = TRUE
+      )
+    }
     if (isTRUE(method$primary)) {
       fwrite(bubble, file.path(nerve_out_dir, "02_summary_GO_vs_metastasis.csv"))
       plot_bubble_two_cols(
@@ -839,6 +1087,16 @@ run_nerve_tcga <- function() {
         path_stub = file.path(nerve_out_dir, "02_summary_bubble_GO_vs_metastasis"),
         facet = TRUE
       )
+      if (nrow(follow) > 0) {
+        fwrite(follow, file.path(nerve_out_dir, "02_summary_followup_primary_GO.csv"))
+        plot_bubble_two_cols(
+          follow,
+          title = "Primary tumor: later metastasis vs none (z-mean)",
+          subtitle = "Redefined by Liu 2018/Xena PFI-DFI-NTE and GDC follow-up; primary tumors only",
+          path_stub = file.path(nerve_out_dir, "02_summary_bubble_followup_primary"),
+          facet = TRUE
+        )
+      }
     }
     bubble
   }
@@ -866,9 +1124,9 @@ run_nerve_tcga <- function() {
   }
 
   message("完成。结果目录：", normalizePath(nerve_out_dir, winslash = "/", mustWork = FALSE))
-  message("主图（z-mean）：zmean/02_summary_bubble_GO_vs_metastasis.png")
-  message("补充 z-median：zmedian/02_summary_bubble_GO_vs_metastasis.png")
-  message("补充 ssGSEA：ssgsea/02_summary_bubble_GO_vs_metastasis.png")
+  message("随访重定义主图：zmean/02_e_followup_primary_met_bubble.png")
+  message("随访三组汇总：zmean/02_summary_bubble_followup_primary.png")
+  message("诊断/组织图：zmean/02_summary_bubble_GO_vs_metastasis.png")
   invisible(TRUE)
 }
 
