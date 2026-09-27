@@ -3,6 +3,7 @@
 .Rproj.user
 .Ruserdata
 results/
+PCY_RNA_results/
 figures/
 *.html
 *.pdf
