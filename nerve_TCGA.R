@@ -26,41 +26,38 @@
 #      biotab 列表：   https://portal.gdc.cancer.gov/repository?facetTab=files&filters=%7B%22op%22%3A%22and%22%2C%22content%22%3A%5B%7B%22op%22%3A%22in%22%2C%22content%22%3A%7B%22field%22%3A%22cases.project.project_id%22%2C%22value%22%3A%5B%22TCGA-BRCA%22%5D%7D%7D%2C%7B%22op%22%3A%22in%22%2C%22content%22%3A%7B%22field%22%3A%22files.data_format%22%2C%22value%22%3A%5B%22BCR%20Biotab%22%5D%7D%7D%5D%7D
 #      也可运行同目录 TCGA_followup_download.R
 #
-# 神经浸润按下面 17 个神经信号 GO，每个单独取基因、单独打分（不合并）：
-#   GO:0023041  neuronal signal transduction
-#   GO:1904457  positive regulation of neuronal action potential
-#   GO:1904340  positive regulation of dopaminergic neuron differentiation
-#   GO:2001224  positive regulation of neuron migration
-#   GO:2001222  regulation of neuron migration
+# 全部只用原位瘤 RNA。已删除 d（转移组织 vs 原位肿瘤）。
+# 气泡图纵坐标只写通路英文名，不写 GO 编号。
+# 聚焦 7 个神经信号 GO，每个单独取基因、单独打分（不合并）：
 #   GO:0019227  neuronal action potential propagation
-#   GO:0019228  neuronal action potential
 #   GO:1902847  regulation of neuronal signal transduction
-#   GO:0031102  neuron projection regeneration
-#   GO:0097492  sympathetic neuron axon guidance
-#   GO:0097491  sympathetic neuron projection guidance
-#   GO:0097374  sensory neuron axon guidance
-#   GO:0007158  neuron cell-cell adhesion
-#   GO:1902667  regulation of axon guidance
-#   GO:0031103  axon regeneration
-#   GO:0007411  axon guidance
+#   GO:0023041  neuronal signal transduction   # 用户写作 G0023041
 #   GO:0007409  axonogenesis
+#   GO:0007411  axon guidance
+#   GO:0031102  neuron projection regeneration
+#   GO:0097374  sensory neuron axon guidance
 #
-# 打分（17 个 GO 各自打分，不合并）：
+# 打分（7 个 GO 各自打分，不合并）：
 #   主：z-mean（基因 z 后取均值）
 #   补充：z-median（基因 z 后取中位数）；ssGSEA（Barbie 2009；有 GSVA 用 GSVA，否则用脚本内实现）
-# 每种打分都对下列转移定义做 Wilcoxon，并画两列气泡图（Non-metastatic | Metastatic）
+# 每种打分都对下列原位转移定义做 Wilcoxon，并画两列气泡图（Non-metastatic | Metastatic）
 #   a 原位肿瘤 诊断 M1 vs M0（就诊时）
 #   b 原位肿瘤 Stage IV vs I-III
 #   c 原位肿瘤 N+ vs N0
-#   d 转移组织 vs 原位肿瘤
 #   e 原位肿瘤 随访后发生远处转移 vs 未转移（主：Liu NTE/DFI + GDC NTE，并计入诊断 M1）
 #   f 原位肿瘤 Liu PFI=1 vs 0（后来进展，含局部+远处）
 #   g 原位肿瘤 Liu DFI=1 vs 0（无病后复发，更接近远处转移）
+#
+# 负相关基因（原位 RNA；每个神经 GO 单独打分，不合并）：
+#   与转移：按 a/b/c/e/f/g 同一套分组，Spearman r<0 且 p<0.05（主）；另出 r<=-0.15 且 p<0.05（严格）
+#   与神经浸润：基因 vs 各神经 GO 分数，同一套阈值
 #
 # 结果目录：results_nerve_TCGA/
 #   zmean/   主结果
 #   zmedian/ 补充
 #   ssgsea/  补充
+#   03_*     与转移负相关的基因
+#   04_*     与各神经 GO 负相关的基因
 ################################################################################
 
 library(data.table)
@@ -74,25 +71,18 @@ nerve_out_dir <- "results_nerve_TCGA"
 min_set_genes <- 1
 min_group_n <- 2
 min_expr_frac <- 0.20
+neg_pvalue_cutoff <- 0.05
+neg_r_cutoff <- 0
+strict_r_cutoff <- -0.15
 
 go_list <- c(
-  "GO:0023041",
-  "GO:1904457",
-  "GO:1904340",
-  "GO:2001224",
-  "GO:2001222",
   "GO:0019227",
-  "GO:0019228",
   "GO:1902847",
-  "GO:0031102",
-  "GO:0097492",
-  "GO:0097491",
-  "GO:0097374",
-  "GO:0007158",
-  "GO:1902667",
-  "GO:0031103",
+  "GO:0023041",
+  "GO:0007409",
   "GO:0007411",
-  "GO:0007409"
+  "GO:0031102",
+  "GO:0097374"
 )
 
 go_name_map <- c(
@@ -265,7 +255,6 @@ go_fallback <- list(
   )
 )
 go_fallback <- lapply(go_fallback, function(x) unique(trimws(x)))
-go_fallback <- lapply(go_fallback, function(x) unique(trimws(x)))
 
 go_title <- function(go_id) {
   go_id <- as.character(go_id)
@@ -274,7 +263,9 @@ go_title <- function(go_id) {
   out[miss] <- go_id[miss]
   out
 }
-go_lab <- function(go_id) paste0(as.character(go_id), "  ", go_title(go_id))
+# 图上只标英文通路名，不写 GO 编号
+go_lab <- function(go_id) go_title(go_id)
+safe_name <- function(x) gsub("[^A-Za-z0-9._-]+", "_", as.character(x))
 
 # ==============================================================================
 # 工具函数（全部先定义，读完表达矩阵再分析）
@@ -558,6 +549,16 @@ load_followup_by_patient <- function() {
   }
   pat <- rbindlist(chunks, fill = TRUE)
   pat <- pat[patient != "" & !is.na(patient)]
+  if (!"liu_pfi" %in% names(pat)) pat[, liu_pfi := NA_integer_]
+  if (!"liu_dfi" %in% names(pat)) pat[, liu_dfi := NA_integer_]
+  if (!"liu_nte_type" %in% names(pat)) pat[, liu_nte_type := NA_character_]
+  if (!"liu_nte_site" %in% names(pat)) pat[, liu_nte_site := NA_character_]
+  if (!"liu_nte_distant" %in% names(pat)) pat[, liu_nte_distant := FALSE]
+  if (!"gdc_nte_distant" %in% names(pat)) pat[, gdc_nte_distant := FALSE]
+  if (!"gdc_fu_new_tumor" %in% names(pat)) pat[, gdc_fu_new_tumor := FALSE]
+  if (!"source_liu" %in% names(pat)) pat[, source_liu := FALSE]
+  if (!"source_gdc_nte" %in% names(pat)) pat[, source_gdc_nte := FALSE]
+  if (!"source_gdc_fu" %in% names(pat)) pat[, source_gdc_fu := FALSE]
   pat <- pat[, .(
     liu_pfi = { x <- liu_pfi[!is.na(liu_pfi)]; if (length(x)) as.integer(max(x)) else NA_integer_ },
     liu_dfi = { x <- liu_dfi[!is.na(liu_dfi)]; if (length(x)) as.integer(max(x)) else NA_integer_ },
@@ -804,6 +805,104 @@ compare_groups <- function(value_vec, group, pos, neg, grouping) {
   )
 }
 
+spearman_vs_go_score <- function(mat, go_score_vec) {
+  common <- intersect(colnames(mat), names(go_score_vec))
+  if (length(common) < 5) return(data.table())
+  mat <- mat[, common, drop = FALSE]
+  go_score_vec <- go_score_vec[common]
+  keep <- apply(mat, 1, function(x) stats::sd(x, na.rm = TRUE) > 0)
+  mat <- mat[keep, , drop = FALSE]
+  n <- ncol(mat)
+  r <- as.numeric(cor(
+    base::t(as.matrix(mat)), go_score_vec,
+    method = "spearman", use = "pairwise.complete.obs"
+  ))
+  names(r) <- rownames(mat)
+  r <- pmin(pmax(r, -0.999999), 0.999999)
+  tstat <- r * sqrt((n - 2) / pmax(1e-12, 1 - r^2))
+  p <- 2 * stats::pt(-abs(tstat), df = n - 2)
+  data.table(feature = names(r), spearman_r = r, pvalue = p,
+             fdr = p.adjust(p, method = "BH"), n = n)
+}
+
+spearman_vs_binary <- function(mat, group, pos, neg) {
+  g <- as.character(group)
+  names(g) <- names(group)
+  common <- intersect(colnames(mat), names(g))
+  g <- g[common]
+  keep_s <- g %in% c(pos, neg)
+  if (sum(g[keep_s] == pos) < min_group_n || sum(g[keep_s] == neg) < min_group_n) {
+    return(data.table())
+  }
+  y <- ifelse(g[keep_s] == pos, 1, 0)
+  mat <- mat[, names(y), drop = FALSE]
+  keep <- apply(mat, 1, function(x) stats::sd(x, na.rm = TRUE) > 0)
+  mat <- mat[keep, , drop = FALSE]
+  n <- ncol(mat)
+  r <- as.numeric(cor(
+    base::t(as.matrix(mat)), y,
+    method = "spearman", use = "pairwise.complete.obs"
+  ))
+  names(r) <- rownames(mat)
+  r <- pmin(pmax(r, -0.999999), 0.999999)
+  tstat <- r * sqrt((n - 2) / pmax(1e-12, 1 - r^2))
+  p <- 2 * stats::pt(-abs(tstat), df = n - 2)
+  data.table(
+    feature = names(r), spearman_r = r, pvalue = p,
+    fdr = p.adjust(p, method = "BH"), n = n,
+    n_pos = sum(y == 1), n_neg = sum(y == 0),
+    pos_level = pos, neg_level = neg
+  )
+}
+
+head_dt <- function(dt, n) {
+  if (is.null(dt) || nrow(dt) == 0L || n <= 0L) return(dt[0])
+  dt[seq_len(min(as.integer(n), nrow(dt)))]
+}
+
+pick_volcano_labels <- function(plot_dt, n_neg = 12L, n_pos = 6L) {
+  neg <- head_dt(plot_dt[significant_neg == TRUE], n_neg)
+  pos <- head_dt(plot_dt[spearman_r > 0][order(-spearman_r)], n_pos)
+  out <- unique(rbindlist(list(neg, pos), fill = TRUE))
+  if (nrow(out) == 0L) return(out)
+  out[is.finite(spearman_r) & is.finite(neglogp) & !is.na(feature) & nzchar(as.character(feature))]
+}
+
+# 不用 ggrepel：ggplot2 4.x 下会报 depth(NULL)
+add_volcano_labels <- function(p, lab_dt) {
+  if (is.null(lab_dt) || nrow(lab_dt) == 0L) return(p)
+  p + ggplot2::geom_text(
+    data = as.data.frame(lab_dt),
+    aes(x = spearman_r, y = neglogp, label = feature),
+    size = 2.3, vjust = -0.55, inherit.aes = FALSE, check_overlap = TRUE
+  )
+}
+
+plot_gene_volcano <- function(tab, title, subtitle, path_stub, n_neg = 12L, n_pos = 6L) {
+  if (is.null(tab) || nrow(tab) == 0) return(invisible(NULL))
+  plot_dt <- copy(as.data.table(tab))
+  plot_dt[, neglogp := pmin(12, -log10(pmax(pvalue, 1e-12)))]
+  plot_dt[, col := ifelse(significant_neg, "Negative",
+                          ifelse(spearman_r > 0 & pvalue < neg_pvalue_cutoff, "Positive", "NS"))]
+  top_lab <- pick_volcano_labels(plot_dt, n_neg, n_pos)
+  p_vol <- tryCatch({
+    p <- ggplot(plot_dt, aes(x = spearman_r, y = neglogp, color = col)) +
+      geom_point(alpha = 0.45, size = 0.7) +
+      geom_vline(xintercept = 0, linetype = 2, color = "grey50") +
+      geom_hline(yintercept = -log10(neg_pvalue_cutoff), linetype = 2, color = "grey50") +
+      scale_color_manual(values = c("Negative" = "#3C5488", "Positive" = "#E64B35", "NS" = "grey75")) +
+      labs(title = title, subtitle = subtitle,
+           x = "Spearman r", y = expression(-log[10](p)), color = NULL) +
+      theme_bw()
+    add_volcano_labels(p, top_lab)
+  }, error = function(e) {
+    message("火山图失败（已跳过）：", conditionMessage(e))
+    NULL
+  })
+  if (!is.null(p_vol)) save_plot(p_vol, path_stub, 10, 7)
+  invisible(p_vol)
+}
+
 as_symbol_matrix <- function(fpkm_data, probe_annot) {
   fpkm_data <- as.data.table(fpkm_data)
   id_col <- names(fpkm_data)[1]
@@ -872,11 +971,18 @@ expand_two_cols <- function(stat_dt) {
   ), fill = TRUE)
 }
 
-plot_bubble_two_cols <- function(stat_dt, title, subtitle, path_stub, facet = FALSE) {
+plot_bubble_two_cols <- function(stat_dt, title, subtitle, path_stub, facet = FALSE,
+                                 go_order = NULL) {
   long <- expand_two_cols(stat_dt)
   long <- long[is.finite(median_value)]
   if (nrow(long) == 0) return(invisible(NULL))
-  go_lv <- unique(go_lab(stat_dt$GO))
+  present <- unique(as.character(stat_dt$GO))
+  if (!is.null(go_order) && length(go_order) > 0) {
+    go_ids <- c(go_order[go_order %in% present], present[!present %in% go_order])
+  } else {
+    go_ids <- present
+  }
+  go_lv <- unique(go_lab(go_ids))
   long[, y_lab := factor(go_lab(GO), levels = rev(go_lv))]
   long[, x_lab := factor(x_lab, levels = unique(c(stat_dt$neg_lab, stat_dt$pos_lab)))]
   long[, neglogp := ifelse(is.finite(pvalue), pmin(10, -log10(pmax(pvalue, 1e-12))), 0.5)]
@@ -911,8 +1017,8 @@ plot_bubble_two_cols <- function(stat_dt, title, subtitle, path_stub, facet = FA
   }
   n_panel <- if (isTRUE(facet)) max(1, uniqueN(long$panel)) else 1
   n_y <- uniqueN(long$y_lab)
-  fig_w <- if (isTRUE(facet)) max(9.5, 2.7 * n_panel + 3.2) else 6.8
-  fig_h <- max(6.2, 0.42 * n_y + 2.6)
+  fig_w <- if (isTRUE(facet)) max(10.5, 2.6 * n_panel + 3.4) else 8.2
+  fig_h <- max(6.2, 0.48 * n_y + 2.6)
   save_plot(p, path_stub, fig_w, fig_h)
 }
 
@@ -1031,17 +1137,13 @@ message(
 )
 
 primary_ids <- nerve_ann$sample[nerve_ann$sample_class == "PrimaryTumor"]
-met_ids <- nerve_ann$sample[nerve_ann$sample_class == "MetastaticTissue"]
-tumor_ids <- unique(c(primary_ids, met_ids))
 if (length(primary_ids) < 20) stop("原位肿瘤样本太少：", length(primary_ids))
 
-nerve_expr_tumor <- nerve_expr_all[, intersect(tumor_ids, colnames(nerve_expr_all)), drop = FALSE]
-keep_g <- rowMeans(is.finite(nerve_expr_tumor) & nerve_expr_tumor > 0, na.rm = TRUE) >= min_expr_frac
-nerve_expr_tumor <- nerve_expr_tumor[keep_g, , drop = FALSE]
-nerve_expr_primary <- nerve_expr_tumor[, intersect(primary_ids, colnames(nerve_expr_tumor)), drop = FALSE]
+nerve_expr_primary <- nerve_expr_all[, intersect(primary_ids, colnames(nerve_expr_all)), drop = FALSE]
+keep_g <- rowMeans(is.finite(nerve_expr_primary) & nerve_expr_primary > 0, na.rm = TRUE) >= min_expr_frac
+nerve_expr_primary <- nerve_expr_primary[keep_g, , drop = FALSE]
 message(
-  "表达矩阵：原位 ", ncol(nerve_expr_primary), " 样本 x ", nrow(nerve_expr_primary),
-  " 基因；肿瘤(含转移组织) ", ncol(nerve_expr_tumor)
+  "表达矩阵（只保留原位瘤）：", ncol(nerve_expr_primary), " 样本 x ", nrow(nerve_expr_primary), " 基因"
 )
 
 # ==============================================================================
@@ -1062,7 +1164,7 @@ run_nerve_tcga <- function() {
     mat
   }
 
-  message("收集 17 个神经 GO 基因（每个 GO 单独，不合并）")
+  message("收集聚焦神经 GO 基因（每个 GO 单独，不合并；只分析原位瘤）")
   go_map <- lapply(go_list, get_go_genes)
   names(go_map) <- go_list
   go_map <- Filter(function(x) length(x$genes) >= min_set_genes, go_map)
@@ -1077,6 +1179,8 @@ run_nerve_tcga <- function() {
     )
   }), fill = TRUE)
   fwrite(gene_dt, file.path(nerve_out_dir, "00_GO_genes_used.csv"))
+  fwrite(data.table(GO = go_list, GO_name = go_title(go_list)),
+         file.path(nerve_out_dir, "00_GO_focus.csv"))
   fwrite(data.table(
     method = c("zmean", "zmedian", "ssgsea"),
     role = c("primary", "supplement", "supplement"),
@@ -1109,73 +1213,62 @@ run_nerve_tcga <- function() {
     list(id = "ssgsea", title = "ssGSEA", primary = FALSE)
   )
 
-  plot_one_method <- function(method, sm_p, sm_t) {
-    if (is.null(sm_p) || is.null(sm_t)) {
-      message("  ", method$title, " 没有可画的分数，跳过")
+  plot_one_method <- function(method, sm_p) {
+    if (is.null(sm_p) || nrow(sm_p) == 0) {
+      message("  ", method$title, " 没有可画的原位分数，跳过")
       return(invisible(NULL))
     }
     mdir <- file.path(nerve_out_dir, method$id)
     dir.create(mdir, showWarnings = FALSE, recursive = TRUE)
     fwrite(data.table(sample = rownames(sm_p), as.data.table(sm_p)),
            file.path(mdir, "01_pathway_scores_primary.csv"))
-    fwrite(data.table(sample = rownames(sm_t), as.data.table(sm_t)),
-           file.path(mdir, "01_pathway_scores_tumor.csv"))
     if (isTRUE(method$primary)) {
       fwrite(data.table(sample = rownames(sm_p), as.data.table(sm_p)),
              file.path(nerve_out_dir, "01_pathway_scores_primary.csv"))
-      fwrite(data.table(sample = rownames(sm_t), as.data.table(sm_t)),
-             file.path(nerve_out_dir, "01_pathway_scores_tumor.csv"))
     }
 
-    ann_p <- nerve_ann[sample %in% rownames(sm_p)]
-    ann_t <- nerve_ann[sample %in% rownames(sm_t)]
+    ann_p <- nerve_ann[sample %in% rownames(sm_p) & sample_class == "PrimaryTumor"]
     designs <- list(
       list(key = "a_distant_M", title = "Distant metastasis", panel = "1a Distant M",
            group = setNames(as.character(ann_p$distant_M), ann_p$sample),
-           pos = "M1", neg = "M0", pos_lab = "M1", neg_lab = "M0",
-           score_mat = sm_p),
+           pos = "M1", neg = "M0", pos_lab = "M1", neg_lab = "M0"),
       list(key = "b_AJCC_stageIV", title = "AJCC stage", panel = "1b AJCC stage",
            group = setNames(as.character(ann_p$stage_IV), ann_p$sample),
            pos = "Stage IV", neg = "Stage I-III",
-           pos_lab = "Stage IV", neg_lab = "Stage I-III",
-           score_mat = sm_p),
+           pos_lab = "Stage IV", neg_lab = "Stage I-III"),
       list(key = "c_node_N", title = "Lymph node", panel = "1c Lymph node",
            group = setNames(as.character(ann_p$node_N), ann_p$sample),
-           pos = "Nplus", neg = "N0", pos_lab = "N+", neg_lab = "N0",
-           score_mat = sm_p),
-      list(key = "d_sample_type", title = "Sample type", panel = "1d Sample type",
-           group = setNames(as.character(ann_t$sample_class), ann_t$sample),
-           pos = "MetastaticTissue", neg = "PrimaryTumor",
-           pos_lab = "Metastatic tissue", neg_lab = "Primary tumor",
-           score_mat = sm_t),
+           pos = "Nplus", neg = "N0", pos_lab = "N+", neg_lab = "N0"),
       list(key = "e_followup_primary_met", title = "Follow-up metastasis in primary",
            panel = "1e Follow-up met",
            group = setNames(as.character(ann_p$primary_later_met), ann_p$sample),
            pos = "Metastasized", neg = "Non-metastasized",
-           pos_lab = "Later / known metastasis", neg_lab = "No later metastasis",
-           score_mat = sm_p),
+           pos_lab = "Later / known metastasis", neg_lab = "No later metastasis"),
       list(key = "f_Liu_PFI", title = "Liu PFI in primary", panel = "1f Liu PFI",
            group = setNames(as.character(ann_p$pfi_event), ann_p$sample),
            pos = "PFI", neg = "NoPFI",
-           pos_lab = "PFI event", neg_lab = "No PFI event",
-           score_mat = sm_p),
+           pos_lab = "PFI event", neg_lab = "No PFI event"),
       list(key = "g_Liu_DFI", title = "Liu DFI in primary", panel = "1g Liu DFI",
            group = setNames(as.character(ann_p$dfi_event), ann_p$sample),
            pos = "DFI", neg = "NoDFI",
-           pos_lab = "DFI event", neg_lab = "No DFI event",
-           score_mat = sm_p)
+           pos_lab = "DFI event", neg_lab = "No DFI event")
     )
 
     all_stat <- list()
     for (ds in designs) {
       message("气泡图：", method$title, " / ", ds$title)
       stat_rows <- list()
-      sm <- ds$score_mat
+      sm <- sm_p
+      if (is.null(sm) || ncol(sm) == 0) {
+        message("  无原位分数矩阵，跳过 ", ds$key)
+        next
+      }
       for (g in colnames(sm)) {
         value_vec <- as.numeric(sm[, g])
         names(value_vec) <- rownames(sm)
         one <- compare_groups(value_vec, ds$group[names(value_vec)], ds$pos, ds$neg, ds$key)
         if (is.null(one)) next
+        if (one$n_pos < min_group_n || one$n_neg < min_group_n) next
         one[, `:=`(
           scoring = method$id, GO = g, GO_name = go_title(g),
           panel = ds$panel, pos_lab = ds$pos_lab, neg_lab = ds$neg_lab
@@ -1196,10 +1289,11 @@ run_nerve_tcga <- function() {
         stat_dt,
         title = paste0(ds$title, ": neural GO (", method$title, ")"),
         subtitle = paste0(
-          "Scoring = ", method$title,
-          "; Y = neuronal GO (scored separately); X = non-metastatic | metastatic; fill = median; size = -log10(Wilcoxon p)"
+          "Primary tumors only; scoring = ", method$title,
+          "; Y = English pathway name; X = two groups; fill = median; size = -log10(Wilcoxon p)"
         ),
-        path_stub = file.path(mdir, paste0("02_", ds$key, "_bubble"))
+        path_stub = file.path(mdir, paste0("02_", ds$key, "_bubble")),
+        go_order = go_list
       )
     }
 
@@ -1212,11 +1306,12 @@ run_nerve_tcga <- function() {
       bubble,
       title = paste0("Neural GO versus metastasis (", method$title, ")"),
       subtitle = paste0(
-        "Scoring = ", method$title,
-        "; each panel: non-metastatic | metastatic; 17 GOs scored separately and not pooled"
+        "Primary tumors only; scoring = ", method$title,
+        "; a/b/c/e/f/g; Y = English name; 7 GOs scored separately and not pooled"
       ),
       path_stub = file.path(mdir, "02_summary_bubble_GO_vs_metastasis"),
-      facet = TRUE
+      facet = TRUE,
+      go_order = go_list
     )
     follow_keys <- c("e_followup_primary_met", "f_Liu_PFI", "g_Liu_DFI")
     follow <- bubble[grouping %in% follow_keys]
@@ -1230,7 +1325,8 @@ run_nerve_tcga <- function() {
           "; primary RNA only; Later met = Liu distant NTE / GDC NTE / DFI=1 or diagnosis M1"
         ),
         path_stub = file.path(mdir, "02_summary_bubble_followup_primary"),
-        facet = TRUE
+        facet = TRUE,
+        go_order = go_list
       )
     }
     if (isTRUE(method$primary)) {
@@ -1238,9 +1334,10 @@ run_nerve_tcga <- function() {
       plot_bubble_two_cols(
         bubble,
         title = "Neural GO versus metastasis (z-mean, primary)",
-        subtitle = "Primary scoring = z-mean; each panel: non-metastatic | metastatic; 17 GOs not pooled",
+        subtitle = "Primary tumors only; Y = English pathway name; 7 GOs not pooled",
         path_stub = file.path(nerve_out_dir, "02_summary_bubble_GO_vs_metastasis"),
-        facet = TRUE
+        facet = TRUE,
+        go_order = go_list
       )
       if (nrow(follow) > 0) {
         fwrite(follow, file.path(nerve_out_dir, "02_summary_followup_primary_GO.csv"))
@@ -1249,39 +1346,155 @@ run_nerve_tcga <- function() {
           title = "Primary tumor: later metastasis vs none (z-mean)",
           subtitle = "Redefined by Liu 2018/Xena PFI-DFI-NTE and GDC follow-up; primary tumors only",
           path_stub = file.path(nerve_out_dir, "02_summary_bubble_followup_primary"),
-          facet = TRUE
+          facet = TRUE,
+          go_order = go_list
         )
       }
     }
     bubble
   }
 
+  score_primary_list <- NULL
   all_method_stats <- list()
   for (method in score_methods) {
     message("打分：", method$title, if (isTRUE(method$primary)) "（主）" else "（补充）")
     if (identical(method$id, "ssgsea")) {
       lst_p <- score_ssgsea_sets(nerve_expr_primary, gene_sets)
-      lst_t <- score_ssgsea_sets(nerve_expr_tumor, gene_sets)
     } else {
       how <- if (identical(method$id, "zmedian")) "median" else "mean"
       lst_p <- score_z_method(nerve_expr_primary, how)
-      lst_t <- score_z_method(nerve_expr_tumor, how)
     }
     sm_p <- mat_from_list(lst_p)
-    sm_t <- mat_from_list(lst_t)
-    all_method_stats[[method$id]] <- plot_one_method(method, sm_p, sm_t)
+    if (isTRUE(method$primary)) score_primary_list <- lst_p
+    all_method_stats[[method$id]] <- plot_one_method(method, sm_p)
   }
 
   keep <- Filter(function(x) is.data.table(x) && nrow(x) > 0, all_method_stats)
   if (length(keep) > 0) {
     cmp <- rbindlist(keep, fill = TRUE)
-    fwrite(cmp, file.path(nerve_out_dir, "03_all_scoring_vs_metastasis.csv"))
+    fwrite(cmp, file.path(nerve_out_dir, "02_all_scoring_methods_vs_metastasis.csv"))
+  }
+
+  # ---- 2) 原位肿瘤内，按 a/b/c/e/f/g 分组，与转移负相关的基因 ----
+  ann_p <- nerve_ann[sample %in% colnames(nerve_expr_primary) & sample_class == "PrimaryTumor"]
+  met_defs <- list(
+    list(key = "a_distant_M", title = "2a Genes negatively correlated with distant M1 (primary tumors)",
+         group = setNames(as.character(ann_p$distant_M), ann_p$sample),
+         pos = "M1", neg = "M0"),
+    list(key = "b_AJCC_stageIV", title = "2b Genes negatively correlated with Stage IV (primary tumors)",
+         group = setNames(as.character(ann_p$stage_IV), ann_p$sample),
+         pos = "Stage IV", neg = "Stage I-III"),
+    list(key = "c_node_N", title = "2c Genes negatively correlated with N+ (primary tumors)",
+         group = setNames(as.character(ann_p$node_N), ann_p$sample),
+         pos = "Nplus", neg = "N0"),
+    list(key = "e_followup_primary_met",
+         title = "2e Genes negatively correlated with later / known metastasis (primary tumors)",
+         group = setNames(as.character(ann_p$primary_later_met), ann_p$sample),
+         pos = "Metastasized", neg = "Non-metastasized"),
+    list(key = "f_Liu_PFI", title = "2f Genes negatively correlated with Liu PFI (primary tumors)",
+         group = setNames(as.character(ann_p$pfi_event), ann_p$sample),
+         pos = "PFI", neg = "NoPFI"),
+    list(key = "g_Liu_DFI", title = "2g Genes negatively correlated with Liu DFI (primary tumors)",
+         group = setNames(as.character(ann_p$dfi_event), ann_p$sample),
+         pos = "DFI", neg = "NoDFI")
+  )
+  met_neg_summary <- list()
+  for (md in met_defs) {
+    message("全基因组相关：", md$title)
+    tab <- spearman_vs_binary(nerve_expr_primary, md$group, md$pos, md$neg)
+    if (nrow(tab) == 0) {
+      message("  分组人数不足，跳过 ", md$key)
+      next
+    }
+    tab[, `:=`(
+      design = md$key,
+      significant_neg = spearman_r < neg_r_cutoff & pvalue < neg_pvalue_cutoff,
+      strict_neg = spearman_r <= strict_r_cutoff & pvalue < neg_pvalue_cutoff
+    )]
+    setorder(tab, spearman_r)
+    fwrite(tab, file.path(nerve_out_dir, paste0("03_", md$key, "_genes_vs_metastasis_all.csv")))
+    fwrite(tab[significant_neg == TRUE],
+           file.path(nerve_out_dir, paste0("03_", md$key, "_genes_NEG_vs_metastasis.csv")))
+    fwrite(tab[strict_neg == TRUE],
+           file.path(nerve_out_dir, paste0("03_", md$key, "_genes_NEG_strict_vs_metastasis.csv")))
+    message("  负相关基因 ", sum(tab$significant_neg),
+            "（严格 r<=", strict_r_cutoff, "：", sum(tab$strict_neg), "）")
+    met_neg_summary[[md$key]] <- data.table(
+      design = md$key, title = md$title,
+      n_tested = nrow(tab), n_pos = tab$n_pos[1], n_neg_group = tab$n_neg[1],
+      n_neg = sum(tab$significant_neg), n_neg_strict = sum(tab$strict_neg)
+    )
+    plot_gene_volcano(
+      tab,
+      title = md$title,
+      subtitle = paste0(
+        "Spearman: gene vs ", md$pos, " (1) / ", md$neg, " (0); blue = negative vs metastasis"
+      ),
+      path_stub = file.path(nerve_out_dir, paste0("03_", md$key, "_volcano_genes_vs_metastasis"))
+    )
+  }
+  if (length(met_neg_summary) > 0) {
+    fwrite(rbindlist(met_neg_summary, fill = TRUE),
+           file.path(nerve_out_dir, "03_summary_neg_genes_vs_metastasis.csv"))
+  }
+
+  # ---- 3) 原位肿瘤内，与每个神经 GO 分数负相关的基因 ----
+  dir.create(file.path(nerve_out_dir, "04_neg_vs_neural_per_GO"), showWarnings = FALSE)
+  summary_neg <- list()
+  if (is.null(score_primary_list) || length(score_primary_list) == 0) {
+    message("没有可用的原位神经 GO 分数，跳过与神经浸润负相关的基因分析")
+  } else {
+    for (g in names(score_primary_list)) {
+      message("与神经浸润负相关：", go_title(g))
+      go_score_vec <- score_primary_list[[g]]
+      tab <- spearman_vs_go_score(nerve_expr_primary, go_score_vec)
+      if (nrow(tab) == 0) next
+      tab[, `:=`(
+        GO = g, GO_name = go_title(g),
+        significant_neg = spearman_r < neg_r_cutoff & pvalue < neg_pvalue_cutoff,
+        strict_neg = spearman_r <= strict_r_cutoff & pvalue < neg_pvalue_cutoff
+      )]
+      setorder(tab, spearman_r)
+      gdir <- file.path(nerve_out_dir, "04_neg_vs_neural_per_GO",
+                        paste0("GO_", safe_name(sub("GO:", "", g))))
+      dir.create(gdir, showWarnings = FALSE)
+      fwrite(tab, file.path(gdir, "genes_vs_neural_GO_all.csv"))
+      fwrite(tab[significant_neg == TRUE], file.path(gdir, "genes_NEG_vs_neural_GO.csv"))
+      fwrite(tab[strict_neg == TRUE], file.path(gdir, "genes_NEG_strict_vs_neural_GO.csv"))
+      summary_neg[[g]] <- data.table(
+        GO = g, GO_name = go_title(g),
+        n_pathway_genes = attr(go_score_vec, "n_genes"),
+        n_tested = nrow(tab),
+        n_neg = sum(tab$significant_neg),
+        n_neg_strict = sum(tab$strict_neg)
+      )
+      plot_gene_volcano(
+        tab,
+        title = "Genes negatively correlated with neural invasion",
+        subtitle = paste0(go_title(g), "; blue = negative vs this GO score"),
+        path_stub = file.path(gdir, "volcano_neg_vs_neural_GO"),
+        n_neg = 10L, n_pos = 5L
+      )
+    }
+  }
+  if (length(summary_neg) > 0) {
+    sum_dt <- rbindlist(summary_neg, fill = TRUE)
+    fwrite(sum_dt, file.path(nerve_out_dir, "04_summary_neg_genes_vs_each_neural_GO.csv"))
+    p_n <- ggplot(sum_dt, aes(x = n_neg, y = reorder(GO_name, n_neg))) +
+      geom_col(fill = "#3C5488", width = 0.7) +
+      labs(title = "Number of genes negatively correlated with each neural GO",
+           subtitle = paste0("Spearman r < 0 and p < ", neg_pvalue_cutoff, "; GO sets not pooled"),
+           x = "Number of negative genes", y = NULL) +
+      theme_bw()
+    save_plot(p_n, file.path(nerve_out_dir, "04_summary_neg_gene_counts"), 10, 6.5)
   }
 
   message("完成。结果目录：", normalizePath(nerve_out_dir, winslash = "/", mustWork = FALSE))
   message("随访重定义主图：zmean/02_e_followup_primary_met_bubble.png")
   message("随访三组汇总：zmean/02_summary_bubble_followup_primary.png")
-  message("诊断/组织图：zmean/02_summary_bubble_GO_vs_metastasis.png")
+  message("诊断分组图：zmean/02_summary_bubble_GO_vs_metastasis.png")
+  message("转移负相关基因：03_*_genes_NEG_vs_metastasis.csv")
+  message("神经 GO 负相关基因：04_neg_vs_neural_per_GO/")
   invisible(TRUE)
 }
 
