@@ -11,9 +11,10 @@
 #   source("PCY_protein_pipeline.R")
 # 也可指定目录：Sys.setenv(PCY_PROTEIN_DIR = "E:/R/PCY_protein")
 #
-# 接受的输入：一张宽表（xlsx / csv / tsv / MaxQuant proteinGroups.txt 等），
-# 列名中能识别 EV1、EV2、EV3、PCY1、PCY2、PCY3。
-# 定量列优先使用 LFQ，其次 iBAQ，再次 Intensity / Abundance。
+# 接受的输入（二选一）：
+#   1. 六个样品各一个文件，文件名就是样品名：EV1.txt、EV2.txt、EV3.txt、PCY1.txt、PCY2.txt、PCY3.txt
+#   2. 一张宽表（xlsx / csv / tsv / MaxQuant proteinGroups.txt），列名里能识别这六个样品
+# 定量列优先使用 LFQ，其次 iBAQ，再次 Intensity / Abundance / 强度。
 # 物种默认人类（org.Hs.eg.db，KEGG hsa）。
 # =============================================================================
 
@@ -77,6 +78,7 @@ has_pkg <- function(p) requireNamespace(p, quietly = TRUE)
 # 富集名单在此之上再要求上调 FC 大于对应档位。只分析 PCY 相对 EV 的上调。
 pvalue_cutoff <- 0.05
 fc_cutoffs <- c("FC_1" = 1, "FC_1.25" = 1.25, "FC_1.5" = 1.5)
+wiki_unavailable <- FALSE
 min_valid_in_group <- 2L
 orgdb_name <- "org.Hs.eg.db"
 kegg_organism <- "hsa"
@@ -125,6 +127,8 @@ parse_sample_id <- function(text) {
 }
 
 quant_class <- function(nm) {
+  if (grepl("肽段|肽数|覆盖率|覆盖度|得分|评分", nm)) return("ignore")
+  if (grepl("强度|丰度|峰面积|定量", nm)) return("INTENSITY")
   u <- toupper(nm)
   if (grepl("PEPTIDE|\\bPSM\\b|SCORE|PROBABILITY|QVALUE|Q\\.VALUE|PVALUE|P\\.VALUE|FOLD|RATIO|COVERAGE|UNIQUE|SEQUENCE", u, perl = TRUE)) {
     return("ignore")
@@ -136,7 +140,9 @@ quant_class <- function(nm) {
   "OTHER"
 }
 
-norm_header <- function(x) tolower(gsub("[^a-z0-9]", "", x, ignore.case = TRUE))
+norm_header <- function(x) {
+  tolower(gsub("[^a-z0-9\u4e00-\u9fff]", "", x, ignore.case = TRUE, perl = TRUE))
+}
 
 pick_column <- function(nms, aliases) {
   nn <- norm_header(nms)
@@ -150,7 +156,7 @@ pick_column <- function(nms, aliases) {
 guess_gene_column <- function(nms) {
   pick_column(nms, c(
     "genenames", "genename", "genesymbol", "genesymbols", "symbol",
-    "pggenes", "geneid", "gene"
+    "pggenes", "geneid", "基因名", "基因符号", "基因名称", "gene", "基因"
   ))
 }
 
@@ -158,6 +164,7 @@ guess_protein_column <- function(nms) {
   pick_column(nms, c(
     "majorityproteinids", "proteinids", "proteingroups", "proteingroup",
     "pgproteinaccessions", "uniprotids", "uniprot", "accession",
+    "蛋白登录号", "蛋白质登录号", "登录号", "蛋白编号", "蛋白质编号",
     "proteinid", "protein", "entry"
   ))
 }
@@ -210,26 +217,57 @@ choose_quant_columns <- function(df) {
   pick
 }
 
+looks_like_header_cell <- function(x) {
+  x <- as.character(x)
+  if (length(x) != 1 || is.na(x) || !nzchar(trimws(x))) return(FALSE)
+  if (grepl("基因|蛋白|登录|强度|丰度|峰面积|描述|名称|肽段|得分|分子量", x)) return(TRUE)
+  nx <- norm_header(x)
+  keys <- c(
+    "gene", "protein", "accession", "uniprot", "intensity", "lfq", "ibaq",
+    "abundance", "area", "peptide", "description", "symbol", "score",
+    "coverage", "sequence", "entry", "name"
+  )
+  any(vapply(keys, function(k) grepl(k, nx, fixed = TRUE), logical(1)))
+}
+
+score_header_row <- function(cells) {
+  cells <- trimws(as.character(cells))
+  key <- sum(vapply(cells, looks_like_header_cell, logical(1)))
+  n_samp <- length(unique(stats::na.omit(vapply(cells, parse_sample_id, character(1)))))
+  key + n_samp * 5
+}
+
 promote_header <- function(raw) {
   raw <- as.data.frame(raw, stringsAsFactors = FALSE)
+  if (nrow(raw) < 1) return(NULL)
   nscan <- min(20L, nrow(raw))
-  best_i <- 1L
-  best_n <- -1L
-  for (i in seq_len(nscan)) {
-    hdr <- trimws(as.character(unlist(raw[i, , drop = TRUE])))
-    n <- length(unique(stats::na.omit(vapply(hdr, parse_sample_id, character(1)))))
-    if (n > best_n) {
-      best_n <- n
-      best_i <- i
-    }
+  scores <- vapply(seq_len(nscan), function(i) {
+    score_header_row(unlist(raw[i, , drop = TRUE]))
+  }, numeric(1))
+  if (max(scores) > 0) {
+    best_i <- which.max(scores)
+    hdr <- trimws(as.character(unlist(raw[best_i, , drop = TRUE])))
+    hdr <- sub("^\ufeff", "", hdr)
+    empty <- !nzchar(hdr) | is.na(hdr)
+    hdr[empty] <- paste0("V", which(empty))
+    hdr <- make.unique(hdr)
+    if (best_i >= nrow(raw)) return(NULL)
+    df <- raw[(best_i + 1L):nrow(raw), , drop = FALSE]
+    names(df) <- hdr
+    return(df)
   }
-  hdr <- trimws(as.character(unlist(raw[best_i, , drop = TRUE])))
+  frac_num <- mean(!is.na(to_numeric(as.character(unlist(raw[1, , drop = TRUE])))))
+  if (frac_num > 0.5) {
+    names(raw) <- paste0("V", seq_len(ncol(raw)))
+    return(raw)
+  }
+  hdr <- trimws(as.character(unlist(raw[1, , drop = TRUE])))
   hdr <- sub("^\ufeff", "", hdr)
-  hdr[!nzchar(hdr) | is.na(hdr)] <- paste0("V", which(!nzchar(hdr) | is.na(hdr)))
-  hdr <- make.unique(hdr)
-  if (best_i >= nrow(raw)) return(NULL)
-  df <- raw[(best_i + 1L):nrow(raw), , drop = FALSE]
-  names(df) <- hdr
+  empty <- !nzchar(hdr) | is.na(hdr)
+  hdr[empty] <- paste0("V", which(empty))
+  if (nrow(raw) < 2) return(NULL)
+  df <- raw[-1, , drop = FALSE]
+  names(df) <- make.unique(hdr)
   df
 }
 
@@ -248,16 +286,13 @@ read_text_flexible <- function(path) {
       blank.lines.skip = FALSE, fill = TRUE
     )
   }
-  raw <- tryCatch(read_one("UTF-8"), error = function(e) NULL)
+  raw <- tryCatch(suppressWarnings(read_one("UTF-8")), error = function(e) NULL)
   df <- if (is.null(raw)) NULL else promote_header(raw)
-  n_hit <- if (is.null(df)) 0L else nrow(sample_hits(names(df)))
-  if (n_hit < 4) {
-    raw2 <- tryCatch(read_one("GB18030"), error = function(e) NULL)
-    df2 <- if (is.null(raw2)) NULL else promote_header(raw2)
-    n2 <- if (is.null(df2)) 0L else nrow(sample_hits(names(df2)))
-    if (n2 > n_hit) df <- df2
-  }
-  df
+  raw2 <- tryCatch(suppressWarnings(read_one("GB18030")), error = function(e) NULL)
+  df2 <- if (is.null(raw2)) NULL else promote_header(raw2)
+  q1 <- if (is.null(df)) -1 else score_header_row(names(df))
+  q2 <- if (is.null(df2)) -1 else score_header_row(names(df2))
+  if (q2 > q1) df2 else df
 }
 
 read_excel_flexible <- function(path) {
@@ -277,7 +312,7 @@ read_excel_flexible <- function(path) {
     if (is.null(raw)) next
     df <- promote_header(as.data.frame(raw, stringsAsFactors = FALSE))
     if (is.null(df)) next
-    n <- length(unique(sample_hits(names(df))$sample))
+    n <- score_header_row(names(df)) + nrow(df) / 1e6
     if (n > best_n) {
       best <- df
       best_n <- n
@@ -307,15 +342,154 @@ list_input_files <- function(dir) {
   files
 }
 
-load_quant_table <- function(dir) {
-  files <- list_input_files(dir)
-  if (length(files) == 0) {
-    stop("目录中没有 csv/tsv/txt/xlsx 定量表: ", dir)
+filename_sample_id <- function(path) {
+  base <- toupper(gsub("[^A-Za-z0-9]", "", tools::file_path_sans_ext(basename(path))))
+  if (!grepl("^(PCY|EV)0*[123]$", base)) return(NA_character_)
+  parse_sample_id(base)
+}
+
+read_table_generic <- function(path) {
+  ext <- tolower(tools::file_ext(path))
+  if (ext %in% c("xlsx", "xls")) return(read_excel_flexible(path))
+  read_text_flexible(path)
+}
+
+pick_abundance_column <- function(df, exclude = character()) {
+  nms <- setdiff(names(df), exclude[!is.na(exclude)])
+  if (length(nms) == 0) return(NA_character_)
+  cls <- setNames(vapply(nms, quant_class, character(1)), nms)
+  is_num <- setNames(vapply(nms, function(nm) {
+    sum(is.finite(to_numeric(df[[nm]]))) >= 5
+  }, logical(1)), nms)
+  pref <- c("LFQ", "IBAQ", "INTENSITY", "COUNT", "OTHER")
+  for (cl in pref) {
+    cols <- nms[cls[nms] == cl & is_num[nms]]
+    if (length(cols) == 0) next
+    if (length(cols) == 1) return(cols)
+    med <- vapply(cols, function(nm) {
+      x <- to_numeric(df[[nm]])
+      x <- x[is.finite(x) & x > 0]
+      if (length(x) == 0) -Inf else stats::median(x)
+    }, numeric(1))
+    return(cols[which.max(med)])
   }
+  NA_character_
+}
+
+extract_sample_abundance <- function(df, sample_id) {
+  gene_col <- guess_gene_column(names(df))
+  prot_col <- guess_protein_column(names(df))
+  val_col <- pick_abundance_column(df, exclude = c(gene_col, prot_col))
+  if (is.na(val_col)) {
+    stop(sample_id, " 里没有找到强度列。列名: ", paste(names(df), collapse = ", "))
+  }
+  log_msg(
+    sample_id, " | gene: ", ifelse(is.na(gene_col), "(none)", gene_col),
+    " | protein: ", ifelse(is.na(prot_col), "(none)", prot_col),
+    " | abundance: ", val_col
+  )
+  gene <- if (!is.na(gene_col)) clean_symbol(df[[gene_col]]) else rep(NA_character_, nrow(df))
+  protein <- if (!is.na(prot_col)) extract_accession(df[[prot_col]]) else rep(NA_character_, nrow(df))
+  value <- to_numeric(df[[val_col]])
+  drop <- rep(FALSE, nrow(df))
+  for (col in c(
+    flag_column(names(df), c("reverse", "reversed")),
+    flag_column(names(df), c("potentialcontaminant", "contaminant")),
+    flag_column(names(df), c("onlyidentifiedbysite"))
+  )) {
+    if (!is.na(col)) drop <- drop | is_flagged(df[[col]])
+  }
+  id <- protein
+  empty_id <- is.na(id) | !nzchar(id)
+  id[empty_id] <- gene[empty_id]
+  ok <- !drop & !is.na(id) & nzchar(id) & is.finite(value)
+  id <- id[ok]
+  gene <- gene[ok]
+  protein <- protein[ok]
+  value <- value[ok]
+  if (length(id) == 0) stop(sample_id, " 没有可用的蛋白定量行。")
+  if (any(duplicated(id))) {
+    ord <- order(value, decreasing = TRUE)
+    id <- id[ord]
+    gene <- gene[ord]
+    protein <- protein[ord]
+    value <- value[ord]
+    keep <- !duplicated(id)
+    log_msg(sample_id, " | duplicate IDs collapsed: ", sum(!keep))
+    id <- id[keep]
+    gene <- gene[keep]
+    protein <- protein[keep]
+    value <- value[keep]
+  }
+  data.frame(id = id, gene = gene, protein = protein, value = value, stringsAsFactors = FALSE)
+}
+
+merge_sample_files <- function(files) {
+  pieces <- lapply(files, function(f) {
+    sid <- filename_sample_id(f)
+    df <- read_table_generic(f)
+    if (is.null(df) || nrow(df) < 1) stop("无法读取样品文件: ", f)
+    extract_sample_abundance(df, sid)
+  })
+  names(pieces) <- vapply(files, filename_sample_id, character(1))
+  ids <- unique(unlist(lapply(pieces, function(p) p$id), use.names = FALSE))
+  gene <- setNames(rep(NA_character_, length(ids)), ids)
+  protein <- gene
+  mat <- matrix(NA_real_, nrow = length(ids), ncol = length(sample_levels),
+                dimnames = list(ids, sample_levels))
+  for (sid in names(pieces)) {
+    p <- pieces[[sid]]
+    hit <- match(p$id, ids)
+    mat[hit, sid] <- p$value
+    fill_gene <- is.na(gene[p$id]) & !is.na(p$gene) & nzchar(p$gene)
+    gene[p$id[fill_gene]] <- p$gene[fill_gene]
+    fill_pro <- is.na(protein[p$id]) & !is.na(p$protein) & nzchar(p$protein)
+    protein[p$id[fill_pro]] <- p$protein[fill_pro]
+  }
+  out <- data.frame(
+    Gene.names = unname(gene[ids]),
+    Majority.protein.IDs = unname(protein[ids]),
+    mat,
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+  quant <- data.frame(column = sample_levels, sample = sample_levels, class = "INTENSITY", stringsAsFactors = FALSE)
+  attr(quant, "missing") <- character()
+  attr(quant, "class") <- "per-sample file"
+  attr(out, "quant") <- quant
+  out
+}
+
+load_per_sample_files <- function(files) {
+  ids <- vapply(files, filename_sample_id, character(1))
+  hit <- files[!is.na(ids)]
+  ids <- ids[!is.na(ids)]
+  if (length(hit) == 0) return(NULL)
+  if (any(duplicated(ids))) {
+    log_msg("多个文件对应同一样品，保留较大的文件: ", paste(basename(hit[duplicated(ids)]), collapse = ", "))
+    ord <- order(file.info(hit)$size, decreasing = TRUE)
+    hit <- hit[ord]
+    ids <- ids[ord]
+    hit <- hit[!duplicated(ids)]
+    ids <- ids[!duplicated(ids)]
+  }
+  missing <- setdiff(sample_levels, ids)
+  if (length(missing) > 0) {
+    log_msg("按文件名识别到的样品还不齐，缺少: ", paste(missing, collapse = ", "))
+    return(NULL)
+  }
+  hit <- hit[match(sample_levels, ids)]
+  log_msg("Merging one file per sample: ", paste(basename(hit), collapse = ", "))
+  df <- merge_sample_files(hit)
+  list(df = df, path = paste(hit, collapse = "; "), quant = attr(df, "quant"))
+}
+
+load_wide_table <- function(files) {
   best <- NULL
   best_score <- -1
   best_path <- NA_character_
   for (f in files) {
+    if (!is.na(filename_sample_id(f))) next
     log_msg("Scanning ", f)
     df <- tryCatch(read_input_file(f), error = function(e) {
       log_msg("  read failed: ", e$message)
@@ -331,21 +505,34 @@ load_quant_table <- function(dir) {
       best_path <- f
     }
   }
-  if (is.null(best)) {
-    stop("没有一张表能识别出 EV/PCY 定量列。请确认列名包含 EV1、EV2、EV3、PCY1、PCY2、PCY3。")
-  }
+  if (is.null(best)) return(NULL)
   quant <- attr(best, "quant")
   if (length(attr(quant, "missing")) > 0) {
-    stop(
-      "文件 ", best_path, " 缺少样品列: ", paste(attr(quant, "missing"), collapse = ", "),
-      "。当前识别到: ", paste(quant$sample, collapse = ", ")
+    log_msg(
+      "宽表 ", best_path, " 缺少样品列: ", paste(attr(quant, "missing"), collapse = ", ")
     )
+    return(NULL)
   }
-  log_msg("Using file: ", best_path)
+  log_msg("Using wide table: ", best_path)
   if (!is.null(attr(best, "sheet"))) log_msg("Excel sheet: ", attr(best, "sheet"))
   log_msg("Quantification class: ", paste(attr(quant, "class"), collapse = ", "))
   log_msg(paste(quant$sample, quant$column, sep = " <- ", collapse = " | "))
   list(df = best, path = best_path, quant = quant)
+}
+
+load_quant_table <- function(dir) {
+  files <- list_input_files(dir)
+  if (length(files) == 0) {
+    stop("目录中没有 csv/tsv/txt/xlsx 定量表: ", dir)
+  }
+  wide <- load_wide_table(files)
+  if (!is.null(wide)) return(wide)
+  per <- load_per_sample_files(files)
+  if (!is.null(per)) return(per)
+  stop(
+    "没有读到六个样品的定量。请提供 EV1、EV2、EV3、PCY1、PCY2、PCY3 六个文件，",
+    "或一张列名包含这六个样品的宽表。"
+  )
 }
 
 # -----------------------------------------------------------------------------
@@ -785,19 +972,33 @@ msig_hallmark_map <- function() {
   out
 }
 
+is_download_error <- function(msg) {
+  !is.na(msg) && nzchar(msg) && grepl(
+    "cannot open|HTTP status|timed out|Timeout|Could not resolve|network",
+    msg, ignore.case = TRUE
+  )
+}
+
 enrich_terms <- function(strict_fun, relax_fun, label) {
+  err1 <- NA_character_
   obj <- tryCatch(strict_fun(), error = function(e) {
-    log_msg(label, " failed: ", e$message)
+    err1 <<- conditionMessage(e)
+    log_msg(label, " failed: ", err1)
     NULL
   })
   if (!is.null(obj) && nrow(as.data.frame(obj)) > 0) {
-    return(list(obj = obj, relaxed = FALSE))
+    return(list(obj = obj, relaxed = FALSE, error = NA_character_))
   }
+  if (is_download_error(err1)) {
+    return(list(obj = NULL, relaxed = TRUE, error = err1))
+  }
+  err2 <- NA_character_
   obj <- tryCatch(relax_fun(), error = function(e) {
-    log_msg(label, " relaxed failed: ", e$message)
+    err2 <<- conditionMessage(e)
+    log_msg(label, " relaxed failed: ", err2)
     NULL
   })
-  list(obj = obj, relaxed = TRUE)
+  list(obj = obj, relaxed = TRUE, error = ifelse(is.na(err2), err1, err2))
 }
 
 write_enrich_bubble <- function(res, stub, title) {
@@ -902,23 +1103,28 @@ run_fc_enrichment <- function(genes, universe, outdir, tag, label) {
     note_empty(file.path(pw_dir, paste0(pref, "Reactome_pathway_bubble")), "ReactomePA not installed")
   }
 
-  old_timeout <- options(timeout = 40)
-  wp <- enrich_terms(
-    function() clusterProfiler::enrichWP(
-      gene = entrez, universe = universe_entrez, organism = wp_organism,
-      pvalueCutoff = 0.05, qvalueCutoff = 0.2, minGSSize = 3, maxGSSize = 500
-    ),
-    function() clusterProfiler::enrichWP(
-      gene = entrez, universe = universe_entrez, organism = wp_organism,
-      pvalueCutoff = 1, qvalueCutoff = 1, minGSSize = 3, maxGSSize = 500
-    ),
-    paste("WikiPathways", tag)
-  )
-  options(old_timeout)
-  wp$obj <- set_readable(wp$obj)
-  write_enrich_bubble(
-    wp, file.path(pw_dir, paste0(pref, "WikiPathways_pathway")), paste(label, "| WikiPathways")
-  )
+  if (isTRUE(wiki_unavailable)) {
+    note_empty(file.path(pw_dir, paste0(pref, "WikiPathways_pathway_bubble")), "WikiPathways download unavailable")
+  } else {
+    old_timeout <- options(timeout = 40)
+    wp <- enrich_terms(
+      function() clusterProfiler::enrichWP(
+        gene = entrez, universe = universe_entrez, organism = wp_organism,
+        pvalueCutoff = 0.05, qvalueCutoff = 0.2, minGSSize = 3, maxGSSize = 500
+      ),
+      function() clusterProfiler::enrichWP(
+        gene = entrez, universe = universe_entrez, organism = wp_organism,
+        pvalueCutoff = 1, qvalueCutoff = 1, minGSSize = 3, maxGSSize = 500
+      ),
+      paste("WikiPathways", tag)
+    )
+    options(old_timeout)
+    if (is_download_error(wp$error)) wiki_unavailable <<- TRUE
+    wp$obj <- set_readable(wp$obj)
+    write_enrich_bubble(
+      wp, file.path(pw_dir, paste0(pref, "WikiPathways_pathway")), paste(label, "| WikiPathways")
+    )
+  }
 
   hallmark <- msig_hallmark_map()
   if (!is.null(hallmark)) {
