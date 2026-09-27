@@ -409,6 +409,7 @@ plot_bubble_two_cols <- function(stat_dt, title, subtitle, path_stub, facet = FA
       name = "Pathway score\nmedian"
     ) +
     scale_size_continuous(range = c(3, 11), name = expression(-log[10](p))) +
+    scale_x_discrete(expand = expansion(add = 1.25)) +
     labs(title = title, subtitle = subtitle, x = NULL, y = NULL) +
     theme_bw(base_size = 12) +
     theme(
@@ -416,13 +417,17 @@ plot_bubble_two_cols <- function(stat_dt, title, subtitle, path_stub, facet = FA
       axis.text.y = element_text(size = 9),
       legend.position = "right",
       plot.title = element_text(face = "bold"),
-      strip.text = element_text(size = 10)
+      strip.text = element_text(size = 10),
+      panel.spacing.x = grid::unit(0.55, "lines")
     )
   if (isTRUE(facet) && "panel" %in% names(long) && uniqueN(long$panel) > 1) {
     p <- p + facet_wrap(~ panel, nrow = 1, scales = "free_x")
   }
   n_panel <- if (isTRUE(facet)) max(1, uniqueN(long$panel)) else 1
-  save_plot(p, path_stub, max(8, 4.2 * n_panel + 4), max(6, 0.42 * uniqueN(long$y_lab) + 2.6))
+  n_y <- uniqueN(long$y_lab)
+  fig_w <- if (isTRUE(facet)) max(9.5, 2.7 * n_panel + 3.2) else 6.2
+  fig_h <- max(5.4, 0.48 * n_y + 2.4)
+  save_plot(p, path_stub, fig_w, fig_h)
 }
 
 build_annotation <- function(sample_ids, clin) {
