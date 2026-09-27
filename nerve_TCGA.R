@@ -16,13 +16,19 @@
 #   GO:1902667  regulation of axon guidance
 #   GO:0007409  axonogenesis
 #
-# 对 4 种转移定义做 Wilcoxon，并画两列气泡图（Non-metastatic | Metastatic）
+# 打分（五个 GO 各自打分，不合并）：
+#   主：z-mean（基因 z 后取均值）
+#   补充：z-median（基因 z 后取中位数）；ssGSEA（Barbie 2009；有 GSVA 用 GSVA，否则用脚本内实现）
+# 每种打分都对 4 种转移定义做 Wilcoxon，并画两列气泡图（Non-metastatic | Metastatic）
 #   a 原位肿瘤 M1 vs M0
 #   b 原位肿瘤 Stage IV vs I-III
 #   c 原位肿瘤 N+ vs N0
 #   d 转移组织 vs 原位肿瘤
 #
 # 结果目录：results_nerve_TCGA/
+#   zmean/   主结果
+#   zmedian/ 补充
+#   ssgsea/  补充
 ################################################################################
 
 library(data.table)
@@ -225,8 +231,8 @@ classify_sample_type <- function(x, barcode) {
   out
 }
 
-# 通路活性：基因 z 后对样本取均值。不要用 scale()/t()，变量不要叫 score
-pathway_zmean <- function(expr_mat, genes) {
+# 通路活性：基因 z 后对样本取均值或中位数。不要用 scale()/t()，变量不要叫 score
+pathway_zstat <- function(expr_mat, genes, how = "mean") {
   genes <- unique(intersect(as.character(genes), rownames(expr_mat)))
   if (length(genes) < min_set_genes) return(NULL)
   sub <- as.matrix(expr_mat[genes, , drop = FALSE])
@@ -236,11 +242,106 @@ pathway_zmean <- function(expr_mat, genes) {
   gene_sd[!is.finite(gene_sd) | gene_sd < 1e-12] <- 1
   z <- (sub - gene_mean) / gene_sd
   z[!is.finite(z)] <- 0
-  set_score <- colMeans(z, na.rm = TRUE)
+  if (identical(how, "median")) {
+    set_score <- apply(z, 2, stats::median, na.rm = TRUE)
+  } else {
+    set_score <- colMeans(z, na.rm = TRUE)
+  }
   names(set_score) <- colnames(sub)
   attr(set_score, "n_genes") <- length(genes)
   attr(set_score, "genes") <- genes
   set_score
+}
+pathway_zmean <- function(expr_mat, genes) pathway_zstat(expr_mat, genes, "mean")
+pathway_zmedian <- function(expr_mat, genes) pathway_zstat(expr_mat, genes, "median")
+
+ssgsea_via_gsva <- function(expr_mat, gene_sets) {
+  if (!requireNamespace("GSVA", quietly = TRUE)) return(NULL)
+  gsets <- lapply(gene_sets, function(g) unique(intersect(as.character(g), rownames(expr_mat))))
+  gsets <- Filter(function(g) length(g) >= min_set_genes, gsets)
+  if (length(gsets) == 0) return(NULL)
+  mat <- as.matrix(expr_mat)
+  storage.mode(mat) <- "double"
+  scored <- tryCatch({
+    if (exists("ssgseaParam", envir = asNamespace("GSVA"), inherits = FALSE)) {
+      param <- GSVA::ssgseaParam(mat, gsets, normalize = TRUE)
+      GSVA::gsva(param, verbose = FALSE)
+    } else {
+      GSVA::gsva(mat, gsets, method = "ssgsea", ssgsea.norm = TRUE, verbose = FALSE)
+    }
+  }, error = function(e) {
+    message("GSVA ssGSEA 失败，改用脚本内实现：", conditionMessage(e))
+    NULL
+  })
+  if (is.null(scored)) return(NULL)
+  scored <- as.matrix(scored)
+  out <- lapply(colnames(scored), function(nm) {
+    v <- as.numeric(scored[, nm])
+    names(v) <- rownames(scored)
+    attr(v, "n_genes") <- length(gsets[[nm]])
+    attr(v, "genes") <- gsets[[nm]]
+    attr(v, "ssgsea_backend") <- "GSVA"
+    v
+  })
+  names(out) <- colnames(scored)
+  out
+}
+
+# Barbie 2009 ssGSEA：全基因组按表达降序，基因集走步长和；样本内再按最大绝对值标准化
+ssgsea_builtin <- function(expr_mat, gene_sets, tau = 0.25) {
+  mat <- as.matrix(expr_mat)
+  storage.mode(mat) <- "double"
+  genes_all <- rownames(mat)
+  ng <- nrow(mat)
+  ns <- ncol(mat)
+  set_idx <- lapply(gene_sets, function(g) {
+    unique(which(genes_all %in% unique(as.character(g))))
+  })
+  keep <- vapply(set_idx, length, integer(1)) >= min_set_genes
+  set_idx <- set_idx[keep]
+  if (length(set_idx) == 0) return(list())
+  out_mat <- matrix(NA_real_, ns, length(set_idx),
+                    dimnames = list(colnames(mat), names(set_idx)))
+  pos_tau <- seq_len(ng)^tau
+  for (j in seq_len(ns)) {
+    o <- order(mat[, j], decreasing = TRUE, na.last = TRUE)
+    for (k in seq_along(set_idx)) {
+      hit <- o %in% set_idx[[k]]
+      n_hit <- sum(hit)
+      n_miss <- ng - n_hit
+      if (n_hit < min_set_genes || n_miss < 1) next
+      hit_w <- numeric(ng)
+      hit_w[hit] <- pos_tau[hit]
+      s <- sum(hit_w)
+      if (!is.finite(s) || s <= 0) next
+      walk <- cumsum(hit_w / s - ifelse(hit, 0, 1 / n_miss))
+      out_mat[j, k] <- sum(walk)
+    }
+  }
+  for (k in seq_len(ncol(out_mat))) {
+    mx <- max(abs(out_mat[, k]), na.rm = TRUE)
+    if (is.finite(mx) && mx > 0) out_mat[, k] <- out_mat[, k] / mx
+  }
+  out <- lapply(colnames(out_mat), function(nm) {
+    v <- as.numeric(out_mat[, nm])
+    names(v) <- rownames(out_mat)
+    attr(v, "n_genes") <- length(set_idx[[nm]])
+    attr(v, "genes") <- genes_all[set_idx[[nm]]]
+    attr(v, "ssgsea_backend") <- "builtin"
+    v
+  })
+  names(out) <- colnames(out_mat)
+  out
+}
+
+score_ssgsea_sets <- function(expr_mat, gene_sets) {
+  via <- ssgsea_via_gsva(expr_mat, gene_sets)
+  if (!is.null(via) && length(via) > 0) {
+    message("  ssGSEA 后端：GSVA")
+    return(via)
+  }
+  message("  ssGSEA 后端：脚本内置（未安装 GSVA）")
+  ssgsea_builtin(expr_mat, gene_sets)
 }
 
 get_go_genes <- function(go_id) {
@@ -562,19 +663,6 @@ run_nerve_tcga <- function() {
     stop("还没有 nerve_expr_primary，请从脚本开头 Source")
   }
 
-  score_one_go <- function(expr_mat, go_id) {
-    gm <- get_go_genes(go_id)
-    set_score <- pathway_zmean(expr_mat, gm$genes)
-    if (is.null(set_score)) {
-      message("  ", go_id, " 映射基因不足，跳过")
-      return(NULL)
-    }
-    attr(set_score, "gene_source") <- gm$source
-    message("  ", go_id, "  ", go_title(go_id), "  基因数=", attr(set_score, "n_genes"),
-            "  (", gm$source, ")")
-    set_score
-  }
-
   mat_from_list <- function(lst) {
     if (length(lst) == 0) return(NULL)
     common <- Reduce(intersect, lapply(lst, names))
@@ -585,106 +673,185 @@ run_nerve_tcga <- function() {
     mat
   }
 
-  message("计算各神经 GO 通路分数（每个 GO 单独，不合并）")
-  go_primary <- lapply(go_list, function(g) score_one_go(nerve_expr_primary, g))
-  names(go_primary) <- go_list
-  go_primary <- Filter(Negate(is.null), go_primary)
-  if (length(go_primary) == 0) stop("没有任何神经 GO 能打分")
-
-  go_tumor <- lapply(names(go_primary), function(g) score_one_go(nerve_expr_tumor, g))
-  names(go_tumor) <- names(go_primary)
-  go_tumor <- Filter(Negate(is.null), go_tumor)
-
-  sm_p <- mat_from_list(go_primary)
-  sm_t <- mat_from_list(go_tumor)
-  fwrite(data.table(sample = rownames(sm_p), as.data.table(sm_p)),
-         file.path(nerve_out_dir, "01_pathway_scores_primary.csv"))
-  fwrite(data.table(sample = rownames(sm_t), as.data.table(sm_t)),
-         file.path(nerve_out_dir, "01_pathway_scores_tumor.csv"))
-
-  gene_dt <- rbindlist(lapply(names(go_primary), function(g) {
+  message("收集五个神经 GO 基因（每个 GO 单独，不合并）")
+  go_map <- lapply(go_list, get_go_genes)
+  names(go_map) <- go_list
+  go_map <- Filter(function(x) length(x$genes) >= min_set_genes, go_map)
+  if (length(go_map) == 0) stop("没有任何神经 GO 能打分")
+  gene_sets <- lapply(go_map, function(x) x$genes)
+  gene_dt <- rbindlist(lapply(names(go_map), function(g) {
     data.table(
       GO = g, GO_name = go_title(g),
-      gene_source = attr(go_primary[[g]], "gene_source"),
-      n_genes = attr(go_primary[[g]], "n_genes"),
-      genes = paste(attr(go_primary[[g]], "genes"), collapse = ";")
+      gene_source = go_map[[g]]$source,
+      n_genes = length(go_map[[g]]$genes),
+      genes = paste(go_map[[g]]$genes, collapse = ";")
     )
   }), fill = TRUE)
   fwrite(gene_dt, file.path(nerve_out_dir, "00_GO_genes_used.csv"))
-
-  ann_p <- nerve_ann[sample %in% rownames(sm_p)]
-  ann_t <- nerve_ann[sample %in% rownames(sm_t)]
-  designs <- list(
-    list(key = "a_distant_M", title = "Distant metastasis", panel = "1a Distant M",
-         group = setNames(as.character(ann_p$distant_M), ann_p$sample),
-         pos = "M1", neg = "M0", pos_lab = "M1", neg_lab = "M0",
-         score_mat = sm_p),
-    list(key = "b_AJCC_stageIV", title = "AJCC stage", panel = "1b AJCC stage",
-         group = setNames(as.character(ann_p$stage_IV), ann_p$sample),
-         pos = "Stage IV", neg = "Stage I-III",
-         pos_lab = "Stage IV", neg_lab = "Stage I-III",
-         score_mat = sm_p),
-    list(key = "c_node_N", title = "Lymph node", panel = "1c Lymph node",
-         group = setNames(as.character(ann_p$node_N), ann_p$sample),
-         pos = "Nplus", neg = "N0", pos_lab = "N+", neg_lab = "N0",
-         score_mat = sm_p),
-    list(key = "d_sample_type", title = "Sample type", panel = "1d Sample type",
-         group = setNames(as.character(ann_t$sample_class), ann_t$sample),
-         pos = "MetastaticTissue", neg = "PrimaryTumor",
-         pos_lab = "Metastatic tissue", neg_lab = "Primary tumor",
-         score_mat = sm_t)
-  )
-
-  all_stat <- list()
-  for (ds in designs) {
-    message("气泡图：", ds$title)
-    stat_rows <- list()
-    sm <- ds$score_mat
-    for (g in colnames(sm)) {
-      value_vec <- as.numeric(sm[, g])
-      names(value_vec) <- rownames(sm)
-      one <- compare_groups(value_vec, ds$group[names(value_vec)], ds$pos, ds$neg, ds$key)
-      if (is.null(one)) next
-      one[, `:=`(
-        GO = g, GO_name = go_title(g),
-        panel = ds$panel, pos_lab = ds$pos_lab, neg_lab = ds$neg_lab
-      )]
-      stat_rows[[g]] <- one
-    }
-    stat_dt <- rbindlist(stat_rows, fill = TRUE)
-    if (nrow(stat_dt) == 0) {
-      message("  分组人数不足，跳过 ", ds$key)
-      next
-    }
-    stat_dt[, fdr := p.adjust(pvalue, method = "BH")]
-    fwrite(stat_dt, file.path(nerve_out_dir, paste0("02_", ds$key, "_GO_vs_metastasis.csv")))
-    fwrite(expand_two_cols(stat_dt),
-           file.path(nerve_out_dir, paste0("02_", ds$key, "_GO_vs_metastasis_two_cols.csv")))
-    all_stat[[ds$key]] <- stat_dt
-    plot_bubble_two_cols(
-      stat_dt,
-      title = paste0(ds$title, ": neural GO in non-metastatic vs metastatic"),
-      subtitle = "Y = neuronal GO (scored separately); X = non-metastatic | metastatic; fill = median pathway score; size = -log10(Wilcoxon p)",
-      path_stub = file.path(nerve_out_dir, paste0("02_", ds$key, "_bubble"))
+  fwrite(data.table(
+    method = c("zmean", "zmedian", "ssgsea"),
+    role = c("primary", "supplement", "supplement"),
+    description = c(
+      "Gene-wise z-score then mean across genes in the GO",
+      "Gene-wise z-score then median across genes in the GO",
+      "ssGSEA (Barbie 2009); GSVA if installed, otherwise built-in"
     )
+  ), file.path(nerve_out_dir, "00_scoring_methods.csv"))
+
+  score_z_method <- function(expr_mat, how) {
+    lst <- lapply(names(gene_sets), function(g) {
+      fn <- if (identical(how, "median")) pathway_zmedian else pathway_zmean
+      set_score <- fn(expr_mat, gene_sets[[g]])
+      if (is.null(set_score)) {
+        message("  ", g, " 映射基因不足，跳过")
+        return(NULL)
+      }
+      attr(set_score, "gene_source") <- go_map[[g]]$source
+      message("  ", g, "  ", go_title(g), "  基因数=", attr(set_score, "n_genes"))
+      set_score
+    })
+    names(lst) <- names(gene_sets)
+    Filter(Negate(is.null), lst)
   }
 
-  if (length(all_stat) > 0) {
+  score_methods <- list(
+    list(id = "zmean", title = "z-mean", primary = TRUE),
+    list(id = "zmedian", title = "z-median", primary = FALSE),
+    list(id = "ssgsea", title = "ssGSEA", primary = FALSE)
+  )
+
+  plot_one_method <- function(method, sm_p, sm_t) {
+    if (is.null(sm_p) || is.null(sm_t)) {
+      message("  ", method$title, " 没有可画的分数，跳过")
+      return(invisible(NULL))
+    }
+    mdir <- file.path(nerve_out_dir, method$id)
+    dir.create(mdir, showWarnings = FALSE, recursive = TRUE)
+    fwrite(data.table(sample = rownames(sm_p), as.data.table(sm_p)),
+           file.path(mdir, "01_pathway_scores_primary.csv"))
+    fwrite(data.table(sample = rownames(sm_t), as.data.table(sm_t)),
+           file.path(mdir, "01_pathway_scores_tumor.csv"))
+    if (isTRUE(method$primary)) {
+      fwrite(data.table(sample = rownames(sm_p), as.data.table(sm_p)),
+             file.path(nerve_out_dir, "01_pathway_scores_primary.csv"))
+      fwrite(data.table(sample = rownames(sm_t), as.data.table(sm_t)),
+             file.path(nerve_out_dir, "01_pathway_scores_tumor.csv"))
+    }
+
+    ann_p <- nerve_ann[sample %in% rownames(sm_p)]
+    ann_t <- nerve_ann[sample %in% rownames(sm_t)]
+    designs <- list(
+      list(key = "a_distant_M", title = "Distant metastasis", panel = "1a Distant M",
+           group = setNames(as.character(ann_p$distant_M), ann_p$sample),
+           pos = "M1", neg = "M0", pos_lab = "M1", neg_lab = "M0",
+           score_mat = sm_p),
+      list(key = "b_AJCC_stageIV", title = "AJCC stage", panel = "1b AJCC stage",
+           group = setNames(as.character(ann_p$stage_IV), ann_p$sample),
+           pos = "Stage IV", neg = "Stage I-III",
+           pos_lab = "Stage IV", neg_lab = "Stage I-III",
+           score_mat = sm_p),
+      list(key = "c_node_N", title = "Lymph node", panel = "1c Lymph node",
+           group = setNames(as.character(ann_p$node_N), ann_p$sample),
+           pos = "Nplus", neg = "N0", pos_lab = "N+", neg_lab = "N0",
+           score_mat = sm_p),
+      list(key = "d_sample_type", title = "Sample type", panel = "1d Sample type",
+           group = setNames(as.character(ann_t$sample_class), ann_t$sample),
+           pos = "MetastaticTissue", neg = "PrimaryTumor",
+           pos_lab = "Metastatic tissue", neg_lab = "Primary tumor",
+           score_mat = sm_t)
+    )
+
+    all_stat <- list()
+    for (ds in designs) {
+      message("气泡图：", method$title, " / ", ds$title)
+      stat_rows <- list()
+      sm <- ds$score_mat
+      for (g in colnames(sm)) {
+        value_vec <- as.numeric(sm[, g])
+        names(value_vec) <- rownames(sm)
+        one <- compare_groups(value_vec, ds$group[names(value_vec)], ds$pos, ds$neg, ds$key)
+        if (is.null(one)) next
+        one[, `:=`(
+          scoring = method$id, GO = g, GO_name = go_title(g),
+          panel = ds$panel, pos_lab = ds$pos_lab, neg_lab = ds$neg_lab
+        )]
+        stat_rows[[g]] <- one
+      }
+      stat_dt <- rbindlist(stat_rows, fill = TRUE)
+      if (nrow(stat_dt) == 0) {
+        message("  分组人数不足，跳过 ", method$id, " / ", ds$key)
+        next
+      }
+      stat_dt[, fdr := p.adjust(pvalue, method = "BH")]
+      fwrite(stat_dt, file.path(mdir, paste0("02_", ds$key, "_GO_vs_metastasis.csv")))
+      fwrite(expand_two_cols(stat_dt),
+             file.path(mdir, paste0("02_", ds$key, "_GO_vs_metastasis_two_cols.csv")))
+      all_stat[[ds$key]] <- stat_dt
+      plot_bubble_two_cols(
+        stat_dt,
+        title = paste0(ds$title, ": neural GO (", method$title, ")"),
+        subtitle = paste0(
+          "Scoring = ", method$title,
+          "; Y = neuronal GO (scored separately); X = non-metastatic | metastatic; fill = median; size = -log10(Wilcoxon p)"
+        ),
+        path_stub = file.path(mdir, paste0("02_", ds$key, "_bubble"))
+      )
+    }
+
+    if (length(all_stat) == 0) return(invisible(NULL))
     bubble <- rbindlist(all_stat, fill = TRUE)
-    fwrite(bubble, file.path(nerve_out_dir, "02_summary_GO_vs_metastasis.csv"))
+    fwrite(bubble, file.path(mdir, "02_summary_GO_vs_metastasis.csv"))
     fwrite(expand_two_cols(bubble),
-           file.path(nerve_out_dir, "02_summary_GO_vs_metastasis_two_cols.csv"))
+           file.path(mdir, "02_summary_GO_vs_metastasis_two_cols.csv"))
     plot_bubble_two_cols(
       bubble,
-      title = "Neural GO activity versus breast cancer metastasis",
-      subtitle = "Each panel: non-metastatic | metastatic; five GOs scored separately and not pooled",
-      path_stub = file.path(nerve_out_dir, "02_summary_bubble_GO_vs_metastasis"),
+      title = paste0("Neural GO versus metastasis (", method$title, ")"),
+      subtitle = paste0(
+        "Scoring = ", method$title,
+        "; each panel: non-metastatic | metastatic; five GOs scored separately and not pooled"
+      ),
+      path_stub = file.path(mdir, "02_summary_bubble_GO_vs_metastasis"),
       facet = TRUE
     )
+    if (isTRUE(method$primary)) {
+      fwrite(bubble, file.path(nerve_out_dir, "02_summary_GO_vs_metastasis.csv"))
+      plot_bubble_two_cols(
+        bubble,
+        title = "Neural GO versus metastasis (z-mean, primary)",
+        subtitle = "Primary scoring = z-mean; each panel: non-metastatic | metastatic; five GOs not pooled",
+        path_stub = file.path(nerve_out_dir, "02_summary_bubble_GO_vs_metastasis"),
+        facet = TRUE
+      )
+    }
+    bubble
+  }
+
+  all_method_stats <- list()
+  for (method in score_methods) {
+    message("打分：", method$title, if (isTRUE(method$primary)) "（主）" else "（补充）")
+    if (identical(method$id, "ssgsea")) {
+      lst_p <- score_ssgsea_sets(nerve_expr_primary, gene_sets)
+      lst_t <- score_ssgsea_sets(nerve_expr_tumor, gene_sets)
+    } else {
+      how <- if (identical(method$id, "zmedian")) "median" else "mean"
+      lst_p <- score_z_method(nerve_expr_primary, how)
+      lst_t <- score_z_method(nerve_expr_tumor, how)
+    }
+    sm_p <- mat_from_list(lst_p)
+    sm_t <- mat_from_list(lst_t)
+    all_method_stats[[method$id]] <- plot_one_method(method, sm_p, sm_t)
+  }
+
+  keep <- Filter(function(x) is.data.table(x) && nrow(x) > 0, all_method_stats)
+  if (length(keep) > 0) {
+    cmp <- rbindlist(keep, fill = TRUE)
+    fwrite(cmp, file.path(nerve_out_dir, "03_all_scoring_vs_metastasis.csv"))
   }
 
   message("完成。结果目录：", normalizePath(nerve_out_dir, winslash = "/", mustWork = FALSE))
-  message("主气泡图：02_summary_bubble_GO_vs_metastasis.png")
+  message("主图（z-mean）：zmean/02_summary_bubble_GO_vs_metastasis.png")
+  message("补充 z-median：zmedian/02_summary_bubble_GO_vs_metastasis.png")
+  message("补充 ssGSEA：ssgsea/02_summary_bubble_GO_vs_metastasis.png")
   invisible(TRUE)
 }
 
