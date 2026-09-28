@@ -1,0 +1,224 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="380mm" height="240mm" viewBox="0 0 2100 1320"
+     font-family="Arial, Liberation Sans, Helvetica, sans-serif">
+  <title>Red protein limits breast cancer lung metastasis</title>
+  <desc>Red protein binds blue protein and prevents yellow protein from driving formation of neuroactive vesicles at the endoplasmic reticulum. Vesicles that are released can be taken up by neurons, increasing mitochondrial activity and axon regeneration. Breast cancer cells then spread along the axon into blood vessels or lymph nodes and reach the lung.</desc>
+  <rect id="Background" width="2100" height="1320" fill="#FFFFFF"/>
+
+  <!-- ===================== Breast cancer cell ===================== -->
+  <g id="Breast_cancer_cell">
+    <path d="M268,150
+             C145,178 86,330 108,500
+             C128,670 175,830 310,910
+             C450,994 660,968 770,830
+             C858,720 870,530 824,390
+             C782,260 640,140 490,132
+             C390,126 330,132 268,150 Z"
+          fill="#FFFCFB" stroke="#C98585" stroke-width="2.6" stroke-linejoin="round"/>
+    <ellipse cx="292" cy="292" rx="70" ry="56" fill="#F8EEEC"/>
+    <ellipse cx="292" cy="292" rx="26" ry="20" fill="#F3E0DC"/>
+    <text x="470" y="96" text-anchor="middle" font-size="24" font-weight="700" fill="#1C2833">Breast cancer cell</text>
+  </g>
+
+  <!-- ===================== Proteins ===================== -->
+  <g id="Protein_complex">
+    <rect x="372" y="348" width="176" height="96" rx="48" fill="#F8EEEE"/>
+    <g id="Blue_protein">
+      <circle cx="430" cy="396" r="30" fill="#2E5984"/>
+      <ellipse cx="418" cy="384" rx="11" ry="6.5" fill="#FFFFFF" opacity="0.28"/>
+    </g>
+    <g id="Red_protein">
+      <circle cx="492" cy="396" r="30" fill="#D64545"/>
+      <ellipse cx="480" cy="384" rx="11" ry="6.5" fill="#FFFFFF" opacity="0.32"/>
+    </g>
+    <g id="Yellow_protein">
+      <circle cx="682" cy="396" r="30" fill="#E3B23C"/>
+      <ellipse cx="670" cy="384" rx="11" ry="6.5" fill="#FFFFFF" opacity="0.38"/>
+    </g>
+    <g id="Inhibition_symbol" fill="none" stroke="#D64545" stroke-width="2.5" stroke-linecap="round">
+      <path d="M534,396 H640"/>
+      <path d="M640,378 V414"/>
+    </g>
+    <text x="430" y="458" text-anchor="middle" font-size="16" fill="#1C2833">Blue protein</text>
+    <text x="492" y="334" text-anchor="middle" font-size="16" font-weight="700" fill="#1C2833">Red protein</text>
+    <text x="682" y="334" text-anchor="middle" font-size="16" fill="#1C2833">Yellow protein</text>
+  </g>
+
+  <!-- ===================== Endoplasmic reticulum ===================== -->
+  <g id="Endoplasmic_reticulum" fill="#F4F0FA" stroke="#6E628F" stroke-width="1.7" stroke-linejoin="round">
+    <path d="M200,560 C270,532 380,534 500,566 C380,592 270,590 200,560 Z"/>
+    <path d="M208,618 C282,590 392,592 530,626 C392,652 282,650 208,618 Z"/>
+    <path d="M216,676 C290,648 400,650 548,684 C400,710 290,708 216,676 Z"/>
+    <path d="M228,734 C298,708 400,710 530,742 C400,766 298,764 228,734 Z"/>
+    <text x="200" y="812" font-size="16" fill="#3D4C5C">Endoplasmic reticulum</text>
+  </g>
+
+  <g id="Blocked_ER_bud">
+    <path d="M548,668
+             C572,656 608,674 614,712
+             C620,754 586,786 552,778
+             C520,770 522,708 548,668 Z"
+          fill="#FBF6E4" stroke="#C4A35A" stroke-width="1.7"/>
+    <g fill="#2E5984">
+      <circle cx="566" cy="724" r="3.1"/>
+      <circle cx="582" cy="736" r="3.1"/>
+      <circle cx="564" cy="746" r="2.7"/>
+      <circle cx="580" cy="756" r="2.5"/>
+    </g>
+    <text x="636" y="748" font-size="16" fill="#3D4C5C">Neuroactive protein</text>
+    <text x="248" y="848" font-size="15" fill="#3D4C5C">Red protein binds blue protein and prevents</text>
+    <text x="248" y="870" font-size="15" fill="#3D4C5C">yellow-dependent vesicle formation</text>
+  </g>
+
+  <!-- ===================== Secretory vesicles ===================== -->
+  <g id="Secretory_vesicles">
+    <g id="Vesicle_1">
+      <circle cx="960" cy="430" r="25" fill="#FBF6E4" stroke="#C4A35A" stroke-width="1.7"/>
+      <g fill="#2E5984">
+        <circle cx="952" cy="424" r="2.8"/>
+        <circle cx="964" cy="432" r="2.8"/>
+        <circle cx="954" cy="440" r="2.4"/>
+      </g>
+    </g>
+    <g id="Vesicle_2">
+      <circle cx="1008" cy="524" r="21" fill="#FBF6E4" stroke="#C4A35A" stroke-width="1.6"/>
+      <g fill="#2E5984">
+        <circle cx="1001" cy="520" r="2.4"/>
+        <circle cx="1012" cy="526" r="2.4"/>
+        <circle cx="1004" cy="532" r="2"/>
+      </g>
+    </g>
+    <text x="984" y="382" text-anchor="middle" font-size="16" fill="#3D4C5C">Secretory vesicle</text>
+  </g>
+
+  <!-- ===================== Neuron ===================== -->
+  <g id="Neuron">
+    <text x="1248" y="118" text-anchor="middle" font-size="24" font-weight="700" fill="#1C2833">Neuron</text>
+    <g fill="none" stroke="#3D628F" stroke-width="7" stroke-linecap="round">
+      <path d="M1188,292 C1170,230 1236,186 1210,148"/>
+      <path d="M1308,320 C1360,280 1368,240 1410,220"/>
+      <path d="M1160,330 C1100,300 1090,240 1040,228"/>
+    </g>
+    <circle cx="1248" cy="430" r="112" fill="#F5F9FC" stroke="#2F4A6E" stroke-width="2.6"/>
+    <circle cx="1248" cy="418" r="34" fill="#E3EDF5"/>
+    <path d="M1138,438 C1120,416 1112,468 1142,486" fill="#F5F9FC" stroke="#2F4A6E" stroke-width="2.6" stroke-linecap="round"/>
+    <g id="Internalized_vesicle">
+      <circle cx="1158" cy="456" r="17" fill="#FBF6E4" stroke="#C4A35A" stroke-width="1.5"/>
+      <g fill="#2E5984">
+        <circle cx="1152" cy="452" r="2.2"/>
+        <circle cx="1162" cy="458" r="2.2"/>
+        <circle cx="1154" cy="464" r="1.9"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- ===================== Mitochondria ===================== -->
+  <g id="Mitochondria" fill="#FDE8D8" stroke="#C45C26" stroke-width="1.6">
+    <g id="Mito_soma_1" transform="translate(1208,512) rotate(-20)">
+      <ellipse cx="0" cy="0" rx="25" ry="12"/>
+      <path d="M-15,0 H15 M-9,-5.5 V5.5 M-1,-7 V7 M7,-5.5 V5.5" fill="none"/>
+    </g>
+    <g id="Mito_soma_2" transform="translate(1296,508) rotate(18)">
+      <ellipse cx="0" cy="0" rx="23" ry="11"/>
+      <path d="M-13,0 H13 M-7,-5 V5 M1,-6.5 V6.5 M8,-4.5 V4.5" fill="none"/>
+    </g>
+    <g id="Mito_axon_1" transform="translate(1488,498) rotate(-6)">
+      <ellipse cx="0" cy="0" rx="23" ry="11"/>
+      <path d="M-13,0 H13 M-7,-5 V5 M1,-6 V6 M8,-4.5 V4.5" fill="none"/>
+    </g>
+    <g id="Mito_axon_2" transform="translate(1628,528) rotate(10)">
+      <ellipse cx="0" cy="0" rx="21" ry="10"/>
+      <path d="M-12,0 H12 M-6,-4.5 V4.5 M2,-6 V6 M8,-4 V4" fill="none"/>
+    </g>
+    <text x="1248" y="586" text-anchor="middle" font-size="16" fill="#3D4C5C">Mitochondrial activity</text>
+  </g>
+
+  <!-- ===================== Axon and cancer cells on it ===================== -->
+  <g id="Axon">
+    <path d="M1352,470
+             C1480,442 1600,458 1700,530
+             C1780,590 1820,680 1760,748"
+          fill="none" stroke="#D5E2EF" stroke-width="32" stroke-linecap="round"/>
+    <path d="M1352,470
+             C1480,442 1600,458 1700,530
+             C1780,590 1820,680 1760,748"
+          fill="none" stroke="#3D628F" stroke-width="15" stroke-linecap="round"/>
+    <g id="Growth_cone" transform="translate(1760,748) rotate(62)">
+      <path d="M0,-7 L32,-18 L54,-5 L38,0 L56,11 L32,15 L0,7 Z" fill="#3D628F"/>
+      <g fill="none" stroke="#3D628F" stroke-width="1.8" stroke-linecap="round">
+        <path d="M48,-7 L74,-22"/>
+        <path d="M52,-1 L80,-2"/>
+        <path d="M50,8 L76,18"/>
+        <path d="M36,13 L54,30"/>
+      </g>
+    </g>
+    <text x="1760" y="360" text-anchor="middle" font-size="16" fill="#3D4C5C">Axon regeneration</text>
+  </g>
+
+  <g id="Cancer_cells_on_axon" fill="#FFFCFB" stroke="#C98585" stroke-width="1.5">
+    <g transform="translate(1472,456) rotate(-10)">
+      <ellipse cx="0" cy="0" rx="20" ry="13.5"/>
+      <ellipse cx="-2" cy="0" rx="5.5" ry="4.2" fill="#F3E0DC" stroke="none"/>
+    </g>
+    <g transform="translate(1608,492) rotate(6)">
+      <ellipse cx="0" cy="0" rx="20" ry="13.5"/>
+      <ellipse cx="-2" cy="0" rx="5.5" ry="4.2" fill="#F3E0DC" stroke="none"/>
+    </g>
+    <g transform="translate(1724,582) rotate(26)">
+      <ellipse cx="0" cy="0" rx="19" ry="13"/>
+      <ellipse cx="-2" cy="0" rx="5.2" ry="4" fill="#F3E0DC" stroke="none"/>
+    </g>
+    <text x="1510" y="360" text-anchor="middle" font-size="16" fill="#3D4C5C">Spread along the axon</text>
+  </g>
+
+  <!-- soft anatomical continuations, not step arrows -->
+  <g id="Exit_routes" fill="none" stroke-linecap="round">
+    <path d="M1760,770 C1700,830 1580,860 1460,878" stroke="#E7C7C7" stroke-width="7"/>
+    <path d="M1788,770 C1840,830 1900,860 1960,878" stroke="#E4D5C6" stroke-width="7"/>
+    <path d="M1560,930 C1640,980 1760,1000 1860,990" stroke="#E7C7C7" stroke-width="5"/>
+    <path d="M1960,960 C1920,1000 1900,1020 1880,1040" stroke="#E4D5C6" stroke-width="5"/>
+  </g>
+
+  <g id="Blood_vessel">
+    <rect x="1188" y="868" width="300" height="44" rx="22" fill="#FDEEEE" stroke="#C45C5C" stroke-width="1.8"/>
+    <g fill="#E07A7A">
+      <ellipse cx="1260" cy="890" rx="11" ry="8"/>
+      <ellipse cx="1316" cy="890" rx="11" ry="8"/>
+      <ellipse cx="1436" cy="890" rx="11" ry="8"/>
+    </g>
+    <g transform="translate(1372,890)">
+      <ellipse cx="0" cy="0" rx="15" ry="11" fill="#FFFCFB" stroke="#C98585" stroke-width="1.4"/>
+      <ellipse cx="-1" cy="0" rx="4.2" ry="3.4" fill="#F3E0DC"/>
+    </g>
+    <text x="1338" y="944" text-anchor="middle" font-size="16" fill="#3D4C5C">Blood vessel</text>
+  </g>
+
+  <g id="Lymph_node">
+    <path d="M1908,848
+             C1908,808 1976,792 2016,820
+             C2064,854 2060,930 2004,956
+             C1956,978 1900,956 1896,910
+             C1894,888 1912,888 1928,898
+             C1950,912 1956,888 1944,872
+             C1932,856 1916,868 1908,848 Z"
+          fill="#F8F1EA" stroke="#A08060" stroke-width="1.8" stroke-linejoin="round"/>
+    <g transform="translate(1988,900)">
+      <ellipse cx="0" cy="0" rx="15" ry="11" fill="#FFFCFB" stroke="#C98585" stroke-width="1.4"/>
+      <ellipse cx="-1" cy="0" rx="4.2" ry="3.4" fill="#F3E0DC"/>
+    </g>
+    <text x="1988" y="1000" text-anchor="middle" font-size="16" fill="#3D4C5C">Lymph node</text>
+  </g>
+
+  <g id="Lung">
+    <path d="M1588,1008
+             C1536,1048 1528,1140 1584,1184
+             C1626,1216 1696,1208 1724,1160
+             C1746,1204 1832,1212 1868,1148
+             C1908,1076 1884,992 1812,988
+             C1772,956 1692,952 1656,992
+             C1634,964 1606,972 1588,1008 Z"
+          fill="#F7F8F9" stroke="#8B97A3" stroke-width="1.8" stroke-linejoin="round"/>
+    <ellipse cx="1704" cy="1104" rx="20" ry="15" fill="#F6D2D2" stroke="#C45C5C" stroke-width="1.4"/>
+    <text x="1724" y="1268" text-anchor="middle" font-size="16" font-weight="700" fill="#1C2833">Lung metastasis</text>
+  </g>
+</svg>
